@@ -1,0 +1,43 @@
+{
+  "name": "m-ld",
+  "version": "0.0.1",
+  "description": "m-ld native Javascript",
+  "main": "index.js",
+  "scripts": {
+    "tsc:version": "tsc --version",
+    "build": "npm run test && tsc",
+    "dev": "jest --watch",
+    "test": "jest"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gsvarovsky/m-ld-js.git"
+  },
+  "author": "gsvarovsky@gmail.com",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/gsvarovsky/m-ld-js/issues"
+  },
+  "homepage": "https://github.com/gsvarovsky/m-ld-js#readme",
+  "devDependencies": {
+    "@types/jest": "^24.0.23",
+    "jest": "^24.9.0",
+    "ts-jest": "^24.1.0",
+    "typescript": "^3.7.2"
+  },
+  "jest": {
+    "roots": [
+      "<rootDir>/src/", "<rootDir>/test/"
+    ],
+    "testMatch": [
+      "<rootDir>/test/**/*.ts"
+    ],
+    "transform": {
+      "^.+\\.(ts|tsx)?$": "ts-jest"
+    }
+  },
+  "dependencies": {
+    "@types/uuid": "^3.4.6",
+    "uuid": "^3.3.3"
+  }
+}
