@@ -1,12 +1,29 @@
-import uuidv4 = require('uuid/v4');
+import { Hash } from "./hash";
 
-export class UuidBagBlock {
-  readonly id: string;
-  readonly data: any;
+export abstract class HashBagBlock<D> {
+  next(data: D): HashBagBlock<D> {
+    return this.construct(this.id.add(this.hash(data)), data);
+  }
 
-  static genesis = (): UuidBagBlock => new UuidBagBlock(uuidv4(null));
+  protected constructor(readonly id: Hash, readonly data: D) {}
 
-  private constructor(id: string) {
-    this.id = id;
+  protected abstract construct(id: Hash, data: D): HashBagBlock<D>;
+
+  protected abstract hash(data: D): Hash;
+}
+
+export class HashStringBagBlock extends HashBagBlock<string> {
+  static genesis = (): HashStringBagBlock => new HashStringBagBlock(Hash.random(), null);
+
+  private constructor(id: Hash, data: string) {
+    super(id, data);
+  }
+
+  protected construct(id: Hash, data: string): HashStringBagBlock {
+    return new HashStringBagBlock(id, data);
+  }
+
+  protected hash(data: string): Hash {
+    return Hash.digest(data);
   }
 }

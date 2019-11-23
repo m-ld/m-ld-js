@@ -27,7 +27,8 @@
   },
   "jest": {
     "roots": [
-      "<rootDir>/src/", "<rootDir>/test/"
+      "<rootDir>/src/",
+      "<rootDir>/test/"
     ],
     "testMatch": [
       "<rootDir>/test/**/*.ts"
@@ -37,7 +38,9 @@
     }
   },
   "dependencies": {
+    "@types/bn.js": "^4.11.5",
     "@types/uuid": "^3.4.6",
+    "bn.js": "^5.0.0",
     "uuid": "^3.3.3"
   }
 }
