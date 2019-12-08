@@ -1,3 +1,80 @@
+export interface Message<C, D> {
+  time: C;
+  data: D;
+}
+
+export interface CausalClock<T> {
+  anyLt(other: T): boolean;
+}
+
+export abstract class MessageService<C extends CausalClock<C>> {
+  send(): C {
+    this.event();
+    return this.peek();
+  }
+
+  receive<M extends Message<C, any>>(message: M, buffer: M[], process: (message: M) => void) {
+    if (this.readyFor(message.time)) {
+      this.event();
+      this.deliver(message, buffer, process);
+    } else {
+      buffer.push(message);
+    }
+  }
+
+  deliver<M extends Message<C, any>>(message: M, buffer: M[], process: (message: M) => void) {
+    this.join(message.time);
+    process(message);
+    this.reconsider(buffer, process);
+  }
+
+  reconsider<M extends Message<C, any>>(buffer: M[], process: (message: M) => void) {
+    const readyForIdx = buffer.findIndex(msg => this.readyFor(msg.time));
+    if (readyForIdx > -1) {
+      const msg = buffer[readyForIdx];
+      buffer.splice(readyForIdx, 1);
+      this.event();
+      this.deliver(msg, buffer, process);
+    }
+  }
+
+  abstract peek(): C;
+  abstract event(): void;
+  abstract join(time: C): void;
+  abstract fork(): C;
+
+  private readyFor(senderTime: C) {
+    return !this.peek().anyLt(senderTime);
+  }
+}
+
+export class TreeClockMessageService extends MessageService<TreeClock> {
+  private localTime: TreeClock;
+
+  constructor(localTime: TreeClock) {
+    super();
+    this.localTime = localTime;
+  }
+
+  peek(): TreeClock {
+    return this.localTime;
+  }
+
+  event(): void {
+    this.localTime = this.localTime.ticked();
+  }
+  
+  join(time: TreeClock): void {
+    this.localTime = this.localTime.update(time);
+  }
+  
+  fork(): TreeClock {
+    const fork = this.localTime.forked();
+    this.localTime = fork.left;
+    return fork.right;
+  }
+}
+
 export class TreeClockFork {
   constructor(
     readonly left: TreeClock,
@@ -19,7 +96,7 @@ export function zeroIfNull(value: number) {
   return value == null ? 0 : value;
 }
 
-export class TreeClock {
+export class TreeClock implements CausalClock<TreeClock> {
   constructor(
     private readonly isId: boolean,
     private readonly ticks: number,
@@ -62,11 +139,9 @@ export class TreeClock {
     if (this.isId) {
       return new TreeClockFork(
         new TreeClock(false, this.ticks, new TreeClockFork(
-          new TreeClock(true, 0, this.fork),
-          new TreeClock(false, 0, this.fork))),
+          new TreeClock(true, 0, this.fork), new TreeClock(false, 0, this.fork))),
         new TreeClock(false, this.ticks, new TreeClockFork(
-          new TreeClock(false, 0, this.fork),
-          new TreeClock(true, 0, this.fork)))
+          new TreeClock(false, 0, this.fork), new TreeClock(true, 0, this.fork)))
       );
     } else if (this.fork != null) {
       const leftResult = this.fork.left.forked();
