@@ -1,8 +1,8 @@
 import { HashStringBagBlock } from '../src/blocks'
 
 test('Genesis block has ID and no data', () => {
-  expect(HashStringBagBlock.genesis().id).toBeTruthy;
-  expect(HashStringBagBlock.genesis().data).toBeNull;
+  expect(HashStringBagBlock.genesis().id).toBeTruthy();
+  expect(HashStringBagBlock.genesis().data).toBeNull();
 });
 
 test('Next block is not the same as this', () => {
