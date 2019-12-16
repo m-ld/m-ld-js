@@ -3,6 +3,12 @@ import { Subject, Describe } from '../src/jsonrql';
 import MemDown from 'memdown';
 
 describe('Meld store implementation', () => {
+  test('not found is empty', async () => {
+    await expect(new QuadStoreClone(new MemDown).transact({
+      '@describe': 'http://test.m-ld.org/fred'
+    } as Describe).toPromise()).resolves.toBeUndefined();
+  });
+
   test('stores a JSON-LD object', async () => {
     await expect(new QuadStoreClone(new MemDown).transact({
       '@id': 'http://test.m-ld.org/fred',

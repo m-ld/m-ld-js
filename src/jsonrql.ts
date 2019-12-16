@@ -1,9 +1,25 @@
-import { JsonLd, Iri } from "jsonld/jsonld-spec";
+import { Iri } from "jsonld/jsonld-spec";
 
 export type Variable = string;
 
 export interface Pattern {
-  '@context'?: JsonLd
+  '@context'?: Context
+}
+
+export type TermDef = Iri | ExpandedTermDef;
+
+export interface ExpandedTermDef {
+  '@id': Iri;
+  '@reverse': TermDef;
+  '@type': Iri;
+  '@language': string;
+  '@container': '@list' | '@set' | '@language' | '@index';
+}
+
+export interface Context {
+  '@base'?: Iri;
+  '@vocab'?: Iri;
+  '@language'?: string;
 }
 
 export interface Subject extends Pattern {
