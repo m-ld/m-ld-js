@@ -12,8 +12,7 @@ describe('Meld API', () => {
 
   test('retrieves a JSON-LD object', async () => {
     await api.transact({ '@id': 'fred', name: 'Fred' } as Subject).toPromise();
-    const fred = await api.get('fred').toPromise();
-    expect(fred['@id']).toBe('fred');
-    expect(fred.name).toBe('Fred');
+    await expect(api.get('fred').toPromise())
+      .resolves.toMatchObject({ '@id': 'fred', name: 'Fred' });
   });
 });
