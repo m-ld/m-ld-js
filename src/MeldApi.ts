@@ -10,8 +10,7 @@ export class MeldApi {
     if (!/^[a-z0-9_]+([\-.][a-z0-9_]+)*\.[a-z]{2,6}$/.test(domain))
       throw new Error('Domain not specified or not valid');
 
-    this.context = { ...context };
-    this.context['@base'] = this.context['@base'] || `http://${domain}/`;
+    this.context = { '@base': `http://${domain}/`, ...context };
     this.context['@vocab'] = this.context['@vocab'] || new URL('/#', this.context['@base']).href;
   }
 

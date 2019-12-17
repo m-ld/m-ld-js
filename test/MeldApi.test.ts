@@ -7,7 +7,7 @@ describe('Meld API', () => {
   let api: MeldApi;
 
   beforeEach(() => {
-    api = new MeldApi('test.m-ld.org', {}, new QuadStoreClone(new MemDown));
+    api = new MeldApi('test.m-ld.org', null, new QuadStoreClone(new MemDown));
   });
 
   test('retrieves a JSON-LD object', async () => {
