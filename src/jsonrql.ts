@@ -1,4 +1,5 @@
 import { Iri } from "jsonld/jsonld-spec";
+import { compact } from 'jsonld';
 
 export type Variable = string;
 
@@ -20,6 +21,7 @@ export interface Context {
   '@base'?: Iri;
   '@vocab'?: Iri;
   '@language'?: string;
+  [key: string]: TermDef;
 }
 
 export interface Subject extends Pattern {
@@ -39,6 +41,13 @@ export interface Group extends Pattern {
 
 export function isGroup(p: Pattern): p is Group {
   return '@graph' in p || '@filter' in p;
+}
+
+export type GroupLike = Subject[] | Subject | Group;
+
+export function asGroup(g: GroupLike, context?: Context): Group {
+  const group = '@graph' in g ? g as Group : { '@graph': g };
+  return context ? { '@context': context, ...group } : group;
 }
 
 export interface Query extends Pattern {
@@ -68,7 +77,7 @@ export function isDescribe(p: Pattern): p is Describe {
 }
 
 export interface Construct extends Read {
-  '@construct': Subject[] | Subject
+  '@construct': GroupLike
 }
 
 export function isConstruct(p: Pattern): p is Construct {
@@ -94,10 +103,18 @@ export function isSelect(p: Pattern): p is Select {
 }
 
 export interface Update extends Query {
-  '@insert'?: Subject[] | Subject;
-  '@delete'?: Subject[] | Subject;
+  '@insert'?: GroupLike;
+  '@delete'?: GroupLike;
 }
 
 export function isUpdate(p: Pattern): p is Update {
   return '@insert' in p || '@delete' in p;
+}
+
+export function resolve(iri: Iri, context: Context): Promise<Iri> {
+  return context ? compact({
+    '@id': iri,
+    'http://json-rql.org/predicate': 1,
+    '@context': context
+  }, {}).then((temp: any) => temp['@id']) : Promise.resolve(iri);
 }

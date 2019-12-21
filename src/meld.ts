@@ -13,9 +13,10 @@ export type DeltaMessage = Message<TreeClock, MeldDelta>;
 export type UUID = string;
 
 export interface Meld {
+  updates(): Observable<DeltaMessage>;
   newClock(): Promise<TreeClock>;
   snapshot(): Promise<Snapshot>;
-  revupFrom(): Promise<Observable<DeltaMessage>>;
+  revupFrom(lastHash: Hash): Promise<Observable<DeltaMessage>>;
 }
 
 export interface MeldDelta {
