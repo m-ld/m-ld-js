@@ -1,18 +1,22 @@
 import { MeldClone, Snapshot, DeltaMessage } from './meld';
-import { Pattern, Subject, Update, isQuery, isUpdate, isDescribe, Describe, asGroup, isSubject, isGroup, resolve } from './jsonrql';
+import {
+  Pattern, Subject, Update, Describe,
+  isQuery, isUpdate, isDescribe, isSubject, isGroup,
+  asGroup, resolve
+} from './jsonrql';
 import { Observable } from 'rxjs';
 import { Hash } from './hash';
 import { TreeClock } from './clocks';
 import { AbstractLevelDOWN, AbstractOpenOptions } from 'abstract-leveldown';
-import { Store, Quad } from 'rdf-js';
+import { Quad } from 'rdf-js';
 import { toRDF, fromRDF, compact } from 'jsonld';
 import { namedNode } from '@rdfjs/data-model';
-import { JsonLd, Iri } from 'jsonld/jsonld-spec';
-const { RdfStore } = require('quadstore');
-const { streamToArray, createArrayStream } = require('quadstore/lib/utils');
+import { JsonLd } from 'jsonld/jsonld-spec';
+import { RdfStore } from 'quadstore';
+import { streamToArray, createArrayStream } from 'quadstore/lib/utils';
 
 export class QuadStoreClone implements MeldClone {
-  private readonly store: Store;
+  private readonly store: RdfStore;
 
   constructor(abstractLevelDown: AbstractLevelDOWN, opts?: AbstractOpenOptions) {
     this.store = new RdfStore(abstractLevelDown, opts);
@@ -53,8 +57,8 @@ export class QuadStoreClone implements MeldClone {
 
   private insert(request: Update): Observable<Subject> {
     return new Observable(subs => {
-      toRDF(asGroup(request['@insert'], request['@context'])).then(quads => {
-        this.store.import(createArrayStream(quads))
+      toRDF(asGroup(request['@insert'], request['@context'])).then(rdf => {
+        this.store.import(createArrayStream(rdf as Quad[]))
           .on('error', err => subs.error(err))
           .on('end', () => subs.complete());
       });
