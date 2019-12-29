@@ -1,16 +1,24 @@
-import { QuadStoreClone } from '../src/QuadStoreClone';
+import { DatasetClone } from '../src/DatasetClone';
 import { Subject, Describe } from '../src/jsonrql';
 import MemDown from 'memdown';
+import { QuadStoreDataset } from '../src/Dataset';
+import { MeldStore } from '../src/meld';
 
 describe('Meld store implementation', () => {
+  let store: MeldStore;
+
+  beforeEach(() => {
+    store = new DatasetClone(new QuadStoreDataset(new MemDown, { id: 'test' }));
+  });
+
   test('not found is empty', async () => {
-    await expect(new QuadStoreClone(new MemDown).transact({
+    await expect(store.transact({
       '@describe': 'http://test.m-ld.org/fred'
     } as Describe).toPromise()).resolves.toBeUndefined();
   });
 
   test('stores a JSON-LD object', async () => {
-    await expect(new QuadStoreClone(new MemDown).transact({
+    await expect(store.transact({
       '@id': 'http://test.m-ld.org/fred',
       'http://test.m-ld.org/#name': 'Fred'
     } as Subject).toPromise())
@@ -19,12 +27,11 @@ describe('Meld store implementation', () => {
   });
 
   test('retrieves a JSON-LD object', async () => {
-    const clone = new QuadStoreClone(new MemDown);
-    await clone.transact({
+    await store.transact({
       '@id': 'http://test.m-ld.org/fred',
       'http://test.m-ld.org/#name': 'Fred'
     } as Subject).toPromise();
-    const fred = await clone.transact({
+    const fred = await store.transact({
       '@describe': 'http://test.m-ld.org/fred'
     } as Describe).toPromise();
     expect(fred['@id']).toBe('http://test.m-ld.org/fred');

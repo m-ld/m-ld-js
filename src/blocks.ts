@@ -20,11 +20,7 @@ export class HashStringBagBlock extends HashBagBlock<string> {
     super(id, data);
   }
 
-  protected construct(id: Hash, data: string): HashStringBagBlock {
-    return new HashStringBagBlock(id, data);
-  }
+  protected construct = (id: Hash, data: string) => new HashStringBagBlock(id, data);
 
-  protected hash(data: string): Hash {
-    return Hash.digest(data);
-  }
+  protected hash = (data: string) => Hash.digest(data);
 }

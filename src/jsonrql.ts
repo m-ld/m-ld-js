@@ -10,11 +10,11 @@ export interface Pattern {
 export type TermDef = Iri | ExpandedTermDef;
 
 export interface ExpandedTermDef {
-  '@id': Iri;
-  '@reverse': TermDef;
-  '@type': Iri;
-  '@language': string;
-  '@container': '@list' | '@set' | '@language' | '@index';
+  '@id'?: Iri;
+  '@reverse'?: TermDef;
+  '@type'?: Iri;
+  '@language'?: string;
+  '@container'?: '@list' | '@set' | '@language' | '@index';
 }
 
 export interface Context {
@@ -46,7 +46,18 @@ export function isGroup(p: Pattern): p is Group {
 export type GroupLike = Subject[] | Subject | Group;
 
 export function asGroup(g: GroupLike, context?: Context): Group {
-  const group = '@graph' in g ? g as Group : { '@graph': g };
+  let group: Group;
+  if ('@graph' in g) {
+    group = g as Group;
+  } else if (Array.isArray(g)) {
+    // Cannot promote contexts
+    group = { '@graph': g };
+  } else {
+    // Promote the subject's context to the group level
+    const { '@context': subjectContext, ...subject } = g;
+    context = { ...subjectContext, ...context };
+    group = { '@graph': subject };
+  }
   return context ? { '@context': context, ...group } : group;
 }
 

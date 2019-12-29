@@ -1,13 +1,16 @@
-import { QuadStoreClone } from '../src/QuadStoreClone';
+import { DatasetClone } from '../src/DatasetClone';
 import { MeldApi } from '../src/MeldApi';
 import { Subject, Describe } from '../src/jsonrql';
 import MemDown from 'memdown';
+import { QuadStoreDataset } from '../src/Dataset';
+import { RdfStore } from 'quadstore';
 
 describe('Meld API', () => {
   let api: MeldApi;
 
   beforeEach(() => {
-    api = new MeldApi('test.m-ld.org', null, new QuadStoreClone(new MemDown));
+    const clone = new DatasetClone(new QuadStoreDataset(new MemDown, { id: 'test' }));
+    api = new MeldApi('test.m-ld.org', null, clone);
   });
 
   test('retrieves a JSON-LD object', async () => {

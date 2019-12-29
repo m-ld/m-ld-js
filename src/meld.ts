@@ -6,7 +6,7 @@ import { Observable } from 'rxjs';
 import { Message } from './messages';
 import { Quad } from 'rdf-js';
 import { Hash } from './hash';
-import { Pattern, Subject, Update } from './jsonrql';
+import { Pattern, Subject, Update, GroupLike, asGroup } from './jsonrql';
 
 export type DeltaMessage = Message<TreeClock, MeldDelta>;
 
