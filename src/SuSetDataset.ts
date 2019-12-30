@@ -1,5 +1,5 @@
 import { MeldDelta, UUID, DeltaMessage } from './meld';
-import { Quad, NamedNode } from 'rdf-js';
+import { Quad, NamedNode, Quad_Subject, Quad_Predicate, Quad_Object } from 'rdf-js';
 import { v4 as uuid } from 'uuid';
 import { quad as createQuad, literal } from '@rdfjs/data-model';
 import { TreeClock } from './clocks';
@@ -62,14 +62,69 @@ const reification = (quad: ReifiedQuad, tid: UUID) => [
 
 const reify = (quad: Quad) => ({ id: m_ld.jena.rid(uuid()), ...quad });
 
-export class SuSetTransaction implements MeldDelta {
+export class SuSetDataset implements Graph {
+  private readonly controlGraph: Graph;
+  private readonly defaultGraph: Graph;
+
+  constructor(
+    private readonly dataset: Dataset) {
+    this.controlGraph = dataset.graph(m_ld.qs.control);
+    this.defaultGraph = dataset.graph();
+  }
+
+  async initialise() {
+    if (!(await this.dataset.graph(m_ld.qs.control).match(m_ld.qs.journal, m_ld.qs.tail)).length)
+      return this.reset(Hash.random(), TreeClock.GENESIS);
+  }
+
+  async reset(startingHash: Hash, startingTime: TreeClock) {
+    const encodedHash = startingHash.encode();
+    const head = m_ld.qs.entry(encodedHash);
+    return this.dataset.transact(() => Promise.resolve([{
+      oldQuads: {}, // Matches everything in all graphs
+      newQuads: [
+        // The starting head is a dummy entry that only captures the hash.
+        createQuad(head, m_ld.qs.hash, literal(encodedHash), m_ld.qs.control),
+        createQuad(head, m_ld.qs.time, literal(JSON.stringify(startingTime.toJson())), m_ld.qs.control),
+        createQuad(m_ld.qs.journal, m_ld.qs.lastDelivered, head, m_ld.qs.control),
+        createQuad(m_ld.qs.journal, m_ld.qs.tail, head, m_ld.qs.control)
+      ]
+    }, undefined]));
+  }
+
+  async loadClock(): Promise<TreeClock | null> {
+    const quads = await this.dataset.graph(m_ld.qs.control).match(m_ld.qs.journal, m_ld.qs.time);
+    return quads.length ? TreeClock.fromJson(JSON.parse(quads[0].object.value)) : null;
+  }
+
+  async saveClock(time: TreeClock) {
+
+  }
+
+  async transact(prepare: (txn: SuSetTransaction) => Promise<TreeClock>): Promise<DeltaMessage> {
+    return this.dataset.transact(async () => {
+      const txn = new SuSetDatasetTransaction(this.controlGraph);
+      return txn.commit(await prepare(txn));
+    });
+  }
+
+  async match(subject?: Quad_Subject, predicate?: Quad_Predicate, object?: Quad_Object): Promise<Quad[]> {
+    return this.defaultGraph.match(subject, predicate, object);
+  }
+}
+
+export interface SuSetTransaction {
+  remove(quads: Quad[]): this;
+  add(quads: Quad[]): this;
+}
+
+class SuSetDatasetTransaction implements SuSetTransaction, MeldDelta {
   readonly tid: UUID = uuid();
   readonly insert: ReifiedQuad[] = [];
   readonly delete: ReifyingQuad[] = [];
-  private readonly controlModel: Graph;
 
-  constructor(dataset: Dataset) {
-    this.controlModel = dataset.model(m_ld.qs.control);
+  constructor(
+    private readonly controlGraph: Graph) {
   }
 
   remove(quads: Quad[]): this {
@@ -104,31 +159,13 @@ export class SuSetTransaction implements MeldDelta {
 
   private async journal(time: TreeClock, isRemote: boolean): Promise<PatchQuads> {
     // Find the old tail
-    const oldTailQuad = (await this.controlModel.match(m_ld.qs.journal, m_ld.qs.tail))[0];
+    const oldTailQuad = (await this.controlGraph.match(m_ld.qs.journal, m_ld.qs.tail))[0];
     // const oldTailHashQuad = await this.controlGraph.get(oldTailQuad.object as NamedNode, m_ld.qs.hash);
     // const oldTailDeltaQuad = await this.controlGraph.get(oldTailQuad.object as NamedNode, m_ld.qs.delta);
+
+    // TODO: Also save the time
     return new PatchQuads([], []);
   };
-}
-
-export async function initialise(dataset: Dataset): Promise<void> {
-  if (!(await dataset.model(m_ld.qs.control).match(m_ld.qs.journal, m_ld.qs.tail)).length)
-    return reset(dataset, Hash.random(), TreeClock.GENESIS);
-}
-
-export async function reset(dataset: Dataset, startingHash: Hash, startingTime: TreeClock): Promise<void> {
-  const encodedHash = startingHash.encode();
-  const head = m_ld.qs.entry(encodedHash);
-  return dataset.transact(() => Promise.resolve([{
-    oldQuads: {}, // Matches everything in all graphs
-    newQuads: [
-      // The starting head is a dummy entry that only captures the hash.
-      createQuad(head, m_ld.qs.hash, literal(encodedHash)),
-      createQuad(head, m_ld.qs.time, literal(JSON.stringify(startingTime.toJson()))),
-      createQuad(m_ld.qs.journal, m_ld.qs.lastDelivered, head),
-      createQuad(m_ld.qs.journal, m_ld.qs.tail, head)
-    ]
-  }, undefined]));
 }
 
 class JsonDeltaBagBlock extends HashBagBlock<JsonDelta> {

@@ -19,6 +19,10 @@ export class TreeClockFork {
   }
 
   toJson = () => ({ left: this.left, right: this.right })
+
+  static fromJson(json: any): TreeClockFork | null {
+    return json ? new TreeClockFork(json.left, json.right) : null;
+  }
 }
 
 export function zeroIfNull(value: number | null) {
@@ -52,21 +56,37 @@ export class TreeClock implements CausalClock<TreeClock> {
     return null;
   }
 
-  ticked(): TreeClock | undefined {
+  ticked(): TreeClock {
+    return this._ticked() as TreeClock;
+  }
+
+  /**
+   * Private variant returns undefined for a tree with no identity in it,
+   * which never arises from the API
+   */
+  private _ticked(): TreeClock | undefined {
     if (this.isId) {
       return new TreeClock(true, this.ticks + 1, this.fork);
     } else if (this.fork) {
-      const leftResult = this.fork.left.ticked();
+      const leftResult = this.fork.left._ticked();
       if (leftResult)
         return new TreeClock(false, this.ticks, new TreeClockFork(leftResult, this.fork.right));
 
-      const rightResult = this.fork.right.ticked();
+      const rightResult = this.fork.right._ticked();
       if (rightResult)
         return new TreeClock(false, this.ticks, new TreeClockFork(this.fork.left, rightResult));
     }
   }
 
-  forked(): TreeClockFork | undefined {
+  forked(): TreeClockFork {
+    return this._forked() as TreeClockFork;
+  }
+
+  /**
+   * Private variant returns undefined for a tree with no identity in it,
+   * which never arises from the API
+   */
+  private _forked(): TreeClockFork | undefined {
     if (this.isId) {
       return new TreeClockFork(
         new TreeClock(false, this.ticks, new TreeClockFork(
@@ -74,16 +94,16 @@ export class TreeClock implements CausalClock<TreeClock> {
         new TreeClock(false, this.ticks, new TreeClockFork(
           new TreeClock(false, 0, this.fork), new TreeClock(true, 0, this.fork)))
       );
-    } else if (this.fork !== null) {
+    } else if (this.fork) {
       const leftResult = this.fork.left.forked();
-      if (leftResult != null)
+      if (leftResult)
         return new TreeClockFork(
           new TreeClock(false, this.ticks, new TreeClockFork(leftResult.left, this.fork.right)),
           new TreeClock(false, this.ticks, new TreeClockFork(leftResult.right, this.fork.right))
         );
 
       const rightResult = this.fork.right.forked();
-      if (rightResult != null)
+      if (rightResult)
         return new TreeClockFork(
           new TreeClock(false, this.ticks, new TreeClockFork(this.fork.left, rightResult.left)),
           new TreeClock(false, this.ticks, new TreeClockFork(this.fork.left, rightResult.right))
@@ -106,7 +126,7 @@ export class TreeClock implements CausalClock<TreeClock> {
   }
 
   mergeId(other: TreeClock): TreeClock {
-    if (this.fork != null && other.fork != null) {
+    if (this.fork !== null && other.fork !== null) {
       const left = this.fork.left.mergeId(other.fork.left),
         right = this.fork.right.mergeId(other.fork.right);
       if (left.isId && right.isId) {
@@ -158,4 +178,8 @@ export class TreeClock implements CausalClock<TreeClock> {
     ticks: this.ticks,
     fork: this.fork ? this.fork.toJson() : null
   });
+
+  static fromJson(json: any): TreeClock | null {
+    return json ? new TreeClock(json.isId, json.ticks, TreeClockFork.fromJson(json.fork)) : null;
+  }
 }

@@ -59,11 +59,7 @@ export class TreeClockMessageService extends MessageService<TreeClock> {
   }
 
   event(): void {
-    const ticked = this.localTime.ticked();
-    if (ticked)
-      this.localTime = ticked;
-    else
-      throw new Error('Local time is not consistent');
+    this.localTime = this.localTime.ticked();
   }
 
   join(time: TreeClock): void {
@@ -72,12 +68,8 @@ export class TreeClockMessageService extends MessageService<TreeClock> {
 
   fork(): TreeClock {
     const fork = this.localTime.forked();
-    if (fork) {
-      this.localTime = fork.left;
-      return fork.right;
-    } else {
-      throw new Error('Local time is not consistent');
-    }
+    this.localTime = fork.left;
+    return fork.right;
   }
 }
 

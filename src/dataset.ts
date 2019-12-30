@@ -20,10 +20,10 @@ export class PatchQuads implements Patch {
     this.newQuads.concat(that.newQuads));
 }
 
-export type ModelName = DefaultGraph | NamedNode;
+export type GraphName = DefaultGraph | NamedNode;
 
 export interface Dataset {
-  model(name?: ModelName): Graph;
+  graph(name?: GraphName): Graph;
 
   /**
    * Ensures that write transactions are executed serially against the store.
@@ -49,7 +49,7 @@ export class QuadStoreDataset implements Dataset {
     this.store = new RdfStore(abstractLevelDown, opts);
   }
 
-  model(name?: ModelName): Graph {
+  graph(name?: GraphName): Graph {
     return new QuadStoreGraph(this.store, name || defaultGraph());
   }
 
@@ -65,7 +65,7 @@ export class QuadStoreDataset implements Dataset {
 class QuadStoreGraph implements Graph {
   constructor(
     readonly store: RdfStore,
-    readonly name: ModelName) {
+    readonly name: GraphName) {
   }
 
   async match(subject?: Quad_Subject, predicate?: Quad_Predicate, object?: Quad_Object): Promise<Quad[]> {
