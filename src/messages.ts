@@ -11,7 +11,7 @@ export abstract class MessageService<C extends CausalClock<C>> {
     return this.peek();
   }
 
-  receive<M extends Message<C, any>>(message: M, buffer: M[], process: (message: M) => void) {
+  receive<M extends Message<C, unknown>>(message: M, buffer: M[], process: (message: M) => void) {
     if (this.readyFor(message.time)) {
       this.event();
       this.deliver(message, buffer, process);
@@ -20,13 +20,13 @@ export abstract class MessageService<C extends CausalClock<C>> {
     }
   }
 
-  deliver<M extends Message<C, any>>(message: M, buffer: M[], process: (message: M) => void) {
+  deliver<M extends Message<C, unknown>>(message: M, buffer: M[], process: (message: M) => void) {
     this.join(message.time);
     process(message);
     this.reconsider(buffer, process);
   }
 
-  reconsider<M extends Message<C, any>>(buffer: M[], process: (message: M) => void) {
+  reconsider<M extends Message<C, unknown>>(buffer: M[], process: (message: M) => void) {
     const readyForIdx = buffer.findIndex(msg => this.readyFor(msg.time));
     if (readyForIdx > -1) {
       const msg = buffer[readyForIdx];

@@ -21,7 +21,7 @@ export interface Context {
   '@base'?: Iri;
   '@vocab'?: Iri;
   '@language'?: string;
-  [key: string]: TermDef;
+  [key: string]: TermDef | undefined;
 }
 
 export interface Subject extends Pattern {
@@ -122,7 +122,7 @@ export function isUpdate(p: Pattern): p is Update {
   return '@insert' in p || '@delete' in p;
 }
 
-export function resolve(iri: Iri, context: Context): Promise<Iri> {
+export function resolve(iri: Iri, context?: Context): Promise<Iri> {
   return context ? compact({
     '@id': iri,
     'http://json-rql.org/predicate': 1,

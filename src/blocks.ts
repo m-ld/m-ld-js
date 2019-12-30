@@ -5,7 +5,7 @@ export abstract class HashBagBlock<D> {
     return this.construct(this.id.add(this.hash(data)), data);
   }
 
-  protected constructor(readonly id: Hash, readonly data: D) { }
+  protected constructor(readonly id: Hash, readonly data?: D) { }
 
   protected abstract construct(id: Hash, data: D): HashBagBlock<D>;
 
@@ -14,9 +14,9 @@ export abstract class HashBagBlock<D> {
 
 export class HashStringBagBlock extends HashBagBlock<string> {
   static genesis = (seed?: string): HashStringBagBlock =>
-    new HashStringBagBlock(seed ? Hash.digest(seed) : Hash.random(), null);
+    new HashStringBagBlock(seed ? Hash.digest(seed) : Hash.random());
 
-  private constructor(id: Hash, data: string) {
+  private constructor(id: Hash, data?: string) {
     super(id, data);
   }
 

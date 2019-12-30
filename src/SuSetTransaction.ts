@@ -7,7 +7,7 @@ import { HashBagBlock } from './blocks';
 import { Hash } from './hash';
 import { asGroup, GroupLike, Context } from './jsonrql';
 import { fromRDF, compact } from 'jsonld';
-import { Model, Dataset, PatchQuads } from './Dataset';
+import { Graph, Dataset, Patch, PatchQuads } from './Dataset';
 
 const ns: (namespace: string) => (name: string) => NamedNode = require('@rdfjs/namespace');
 namespace m_ld {
@@ -62,20 +62,11 @@ const reification = (quad: ReifiedQuad, tid: UUID) => [
 
 const reify = (quad: Quad) => ({ id: m_ld.jena.rid(uuid()), ...quad });
 
-class DeltaMessagePatch extends PatchQuads implements DeltaMessage {
-  constructor(
-    patch: PatchQuads,
-    readonly time: TreeClock,
-    readonly data: MeldDelta) {
-    super(patch.oldQuads, patch.newQuads);
-  }
-}
-
 export class SuSetTransaction implements MeldDelta {
   readonly tid: UUID = uuid();
   readonly insert: ReifiedQuad[] = [];
   readonly delete: ReifyingQuad[] = [];
-  private readonly controlModel: Model;
+  private readonly controlModel: Graph;
 
   constructor(dataset: Dataset) {
     this.controlModel = dataset.model(m_ld.qs.control);
@@ -91,9 +82,11 @@ export class SuSetTransaction implements MeldDelta {
     return this;
   }
 
-  async commit(time: TreeClock): Promise<DeltaMessagePatch> {
-    return new DeltaMessagePatch(
-      this.asPatch().concat(await this.journal(time, false)), time, this);
+  async commit(time: TreeClock): Promise<[Patch, DeltaMessage]> {
+    return [
+      this.asPatch().concat(await this.journal(time, false)),
+      { time, data: this }
+    ];
   }
 
   private asPatch = () => new PatchQuads(this.oldQuads, this.newQuads);
@@ -111,35 +104,37 @@ export class SuSetTransaction implements MeldDelta {
 
   private async journal(time: TreeClock, isRemote: boolean): Promise<PatchQuads> {
     // Find the old tail
-    const oldTailQuad = await this.controlModel.matchOne(m_ld.qs.journal, m_ld.qs.tail);
+    const oldTailQuad = (await this.controlModel.match(m_ld.qs.journal, m_ld.qs.tail))[0];
     // const oldTailHashQuad = await this.controlGraph.get(oldTailQuad.object as NamedNode, m_ld.qs.hash);
     // const oldTailDeltaQuad = await this.controlGraph.get(oldTailQuad.object as NamedNode, m_ld.qs.delta);
     return new PatchQuads([], []);
   };
 }
 
-export async function initialise(dataset: Dataset) {
-  if (!dataset.model(m_ld.qs.control).matchOne(m_ld.qs.journal, m_ld.qs.tail))
-    reset(dataset, Hash.random());
+export async function initialise(dataset: Dataset): Promise<void> {
+  if (!(await dataset.model(m_ld.qs.control).match(m_ld.qs.journal, m_ld.qs.tail)).length)
+    return reset(dataset, Hash.random(), TreeClock.GENESIS);
 }
 
-export async function reset(dataset: Dataset, startingHash: Hash, startingTime?: TreeClock) {
-  // TODO
+export async function reset(dataset: Dataset, startingHash: Hash, startingTime: TreeClock): Promise<void> {
+  const encodedHash = startingHash.encode();
+  const head = m_ld.qs.entry(encodedHash);
+  return dataset.transact(() => Promise.resolve([{
+    oldQuads: {}, // Matches everything in all graphs
+    newQuads: [
+      // The starting head is a dummy entry that only captures the hash.
+      createQuad(head, m_ld.qs.hash, literal(encodedHash)),
+      createQuad(head, m_ld.qs.time, literal(JSON.stringify(startingTime.toJson()))),
+      createQuad(m_ld.qs.journal, m_ld.qs.lastDelivered, head),
+      createQuad(m_ld.qs.journal, m_ld.qs.tail, head)
+    ]
+  }, undefined]));
 }
 
 class JsonDeltaBagBlock extends HashBagBlock<JsonDelta> {
-  static genesis = (seed?: string): JsonDeltaBagBlock =>
-    new JsonDeltaBagBlock(seed ? Hash.digest(seed) : Hash.random(), null);
-
-  private constructor(id: Hash, data: JsonDelta) {
-    super(id, data);
-  }
-
+  private constructor(id: Hash, data: JsonDelta) { super(id, data); }
   protected construct = (id: Hash, data: JsonDelta) => new JsonDeltaBagBlock(id, data);
-
-  protected hash(data: JsonDelta): Hash {
-    return Hash.digest(data.tid, data.insert, data.delete);
-  }
+  protected hash = (data: JsonDelta) => Hash.digest(data.tid, data.insert, data.delete);
 }
 
 const DELETE_CONTEXT = {
@@ -161,7 +156,7 @@ async function toJson(delta: MeldDelta): Promise<JsonDelta>;
 async function toJson(object: Quad[] | MeldDelta, context?: Context): Promise<string | JsonDelta> {
   if (Array.isArray(object)) {
     const jsonld = await fromRDF(object);
-    const group = asGroup(await compact(jsonld, context) as GroupLike);
+    const group = asGroup(await compact(jsonld, context || {}) as GroupLike);
     delete group['@context'];
     return JSON.stringify(group);
   } else {

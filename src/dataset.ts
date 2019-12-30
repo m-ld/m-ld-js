@@ -1,10 +1,15 @@
 import { Quad, DefaultGraph, NamedNode, Quad_Subject, Quad_Predicate, Quad_Object } from 'rdf-js';
 import { defaultGraph } from '@rdfjs/data-model';
-import { RdfStore } from 'quadstore';
+import { RdfStore, MatchTerms } from 'quadstore';
 import AsyncLock = require('async-lock');
 import { AbstractLevelDOWN, AbstractOpenOptions } from 'abstract-leveldown';
 
-export class PatchQuads {
+export interface Patch {
+  oldQuads: Quad[] | MatchTerms<Quad>;
+  newQuads: Quad[];
+}
+
+export class PatchQuads implements Patch {
   constructor(
     readonly oldQuads: Quad[],
     readonly newQuads: Quad[]) {
@@ -18,18 +23,17 @@ export class PatchQuads {
 export type ModelName = DefaultGraph | NamedNode;
 
 export interface Dataset {
-  model(name?: ModelName): Model;
+  model(name?: ModelName): Graph;
 
   /**
    * Ensures that write transactions are executed serially against the store.
    * @param prepare prepares a write operation to be performed
    */
-  transact<T extends PatchQuads>(prepare: () => Promise<T>): Promise<T>;
+  transact<T>(prepare: () => Promise<[Patch, T]>): Promise<T>;
 }
 
-export interface Model {
+export interface Graph {
   match(subject?: Quad_Subject, predicate?: Quad_Predicate, object?: Quad_Object): Promise<Quad[]>;
-  matchOne(subject?: Quad_Subject, predicate?: Quad_Predicate, object?: Quad_Object): Promise<Quad>;
 }
 
 export interface DatasetOptions extends AbstractOpenOptions {
@@ -45,20 +49,20 @@ export class QuadStoreDataset implements Dataset {
     this.store = new RdfStore(abstractLevelDown, opts);
   }
 
-  model(name?: ModelName): Model {
-    return new QuadStoreModel(this.store, name || defaultGraph());
+  model(name?: ModelName): Graph {
+    return new QuadStoreGraph(this.store, name || defaultGraph());
   }
 
-  transact<T extends PatchQuads>(prepare: () => Promise<T>): Promise<T> {
+  transact<T>(prepare: () => Promise<[Patch, T]>): Promise<T> {
     return new AsyncLock().acquire(this.id, async () => {
-      const patch = await prepare();
+      const [patch, rtn] = await prepare();
       await this.store.patch(patch.oldQuads, patch.newQuads);
-      return patch;
+      return rtn;
     });
   }
 }
 
-class QuadStoreModel implements Model {
+class QuadStoreGraph implements Graph {
   constructor(
     readonly store: RdfStore,
     readonly name: ModelName) {
@@ -66,9 +70,5 @@ class QuadStoreModel implements Model {
 
   async match(subject?: Quad_Subject, predicate?: Quad_Predicate, object?: Quad_Object): Promise<Quad[]> {
     return await this.store.get({ graph: this.name, subject, predicate, object });
-  }
-
-  async matchOne(subject?: Quad_Subject, predicate?: Quad_Predicate, object?: Quad_Object): Promise<Quad> {
-    return (await this.match(subject, predicate, object))[0];
   }
 }

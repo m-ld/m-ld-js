@@ -24,13 +24,13 @@ declare module 'quadstore' {
     
     get(matchTerms: MatchTerms<Q>): Promise<Q[]>;
     getByIndex(name: string, opts: IndexOptions): Promise<Q[]>;
-    put(quads: Q | Q[]): Promise<never>;
-    del(matchTerms: Q | Q[] | MatchTerms<Q>): Promise<never>;
-    patch(oldQuads: Q | Q[] | MatchTerms<Q>, newQuads: Q | Q[]): Promise<never>;
+    put(quads: Q | Q[]): Promise<void>;
+    del(matchTerms: Q | Q[] | MatchTerms<Q>): Promise<void>;
+    patch(oldQuads: Q | Q[] | MatchTerms<Q>, newQuads: Q | Q[]): Promise<void>;
     getStream(matchTerms: MatchTerms<Q>): Readable;
     getByIndexStream(name: string, opts: IndexOptions): Readable;
-    putStream(quads: Readable): Promise<never>;
-    delStream(quads: Readable): Promise<never>;
+    putStream(quads: Readable): Promise<void>;
+    delStream(quads: Readable): Promise<void>;
     registerIndex(name: string, keygen: (arg: Q) => any): QuadStore<Q>;
   }
 

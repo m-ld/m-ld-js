@@ -3,6 +3,10 @@ import { Observable } from 'rxjs';
 import { TreeClock } from "./clocks";
 
 export class MqttRemotes implements MeldRemotes {
+  updates(): Observable<DeltaMessage> {
+    throw new Error('Method not implemented.');
+  }
+  
   connect(clone: Meld): void {
     throw new Error("Method not implemented.");
   }
