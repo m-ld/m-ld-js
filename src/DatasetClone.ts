@@ -16,7 +16,7 @@ import { Dataset } from './Dataset';
 
 export class DatasetClone implements MeldClone {
   private readonly messageService: TreeClockMessageService;
-  private isGenesis: boolean;
+  private isGenesis: boolean = false;
 
   constructor(
     private readonly dataset: Dataset) {
