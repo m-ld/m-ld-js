@@ -33,6 +33,8 @@ export interface Dataset {
 }
 
 export interface Graph {
+  readonly name: GraphName;
+
   match(subject?: Quad_Subject, predicate?: Quad_Predicate, object?: Quad_Object): Promise<Quad[]>;
 }
 

@@ -1,15 +1,7 @@
 import { MeldClone, Snapshot, DeltaMessage, MeldRemotes } from './meld';
-import {
-  Pattern, Subject, Update, Context, GroupLike,
-  isQuery, isUpdate, isDescribe, isSubject, isGroup,
-  asGroup, resolve
-} from './jsonrql';
+import { Pattern, Subject, Update, isRead } from './jsonrql';
 import { Observable } from 'rxjs';
 import { TreeClock } from './clocks';
-import { Quad } from 'rdf-js';
-import { namedNode } from '@rdfjs/data-model';
-import { toRDF, fromRDF, compact } from 'jsonld';
-import { JsonLd, Iri } from 'jsonld/jsonld-spec';
 import { SuSetDataset } from './SuSetDataset';
 import { TreeClockMessageService } from './messages';
 import { Dataset } from './Dataset';
@@ -32,15 +24,16 @@ export class DatasetClone implements MeldClone {
 
   async initialise(): Promise<void> {
     await this.dataset.initialise();
-    let newClone: boolean, time: TreeClock | null;
+    // Establish a clock for this clone
+    let newClone: boolean = true, time: TreeClock | null;
     if (this.isGenesis) {
       time = TreeClock.GENESIS;
     } else if (newClone = !(time = await this.dataset.loadClock())) {
       time = await this.remotes.newClock();
-      this.dataset.saveClock(time);
     }
-
-
+    if (newClone)
+      this.dataset.saveClock(time, true);
+    // Flush unsent operations
   }
 
   updates(): Observable<DeltaMessage> {
@@ -60,48 +53,27 @@ export class DatasetClone implements MeldClone {
   }
 
   transact(request: Pattern): Observable<Subject> {
-    if (isGroup(request) || isSubject(request)) {
-      return this.transact({ '@insert': request } as Update);
-    } else if (isQuery(request) && !request['@where']) {
-      if (isUpdate(request) && request['@insert'] && !request['@delete']) {
-        return this.insert(request['@insert'], request['@context']);
-      } else if (isDescribe(request)) {
-        return this.describe(request['@describe'], request['@context']);
-      }
+    if (isRead(request)) {
+      return new Observable(subs => {
+        this.dataset.read(request).then(subjects => {
+          subjects.forEach(subject => subs.next(subject));
+          subs.complete();
+        }, err => subs.error(err));
+      });
+    } else {
+      return new Observable(subs => {
+        this.dataset.transact(async () => {
+          const patch = await this.dataset.write(request);
+          return [this.messageService.send(), patch];
+        }).then(deltaMessage => {
+          // TODO publish the DeltaMessage
+          subs.complete();
+        }, err => subs.error(err));
+      });
     }
-    throw new Error('Request type not supported.');
   }
 
   follow(): Observable<Update> {
     throw new Error('Method not implemented.');
-  }
-
-  private insert(insert: GroupLike, context?: Context): Observable<Subject> {
-    return new Observable(subs => {
-      toRDF(asGroup(insert, context)).then(rdf => this.dataset.transact(async txn => {
-        txn.add(rdf as Quad[]);
-        return this.messageService.send();
-      })
-        // TODO publish the DeltaMessage
-        .then(() => subs.complete(), err => subs.error(err)));
-    });
-  }
-
-  private describe(describe: Iri, context?: Context): Observable<Subject> {
-    return new Observable(subs => {
-      resolve(describe, context)
-        .then(iri => this.dataset.match(namedNode(iri)))
-        .then((quads: Quad[]) => {
-          if (quads.length)
-            fromRDF(quads)
-              .then((jsonld: JsonLd) => compact(jsonld, context || {}))
-              .then((jsonld: JsonLd) => {
-                (Array.isArray(jsonld) ? jsonld : [jsonld]).forEach(subject => subs.next(subject));
-                subs.complete();
-              }, (err: unknown) => subs.error(err))
-          else
-            subs.complete();
-        });
-    });
   }
 }

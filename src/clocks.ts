@@ -18,7 +18,9 @@ export class TreeClockFork {
     return `{ ${this.left}, ${this.right} }`;
   }
 
-  toJson = () => ({ left: this.left, right: this.right })
+  toJson(): any {
+    return { left: this.left.toJson(), right: this.right.toJson() };
+  }
 
   static fromJson(json: any): TreeClockFork | null {
     return json ? new TreeClockFork(json.left, json.right) : null;
@@ -173,11 +175,13 @@ export class TreeClock implements CausalClock<TreeClock> {
     return (content.length == 1 ? content[0] || '' : content).toString();
   }
 
-  toJson = () => ({
-    isId: this.isId,
-    ticks: this.ticks,
-    fork: this.fork ? this.fork.toJson() : null
-  });
+  toJson(): any {
+    return {
+      isId: this.isId,
+      ticks: this.ticks,
+      fork: this.fork ? this.fork.toJson() : null
+    };
+  }
 
   static fromJson(json: any): TreeClock | null {
     return json ? new TreeClock(json.isId, json.ticks, TreeClockFork.fromJson(json.fork)) : null;

@@ -41,7 +41,6 @@
     }
   },
   "dependencies": {
-    "@rdfjs/namespace": "^1.1.0",
     "@types/abstract-leveldown": "^5.0.1",
     "@types/async-lock": "^1.1.1",
     "@types/bn.js": "^4.11.5",

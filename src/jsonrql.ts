@@ -1,5 +1,4 @@
 import { Iri } from "jsonld/jsonld-spec";
-import { compact } from 'jsonld';
 
 export type Variable = string;
 
@@ -120,12 +119,4 @@ export interface Update extends Query {
 
 export function isUpdate(p: Pattern): p is Update {
   return '@insert' in p || '@delete' in p;
-}
-
-export function resolve(iri: Iri, context?: Context): Promise<Iri> {
-  return context ? compact({
-    '@id': iri,
-    'http://json-rql.org/predicate': 1,
-    '@context': context
-  }, {}).then((temp: any) => temp['@id']) : Promise.resolve(iri);
 }
