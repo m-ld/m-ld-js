@@ -55,7 +55,7 @@ export class SuSetDataset extends JrqlGraph {
         }
       }, CONTROL_CONTEXT);
       // Delete matches everything in all graphs
-      return [{ oldQuads: {}, newQuads: insert.newQuads }, undefined];
+      return { oldQuads: {}, newQuads: insert.newQuads };
     });
   }
 
@@ -65,7 +65,7 @@ export class SuSetDataset extends JrqlGraph {
   }
 
   async saveClock(time: TreeClock, newClone?: boolean): Promise<void> {
-    return this.dataset.transact(async () => [await this.patchClock(time, newClone), undefined]);
+    return this.dataset.transact(async () => await this.patchClock(time, newClone));
   }
 
   private async patchClock(time: TreeClock, newClone?: boolean): Promise<PatchQuads> {
