@@ -6,10 +6,12 @@ import { MeldStore, MeldRemotes } from '../src/meld';
 import { mock } from 'jest-mock-extended';
 
 describe('Meld store implementation', () => {
-  let store: MeldStore;
+  let store: DatasetClone;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     store = new DatasetClone(new QuadStoreDataset(new MemDown, { id: 'test' }), mock<MeldRemotes>());
+    store.genesis = true;
+    await store.initialise(); 
   });
 
   test('not found is empty', async () => {

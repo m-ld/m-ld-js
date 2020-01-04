@@ -1,10 +1,18 @@
 import { Iri } from 'jsonld/jsonld-spec';
-import { Context, Read, Subject, GroupLike, Update, isDescribe, isGroup, isSubject, isUpdate, asGroup } from './jsonrql';
+import {
+  Context, Read, Subject, GroupLike, Update, Group,
+  isDescribe, isGroup, isSubject, isUpdate, asGroup
+} from './jsonrql';
 import { NamedNode, Quad } from 'rdf-js';
 import { compact, fromRDF, toRDF } from 'jsonld';
-import { namedNode } from '@rdfjs/data-model';
-import { Graph, Patch, PatchQuads } from './Dataset';
+import { namedNode, defaultGraph } from '@rdfjs/data-model';
+import { Graph, PatchQuads } from './Dataset';
 
+/**
+ * A graph wrapper that provides low-level json-rql handling for queries.
+ * The write methods don't actually make changes but produce Patches which
+ * can then be applied to a Dataset.
+ */
 export class JrqlGraph {
   constructor(
     private readonly graph: Graph) {
@@ -13,7 +21,7 @@ export class JrqlGraph {
   async read(query: Read): Promise<Subject[]> {
     if (!query['@where'] && isDescribe(query)) {
       const subject = await this.describe(query['@describe'], query['@context']);
-      return subject['@id'] ? [subject] : [];
+      return subject ? [subject] : [];
     }
     throw new Error('Read type not supported.');
   }
@@ -32,9 +40,12 @@ export class JrqlGraph {
     throw new Error('Write type not supported.');
   }
 
-  async describe(describe: Iri, context?: Context): Promise<Subject> {
+  async describe(describe: Iri, context?: Context): Promise<Subject | undefined> {
     const quads = await this.graph.match(await resolve(describe, context));
-    return await compact(await fromRDF(quads), context || {}) as Subject;
+    if (quads.length) {
+      quads.forEach(quad => quad.graph = defaultGraph());
+      return await compact(await fromRDF(quads), context || {});
+    }
   }
 
   async insert(insert: GroupLike, context?: Context): Promise<PatchQuads> {

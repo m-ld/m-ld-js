@@ -1,7 +1,7 @@
-import { MeldDelta, UUID } from './meld';
-import { Quad, NamedNode } from 'rdf-js';
+import { MeldDelta, JsonDelta, UUID } from './meld';
+import { Triple, NamedNode } from 'rdf-js';
 import { v4 as uuid } from 'uuid';
-import { literal, namedNode, quad as createQuad } from '@rdfjs/data-model';
+import { literal, namedNode, triple as newTriple } from '@rdfjs/data-model';
 import { HashBagBlock } from './blocks';
 import { Hash } from './hash';
 import { asGroup, GroupLike, Context } from './jsonrql';
@@ -24,19 +24,19 @@ namespace rdf {
 }
 
 // See https://jena.apache.org/documentation/notes/reification.html
-export function reify(quad: Quad, tid: UUID) {
+export function reify(triple: Triple, tid: UUID) {
   const rid = namedNode(jena.rid + uuid());
   return [
-    createQuad(rid, rdf.type, rdf.Statement),
-    createQuad(rid, rdf.subject, quad.subject),
-    createQuad(rid, rdf.predicate, quad.predicate),
-    createQuad(rid, rdf.object, quad.object),
-    createQuad(rid, jena.tid, literal(tid))
+    newTriple(rid, rdf.type, rdf.Statement),
+    newTriple(rid, rdf.subject, triple.subject),
+    newTriple(rid, rdf.predicate, triple.predicate),
+    newTriple(rid, rdf.object, triple.object),
+    newTriple(rid, jena.tid, literal(tid))
   ];
 }
 
 export class JsonDeltaBagBlock extends HashBagBlock<JsonDelta> {
-  private constructor(id: Hash, data: JsonDelta) { super(id, data); }
+  constructor(id: Hash, data?: JsonDelta) { super(id, data); }
   protected construct = (id: Hash, data: JsonDelta) => new JsonDeltaBagBlock(id, data);
   protected hash = (data: JsonDelta) => Hash.digest(data.tid, data.insert, data.delete);
 }
@@ -49,28 +49,21 @@ const DELETE_CONTEXT = {
   o: 'rdf:object'
 };
 
-export interface JsonDelta {
-  tid: string,
-  insert: string,
-  delete: string
+export async function newDelta(delta: Omit<MeldDelta, 'json'>): Promise<MeldDelta> {
+  return {
+    ...delta,
+    json: {
+      tid: delta.tid,
+      insert: await toJson(delta.insert, {}),
+      delete: await toJson(delta.delete, DELETE_CONTEXT)
+    }
+  };
 }
 
-export namespace JsonDelta {
-  export async function toJson(quads: Quad[], context: Context): Promise<string>;
-  export async function toJson(delta: MeldDelta): Promise<JsonDelta>;
-  export async function toJson(object: Quad[] | MeldDelta, context?: Context): Promise<string | JsonDelta> {
-    if (Array.isArray(object)) {
-      const jsonld = await fromRDF(object);
-      const group = asGroup(await compact(jsonld, context || {}) as GroupLike);
-      delete group['@context'];
-      return JSON.stringify(group);
-    } else {
-      return {
-        tid: object.tid,
-        insert: await toJson(object.insert, {}),
-        delete: await toJson(object.delete, DELETE_CONTEXT)
-      };
-    }
-  }
+async function toJson(quads: Triple[], context: Context): Promise<string> {
+  const jsonld = await fromRDF(quads);
+  const group = asGroup(await compact(jsonld, context || {}) as GroupLike);
+  delete group['@context'];
+  return JSON.stringify(group);
 }
 

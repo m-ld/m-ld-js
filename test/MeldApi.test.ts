@@ -10,8 +10,10 @@ import { mock } from 'jest-mock-extended';
 describe('Meld API', () => {
   let api: MeldApi;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     const clone = new DatasetClone(new QuadStoreDataset(new MemDown, { id: 'test' }), mock<MeldRemotes>());
+    clone.genesis = true;
+    await clone.initialise();
     api = new MeldApi('test.m-ld.org', null, clone);
   });
 

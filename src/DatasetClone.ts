@@ -1,4 +1,4 @@
-import { MeldClone, Snapshot, DeltaMessage, MeldRemotes } from './meld';
+import { MeldClone, Snapshot, DeltaMessage, MeldRemotes, MeldJournalEntry } from './meld';
 import { Pattern, Subject, Update, isRead } from './jsonrql';
 import { Observable } from 'rxjs';
 import { TreeClock } from './clocks';
@@ -36,7 +36,7 @@ export class DatasetClone implements MeldClone {
     // Flush unsent operations
   }
 
-  updates(): Observable<DeltaMessage> {
+  updates(): Observable<MeldJournalEntry> {
     throw new Error('Method not implemented.');
   }
 
@@ -65,8 +65,8 @@ export class DatasetClone implements MeldClone {
         this.dataset.transact(async () => {
           const patch = await this.dataset.write(request);
           return [this.messageService.send(), patch];
-        }).then(deltaMessage => {
-          // TODO publish the DeltaMessage
+        }).then(journalEntry => {
+          // TODO publish the MeldJournalEntry as a delta message
           subs.complete();
         }, err => subs.error(err));
       });
