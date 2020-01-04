@@ -9,7 +9,7 @@ import { Hash } from './hash';
 import { Pattern, Subject, Update } from './jsonrql';
 import { JsonDeltaBagBlock } from './JsonDelta';
 
-export type DeltaMessage = Message<TreeClock, MeldDelta>;
+export type DeltaMessage = Message<TreeClock, JsonDelta>;
 
 export type UUID = string;
 

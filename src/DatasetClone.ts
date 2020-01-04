@@ -1,6 +1,6 @@
 import { MeldClone, Snapshot, DeltaMessage, MeldRemotes, MeldJournalEntry } from './meld';
 import { Pattern, Subject, Update, isRead } from './jsonrql';
-import { Observable } from 'rxjs';
+import { Observable, Subject as Source } from 'rxjs';
 import { TreeClock } from './clocks';
 import { SuSetDataset } from './SuSetDataset';
 import { TreeClockMessageService } from './messages';
@@ -8,14 +8,13 @@ import { Dataset } from './Dataset';
 
 export class DatasetClone implements MeldClone {
   private readonly dataset: SuSetDataset;
-  private readonly messageService: TreeClockMessageService;
+  private messageService: TreeClockMessageService;
+  private readonly updateSource: Source<MeldJournalEntry> = new Source;
   private isGenesis: boolean = false;
 
   constructor(dataset: Dataset,
     private readonly remotes: MeldRemotes) {
     this.dataset = new SuSetDataset(dataset);
-    // TODO
-    this.messageService = new TreeClockMessageService(TreeClock.GENESIS);
   }
 
   set genesis(isGenesis: boolean) {
@@ -33,7 +32,12 @@ export class DatasetClone implements MeldClone {
     }
     if (newClone)
       this.dataset.saveClock(time, true);
+    this.messageService = new TreeClockMessageService(time);
     // Flush unsent operations
+    await new Promise<void>((resolve, reject) => {
+      this.dataset.unsentLocalOperations().subscribe(
+        entry => this.updateSource.next(entry), reject, resolve);
+    });
   }
 
   updates(): Observable<MeldJournalEntry> {
@@ -66,7 +70,8 @@ export class DatasetClone implements MeldClone {
           const patch = await this.dataset.write(request);
           return [this.messageService.send(), patch];
         }).then(journalEntry => {
-          // TODO publish the MeldJournalEntry as a delta message
+          // Publish the MeldJournalEntry
+          this.updateSource.next(journalEntry);
           subs.complete();
         }, err => subs.error(err));
       });

@@ -15,7 +15,8 @@ import { Graph, PatchQuads } from './Dataset';
  */
 export class JrqlGraph {
   constructor(
-    private readonly graph: Graph) {
+    private readonly graph: Graph,
+    private readonly defaultContext: Context = {}) {
   }
 
   async read(query: Read): Promise<Subject[]> {
@@ -40,7 +41,7 @@ export class JrqlGraph {
     throw new Error('Write type not supported.');
   }
 
-  async describe(describe: Iri, context?: Context): Promise<Subject | undefined> {
+  async describe(describe: Iri, context: Context = this.defaultContext): Promise<Subject | undefined> {
     const quads = await this.graph.match(await resolve(describe, context));
     if (quads.length) {
       quads.forEach(quad => quad.graph = defaultGraph());
@@ -48,15 +49,15 @@ export class JrqlGraph {
     }
   }
 
-  async insert(insert: GroupLike, context?: Context): Promise<PatchQuads> {
+  async insert(insert: GroupLike, context: Context = this.defaultContext): Promise<PatchQuads> {
     return new PatchQuads([], await this.quads(insert, context));
   }
 
-  async delete(dels: GroupLike, context?: Context): Promise<PatchQuads> {
+  async delete(dels: GroupLike, context: Context = this.defaultContext): Promise<PatchQuads> {
     return new PatchQuads(await this.quads(dels, context), []);
   }
 
-  async quads(g: GroupLike, context?: Context): Promise<Quad[]> {
+  async quads(g: GroupLike, context: Context = this.defaultContext): Promise<Quad[]> {
     const jsonld = asGroup(g, context) as any;
     if (this.graph.name.termType !== 'DefaultGraph')
       jsonld['@id'] = this.graph.name.value;
