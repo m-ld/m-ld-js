@@ -41,9 +41,8 @@ export interface Dataset {
    * Ensures that write transactions are executed serially against the store.
    * @param prepare prepares a write operation to be performed
    */
-  transact<T>(prepare: () => Promise<Patch>): Promise<void>;
+  transact(prepare: () => Promise<Patch>): Promise<void>;
   transact<T>(prepare: () => Promise<[Patch, T]>): Promise<T>;
-  transact<T>(prepare: () => Promise<Patch | [Patch, T]>): Promise<T>;
 }
 
 /**
@@ -72,8 +71,6 @@ export class QuadStoreDataset implements Dataset {
     return new QuadStoreGraph(this.store, name || defaultGraph());
   }
 
-  transact<T>(prepare: () => Promise<Patch>): Promise<void>;
-  transact<T>(prepare: () => Promise<[Patch, T]>): Promise<T>;
   transact<T>(prepare: () => Promise<Patch | [Patch, T]>): Promise<T | void> {
     return new AsyncLock().acquire(this.id, async () => {
       const prep = await prepare();

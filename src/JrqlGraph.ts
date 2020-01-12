@@ -19,26 +19,30 @@ export class JrqlGraph {
     private readonly defaultContext: Context = {}) {
   }
 
-  async read(query: Read): Promise<Subject[]> {
+  async read(query: Read, context: Context = query['@context'] || this.defaultContext): Promise<Subject[]> {
     if (!query['@where'] && isDescribe(query)) {
-      const subject = await this.describe(query['@describe'], query['@context']);
+      const subject = await this.describe(query['@describe'], context);
       return subject ? [subject] : [];
     }
     throw new Error('Read type not supported.');
   }
 
-  async write(query: GroupLike | Update): Promise<PatchQuads> {
+  async write(query: GroupLike | Update, context?: Context): Promise<PatchQuads> {
     if (Array.isArray(query) || isGroup(query) || isSubject(query)) {
       return this.write({ '@insert': query } as Update);
     } else if (isUpdate(query) && !query['@where']) {
-      let patch = new PatchQuads([], []);
-      if (query['@delete'])
-        patch = patch.concat(await this.delete(query['@delete'], query['@context']));
-      if (query['@insert'])
-        patch = patch.concat(await this.insert(query['@insert'], query['@context']));
-      return patch;
+      return await this.update(query, context);
     }
     throw new Error('Write type not supported.');
+  }
+
+  async update(query: Update, context: Context = query['@context'] || this.defaultContext): Promise<PatchQuads> {
+    let patch = new PatchQuads([], []);
+    if (query['@delete'])
+      patch = patch.concat(await this.delete(query['@delete'], context));
+    if (query['@insert'])
+      patch = patch.concat(await this.insert(query['@insert'], context));
+    return patch;
   }
 
   async describe(describe: Iri, context: Context = this.defaultContext): Promise<Subject | undefined> {

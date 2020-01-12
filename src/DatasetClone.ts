@@ -9,7 +9,7 @@ import { Dataset } from './Dataset';
 export class DatasetClone implements MeldClone {
   private readonly dataset: SuSetDataset;
   private messageService: TreeClockMessageService;
-  private readonly updateSource: Source<MeldJournalEntry> = new Source;
+  readonly updates: Source<MeldJournalEntry> = new Source;
   private isGenesis: boolean = false;
 
   constructor(dataset: Dataset,
@@ -36,12 +36,18 @@ export class DatasetClone implements MeldClone {
     // Flush unsent operations
     await new Promise<void>((resolve, reject) => {
       this.dataset.unsentLocalOperations().subscribe(
-        entry => this.updateSource.next(entry), reject, resolve);
+        entry => this.updates.next(entry), reject, resolve);
     });
-  }
+    if (this.isGenesis) {
+      // No rev-up to do, so just subscribe to updates from later clones
+      // this.remotes.updates.subscribe({
+      //   next: delta => { },
+      //   error: err => { },
+      //   complete: () => { }
+      // });
+    } else {
 
-  updates(): Observable<MeldJournalEntry> {
-    throw new Error('Method not implemented.');
+    }
   }
 
   newClock(): Promise<TreeClock> {
@@ -71,7 +77,7 @@ export class DatasetClone implements MeldClone {
           return [this.messageService.send(), patch];
         }).then(journalEntry => {
           // Publish the MeldJournalEntry
-          this.updateSource.next(journalEntry);
+          this.updates.next(journalEntry);
           subs.complete();
         }, err => subs.error(err));
       });

@@ -14,7 +14,7 @@ export type DeltaMessage = Message<TreeClock, JsonDelta>;
 export type UUID = string;
 
 export interface Meld {
-  updates(): Observable<DeltaMessage>;
+  readonly updates: Observable<DeltaMessage>;
   newClock(): Promise<TreeClock>;
   snapshot(): Promise<Snapshot>;
   revupFrom(lastHash: Hash): Promise<Observable<DeltaMessage>>;
@@ -38,7 +38,7 @@ export type JsonDelta = {
 
 export interface Snapshot extends Message<TreeClock, Observable<Triple[]>> {
   lastHash: Hash
-  updates(): Observable<DeltaMessage>;
+  readonly updates: Observable<DeltaMessage>;
 }
 
 export interface MeldRemotes extends Meld {
@@ -50,7 +50,7 @@ export interface MeldJournalEntry extends DeltaMessage {
 }
 
 export interface MeldLocal extends Meld {
-  updates(): Observable<MeldJournalEntry>;
+  readonly updates: Observable<MeldJournalEntry>;
 }
 
 export interface MeldStore {
