@@ -1,12 +1,13 @@
 import { Iri } from 'jsonld/jsonld-spec';
 import {
-  Context, Read, Subject, GroupLike, Update, Group,
+  Context, Read, Subject, GroupLike, Update,
   isDescribe, isGroup, isSubject, isUpdate, asGroup
 } from './jsonrql';
 import { NamedNode, Quad } from 'rdf-js';
 import { compact, fromRDF, toRDF } from 'jsonld';
 import { namedNode, defaultGraph } from '@rdfjs/data-model';
 import { Graph, PatchQuads } from './Dataset';
+import { flatten } from './util';
 
 /**
  * A graph wrapper that provides low-level json-rql handling for queries.
@@ -51,6 +52,16 @@ export class JrqlGraph {
       quads.forEach(quad => quad.graph = defaultGraph());
       return await compact(await fromRDF(quads), context || {});
     }
+  }
+
+  async find(subject: Subject, context: Context = subject['@context'] || this.defaultContext): Promise<Set<Iri>> {
+    const isTempId = !subject['@id'];
+    if (isTempId)
+      subject = { '@id': 'http://json-rql.org/subject', ...subject };
+    const quads = await this.quads(subject, context);
+    const matches = await Promise.all(quads.map(quad => 
+      this.graph.match(isTempId ? undefined : quad.subject, quad.predicate, quad.object)));
+    return new Set(flatten(matches).map(quad => quad.subject.value));
   }
 
   async insert(insert: GroupLike, context: Context = this.defaultContext): Promise<PatchQuads> {

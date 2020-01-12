@@ -1,16 +1,24 @@
 import { MeldClone, Snapshot, DeltaMessage, MeldRemotes, MeldJournalEntry } from './meld';
 import { Pattern, Subject, Update, isRead } from './jsonrql';
-import { Observable, Subject as Source } from 'rxjs';
+import { Observable, Subject as Source, PartialObserver, merge, empty } from 'rxjs';
 import { TreeClock } from './clocks';
 import { SuSetDataset } from './SuSetDataset';
 import { TreeClockMessageService } from './messages';
 import { Dataset } from './Dataset';
+import { catchError } from 'rxjs/operators';
 
 export class DatasetClone implements MeldClone {
+  readonly updates: Source<MeldJournalEntry> = new Source;
   private readonly dataset: SuSetDataset;
   private messageService: TreeClockMessageService;
-  readonly updates: Source<MeldJournalEntry> = new Source;
   private isGenesis: boolean = false;
+  private readonly orderingBuffer: DeltaMessage[] = [];
+  private readonly updateReceiver: PartialObserver<DeltaMessage> = {
+    next: delta => this.messageService.receive(delta, this.orderingBuffer, acceptedMsg =>
+      this.dataset.apply(acceptedMsg.data, this.messageService.peek())),
+    error: err => this.updates.error(err),
+    complete: () => this.updates.complete()
+  };
 
   constructor(dataset: Dataset,
     private readonly remotes: MeldRemotes) {
@@ -40,14 +48,44 @@ export class DatasetClone implements MeldClone {
     });
     if (this.isGenesis) {
       // No rev-up to do, so just subscribe to updates from later clones
-      // this.remotes.updates.subscribe({
-      //   next: delta => { },
-      //   error: err => { },
-      //   complete: () => { }
-      // });
+      this.remotes.updates.subscribe(this.updateReceiver);
     } else {
-
+      const remoteRevups = new Source<DeltaMessage>();
+      merge(this.remotes.updates, remoteRevups.pipe(catchError(err => {
+        // Not a catastrophe but may get ordering overflow later
+        console.warn(`Revup lost with ${err}`);
+        return empty();
+      }))).subscribe(this.updateReceiver);
+      if (newClone) {
+        await this.requestSnapshot(remoteRevups);
+      } else {
+        const revup = await this.remotes.revupFrom(await this.dataset.lastHash());
+        if (revup) {
+          revup.subscribe(remoteRevups);
+        } else {
+          await this.requestSnapshot(remoteRevups);
+        }
+      }
     }
+    this.remotes.connect(this);
+  }
+
+  private async requestSnapshot(remoteRevups: PartialObserver<DeltaMessage>) {
+    const snapshot = await this.remotes.snapshot();
+    // Deliver the message immediately through the message service
+    const snapshotMsg = { time: snapshot.time } as DeltaMessage;
+    await new Promise<void>((resolve, reject) => {
+      this.messageService.deliver(snapshotMsg, this.orderingBuffer, acceptedMsg => {
+        if (acceptedMsg == snapshotMsg) {
+          this.dataset.applySnapshot(snapshot.data, snapshot.lastHash, snapshot.time, this.messageService.peek())
+            .then(resolve, reject);
+        }
+        else {
+          this.dataset.apply(acceptedMsg.data, this.messageService.peek());
+        }
+      });
+      snapshot.updates.subscribe(remoteRevups);
+    });
   }
 
   newClock(): Promise<TreeClock> {

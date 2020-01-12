@@ -4,9 +4,10 @@ import { v4 as uuid } from 'uuid';
 import { literal, namedNode, triple as newTriple } from '@rdfjs/data-model';
 import { HashBagBlock } from './blocks';
 import { Hash } from './hash';
-import { asGroup, GroupLike, Context } from './jsonrql';
-import { fromRDF, compact } from 'jsonld';
+import { asGroup, GroupLike, Context, Group } from './jsonrql';
+import { fromRDF, compact, toRDF } from 'jsonld';
 import { Iri } from 'jsonld/jsonld-spec';
+import { flatten } from './util';
 
 //TODO: Correct all implementations to use generic @base for reification
 namespace jena {
@@ -24,15 +25,17 @@ namespace rdf {
 }
 
 // See https://jena.apache.org/documentation/notes/reification.html
-export function reify(triple: Triple, tid: UUID) {
-  const rid = namedNode(jena.rid + uuid());
-  return [
-    newTriple(rid, rdf.type, rdf.Statement),
-    newTriple(rid, rdf.subject, triple.subject),
-    newTriple(rid, rdf.predicate, triple.predicate),
-    newTriple(rid, rdf.object, triple.object),
-    newTriple(rid, jena.tid, literal(tid))
-  ];
+export function reify(triples: Triple[], tid: UUID): Triple[] {
+  return flatten(triples.map(triple => {
+    const rid = namedNode(jena.rid + uuid());
+    return [
+      newTriple(rid, rdf.type, rdf.Statement),
+      newTriple(rid, rdf.subject, triple.subject),
+      newTriple(rid, rdf.predicate, triple.predicate),
+      newTriple(rid, rdf.object, triple.object),
+      newTriple(rid, jena.tid, literal(tid))
+    ];
+  }));
 }
 
 export class JsonDeltaBagBlock extends HashBagBlock<JsonDelta> {
@@ -60,10 +63,25 @@ export async function newDelta(delta: Omit<MeldDelta, 'json'>): Promise<MeldDelt
   };
 }
 
-async function toJson(quads: Triple[], context: Context): Promise<string> {
-  const jsonld = await fromRDF(quads);
+export async function asMeldDelta(delta: JsonDelta): Promise<MeldDelta> {
+  return {
+    tid: delta.tid,
+    insert: await fromJson(delta.insert, {}),
+    delete: await fromJson(delta.delete, DELETE_CONTEXT),
+    json: delta
+  }
+}
+
+async function toJson(triples: Triple[], context: Context): Promise<string> {
+  const jsonld = await fromRDF(triples);
   const group = asGroup(await compact(jsonld, context || {}) as GroupLike);
   delete group['@context'];
   return JSON.stringify(group);
+}
+
+async function fromJson(json: string, context: Context): Promise<Triple[]> {
+  const jsonld = JSON.parse(json) as Group;
+  jsonld['@context'] = context;
+  return await toRDF(jsonld) as Triple[];
 }
 

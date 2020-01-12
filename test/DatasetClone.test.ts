@@ -1,17 +1,12 @@
 import { DatasetClone } from '../src/DatasetClone';
 import { Subject, Describe } from '../src/jsonrql';
-import MemDown from 'memdown';
-import { QuadStoreDataset } from '../src/Dataset';
-import { MeldStore, MeldRemotes } from '../src/meld';
-import { mock } from 'jest-mock-extended';
+import { genesisClone } from './testClones';
 
 describe('Meld store implementation', () => {
   let store: DatasetClone;
 
   beforeEach(async () => {
-    store = new DatasetClone(new QuadStoreDataset(new MemDown, { id: 'test' }), mock<MeldRemotes>());
-    store.genesis = true;
-    await store.initialise(); 
+    store = await genesisClone(); 
   });
 
   test('not found is empty', async () => {

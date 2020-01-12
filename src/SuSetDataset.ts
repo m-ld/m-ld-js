@@ -1,5 +1,5 @@
-import { MeldDelta, MeldJournalEntry } from './meld';
-import { Quad } from 'rdf-js';
+import { MeldDelta, MeldJournalEntry, JsonDelta } from './meld';
+import { Quad, Triple } from 'rdf-js';
 import { v4 as uuid } from 'uuid';
 import { namedNode } from '@rdfjs/data-model';
 import { TreeClock } from './clocks';
@@ -8,8 +8,10 @@ import { Context, Subject } from './jsonrql';
 import { Dataset, PatchQuads, Patch } from './Dataset';
 import { Iri } from 'jsonld/jsonld-spec';
 import { JrqlGraph } from './JrqlGraph';
-import { reify, JsonDeltaBagBlock, newDelta } from './JsonDelta';
+import { reify, JsonDeltaBagBlock, newDelta, asMeldDelta } from './JsonDelta';
 import { Observable, Subscriber } from 'rxjs';
+import { toArray } from 'rxjs/operators';
+import { flatten } from './util';
 
 const CONTROL_CONTEXT: Context = {
   qs: 'http://qs.m-ld.org/',
@@ -56,25 +58,25 @@ export class SuSetDataset extends JrqlGraph {
 
   async initialise() {
     if (!await this.controlGraph.describe('qs:journal'))
-      return this.reset(Hash.random());
+      return this.dataset.transact(() => this.reset(Hash.random()));
   }
 
-  private async reset(startingHash: Hash, startingTime?: TreeClock) {
-    return this.dataset.transact(async () => {
-      const encodedHash = startingHash.encode();
-      const entryId = 'entry:' + encodedHash;
-      const insert = await this.controlGraph.insert({
-        '@id': 'qs:journal',
-        lastDelivered: entryId,
-        tail: {
-          '@id': entryId,
-          hash: encodedHash,
-          time: startingTime ? JSON.stringify(startingTime.toJson()) : null
-        } as Partial<JournalEntry>
-      } as Journal);
-      // Delete matches everything in all graphs
-      return { oldQuads: {}, newQuads: insert.newQuads };
-    });
+  private async reset(startingHash: Hash,
+    startingTime?: TreeClock, localTime?: TreeClock): Promise<Patch> {
+    const encodedHash = startingHash.encode();
+    const entryId = 'entry:' + encodedHash;
+    const insert = await this.controlGraph.insert({
+      '@id': 'qs:journal',
+      lastDelivered: entryId,
+      time: toJsonLdString(localTime),
+      tail: {
+        '@id': entryId,
+        hash: encodedHash,
+        time: toJsonLdString(startingTime)
+      } as Partial<JournalEntry>
+    } as Journal);
+    // Delete matches everything in all graphs
+    return { oldQuads: {}, newQuads: insert.newQuads };
   }
 
   async loadClock(): Promise<TreeClock | null> {
@@ -85,6 +87,12 @@ export class SuSetDataset extends JrqlGraph {
   async saveClock(time: TreeClock, newClone?: boolean): Promise<void> {
     return this.dataset.transact(async () =>
       await this.patchClock(await this.loadJournal(), time, newClone));
+  }
+
+  async lastHash(): Promise<Hash> {
+    const journal = await this.loadJournal();
+    const tail = await this.controlGraph.describe(journal.tail) as JournalEntry;
+    return Hash.decode(tail.hash);
   }
 
   unsentLocalOperations(): Observable<MeldJournalEntry> {
@@ -110,7 +118,6 @@ export class SuSetDataset extends JrqlGraph {
   private async patchClock(journal: Journal, time: TreeClock, newClone?: boolean): Promise<PatchQuads> {
     const encodedTime = JSON.stringify(time.toJson());
     const update = {
-      '@context': CONTROL_CONTEXT,
       '@delete': { '@id': 'qs:journal', time: journal.time } as Partial<Journal>,
       '@insert': [{ '@id': 'qs:journal', time: encodedTime } as Partial<Journal>] as Subject[]
     };
@@ -131,22 +138,49 @@ export class SuSetDataset extends JrqlGraph {
       const delta = await newDelta({
         tid: uuid(),
         insert: patch.newQuads,
-        // Establish reifications of old quads
+        // Find reifications of old quads
         delete: [/*TODO*/]
       });
       // Include reifications in final patch
       const reifications = {
         oldQuads: delta.delete,
         // Reified new quads
-        newQuads: ([] as Quad[]).concat(...delta.insert.map(quad => reify(quad, delta.tid)))
+        newQuads: reify(delta.insert, delta.tid)
       };
       // Include journaling in final patch
-      const [journaling, entry] = await this.journal(time, delta, false);
+      const [journaling, entry] = await this.journal(delta, time, false);
       return [patch.concat(reifications).concat(journaling), entry] as [Patch, MeldJournalEntry];
     });
   }
 
-  private async journal(time: TreeClock, delta: MeldDelta, remote: boolean): Promise<[PatchQuads, MeldJournalEntry]> {
+  async apply(msg: JsonDelta, time: TreeClock) {
+    return this.dataset.transact(async () => {
+      // Check we haven't seen this transaction before in the journal
+      if (!(await this.controlGraph.find({ tid: msg.tid })).size) {
+        const delta = await asMeldDelta(msg), patch = new PatchQuads([/*TODO*/], delta.insert);
+        // Include reifications in final patch
+        const reifications = {
+          oldQuads: [] as Quad[], // TODO
+          newQuads: reify(delta.insert, delta.tid)
+        }
+        // Include journaling in final patch
+        const [journaling,] = await this.journal(delta, time, true);
+        return patch.concat(reifications).concat(journaling);
+      }
+    });
+  }
+
+  async applySnapshot(data: Observable<Triple[]>, lastHash: Hash, lastTime: TreeClock, localTime: TreeClock) {
+    this.dataset.transact(async () => {
+      const reset = await this.reset(lastHash, lastTime, localTime);
+      return {
+        oldQuads: reset.oldQuads,
+        newQuads: reset.newQuads.concat(flatten(await data.pipe(toArray()).toPromise()))
+      };
+    });
+  }
+
+  private async journal(delta: MeldDelta, time: TreeClock, remote: boolean): Promise<[PatchQuads, MeldJournalEntry]> {
     const journal = await this.loadJournal();
     const oldTail = await this.controlGraph.describe(journal.tail) as JournalEntry;
     const block = new JsonDeltaBagBlock(Hash.decode(oldTail.hash)).next(delta.json);
@@ -154,7 +188,6 @@ export class SuSetDataset extends JrqlGraph {
     const delivered = () => this.markDelivered(entryId);
     return [
       (await this.controlGraph.write({
-        '@context': CONTROL_CONTEXT,
         '@delete': { '@id': 'qs:journal', tail: journal.tail } as Partial<Journal>,
         '@insert': [
           { '@id': 'qs:journal', tail: entryId } as Partial<Journal>,
@@ -175,9 +208,12 @@ export class SuSetDataset extends JrqlGraph {
   private async markDelivered(entryId: Iri): Promise<PatchQuads> {
     const journal = await this.loadJournal();
     return await this.controlGraph.write({
-      '@context': CONTROL_CONTEXT,
-      '@delete': { '@id': 'qs:journal', lastDelivered: journal.lastDelivered },
-      '@insert': { '@id': 'qs:journal', lastDelivered: entryId }
+      '@delete': { '@id': 'qs:journal', lastDelivered: journal.lastDelivered } as Partial<Journal>,
+      '@insert': { '@id': 'qs:journal', lastDelivered: entryId } as Partial<Journal>
     });
   }
+}
+
+function toJsonLdString(localTime?: TreeClock): string | null {
+  return localTime ? JSON.stringify(localTime.toJson()) : null;
 }

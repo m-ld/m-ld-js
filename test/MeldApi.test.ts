@@ -1,20 +1,12 @@
-import { DatasetClone } from '../src/DatasetClone';
 import { MeldApi } from '../src/MeldApi';
 import { Subject } from '../src/jsonrql';
-import MemDown from 'memdown';
-import { QuadStoreDataset } from '../src/Dataset';
-import { MeldRemotes } from '../src/meld';
-import { mock } from 'jest-mock-extended';
-
+import { genesisClone } from './testClones';
 
 describe('Meld API', () => {
   let api: MeldApi;
 
   beforeEach(async () => {
-    const clone = new DatasetClone(new QuadStoreDataset(new MemDown, { id: 'test' }), mock<MeldRemotes>());
-    clone.genesis = true;
-    await clone.initialise();
-    api = new MeldApi('test.m-ld.org', null, clone);
+    api = new MeldApi('test.m-ld.org', null, await genesisClone());
   });
 
   test('retrieves a JSON-LD object', async () => {

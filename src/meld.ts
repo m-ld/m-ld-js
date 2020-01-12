@@ -17,7 +17,7 @@ export interface Meld {
   readonly updates: Observable<DeltaMessage>;
   newClock(): Promise<TreeClock>;
   snapshot(): Promise<Snapshot>;
-  revupFrom(lastHash: Hash): Promise<Observable<DeltaMessage>>;
+  revupFrom(lastHash: Hash): Promise<Observable<DeltaMessage> | undefined>;
 }
 
 export interface MeldDelta {

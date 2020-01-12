@@ -3,7 +3,7 @@ import { Observable } from 'rxjs';
 import { TreeClock } from "./clocks";
 
 export class MqttRemotes implements MeldRemotes {
-  updates(): Observable<DeltaMessage> {
+  get updates(): Observable<DeltaMessage> {
     throw new Error('Method not implemented.');
   }
   
@@ -19,7 +19,7 @@ export class MqttRemotes implements MeldRemotes {
     throw new Error("Method not implemented.");
   }
   
-  revupFrom(): Promise<Observable<DeltaMessage>> {
+  revupFrom(): Promise<Observable<DeltaMessage> | undefined> {
     throw new Error("Method not implemented.");
   }
 }
