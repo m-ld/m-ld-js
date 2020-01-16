@@ -79,8 +79,7 @@ export class DatasetClone implements MeldClone {
         if (acceptedMsg == snapshotMsg) {
           this.dataset.applySnapshot(snapshot.data, snapshot.lastHash, snapshot.time, this.messageService.peek())
             .then(resolve, reject);
-        }
-        else {
+        } else {
           this.dataset.apply(acceptedMsg.data, this.messageService.peek());
         }
       });
@@ -88,8 +87,11 @@ export class DatasetClone implements MeldClone {
     });
   }
 
-  newClock(): Promise<TreeClock> {
-    throw new Error('Method not implemented.');
+  async newClock(): Promise<TreeClock> {
+    const newClock = this.messageService.fork();
+    // Forking is a mutation operation, need to save the new clock state
+    await this.dataset.saveClock(this.messageService.peek());
+    return newClock;
   }
 
   snapshot(): Promise<Snapshot> {

@@ -86,7 +86,7 @@ export class SuSetDataset extends JrqlGraph {
 
   async saveClock(time: TreeClock, newClone?: boolean): Promise<void> {
     return this.dataset.transact(async () =>
-      await this.patchClock(await this.loadJournal(), time, newClone));
+      this.patchClock(await this.loadJournal(), time, newClone));
   }
 
   async lastHash(): Promise<Hash> {
