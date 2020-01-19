@@ -1,11 +1,12 @@
 import { MeldClone, Snapshot, DeltaMessage, MeldRemotes, MeldJournalEntry } from './meld';
 import { Pattern, Subject, Update, isRead } from './jsonrql';
-import { Observable, Subject as Source, PartialObserver, merge, empty } from 'rxjs';
+import { Observable, Subject as Source, PartialObserver, merge, empty, defer, from, ReplaySubject } from 'rxjs';
 import { TreeClock } from './clocks';
 import { SuSetDataset } from './SuSetDataset';
 import { TreeClockMessageService } from './messages';
 import { Dataset } from './Dataset';
-import { catchError } from 'rxjs/operators';
+import { catchError, publishReplay, refCount } from 'rxjs/operators';
+import { Triple } from 'rdf-js';
 
 export class DatasetClone implements MeldClone {
   readonly updates: Source<MeldJournalEntry> = new Source;
@@ -51,11 +52,8 @@ export class DatasetClone implements MeldClone {
       this.remotes.updates.subscribe(this.updateReceiver);
     } else {
       const remoteRevups = new Source<DeltaMessage>();
-      merge(this.remotes.updates, remoteRevups.pipe(catchError(err => {
-        // Not a catastrophe but may get ordering overflow later
-        console.warn(`Revup lost with ${err}`);
-        return empty();
-      }))).subscribe(this.updateReceiver);
+      merge(this.remotes.updates, remoteRevups.pipe(catchError(this.revupLost)))
+        .subscribe(this.updateReceiver);
       if (newClone) {
         await this.requestSnapshot(remoteRevups);
       } else {
@@ -68,6 +66,12 @@ export class DatasetClone implements MeldClone {
       }
     }
     this.remotes.connect(this);
+  }
+
+  private revupLost(err: any) {
+    // Not a catastrophe but may get ordering overflow later
+    console.warn(`Revup lost with ${err}`);
+    return empty();
   }
 
   private async requestSnapshot(remoteRevups: PartialObserver<DeltaMessage>) {
@@ -94,7 +98,18 @@ export class DatasetClone implements MeldClone {
     return newClock;
   }
 
-  snapshot(): Promise<Snapshot> {
+  async snapshot(): Promise<Snapshot> {
+    const dataSnapshot = await this.dataset.takeSnapshot();
+    return {
+      time: dataSnapshot.time,
+      // Snapshotting holds open a transaction, so buffer/replay triples
+      data: dataSnapshot.data.pipe(publishReplay(), refCount()),
+      lastHash: dataSnapshot.lastHash,
+      updates: this.remoteUpdatesBeforeNow()
+    };
+  }
+
+  private remoteUpdatesBeforeNow(): Observable<DeltaMessage> {
     throw new Error('Method not implemented.');
   }
 

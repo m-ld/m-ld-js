@@ -21,15 +21,15 @@ export interface Meld {
 }
 
 export interface MeldDelta {
-  tid: UUID;
-  insert: Triple[];
-  delete: Triple[];
+  readonly tid: UUID;
+  readonly insert: Triple[];
+  readonly delete: Triple[];
   /**
    * Serialisation output of triples is not required to be normalised.
    * For any m-ld delta, there are many possible serialisations.
    * A delta carries its serialisation with it, for journaling and hashing.
    */
-  json: JsonDelta
+  readonly json: JsonDelta
 }
 
 export type JsonDelta = {
@@ -37,7 +37,7 @@ export type JsonDelta = {
 }
 
 export interface Snapshot extends Message<TreeClock, Observable<Triple[]>> {
-  lastHash: Hash
+  readonly lastHash: Hash;
   readonly updates: Observable<DeltaMessage>;
 }
 

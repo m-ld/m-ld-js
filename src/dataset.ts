@@ -3,6 +3,7 @@ import { defaultGraph } from '@rdfjs/data-model';
 import { RdfStore, MatchTerms } from 'quadstore';
 import AsyncLock = require('async-lock');
 import { AbstractLevelDOWN, AbstractOpenOptions } from 'abstract-leveldown';
+import { Observable } from 'rxjs';
 
 /**
  * Atomically-applied patch to a quad-store.
@@ -41,7 +42,7 @@ export interface Dataset {
    * Ensures that write transactions are executed serially against the store.
    * @param prepare prepares a write operation to be performed
    */
-  transact(prepare: () => Promise<Patch | undefined>): Promise<void>;
+  transact(prepare: () => Promise<Patch | undefined | void>): Promise<void>;
   transact<T>(prepare: () => Promise<[Patch | undefined, T]>): Promise<T>;
 }
 
@@ -51,7 +52,7 @@ export interface Dataset {
 export interface Graph {
   readonly name: GraphName;
 
-  match(subject?: Quad_Subject, predicate?: Quad_Predicate, object?: Quad_Object): Promise<Quad[]>;
+  match(subject?: Quad_Subject, predicate?: Quad_Predicate, object?: Quad_Object): Observable<Quad>;
 }
 
 export interface DatasetOptions extends AbstractOpenOptions {
@@ -71,7 +72,7 @@ export class QuadStoreDataset implements Dataset {
     return new QuadStoreGraph(this.store, name || defaultGraph());
   }
 
-  transact<T>(prepare: () => Promise<Patch | [Patch | undefined, T] | undefined>): Promise<T | void> {
+  transact<T>(prepare: () => Promise<Patch | [Patch | undefined, T] | undefined | void>): Promise<T | void> {
     return new AsyncLock().acquire(this.id, async () => {
       const prep = await prepare();
       const [patch, rtn] = Array.isArray(prep) ? prep : [prep, undefined];
@@ -88,7 +89,12 @@ class QuadStoreGraph implements Graph {
     readonly name: GraphName) {
   }
 
-  async match(subject?: Quad_Subject, predicate?: Quad_Predicate, object?: Quad_Object): Promise<Quad[]> {
-    return await this.store.get({ graph: this.name, subject, predicate, object });
+  match(subject?: Quad_Subject, predicate?: Quad_Predicate, object?: Quad_Object): Observable<Quad> {
+    return new Observable(subs => {
+      this.store.match(subject, predicate, object, this.name)
+        .on('data', quad => subs.next(quad))
+        .on('error', err => subs.error(err))
+        .on('end', () => subs.complete());
+    });    
   }
 }

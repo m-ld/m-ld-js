@@ -8,6 +8,8 @@ import { compact, fromRDF, toRDF } from 'jsonld';
 import { namedNode, defaultGraph } from '@rdfjs/data-model';
 import { Graph, PatchQuads } from './Dataset';
 import { flatten } from './util';
+import { toArray, flatMap } from 'rxjs/operators';
+import { from } from 'rxjs';
 
 /**
  * A graph wrapper that provides low-level json-rql handling for queries.
@@ -16,10 +18,11 @@ import { flatten } from './util';
  */
 export class JrqlGraph {
   constructor(
-    private readonly graph: Graph,
-    private readonly defaultContext: Context = {}) {
+    readonly graph: Graph,
+    readonly defaultContext: Context = {}) {
   }
 
+  // TODO: Make this return an Observable<Subject>
   async read(query: Read, context: Context = query['@context'] || this.defaultContext): Promise<Subject[]> {
     if (!query['@where'] && isDescribe(query)) {
       const subject = await this.describe(query['@describe'], context);
@@ -47,7 +50,7 @@ export class JrqlGraph {
   }
 
   async describe(describe: Iri, context: Context = this.defaultContext): Promise<Subject | undefined> {
-    const quads = await this.graph.match(await resolve(describe, context));
+    const quads = await this.graph.match(await resolve(describe, context)).pipe(toArray()).toPromise();
     if (quads.length) {
       quads.forEach(quad => quad.graph = defaultGraph());
       return await compact(await fromRDF(quads), context || {});
@@ -59,9 +62,10 @@ export class JrqlGraph {
     if (isTempId)
       subject = { '@id': 'http://json-rql.org/subject', ...subject };
     const quads = await this.quads(subject, context);
-    const matches = await Promise.all(quads.map(quad => 
-      this.graph.match(isTempId ? undefined : quad.subject, quad.predicate, quad.object)));
-    return new Set(flatten(matches).map(quad => quad.subject.value));
+    const matches = await from(quads).pipe(
+      flatMap(quad => this.graph.match(isTempId ? undefined : quad.subject, quad.predicate, quad.object)),
+      toArray()).toPromise();
+    return new Set(matches.map(quad => quad.subject.value));
   }
 
   async insert(insert: GroupLike, context: Context = this.defaultContext): Promise<PatchQuads> {

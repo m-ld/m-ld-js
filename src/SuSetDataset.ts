@@ -1,4 +1,4 @@
-import { MeldDelta, MeldJournalEntry, JsonDelta } from './meld';
+import { MeldDelta, MeldJournalEntry, JsonDelta, Snapshot } from './meld';
 import { Quad, Triple } from 'rdf-js';
 import { v4 as uuid } from 'uuid';
 import { namedNode } from '@rdfjs/data-model';
@@ -10,7 +10,7 @@ import { Iri } from 'jsonld/jsonld-spec';
 import { JrqlGraph } from './JrqlGraph';
 import { reify, JsonDeltaBagBlock, newDelta, asMeldDelta } from './JsonDelta';
 import { Observable, Subscriber } from 'rxjs';
-import { toArray } from 'rxjs/operators';
+import { toArray, bufferCount } from 'rxjs/operators';
 import { flatten } from './util';
 
 const CONTROL_CONTEXT: Context = {
@@ -89,10 +89,17 @@ export class SuSetDataset extends JrqlGraph {
       this.patchClock(await this.loadJournal(), time, newClone));
   }
 
+  /**
+   * @return the last hash seen in the journal.
+   */
   async lastHash(): Promise<Hash> {
-    const journal = await this.loadJournal();
-    const tail = await this.controlGraph.describe(journal.tail) as JournalEntry;
+    const [, tail] = await this.journalTail();
     return Hash.decode(tail.hash);
+  }
+
+  private async journalTail(): Promise<[Journal, JournalEntry]> {
+    const journal = await this.loadJournal();
+    return [journal, await this.controlGraph.describe(journal.tail) as JournalEntry];
   }
 
   unsentLocalOperations(): Observable<MeldJournalEntry> {
@@ -180,9 +187,23 @@ export class SuSetDataset extends JrqlGraph {
     });
   }
 
+  async takeSnapshot(): Promise<Omit<Snapshot, 'updates'>> {
+    // Snapshot requires a consistent view, so use a transaction lock
+    // until data has been emitted. But, resolve as soon as the observables are prepared.
+    return new Promise((resolve, reject) => {
+      this.dataset.transact(async () => {
+        const [, tail] = await this.journalTail();
+        resolve({
+          time: TreeClock.fromJson(JSON.parse(tail.time)) as TreeClock,
+          lastHash: Hash.decode(tail.hash),
+          data: this.controlGraph.graph.match().pipe(bufferCount(10)) // TODO buffer config
+        });
+      }).catch(reject);
+    });
+  }
+
   private async journal(delta: MeldDelta, time: TreeClock, remote: boolean): Promise<[PatchQuads, MeldJournalEntry]> {
-    const journal = await this.loadJournal();
-    const oldTail = await this.controlGraph.describe(journal.tail) as JournalEntry;
+    const [journal, oldTail] = await this.journalTail();
     const block = new JsonDeltaBagBlock(Hash.decode(oldTail.hash)).next(delta.json);
     const entryId = 'entry:' + block.id.encode();
     const delivered = () => this.markDelivered(entryId);
