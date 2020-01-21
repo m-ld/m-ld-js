@@ -1,12 +1,12 @@
 import { MeldClone, Snapshot, DeltaMessage, MeldRemotes, MeldJournalEntry } from './meld';
 import { Pattern, Subject, Update, isRead } from './jsonrql';
-import { Observable, Subject as Source, PartialObserver, merge, empty, defer, from, ReplaySubject } from 'rxjs';
+import { Observable, Subject as Source, PartialObserver, merge, empty, from, concat } from 'rxjs';
 import { TreeClock } from './clocks';
 import { SuSetDataset } from './SuSetDataset';
 import { TreeClockMessageService } from './messages';
 import { Dataset } from './Dataset';
-import { catchError, publishReplay, refCount } from 'rxjs/operators';
-import { Triple } from 'rdf-js';
+import { catchError, publishReplay, refCount, filter, ignoreElements, materialize, dematerialize } from 'rxjs/operators';
+import { Hash } from './hash';
 
 export class DatasetClone implements MeldClone {
   readonly updates: Source<MeldJournalEntry> = new Source;
@@ -16,7 +16,7 @@ export class DatasetClone implements MeldClone {
   private readonly orderingBuffer: DeltaMessage[] = [];
   private readonly updateReceiver: PartialObserver<DeltaMessage> = {
     next: delta => this.messageService.receive(delta, this.orderingBuffer, acceptedMsg =>
-      this.dataset.apply(acceptedMsg.data, this.messageService.peek())),
+      this.dataset.apply(acceptedMsg.data, this.localTime)),
     error: err => this.updates.error(err),
     complete: () => this.updates.complete()
   };
@@ -81,10 +81,10 @@ export class DatasetClone implements MeldClone {
     await new Promise<void>((resolve, reject) => {
       this.messageService.deliver(snapshotMsg, this.orderingBuffer, acceptedMsg => {
         if (acceptedMsg == snapshotMsg) {
-          this.dataset.applySnapshot(snapshot.data, snapshot.lastHash, snapshot.time, this.messageService.peek())
+          this.dataset.applySnapshot(snapshot.data, snapshot.lastHash, snapshot.time, this.localTime)
             .then(resolve, reject);
         } else {
-          this.dataset.apply(acceptedMsg.data, this.messageService.peek());
+          this.dataset.apply(acceptedMsg.data, this.localTime);
         }
       });
       snapshot.updates.subscribe(remoteRevups);
@@ -94,7 +94,7 @@ export class DatasetClone implements MeldClone {
   async newClock(): Promise<TreeClock> {
     const newClock = this.messageService.fork();
     // Forking is a mutation operation, need to save the new clock state
-    await this.dataset.saveClock(this.messageService.peek());
+    await this.dataset.saveClock(this.localTime);
     return newClock;
   }
 
@@ -110,11 +110,31 @@ export class DatasetClone implements MeldClone {
   }
 
   private remoteUpdatesBeforeNow(): Observable<DeltaMessage> {
-    throw new Error('Method not implemented.');
+    const now = this.localTime;
+    const updatesBeforeNow = merge(
+      // #1 Anything that arrives stamped prior to now
+      this.remotes.updates.pipe(filter(message => message.time.anyLt(now))),
+      // #2 Anything currently in our ordering buffer
+      from(this.orderingBuffer));
+    // #3 terminate the flow when this process disposes
+    return merge(
+      updatesBeforeNow.pipe(materialize()),
+      this.asCompletable().pipe(materialize()))
+      .pipe(dematerialize());
   }
 
-  revupFrom(): Promise<Observable<DeltaMessage>> {
-    throw new Error('Method not implemented.');
+  private asCompletable(): Observable<never> {
+    return this.updates.pipe(ignoreElements());
+  }
+
+  private get localTime() {
+    return this.messageService.peek();
+  }
+
+  async revupFrom(lastHash: Hash): Promise<Observable<DeltaMessage> | undefined> {
+    const operations = await this.dataset.operationsSince(lastHash);
+    if (operations)
+      return concat(operations, this.remoteUpdatesBeforeNow());
   }
 
   transact(request: Pattern): Observable<Subject> {

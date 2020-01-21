@@ -1,4 +1,4 @@
-import { MeldDelta, MeldJournalEntry, JsonDelta, Snapshot } from './meld';
+import { MeldDelta, MeldJournalEntry, JsonDelta, Snapshot, DeltaMessage } from './meld';
 import { Quad, Triple } from 'rdf-js';
 import { v4 as uuid } from 'uuid';
 import { namedNode } from '@rdfjs/data-model';
@@ -119,6 +119,16 @@ export class SuSetDataset extends JrqlGraph {
       const time = TreeClock.fromJson(entry.time) as TreeClock; // Never null
       subs.next({ time, data: JSON.parse(entry.delta), delivered });
       await this.emitJournalAfter(entry, subs);
+    }
+  }
+
+  async operationsSince(lastHash: Hash): Promise<Observable<DeltaMessage> | undefined> {
+    const found = await this.controlGraph.find({ hash: lastHash.encode() });
+    if (found.size) {
+      const entry = this.controlGraph.describe(found.values().next().value) as Subject;
+      return new Observable(subs => {
+        this.emitJournalAfter(entry as JournalEntry, subs);
+      });
     }
   }
 
