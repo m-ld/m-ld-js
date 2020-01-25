@@ -35,7 +35,7 @@ interface Journal {
 interface JournalEntry {
   '@id': Iri,
   hash: string, // Encoded Hash
-  delta: string, // JSON-encoded MeldDelta
+  delta: string, // JSON-encoded JsonDelta
   remote: boolean,
   time: string, // JSON-encoded TreeClock
   next?: JournalEntry['@id']
@@ -68,11 +68,11 @@ export class SuSetDataset extends JrqlGraph {
     const insert = await this.controlGraph.insert({
       '@id': 'qs:journal',
       lastDelivered: entryId,
-      time: toJsonLdString(localTime),
+      time: toTimeString(localTime),
       tail: {
         '@id': entryId,
         hash: encodedHash,
-        time: toJsonLdString(startingTime)
+        time: toTimeString(startingTime)
       } as Partial<JournalEntry>
     } as Journal);
     // Delete matches everything in all graphs
@@ -81,7 +81,7 @@ export class SuSetDataset extends JrqlGraph {
 
   async loadClock(): Promise<TreeClock | null> {
     const journal = await this.loadJournal();
-    return TreeClock.fromJson(JSON.parse(journal.time));
+    return fromTimeString(journal.time);
   }
 
   async saveClock(time: TreeClock, newClone?: boolean): Promise<void> {
@@ -112,13 +112,15 @@ export class SuSetDataset extends JrqlGraph {
     });
   }
 
-  async emitJournalAfter(entry: JournalEntry, subs: Subscriber<MeldJournalEntry>) {
+  private async emitJournalAfter(entry: JournalEntry, subs: Subscriber<MeldJournalEntry>) {
     if (entry.next) {
       entry = await this.controlGraph.describe(entry.next) as JournalEntry;
       const delivered = () => this.markDelivered(entry['@id']);
       const time = TreeClock.fromJson(entry.time) as TreeClock; // Never null
       subs.next({ time, data: JSON.parse(entry.delta), delivered });
       await this.emitJournalAfter(entry, subs);
+    } else {
+      subs.complete();
     }
   }
 
@@ -133,7 +135,7 @@ export class SuSetDataset extends JrqlGraph {
   }
 
   private async patchClock(journal: Journal, time: TreeClock, newClone?: boolean): Promise<PatchQuads> {
-    const encodedTime = JSON.stringify(time.toJson());
+    const encodedTime = toTimeString(time);
     const update = {
       '@delete': { '@id': 'qs:journal', time: journal.time } as Partial<Journal>,
       '@insert': [{ '@id': 'qs:journal', time: encodedTime } as Partial<Journal>] as Subject[]
@@ -170,7 +172,7 @@ export class SuSetDataset extends JrqlGraph {
     });
   }
 
-  async apply(msg: JsonDelta, time: TreeClock) {
+  async apply(msg: JsonDelta, time: TreeClock): Promise<void> {
     return this.dataset.transact(async () => {
       // Check we haven't seen this transaction before in the journal
       if (!(await this.controlGraph.find({ tid: msg.tid })).size) {
@@ -204,9 +206,9 @@ export class SuSetDataset extends JrqlGraph {
       this.dataset.transact(async () => {
         const [, tail] = await this.journalTail();
         resolve({
-          time: TreeClock.fromJson(JSON.parse(tail.time)) as TreeClock,
+          time: fromTimeString(tail.time) as TreeClock,
           lastHash: Hash.decode(tail.hash),
-          data: this.controlGraph.graph.match().pipe(bufferCount(10)) // TODO buffer config
+          data: this.graph.match().pipe(bufferCount(10)) // TODO buffer config
         });
       }).catch(reject);
     });
@@ -227,7 +229,7 @@ export class SuSetDataset extends JrqlGraph {
             '@id': entryId, remote,
             hash: block.id.encode(),
             tid: delta.tid,
-            time: JSON.stringify(time.toJson()),
+            time: toTimeString(time),
             delta: JSON.stringify(delta.json)
           } as JournalEntry
         ]
@@ -245,6 +247,10 @@ export class SuSetDataset extends JrqlGraph {
   }
 }
 
-function toJsonLdString(localTime?: TreeClock): string | null {
-  return localTime ? JSON.stringify(localTime.toJson()) : null;
+function toTimeString(time?: TreeClock): string | null {
+  return time ? JSON.stringify(time.toJson()) : null;
+}
+
+function fromTimeString(timeString: string): TreeClock | null {
+  return timeString ? TreeClock.fromJson(JSON.parse(timeString)) : null;
 }
