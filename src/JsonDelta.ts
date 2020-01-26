@@ -1,6 +1,6 @@
 import { MeldDelta, JsonDelta, UUID } from './meld';
 import { Triple, NamedNode } from 'rdf-js';
-import { v4 as uuid } from 'uuid';
+import { generate as uuid } from 'short-uuid';
 import { literal, namedNode, triple as newTriple } from '@rdfjs/data-model';
 import { HashBagBlock } from './blocks';
 import { Hash } from './hash';

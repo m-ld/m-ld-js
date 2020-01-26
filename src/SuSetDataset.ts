@@ -1,6 +1,5 @@
 import { MeldDelta, MeldJournalEntry, JsonDelta, Snapshot, DeltaMessage } from './meld';
 import { Quad, Triple } from 'rdf-js';
-import { v4 as uuid } from 'uuid';
 import { namedNode } from '@rdfjs/data-model';
 import { TreeClock } from './clocks';
 import { Hash } from './hash';
@@ -12,6 +11,7 @@ import { reify, JsonDeltaBagBlock, newDelta, asMeldDelta } from './JsonDelta';
 import { Observable, Subscriber } from 'rxjs';
 import { toArray, bufferCount } from 'rxjs/operators';
 import { flatten } from './util';
+import { generate as uuid } from 'short-uuid';
 
 const CONTROL_CONTEXT: Context = {
   qs: 'http://qs.m-ld.org/',

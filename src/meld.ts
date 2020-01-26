@@ -42,7 +42,7 @@ export interface Snapshot extends Message<TreeClock, Observable<Triple[]>> {
 }
 
 export interface MeldRemotes extends Meld {
-  connect(clone: Meld): void;
+  connect(clone: MeldLocal): void;
 }
 
 export interface MeldJournalEntry extends DeltaMessage {
