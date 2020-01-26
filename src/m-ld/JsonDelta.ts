@@ -1,13 +1,13 @@
-import { MeldDelta, JsonDelta, UUID } from './meld';
+import { MeldDelta, JsonDelta, UUID } from '.';
 import { Triple, NamedNode } from 'rdf-js';
 import { generate as uuid } from 'short-uuid';
 import { literal, namedNode, triple as newTriple } from '@rdfjs/data-model';
-import { HashBagBlock } from './blocks';
-import { Hash } from './hash';
+import { HashBagBlock } from '../blocks';
+import { Hash } from '../hash';
 import { asGroup, GroupLike, Context, Group } from './jsonrql';
 import { fromRDF, compact, toRDF } from 'jsonld';
 import { Iri } from 'jsonld/jsonld-spec';
-import { flatten } from './util';
+import { flatten } from '../util';
 
 //TODO: Correct all implementations to use generic @base for reification
 namespace jena {

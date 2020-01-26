@@ -2,12 +2,11 @@ import { Iri } from 'jsonld/jsonld-spec';
 import {
   Context, Read, Subject, GroupLike, Update,
   isDescribe, isGroup, isSubject, isUpdate, asGroup
-} from './jsonrql';
+} from '../m-ld/jsonrql';
 import { NamedNode, Quad } from 'rdf-js';
 import { compact, fromRDF, toRDF } from 'jsonld';
 import { namedNode, defaultGraph } from '@rdfjs/data-model';
-import { Graph, PatchQuads } from './Dataset';
-import { flatten } from './util';
+import { Graph, PatchQuads } from '.';
 import { toArray, flatMap } from 'rxjs/operators';
 import { from } from 'rxjs';
 

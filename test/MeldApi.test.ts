@@ -1,5 +1,5 @@
-import { MeldApi } from '../src/MeldApi';
-import { Subject } from '../src/jsonrql';
+import { MeldApi } from '../src/m-ld/MeldApi';
+import { Subject } from '../src/m-ld/jsonrql';
 import { genesisClone } from './testClones';
 
 describe('Meld API', () => {

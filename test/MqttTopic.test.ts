@@ -1,4 +1,4 @@
-import { MqttTopic } from '../src/MqttTopic';
+import { MqttTopic } from '../src/mqtt/MqttTopic';
 
 describe('MQTT topic pattern', () => {
   test('fixed to string', () => {

@@ -1,5 +1,5 @@
 import { exec, TopicParams } from 'mqtt-pattern';
-import { flatten, toArray } from './util';
+import { flatten, toArray } from '../util';
 
 export class MqttTopic<P extends TopicParams = TopicParams> {
   constructor(

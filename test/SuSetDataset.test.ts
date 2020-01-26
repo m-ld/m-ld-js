@@ -1,4 +1,4 @@
-import { SuSetDataset } from '../src/SuSetDataset';
+import { SuSetDataset } from '../src/dataset/SuSetDataset';
 import { memStore } from './testClones';
 import { TreeClock } from '../src/clocks';
 import { Hash } from '../src/hash';

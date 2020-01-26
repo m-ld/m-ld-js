@@ -1,4 +1,4 @@
-import { MeldStore } from './meld';
+import { MeldStore } from '.';
 import { Context, Subject, Describe, Pattern } from './jsonrql';
 import { Observable } from 'rxjs';
 import { map } from 'rxjs/operators';

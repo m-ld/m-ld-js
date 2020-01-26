@@ -1,16 +1,16 @@
-import { MeldDelta, MeldJournalEntry, JsonDelta, Snapshot, DeltaMessage } from './meld';
+import { MeldDelta, MeldJournalEntry, JsonDelta, Snapshot, DeltaMessage } from '../m-ld';
 import { Quad, Triple } from 'rdf-js';
 import { namedNode } from '@rdfjs/data-model';
-import { TreeClock } from './clocks';
-import { Hash } from './hash';
-import { Context, Subject } from './jsonrql';
-import { Dataset, PatchQuads, Patch } from './Dataset';
+import { TreeClock } from '../clocks';
+import { Hash } from '../hash';
+import { Context, Subject } from '../m-ld/jsonrql';
+import { Dataset, PatchQuads, Patch } from '.';
 import { Iri } from 'jsonld/jsonld-spec';
 import { JrqlGraph } from './JrqlGraph';
-import { reify, JsonDeltaBagBlock, newDelta, asMeldDelta } from './JsonDelta';
+import { reify, JsonDeltaBagBlock, newDelta, asMeldDelta } from '../m-ld/JsonDelta';
 import { Observable, Subscriber } from 'rxjs';
 import { toArray, bufferCount } from 'rxjs/operators';
-import { flatten } from './util';
+import { flatten } from '../util';
 import { generate as uuid } from 'short-uuid';
 
 const CONTROL_CONTEXT: Context = {

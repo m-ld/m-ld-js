@@ -1,5 +1,5 @@
-import { DatasetClone } from '../src/DatasetClone';
-import { Subject, Describe } from '../src/jsonrql';
+import { DatasetClone } from '../src/dataset/DatasetClone';
+import { Subject, Describe } from '../src/m-ld/jsonrql';
 import { genesisClone } from './testClones';
 
 describe('Meld store implementation', () => {

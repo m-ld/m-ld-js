@@ -1,8 +1,8 @@
-import { DatasetClone } from '../src/DatasetClone';
-import { MeldRemotes, DeltaMessage } from '../src/meld';
+import { DatasetClone } from '../src/dataset/DatasetClone';
+import { MeldRemotes, DeltaMessage } from '../src/m-ld';
 import { mock } from 'jest-mock-extended';
 import { Observable } from 'rxjs';
-import { Dataset, QuadStoreDataset } from '../src/Dataset';
+import { Dataset, QuadStoreDataset } from '../src/dataset';
 import MemDown from 'memdown';
 
 export async function genesisClone(remotes?: MeldRemotes) {

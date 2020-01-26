@@ -1,12 +1,12 @@
-import { MeldClone, Snapshot, DeltaMessage, MeldRemotes, MeldJournalEntry } from './meld';
-import { Pattern, Subject, Update, isRead } from './jsonrql';
+import { MeldClone, Snapshot, DeltaMessage, MeldRemotes, MeldJournalEntry } from '../m-ld';
+import { Pattern, Subject, Update, isRead } from '../m-ld/jsonrql';
 import { Observable, Subject as Source, PartialObserver, merge, empty, from, concat } from 'rxjs';
-import { TreeClock } from './clocks';
+import { TreeClock } from '../clocks';
 import { SuSetDataset } from './SuSetDataset';
-import { TreeClockMessageService } from './messages';
-import { Dataset } from './Dataset';
+import { TreeClockMessageService } from '../messages';
+import { Dataset } from '.';
 import { catchError, publishReplay, refCount, filter, ignoreElements, materialize, dematerialize } from 'rxjs/operators';
-import { Hash } from './hash';
+import { Hash } from '../hash';
 
 export class DatasetClone implements MeldClone {
   readonly updates: Source<MeldJournalEntry> = new Source;

@@ -1,13 +1,12 @@
 /**
  * Primary interfaces involved in a m-ld implementation
  */
-import { TreeClock } from './clocks';
+import { TreeClock } from '../clocks';
 import { Observable } from 'rxjs';
-import { Message } from './messages';
+import { Message } from '../messages';
 import { Triple } from 'rdf-js';
-import { Hash } from './hash';
+import { Hash } from '../hash';
 import { Pattern, Subject, Update } from './jsonrql';
-import { JsonDeltaBagBlock } from './JsonDelta';
 
 export type DeltaMessage = Message<TreeClock, JsonDelta>;
 

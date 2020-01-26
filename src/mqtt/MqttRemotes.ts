@@ -1,6 +1,6 @@
-import { Snapshot, DeltaMessage, MeldRemotes, MeldLocal, JsonDelta } from './meld';
+import { Snapshot, DeltaMessage, MeldRemotes, MeldLocal, JsonDelta } from '../m-ld';
 import { Observable, Subject as Source } from 'rxjs';
-import { TreeClock } from './clocks';
+import { TreeClock } from '../clocks';
 import { connectAsync, AsyncMqttClient, IClientOptions, ISubscriptionMap } from 'async-mqtt';
 import { generate as uuid } from 'short-uuid';
 import { MqttTopic, SENT_TOPIC, REPLY_TOPIC, SentParams, ReplyParams } from './MqttTopic';
@@ -43,7 +43,7 @@ export class MqttRemotes implements MeldRemotes {
         sentTopic.match(topic, sent =>
           this.onSent(JSON.parse(payload.toString()), sent));
         replyTopic.match(topic, replied =>
-          this.onReplied(JSON.parse(payload.toString()), replied));
+          this.onReply(JSON.parse(payload.toString()), replied));
       });
 
       // Subscribe as required
@@ -93,7 +93,7 @@ export class MqttRemotes implements MeldRemotes {
     throw new Error('Method not implemented.');
   }
 
-  onReplied(msg: any/*TODO*/, { fromId, messageId, sentMessageId }: ReplyParams) {
+  onReply(msg: any/*TODO*/, { fromId, messageId, sentMessageId }: ReplyParams) {
     throw new Error('Method not implemented.');
   }
 }
