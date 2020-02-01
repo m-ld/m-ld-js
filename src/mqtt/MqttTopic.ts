@@ -50,7 +50,7 @@ export interface ReplyParams extends DirectParams {
   sentMessageId: string;
 }
 
-export const SENT_TOPIC = new MqttTopic<SentParams>
+export const SEND_TOPIC = new MqttTopic<SentParams>
   (['__send', { '+': 'toId' }, { '+': 'fromId' }, { '+': 'messageId' }, { '#': 'address' }]);
 
 export const REPLY_TOPIC = new MqttTopic<ReplyParams>

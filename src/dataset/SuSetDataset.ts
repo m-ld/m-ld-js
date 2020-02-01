@@ -7,7 +7,7 @@ import { Context, Subject } from '../m-ld/jsonrql';
 import { Dataset, PatchQuads, Patch } from '.';
 import { Iri } from 'jsonld/jsonld-spec';
 import { JrqlGraph } from './JrqlGraph';
-import { reify, JsonDeltaBagBlock, newDelta, asMeldDelta } from '../m-ld/JsonDelta';
+import { reify, JsonDeltaBagBlock, newDelta, asMeldDelta, toTimeString, fromTimeString } from '../m-ld/JsonDelta';
 import { Observable, Subscriber } from 'rxjs';
 import { toArray, bufferCount } from 'rxjs/operators';
 import { flatten } from '../util';
@@ -245,12 +245,4 @@ export class SuSetDataset extends JrqlGraph {
       '@insert': { '@id': 'qs:journal', lastDelivered: entryId } as Partial<Journal>
     });
   }
-}
-
-function toTimeString(time?: TreeClock): string | null {
-  return time ? JSON.stringify(time.toJson()) : null;
-}
-
-function fromTimeString(timeString: string): TreeClock | null {
-  return timeString ? TreeClock.fromJson(JSON.parse(timeString)) : null;
 }

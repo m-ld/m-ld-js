@@ -8,6 +8,7 @@ import { asGroup, GroupLike, Context, Group } from './jsonrql';
 import { fromRDF, compact, toRDF } from 'jsonld';
 import { Iri } from 'jsonld/jsonld-spec';
 import { flatten } from '../util';
+import { TreeClock } from '../clocks';
 
 //TODO: Correct all implementations to use generic @base for reification
 namespace jena {
@@ -83,5 +84,13 @@ async function fromJson(json: string, context: Context): Promise<Triple[]> {
   const jsonld = JSON.parse(json) as Group;
   jsonld['@context'] = context;
   return await toRDF(jsonld) as Triple[];
+}
+
+export function toTimeString(time?: TreeClock): string | null {
+  return time ? JSON.stringify(time.toJson()) : null;
+}
+
+export function fromTimeString(timeString: string): TreeClock | null {
+  return timeString ? TreeClock.fromJson(JSON.parse(timeString)) : null;
 }
 
