@@ -3,7 +3,7 @@ import { Observable, Subject as Source } from 'rxjs';
 import { TreeClock } from '../clocks';
 import { connectAsync, AsyncMqttClient, IClientOptions, ISubscriptionMap } from 'async-mqtt';
 import { generate as uuid } from 'short-uuid';
-import { MqttTopic, SEND_TOPIC, REPLY_TOPIC, SentParams as SendParams, ReplyParams } from './MqttTopic';
+import { MqttTopic, SEND_TOPIC, REPLY_TOPIC, SentParams as SendParams, ReplyParams, DirectParams } from './MqttTopic';
 import { TopicParams, AT_LEAST_ONCE, AT_MOST_ONCE } from 'mqtt-pattern';
 import { MqttPresence } from './MqttPresence';
 import { Response, Request } from '../m-ld/ControlMessage';
@@ -83,10 +83,15 @@ export class MqttRemotes implements MeldRemotes {
     this.clone.resolve(clone);
     clone.updates.subscribe({
       next: async msg => {
-        // Delta received from the local clone. Relay to the domain
-        await (await this.mqtt).publish(this.operationsTopic.address, JSON.stringify(msg));
-        // When done, mark the message as delivered
-        msg.delivered();
+        try {
+          // Delta received from the local clone. Relay to the domain
+          await (await this.mqtt).publish(this.operationsTopic.address, JSON.stringify(msg));
+          // When done, mark the message as delivered
+          msg.delivered();
+        } catch (err) {
+          // Failure to send an update is catastrophic - signal death to the clone
+          this.remoteUpdates.error(err);
+        }
       },
       // Local m-ld clone has stopped normally. It will no longer accept messages
       complete: () => this.shutdown(),
@@ -146,10 +151,10 @@ export class MqttRemotes implements MeldRemotes {
       this.onSent(jsonFrom(payload), sent));
     this.replyTopic.match(topic, replied =>
       this.onReply(jsonFrom(payload), replied));
-    this.matchObserving(topic, payload);
+    this.matchConsuming(topic, payload);
   }
 
-  private matchObserving(topic: string, payload: Buffer) {
+  private matchConsuming(topic: string, payload: Buffer) {
     if (topic in this.consuming) {
       const jsonNotification = jsonFrom(payload) as JsonNotification;
       if (jsonNotification.next)
@@ -172,22 +177,30 @@ export class MqttRemotes implements MeldRemotes {
     })
   }
 
-  private async onSent(json: any, { fromId, messageId }: SendParams) {
+  private async onSent(json: any, sentParams: SendParams) {
     const req = Request.fromJson(json);
     if (Request.isNewClock(req)) {
-      const clock = await (await this.clone).newClock();
-      this.reply(fromId, messageId, Response.NewClock.toJson({ clock }));
+      await this.replyClock(sentParams);
     } else if (Request.isSnapshot(req)) {
-      const { time, lastHash, data, updates } = await (await this.clone).snapshot();
-      const dataAddress = uuid(), updatesAddress = uuid();
-      await this.reply(fromId, messageId, Response.Snapshot.toJson({
-        time, dataAddress, lastHash, updatesAddress
-      }), true);
-      // Ack has been sent, start streaming the data and updates
-      this.produce(data, dataAddress, triples => jsonFromTriples(triples));
-      this.produce(updates, updatesAddress, msg => Promise.resolve(jsonFromDelta(msg)));
+      await this.replySnapshot(sentParams);
     }
     // TODO revup
+  }
+
+  private async replyClock(sentParams: SendParams) {
+    const clock = await (await this.clone).newClock();
+    this.reply(sentParams, Response.NewClock.toJson({ clock }));
+  }
+
+  private async replySnapshot(sentParams: SendParams) {
+    const { time, lastHash, data, updates } = await (await this.clone).snapshot();
+    const dataAddress = uuid(), updatesAddress = uuid();
+    await this.reply(sentParams, Response.Snapshot.toJson({
+      time, dataAddress, lastHash, updatesAddress
+    }), true);
+    // Ack has been sent, start streaming the data and updates
+    this.produce(data, dataAddress, triples => jsonFromTriples(triples));
+    this.produce(updates, updatesAddress, msg => Promise.resolve(jsonFromDelta(msg)));
   }
 
   private produce<T>(data: Observable<T>, address: string, toJson: (datum: T) => Promise<any>) {
@@ -207,7 +220,7 @@ export class MqttRemotes implements MeldRemotes {
     return (await this.mqtt).publish(this.controlSubAddress(dataAddress), JSON.stringify(notification));
   }
 
-  private async reply(toId: string, sentMessageId: string, json: any, expectAck?: boolean) {
+  private async reply({ fromId: toId, messageId: sentMessageId }: DirectParams, json: any, expectAck?: boolean) {
     const messageId = uuid();
     await (await this.mqtt).publish(REPLY_TOPIC.with({
       messageId, fromId: this.id, toId, sentMessageId
@@ -220,12 +233,12 @@ export class MqttRemotes implements MeldRemotes {
     }
   }
 
-  private onReply(json: any, { fromId, messageId, sentMessageId }: ReplyParams) {
-    if (sentMessageId in this.replyResolvers) {
-      const [resolve, ack] = this.replyResolvers[sentMessageId];
+  private onReply(json: any, replyParams: ReplyParams) {
+    if (replyParams.sentMessageId in this.replyResolvers) {
+      const [resolve, ack] = this.replyResolvers[replyParams.sentMessageId];
       resolve(Response.fromJson(json));
-      if (ack)
-        ack.then(() => this.reply(fromId, messageId, null));
+      if (ack) // A m-ld ack is a reply to a reply with a null body
+        ack.then(() => this.reply(replyParams, null));
     }
   }
 
