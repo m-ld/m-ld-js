@@ -6,13 +6,13 @@ export namespace Request {
   export interface NewClock { }
 
   export function isNewClock(req: Request): req is NewClock {
-    return req === NewClock;
+    return req === NewClock; // See fromJson
   }
 
   export interface Snapshot { }
 
   export function isSnapshot(req: Request): req is Snapshot {
-    return req === Snapshot;
+    return req === Snapshot; // See fromJson
   }
 
   export interface Revup {
@@ -40,9 +40,9 @@ export namespace Request {
   export function fromJson(json: any): Request {
     switch (json['@type']) {
       case 'http://control.m-ld.org/request/clock':
-        return NewClock;
+        return NewClock; // See isNewClock
       case 'http://control.m-ld.org/request/snapshot':
-        return Snapshot;
+        return Snapshot; // See isSnapshot
       case 'http://control.m-ld.org/request/revup':
         return { ...json };
     }
