@@ -56,6 +56,10 @@ export class SuSetDataset extends JrqlGraph {
       dataset.graph(namedNode(CONTROL_CONTEXT.qs + 'control')), CONTROL_CONTEXT);
   }
 
+  get id() {
+    return this.dataset.id;
+  }
+
   async initialise() {
     if (!await this.controlGraph.describe('qs:journal'))
       return this.dataset.transact(() => this.reset(Hash.random()));

@@ -49,6 +49,7 @@ export interface MeldJournalEntry extends DeltaMessage {
 }
 
 export interface MeldLocal extends Meld {
+  readonly id: string;
   readonly updates: Observable<MeldJournalEntry>;
 }
 

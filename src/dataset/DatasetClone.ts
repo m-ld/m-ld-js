@@ -30,6 +30,10 @@ export class DatasetClone implements MeldClone {
     this.isGenesis = isGenesis;
   }
 
+  get id() {
+    return this.dataset.id;
+  }
+
   async initialise(): Promise<void> {
     await this.dataset.initialise();
     // Establish a clock for this clone

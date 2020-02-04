@@ -36,6 +36,7 @@ export type GraphName = DefaultGraph | NamedNode;
  * Quad in the patch will have a graph property.
  */
 export interface Dataset {
+  readonly id: string;
   graph(name?: GraphName): Graph;
 
   /**

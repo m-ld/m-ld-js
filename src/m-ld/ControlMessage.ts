@@ -6,13 +6,13 @@ export namespace Request {
   export interface NewClock { }
 
   export function isNewClock(req: Request): req is NewClock {
-    return req === NewClock; // See fromJson
+    return req === NewClock.INSTANCE; // See fromJson
   }
 
   export interface Snapshot { }
 
   export function isSnapshot(req: Request): req is Snapshot {
-    return req === Snapshot; // See fromJson
+    return req === Snapshot.INSTANCE; // See fromJson
   }
 
   export interface Revup {
@@ -24,11 +24,13 @@ export namespace Request {
   }
 
   export const NewClock = {
-    json: { '@type': 'http://control.m-ld.org/request/clock' }
+    INSTANCE: {} as NewClock,
+    JSON: { '@type': 'http://control.m-ld.org/request/clock' }
   }
 
   export const Snapshot = {
-    json: { '@type': 'http://control.m-ld.org/request/snapshot' }
+    INSTANCE: {} as Snapshot,
+    JSON: { '@type': 'http://control.m-ld.org/request/snapshot' }
   }
 
   export const Revup = {
@@ -37,19 +39,20 @@ export namespace Request {
     })
   }
 
-  export function fromJson(json: any): Request {
+  // If return type is Request the type system thinks it's always NewClock
+  export function fromJson(json: any): any {
     switch (json['@type']) {
       case 'http://control.m-ld.org/request/clock':
-        return NewClock; // See isNewClock
+        return NewClock.INSTANCE; // See isNewClock
       case 'http://control.m-ld.org/request/snapshot':
-        return Snapshot; // See isSnapshot
+        return Snapshot.INSTANCE; // See isSnapshot
       case 'http://control.m-ld.org/request/revup':
-        return { ...json };
+        return { lastHash: json.lastHash };
     }
     throw new Error('Bad request JSON');
   }
 }
-export type Request = {} | Request.Revup;
+export type Request = Request.NewClock | Request.Snapshot | Request.Revup;
 
 export namespace Response {
   export interface NewClock {
@@ -65,6 +68,10 @@ export namespace Response {
 
   export interface Revup {
     hashFound: boolean;
+    /**
+     * If !hashFound this should be a stable identifier of the answering clone,
+     * to allow detection of a re-send.
+     */
     updatesAddress: string;
   }
 

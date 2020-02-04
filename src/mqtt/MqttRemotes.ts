@@ -3,7 +3,7 @@ import { Observable, Subject as Source } from 'rxjs';
 import { TreeClock } from '../clocks';
 import { connectAsync, AsyncMqttClient, IClientOptions, ISubscriptionMap } from 'async-mqtt';
 import { generate as uuid } from 'short-uuid';
-import { MqttTopic, SEND_TOPIC, REPLY_TOPIC, SentParams as SendParams, ReplyParams, DirectParams } from './MqttTopic';
+import { MqttTopic, SEND_TOPIC, REPLY_TOPIC, SendParams, ReplyParams, DirectParams } from './MqttTopic';
 import { TopicParams, AT_LEAST_ONCE, AT_MOST_ONCE } from 'mqtt-pattern';
 import { MqttPresence } from './MqttPresence';
 import { Response, Request } from '../m-ld/ControlMessage';
@@ -13,6 +13,7 @@ import { fromRDF, toRDF } from 'jsonld';
 import { Triple } from 'rdf-js';
 import { fromTimeString, toTimeString } from '../m-ld/JsonDelta';
 import { JsonLd } from 'jsonld/jsonld-spec';
+import { Hash } from '../hash';
 
 export type MqttRemotesOptions = Omit<IClientOptions, 'clientId'>;
 
@@ -85,7 +86,8 @@ export class MqttRemotes implements MeldRemotes {
       next: async msg => {
         try {
           // Delta received from the local clone. Relay to the domain
-          await (await this.mqtt).publish(this.operationsTopic.address, JSON.stringify(msg));
+          await (await this.mqtt).publish(
+            this.operationsTopic.address, JSON.stringify(msg));
           // When done, mark the message as delivered
           msg.delivered();
         } catch (err) {
@@ -108,13 +110,13 @@ export class MqttRemotes implements MeldRemotes {
   }
 
   async newClock(): Promise<TreeClock> {
-    const res = await this.send<Response.NewClock>(Request.NewClock.json);
+    const res = await this.send<Response.NewClock>(Request.NewClock.JSON);
     return res.clock;
   }
 
   async snapshot(): Promise<Snapshot> {
     const ack = new Future<null>();
-    const res = await this.send<Response.Snapshot>(Request.Snapshot.json, ack);
+    const res = await this.send<Response.Snapshot>(Request.Snapshot.JSON, ack);
     const snapshot: Snapshot = {
       time: res.time,
       data: (await this.consume(res.dataAddress)).pipe(flatMap(triplesFromJson)),
@@ -126,8 +128,23 @@ export class MqttRemotes implements MeldRemotes {
     return snapshot;
   }
 
-  revupFrom(): Promise<Observable<DeltaMessage> | undefined> {
-    throw new Error('Method not implemented.');
+  revupFrom(lastHash: Hash): Promise<Observable<DeltaMessage> | undefined> {
+    return this.revupFromNext(lastHash, new Set);
+  }
+
+  private async revupFromNext(lastHash: Hash, tried: Set<string>): Promise<Observable<DeltaMessage> | undefined> {
+    const ack = new Future<null>();
+    const res = await this.send<Response.Revup>(Request.Revup.toJson({ lastHash }), ack);
+    if (res.hashFound) {
+      const updates = (await this.consume(res.updatesAddress)).pipe(map(deltaFromJson));
+      // Ack the response to start the streams
+      ack.resolve(null);
+      return updates;
+    } else if (!tried.has(res.updatesAddress)) {
+      tried.add(res.updatesAddress);
+      // Not expecting an ack if hash not found
+      return this.revupFromNext(lastHash, tried);
+    } // else return undefined
   }
 
   private async consume<T>(address: string): Promise<Observable<any>> {
@@ -177,14 +194,15 @@ export class MqttRemotes implements MeldRemotes {
     })
   }
 
-  private async onSent(json: any, sentParams: SendParams) {
+  private onSent(json: any, sentParams: SendParams) {
     const req = Request.fromJson(json);
     if (Request.isNewClock(req)) {
-      await this.replyClock(sentParams);
+      this.replyClock(sentParams);
     } else if (Request.isSnapshot(req)) {
-      await this.replySnapshot(sentParams);
+      this.replySnapshot(sentParams);
+    } else if (Request.isRevup(req)) {
+      this.replyRevup(req.lastHash, sentParams);
     }
-    // TODO revup
   }
 
   private async replyClock(sentParams: SendParams) {
@@ -199,11 +217,28 @@ export class MqttRemotes implements MeldRemotes {
       time, dataAddress, lastHash, updatesAddress
     }), true);
     // Ack has been sent, start streaming the data and updates
-    this.produce(data, dataAddress, triples => jsonFromTriples(triples));
-    this.produce(updates, updatesAddress, msg => Promise.resolve(jsonFromDelta(msg)));
+    this.produce(data, dataAddress, jsonFromTriples);
+    this.produce(updates, updatesAddress, jsonFromDelta);
   }
 
-  private produce<T>(data: Observable<T>, address: string, toJson: (datum: T) => Promise<any>) {
+  private async replyRevup(lastHash: Hash, sentParams: SendParams) {
+    const revup = await (await this.clone).revupFrom(lastHash);
+    if (revup) {
+      const updatesAddress = uuid();
+      await this.reply(sentParams, Response.Revup.toJson({
+        hashFound: true, updatesAddress
+      }), true);
+      // Ack has been sent, start streaming the updates
+      this.produce(revup, updatesAddress, jsonFromDelta);
+    } else {
+      this.reply(sentParams, Response.Revup.toJson({
+        hashFound: false, updatesAddress: (await this.clone).id
+      }));
+    }
+  }
+
+  private produce<T>(data: Observable<T>, subAddress: string, toJson: (datum: T) => Promise<any>) {
+    const address = this.controlSubAddress(subAddress);
     const subs = data.subscribe({
       next: datum => toJson(datum).then(
         json => this.notify(address, { next: json }),
@@ -216,8 +251,8 @@ export class MqttRemotes implements MeldRemotes {
     });
   }
 
-  private async notify(dataAddress: string, notification: JsonNotification) {
-    return (await this.mqtt).publish(this.controlSubAddress(dataAddress), JSON.stringify(notification));
+  private async notify(address: string, notification: JsonNotification) {
+    return (await this.mqtt).publish(address, JSON.stringify(notification));
   }
 
   private async reply({ fromId: toId, messageId: sentMessageId }: DirectParams, json: any, expectAck?: boolean) {
@@ -276,6 +311,6 @@ function deltaFromJson(json: any): DeltaMessage {
     throw new Error('No time in message');
 }
 
-function jsonFromDelta(msg: DeltaMessage): any {
+async function jsonFromDelta(msg: DeltaMessage): Promise<any> {
   return { time: toTimeString(msg.time), data: msg.data };
 }
