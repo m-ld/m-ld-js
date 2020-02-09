@@ -10,6 +10,18 @@ import { Pattern, Subject, Update } from './jsonrql';
 
 export type DeltaMessage = Message<TreeClock, JsonDelta>;
 
+export namespace DeltaMessage {
+  export function toJson(msg: DeltaMessage): any {
+    return { time: msg.time.toJson(), data: msg.data };
+  }
+
+  export function fromJson(json: any): DeltaMessage | undefined {
+    const time = TreeClock.fromJson(json.time);
+    if (time && json.data)
+      return { time, data: json.data };
+  }
+}
+
 export type UUID = string;
 
 export interface Meld {

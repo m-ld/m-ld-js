@@ -1,4 +1,4 @@
-import { TopicParams, AT_LEAST_ONCE, matches } from 'mqtt-pattern';
+import { TopicParams, matches } from 'mqtt-pattern';
 import { MqttTopic } from './MqttTopic';
 import { ISubscriptionMap, AsyncMqttClient } from 'async-mqtt';
 
@@ -12,7 +12,7 @@ const PRESENCE_TOPIC = new MqttTopic<PresenceParams>(
 
 export class MqttPresence {
   private readonly presenceTopic: MqttTopic<PresenceParams>;
-  private readonly presentMap: { [clientId: string]: { [consumerId: string]: string } }
+  private readonly presentMap: { [clientId: string]: { [consumerId: string]: string } } = {};
 
   constructor(domain: string) {
     this.presenceTopic = PRESENCE_TOPIC.with({ domain });
@@ -20,7 +20,7 @@ export class MqttPresence {
 
   get subscriptions(): ISubscriptionMap {
     const subscriptions: ISubscriptionMap = {};
-    subscriptions[this.presenceTopic.address] = AT_LEAST_ONCE;
+    subscriptions[this.presenceTopic.address] = 1;
     return subscriptions;
   }
 

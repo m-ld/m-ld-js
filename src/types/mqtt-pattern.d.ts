@@ -3,8 +3,6 @@ declare module 'mqtt-pattern' {
     [key: string]: string | string[];
   }
 
-  const AT_MOST_ONCE = 0, AT_LEAST_ONCE = 1;
-
   /**
    * Validates that topic fits the pattern and parses out any parameters.
    * If the topic doesn't match, it returns null.
