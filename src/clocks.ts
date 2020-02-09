@@ -23,7 +23,12 @@ export class TreeClockFork {
   }
 
   static fromJson(json: any): TreeClockFork | null {
-    return json ? new TreeClockFork(json.left, json.right) : null;
+    if (json) {
+      const left = TreeClock.fromJson(json.left);
+      const right = TreeClock.fromJson(json.right);
+      return left && right ? new TreeClockFork(left, right) : null;
+    }
+    return null;
   }
 }
 

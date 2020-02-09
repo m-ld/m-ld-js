@@ -1,9 +1,11 @@
 import { exec, TopicParams } from 'mqtt-pattern';
 import { flatten, toArray } from '../util';
 
+type TopicPart<P> = string | { '+': keyof P; } | { '#': keyof P; };
+
 export class MqttTopic<P extends TopicParams = TopicParams> {
   constructor(
-    private readonly parts: Array<string | { '+': keyof P; } | { '#': keyof P; }>) {
+    private readonly parts: Array<TopicPart<P>>) {
   }
 
   match(topic: string): P | null;
@@ -17,8 +19,9 @@ export class MqttTopic<P extends TopicParams = TopicParams> {
   }
 
   with(params: Partial<P>) {
-    return new MqttTopic<P>(flatten(this.parts.map(part => typeof part === 'string' ?
-      [part] : '+' in part ? toArray(params[part['+']] || '+') : toArray(params[part['#']] || '#'))));
+    return new MqttTopic<P>(flatten<TopicPart<P>>(this.parts.map(part => typeof part === 'string' ?
+      [part] : '+' in part ? toArray<TopicPart<P>>(params[part['+']] || part) :
+        toArray<TopicPart<P>>(params[part['#']] || part))));
   }
 
   get address(): string {

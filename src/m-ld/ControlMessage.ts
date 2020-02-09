@@ -99,9 +99,9 @@ export namespace Response {
   export function fromJson(json: any): Response {
     switch (json['@type']) {
       case 'http://control.m-ld.org/response/clock':
-        return { ...json, clock: fromTimeString(json.clock) };
+        return { ...json, clock: TreeClock.fromJson(json.clock) };
       case 'http://control.m-ld.org/response/snapshot':
-        return { ...json, time: fromTimeString(json.time), lastHash: Hash.decode(json.time) };
+        return { ...json, time: TreeClock.fromJson(json.time), lastHash: Hash.decode(json.time) };
       case 'http://control.m-ld.org/response/revup':
         return { ...json };
     }

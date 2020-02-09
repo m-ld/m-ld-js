@@ -13,11 +13,14 @@ describe('New MQTT remotes', () => {
 
   beforeEach(async () => {
     mqtt = new EventEmitter() as AsyncMqttClient & MockProxy<AsyncMqttClient>;
-    mqtt.options = { clientId: 'clientId' };
+    mqtt.options = { clientId: 'client1' };
     mqtt = mock<AsyncMqttClient>(mqtt);
     // jest-mock-extended typing is confused by the AsyncMqttClient overloads, hence <any>
     mqtt.subscribe.mockReturnValue(<any>Promise.resolve([]));
-    mqtt.publish.mockReturnValue(<any>published);
+    mqtt.publish.mockImplementation((topic, msg) => {
+      setImmediate(() => mqtt.emit('message', topic, Buffer.from(<string>msg)));
+      return <any>published;
+    });
 
     remotes = new MqttRemotes('test.m-ld.org', mqtt);
     mqtt.emit('connect');
@@ -28,8 +31,8 @@ describe('New MQTT remotes', () => {
     expect(mqtt.subscribe).toBeCalledWith({
       '__presence/test.m-ld.org/#': 1,
       'test.m-ld.org/operations': 1,
-      '__send/clientId/+/+/test.m-ld.org/control': 0,
-      '__reply/clientId/+/+/+': 0
+      '__send/client1/+/+/test.m-ld.org/control': 0,
+      '__reply/client1/+/+/+': 0
     });
   });
 
@@ -44,10 +47,11 @@ describe('New MQTT remotes', () => {
   });
 
   test('publishes local operations', async () => {
-    const entry = mock<MeldJournalEntry>({
+    const entry = {
       time: TreeClock.GENESIS.forked().left,
-      data: { tid: 't1', insert: '{}', delete: '{}' }
-    });
+      data: { tid: 't1', insert: '{}', delete: '{}' },
+      delivered: jest.fn()
+    };
     const updates = new Subject<MeldJournalEntry>();
     // This weirdness is due to jest-mock-extended trying to mock arrays
     remotes.connect({ ...mock<MeldLocal>(), updates });
@@ -65,5 +69,26 @@ describe('New MQTT remotes', () => {
     } catch (error) {
       expect(error.message).toMatch(/No-one present/);
     };
+  });
+
+  test('can get clock', async () => {
+    const newClock = TreeClock.GENESIS.forked().right;
+    // Set presence of client2's consumer
+    mqtt.emit('message', '__presence/test.m-ld.org/client2/consumer2',
+      Buffer.from('test.m-ld.org/control'));
+    mqtt.on('message', (topic, payload) => {
+      const [type, toId, fromId, messageId, domain,] = topic.split('/');
+      if (type === '__send' && JSON.parse(payload.toString())['@type'] === 'http://control.m-ld.org/request/clock') {
+        expect(toId).toBe('consumer2');
+        expect(fromId).toBe('client1');
+        expect(domain).toBe('test.m-ld.org');
+        setImmediate(() => mqtt.emit('message', '__reply/client1/consumer2/reply1/' + messageId,
+          Buffer.from(JSON.stringify({
+            '@type': 'http://control.m-ld.org/response/clock',
+            clock: newClock.toJson()
+          }))));
+      }
+    });
+    expect((await remotes.newClock()).equals(newClock)).toBe(true);
   });
 });
