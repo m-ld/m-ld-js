@@ -11,6 +11,26 @@ describe('New MQTT remotes', () => {
   let remotes: MqttRemotes;
   const published = Promise.resolve(mock<IPublishPacket>());
 
+  function remotePublish(topic: string, json: any) {
+    return new Promise<void>((resolve) => {
+      setImmediate(() => {
+        mqtt.emit('message', topic, Buffer.from(
+          typeof json === 'string' ? json : JSON.stringify(json)));
+        resolve();
+      });
+    });
+  }
+
+  function remoteSubscribe(subscriber: (topic: string, json: any) => void) {
+    mqtt.on('message', (topic, payload) => {
+      try {
+        subscriber(topic, JSON.parse(payload.toString()));
+      } catch (err) {
+        subscriber(topic, payload.toString());
+      }
+    });
+  }
+
   beforeEach(async () => {
     mqtt = new EventEmitter() as AsyncMqttClient & MockProxy<AsyncMqttClient>;
     mqtt.options = { clientId: 'client1' };
@@ -18,7 +38,7 @@ describe('New MQTT remotes', () => {
     // jest-mock-extended typing is confused by the AsyncMqttClient overloads, hence <any>
     mqtt.subscribe.mockReturnValue(<any>Promise.resolve([]));
     mqtt.publish.mockImplementation((topic, msg) => {
-      setImmediate(() => mqtt.emit('message', topic, Buffer.from(<string>msg)));
+      remotePublish(topic, <string>msg).then(() => published);
       return <any>published;
     });
 
@@ -37,10 +57,10 @@ describe('New MQTT remotes', () => {
   });
 
   test('emits remote operations', async () => {
-    setImmediate(() => mqtt.emit('message', 'test.m-ld.org/operations', Buffer.from(JSON.stringify({
+    remotePublish('test.m-ld.org/operations', {
       time: TreeClock.GENESIS.forked().left.toJson(),
       data: { tid: 't1', insert: '{}', delete: '{}' }
-    }), 'utf8')));
+    });
     await expect(new Promise((resolve) => {
       remotes.updates.subscribe({ next: resolve });
     })).resolves.toHaveProperty('data');
@@ -74,19 +94,17 @@ describe('New MQTT remotes', () => {
   test('can get clock', async () => {
     const newClock = TreeClock.GENESIS.forked().right;
     // Set presence of client2's consumer
-    mqtt.emit('message', '__presence/test.m-ld.org/client2/consumer2',
-      Buffer.from('test.m-ld.org/control'));
-    mqtt.on('message', (topic, payload) => {
+    await remotePublish('__presence/test.m-ld.org/client2/consumer2', 'test.m-ld.org/control');
+    remoteSubscribe((topic, json) => {
       const [type, toId, fromId, messageId, domain,] = topic.split('/');
-      if (type === '__send' && JSON.parse(payload.toString())['@type'] === 'http://control.m-ld.org/request/clock') {
+      if (type === '__send' && json['@type'] === 'http://control.m-ld.org/request/clock') {
         expect(toId).toBe('consumer2');
         expect(fromId).toBe('client1');
         expect(domain).toBe('test.m-ld.org');
-        setImmediate(() => mqtt.emit('message', '__reply/client1/consumer2/reply1/' + messageId,
-          Buffer.from(JSON.stringify({
-            '@type': 'http://control.m-ld.org/response/clock',
-            clock: newClock.toJson()
-          }))));
+        remotePublish('__reply/client1/consumer2/reply1/' + messageId, {
+          '@type': 'http://control.m-ld.org/response/clock',
+          clock: newClock.toJson()
+        });
       }
     });
     expect((await remotes.newClock()).equals(newClock)).toBe(true);
