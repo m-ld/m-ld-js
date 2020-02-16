@@ -9,9 +9,21 @@ describe('Meld API', () => {
     api = new MeldApi('test.m-ld.org', null, await genesisClone());
   });
 
-  test('retrieves a JSON-LD object', async () => {
+  test('retrieves a JSON-LD subject', async () => {
     await api.transact({ '@id': 'fred', name: 'Fred' } as Subject).toPromise();
     await expect(api.get('fred').toPromise())
       .resolves.toMatchObject({ '@id': 'fred', name: 'Fred' });
+  });
+
+  test('deletes a subject by path', async () => {
+    await api.transact({ '@id': 'fred', name: 'Fred' } as Subject).toPromise();
+    await api.delete('fred').toPromise();
+    await expect(api.get('fred').toPromise()).resolves.toBeUndefined();
+  });
+
+  test('deletes an object by path', async () => {
+    await api.transact({ '@id': 'fred', wife: { '@id': 'wilma' } } as Subject).toPromise();
+    await api.delete('wilma').toPromise();
+    await expect(api.get('fred').toPromise()).resolves.toBeUndefined();
   });
 });

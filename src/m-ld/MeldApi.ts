@@ -1,5 +1,5 @@
 import { MeldStore } from '.';
-import { Context, Subject, Describe, Pattern } from './jsonrql';
+import { Context, Subject, Describe, Pattern, Update } from './jsonrql';
 import { Observable } from 'rxjs';
 import { map } from 'rxjs/operators';
 
@@ -18,7 +18,13 @@ export class MeldApi {
     return this.transact({ '@describe': path } as Describe);
   }
 
-  // TODO: delete, post, put
+  delete(path: string): Observable<Subject> {
+    return this.transact({
+      '@delete': [{ '@id': path }, { '?': { '@id': path } }]
+    } as Update);
+  }
+
+  // TODO: post, put
 
   transact(request: Pattern, implicitContext?: Context): Observable<Subject> {
     implicitContext = implicitContext || this.context;

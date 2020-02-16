@@ -37,3 +37,10 @@ export class Future<T> implements PromiseLike<T> {
     return this.promise.then(onfulfilled, onrejected);
   }
 }
+
+export function shortId(len: number = 8) {
+  var d = new Date().getTime();
+  return ('a' + 'x'.repeat(len - 1)).replace(/[ax]/g, function (c) {
+    return ((d + Math.random() * 16) % (c == 'a' ? 6 : 16) + (c == 'a' ? 10 : 0) | 0).toString(16);
+  });
+}

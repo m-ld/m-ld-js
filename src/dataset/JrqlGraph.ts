@@ -1,14 +1,16 @@
 import { Iri } from 'jsonld/jsonld-spec';
 import {
   Context, Read, Subject, GroupLike, Update,
-  isDescribe, isGroup, isSubject, isUpdate, asGroup
+  isDescribe, isGroup, isSubject, isUpdate, asGroup, Group
 } from '../m-ld/jsonrql';
-import { NamedNode, Quad } from 'rdf-js';
+import { NamedNode, Quad, Term, Variable, Quad_Subject, Quad_Predicate, Quad_Object, Quad_Graph } from 'rdf-js';
 import { compact, fromRDF, toRDF } from 'jsonld';
-import { namedNode, defaultGraph } from '@rdfjs/data-model';
+import { namedNode, defaultGraph, variable } from '@rdfjs/data-model';
 import { Graph, PatchQuads } from '.';
-import { toArray, flatMap } from 'rxjs/operators';
-import { from } from 'rxjs';
+import { toArray, flatMap, mergeScan, tap, defaultIfEmpty } from 'rxjs/operators';
+import { from, Observable, of, EMPTY } from 'rxjs';
+import { toArray as array, shortId, flatten } from '../util';
+import { QuadSolution } from './QuadSolution';
 
 /**
  * A graph wrapper that provides low-level json-rql handling for queries.
@@ -56,30 +58,51 @@ export class JrqlGraph {
     }
   }
 
-  async find(subject: Subject, context: Context = subject['@context'] || this.defaultContext): Promise<Set<Iri>> {
-    const isTempId = !subject['@id'];
-    if (isTempId)
-      subject = { '@id': 'http://json-rql.org/subject', ...subject };
-    const quads = await this.quads(subject, context);
-    const matches = await from(quads).pipe(
-      flatMap(quad => this.graph.match(isTempId ? undefined : quad.subject, quad.predicate, quad.object)),
-      toArray()).toPromise();
-    return new Set(matches.map(quad => quad.subject.value));
+  async find(jrqlPattern: Subject | Group,
+    context: Context = jrqlPattern['@context'] || this.defaultContext): Promise<Set<Iri>> {
+    const patterns = await this.quads(jrqlPattern, context);
+    return new Set((await this.matchQuads(patterns)).map(quad => quad.subject.value));
   }
 
   async insert(insert: GroupLike, context: Context = this.defaultContext): Promise<PatchQuads> {
     return new PatchQuads([], await this.quads(insert, context));
   }
 
+  // TODO: This deletes reifications!!
   async delete(dels: GroupLike, context: Context = this.defaultContext): Promise<PatchQuads> {
-    return new PatchQuads(await this.quads(dels, context), []);
+    const patterns = await this.quads(dels, context);
+    // If there are no variables in the delete, we don't need to find solutions
+    return new PatchQuads(patterns.every(pattern => asMatchTerms(pattern).every(p => p)) ?
+      patterns : await this.matchQuads(patterns), []);
   }
 
   async quads(g: GroupLike, context: Context = this.defaultContext): Promise<Quad[]> {
-    const jsonld = asGroup(g, context) as any;
-    if (this.graph.name.termType !== 'DefaultGraph')
-      jsonld['@id'] = this.graph.name.value;
-    return await toRDF(jsonld) as Quad[];
+    const jsonld = asGroup(g, context);
+    hideVars(jsonld['@graph']);
+    const quads = await toRDF(this.graph.name.termType !== 'DefaultGraph' ?
+      { ...jsonld, '@id': this.graph.name.value } : jsonld) as Quad[];
+    unhideVars(quads);
+    return quads;
+  }
+
+  private async matchQuads(patterns: Quad[]): Promise<Quad[]> {
+    const solutions = await this.matchSolutions(patterns);
+    return flatten(solutions.map(solution => solution.quads));
+  }
+
+  private async matchSolutions(patterns: Quad[]): Promise<QuadSolution[]> {
+    // reduce async from a single empty solution
+    return patterns.reduce(async (willSolve, pattern) => {
+      const solutions = await willSolve;
+      // find matching quads for each pattern quad
+      return this.graph.match(...asMatchTerms(pattern)).pipe(
+        defaultIfEmpty(), // Produces null if no quads
+        // match each quad against already-found solutions
+        flatMap(quad => from(solutions).pipe(flatMap(solution => {
+          const matchingSolution = quad ? solution.intersect(pattern, quad) : solution;
+          return matchingSolution ? of(matchingSolution) : EMPTY;
+        }))), toArray()).toPromise();
+    }, Promise.resolve([QuadSolution.EMPTY]));
   }
 }
 
@@ -90,3 +113,66 @@ export async function resolve(iri: Iri, context?: Context): Promise<NamedNode> {
     '@context': context
   }, {}) as any)['@id'] : iri);
 }
+
+function asMatchTerms(quad: Quad):
+  [Quad_Subject | undefined, Quad_Predicate | undefined, Quad_Object | undefined] {
+  return [asTermMatch(quad.subject), asTermMatch(quad.predicate), asTermMatch(quad.object)];
+}
+
+function asTermMatch<T extends Term>(term: T): T | undefined {
+  if (term.termType !== 'Variable')
+    return term;
+}
+
+function hideVars(subjects: Subject | Subject[], top: boolean = true) {
+  array(subjects).forEach(subject => {
+    // Process predicates and objects
+    Object.entries(subject).forEach(([key, value]) => {
+      const varKey = hideVar(key);
+      if (typeof value === 'object')
+        hideVars(Array.isArray(value) ? value as Subject[] : value as Subject, false);
+      subject[varKey] = value;
+      if (varKey !== key)
+        delete subject[key];
+    });
+    // Identity-only subjects at top level => implicit wildcard p-o
+    if (top && Object.keys(subject).every(k => k === '@id'))
+      subject[genVar()] = { '@id': genVar() };
+    // Anonymous subjects => wildcard subject
+    if (!subject['@id'])
+      subject['@id'] = genVar();
+  });
+}
+
+function hideVar(token: string): string {
+  // Allow anonymous variables as '?'
+  const match = /^\?([\d\w]*)$/g.exec(token);
+  return match ? match[1] ? hiddenVar(match[1]) : genVar() : token;
+}
+
+function unhideVars(quads: Quad[]) {
+  quads.forEach(quad => {
+    quad.subject = unhideVar(quad.subject);
+    quad.predicate = unhideVar(quad.predicate);
+    quad.object = unhideVar(quad.object);
+  });
+}
+
+function unhideVar<T extends Term>(term: T): T | Variable {
+  switch (term.termType) {
+    case 'NamedNode':
+      const match = /^http:\/\/json-rql.org\/var#([\d\w]+)$/g.exec(term.value);
+      if (match)
+        return variable(match[1]);
+  }
+  return term;
+}
+
+function genVar() {
+  return hiddenVar(shortId(4));
+}
+
+function hiddenVar(name: string) {
+  return 'http://json-rql.org/var#' + name;
+}
+
