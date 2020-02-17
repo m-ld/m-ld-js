@@ -1,4 +1,4 @@
-import { MeldDelta, MeldJournalEntry, JsonDelta, Snapshot, DeltaMessage } from '../m-ld';
+import { MeldDelta, MeldJournalEntry, JsonDelta, Snapshot, DeltaMessage, UUID } from '../m-ld';
 import { Quad, Triple } from 'rdf-js';
 import { namedNode } from '@rdfjs/data-model';
 import { TreeClock } from '../clocks';
@@ -7,7 +7,7 @@ import { Context, Subject } from '../m-ld/jsonrql';
 import { Dataset, PatchQuads, Patch } from '.';
 import { Iri } from 'jsonld/jsonld-spec';
 import { JrqlGraph } from './JrqlGraph';
-import { reify, JsonDeltaBagBlock, newDelta, asMeldDelta, toTimeString, fromTimeString } from '../m-ld/JsonDelta';
+import { reify as reifyTriples, JsonDeltaBagBlock, newDelta, asMeldDelta, toTimeString, fromTimeString } from '../m-ld/JsonDelta';
 import { Observable, Subscriber } from 'rxjs';
 import { toArray, bufferCount } from 'rxjs/operators';
 import { flatten } from '../util';
@@ -43,10 +43,11 @@ interface JournalEntry {
 
 /**
  * Writeable Graph, similar to a Dataset, but with a slightly different transaction API.
- * Journals every every transaction and creates m-ld compliant deltas.
+ * Journals every transaction and creates m-ld compliant deltas.
  */
 export class SuSetDataset extends JrqlGraph {
   private readonly controlGraph: JrqlGraph;
+  private readonly metaGraph: JrqlGraph;
 
   constructor(
     private readonly dataset: Dataset) {
@@ -54,6 +55,7 @@ export class SuSetDataset extends JrqlGraph {
     // Named graph for control quads e.g. Journal
     this.controlGraph = new JrqlGraph(
       dataset.graph(namedNode(CONTROL_CONTEXT.qs + 'control')), CONTROL_CONTEXT);
+    this.metaGraph = new JrqlGraph(dataset.graph(namedNode(CONTROL_CONTEXT.qs + 'meta')));
   }
 
   get id() {
@@ -168,7 +170,7 @@ export class SuSetDataset extends JrqlGraph {
       const reifications = {
         oldQuads: delta.delete,
         // Reified new quads
-        newQuads: reify(delta.insert, delta.tid)
+        newQuads: this.reify(delta.insert, delta.tid)
       };
       // Include journaling in final patch
       const [journaling, entry] = await this.journal(delta, time, false);
@@ -184,13 +186,20 @@ export class SuSetDataset extends JrqlGraph {
         // Include reifications in final patch
         const reifications = {
           oldQuads: [] as Quad[], // TODO
-          newQuads: reify(delta.insert, delta.tid)
+          newQuads: this.reify(delta.insert, delta.tid)
         }
         // Include journaling in final patch
         const [journaling,] = await this.journal(delta, time, true);
         return patch.concat(reifications).concat(journaling);
       }
     });
+  }
+
+  private reify(quads: Quad[], tid: UUID): Quad[] {
+    const reified = reifyTriples(quads, tid);
+    // Reifications go in the 'meta' graph so they are not included in queries
+    reified.forEach(quad => quad.graph = this.metaGraph.graph.name);
+    return reified;
   }
 
   async applySnapshot(data: Observable<Triple[]>, lastHash: Hash, lastTime: TreeClock, localTime: TreeClock) {

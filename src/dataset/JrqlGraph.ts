@@ -68,7 +68,6 @@ export class JrqlGraph {
     return new PatchQuads([], await this.quads(insert, context));
   }
 
-  // TODO: This deletes reifications!!
   async delete(dels: GroupLike, context: Context = this.defaultContext): Promise<PatchQuads> {
     const patterns = await this.quads(dels, context);
     // If there are no variables in the delete, we don't need to find solutions
