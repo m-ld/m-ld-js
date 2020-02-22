@@ -100,7 +100,7 @@ export class JrqlGraph {
       const solutions = await willSolve;
       // find matching quads for each pattern quad
       return this.graph.match(...asMatchTerms(pattern)).pipe(
-        defaultIfEmpty(), // Produces null if no quads
+        defaultIfEmpty(), // TODO: Produces null if no quads, incorrect according to BGP
         // match each quad against already-found solutions
         flatMap(quad => from(solutions).pipe(flatMap(solution => {
           const matchingSolution = quad ? solution.join(pattern, quad) : solution;

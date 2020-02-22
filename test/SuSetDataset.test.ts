@@ -49,7 +49,7 @@ describe('SU-Set Dataset', () => {
         await expect(snapshot.data.toPromise()).resolves.toBeUndefined();
       });
 
-      test('transacts a triple', async () => {
+      test('transacts an insert', async () => {
         const msg = await ds.transact(async () => [
           time = time.ticked(),
           await ds.insert({
@@ -70,9 +70,9 @@ describe('SU-Set Dataset', () => {
 
       test('applies an insert delta', async () => {
         await ds.apply({
-          'tid': 'B6FVbHGtFxXhdLKEVmkcd',
-          'insert': '{"@graph":{"@id":"http://test.m-ld.org/fred","http://test.m-ld.org/#name":"Fred"}}',
-          'delete': '{"@graph":{}}'
+          tid: 'B6FVbHGtFxXhdLKEVmkcd',
+          insert: '{"@graph":{"@id":"http://test.m-ld.org/fred","http://test.m-ld.org/#name":"Fred"}}',
+          delete: '{"@graph":{}}'
         }, time = time.ticked());
         await expect(ds.find({ '@id': 'http://test.m-ld.org/fred' }))
           .resolves.toEqual(new Set(['http://test.m-ld.org/fred']));
@@ -80,16 +80,19 @@ describe('SU-Set Dataset', () => {
 
       describe('with an initial triple', () => {
         let firstHash: Hash;
+        let firstTid: string;
 
         beforeEach(async () => firstHash = await ds.lastHash());
 
-        beforeEach(async () => ds.transact(async () => [
-          time = time.ticked(),
-          await ds.insert({
-            '@id': 'http://test.m-ld.org/fred',
-            'http://test.m-ld.org/#name': 'Fred'
-          })
-        ]));
+        beforeEach(async () => {
+          firstTid = (await ds.transact(async () => [
+            time = time.ticked(),
+            await ds.insert({
+              '@id': 'http://test.m-ld.org/fred',
+              'http://test.m-ld.org/#name': 'Fred'
+            })
+          ])).data.tid;
+        });
 
         test('has a new hash', async () => {
           const newHash = await ds.lastHash();
@@ -112,8 +115,7 @@ describe('SU-Set Dataset', () => {
           await expect(snapshot.data.toPromise()).resolves.toBeDefined();
         });
 
-
-        test('can delete the triple', async () => {
+        test('transacts a delete', async () => {
           const msg = await ds.transact(async () => [
             time = time.ticked(),
             await ds.delete({ '@id': 'http://test.m-ld.org/fred' })
@@ -130,6 +132,19 @@ describe('SU-Set Dataset', () => {
           expect(deletedJsonLd).toHaveProperty(['@graph', 's'], 'http://test.m-ld.org/fred');
           expect(deletedJsonLd).toHaveProperty(['@graph', 'p'], 'http://test.m-ld.org/#name');
           expect(deletedJsonLd).toHaveProperty(['@graph', 'o'], 'Fred');
+        });
+
+        test('applies a delete delta', async () => {
+          await ds.apply({
+            tid: 'uSX1mPGhuWAEH56RLwYmvG',
+            insert: '{"@graph":{}}',
+            // Deleting the triple based on the inserted Transaction ID
+            delete: `{"@graph":{"@id":"b4vMkTurWFf6qjBuhkRvjX","@type":"rdf:Statement",
+              "tid":"${firstTid}","o":"Fred","p":"http://test.m-ld.org/#name",
+              "s":"http://test.m-ld.org/fred"}}`
+          }, time = time.ticked());
+          await expect(ds.find({ '@id': 'http://test.m-ld.org/fred' }))
+            .resolves.toEqual(new Set());
         });
       });
     });

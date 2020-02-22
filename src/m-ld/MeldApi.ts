@@ -20,7 +20,12 @@ export class MeldApi {
 
   delete(path: string): Observable<Subject> {
     return this.transact({
-      '@delete': [{ '@id': path }, { '?': { '@id': path } }]
+      '@delete': [
+        { '@id': path },
+        // TODO: This is wrong, multiple patterns INTERSECT in BGP (not UNION)
+        // https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#BGPsparql
+        { '?': { '@id': path } }
+      ]
     } as Update);
   }
 
