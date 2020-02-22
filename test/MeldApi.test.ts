@@ -1,5 +1,5 @@
 import { MeldApi } from '../src/m-ld/MeldApi';
-import { Subject, Select } from '../src/m-ld/jsonrql';
+import { Subject, Select, Describe } from '../src/m-ld/jsonrql';
 import { genesisClone } from './testClones';
 
 describe('Meld API', () => {
@@ -33,5 +33,13 @@ describe('Meld API', () => {
       '@select': '?f', '@where': { '@id': '?f', name: 'Fred' }
     } as Select).toPromise())
       .resolves.toMatchObject({ '?f': { '@id': 'fred' } });
+  });
+
+  test('describes where', async () => {
+    await api.transact({ '@id': 'fred', name: 'Fred' } as Subject).toPromise();
+    await expect(api.transact({
+      '@describe': '?f', '@where': { '@id': '?f', name: 'Fred' }
+    } as Describe).toPromise())
+      .resolves.toMatchObject({ '@id': 'fred', name: 'Fred' });
   });
 });

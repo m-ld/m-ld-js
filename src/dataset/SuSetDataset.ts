@@ -75,7 +75,7 @@ export class SuSetDataset extends JrqlGraph {
   }
 
   async initialise() {
-    if (!await this.controlGraph.describe('qs:journal'))
+    if (!await this.controlGraph.describe1('qs:journal'))
       return this.dataset.transact(() => this.reset(Hash.random()));
   }
 
@@ -117,13 +117,13 @@ export class SuSetDataset extends JrqlGraph {
 
   private async journalTail(): Promise<[Journal, JournalEntry]> {
     const journal = await this.loadJournal();
-    return [journal, await this.controlGraph.describe(journal.tail) as JournalEntry];
+    return [journal, await this.controlGraph.describe1(journal.tail) as JournalEntry];
   }
 
   unsentLocalOperations(): Observable<MeldJournalEntry> {
     return new Observable(subs => {
       this.loadJournal().then(async (journal) => {
-        const last = await this.controlGraph.describe(journal.lastDelivered) as JournalEntry;
+        const last = await this.controlGraph.describe1(journal.lastDelivered) as JournalEntry;
         await this.emitJournalAfter(last, subs);
         subs.complete();
       });
@@ -132,7 +132,7 @@ export class SuSetDataset extends JrqlGraph {
 
   private async emitJournalAfter(entry: JournalEntry, subs: Subscriber<MeldJournalEntry>) {
     if (entry.next) {
-      entry = await this.controlGraph.describe(entry.next) as JournalEntry;
+      entry = await this.controlGraph.describe1(entry.next) as JournalEntry;
       const delivered = () => this.markDelivered(entry['@id']);
       const time = TreeClock.fromJson(entry.time) as TreeClock; // Never null
       subs.next({ time, data: JSON.parse(entry.delta), delivered });
@@ -145,7 +145,7 @@ export class SuSetDataset extends JrqlGraph {
   async operationsSince(lastHash: Hash): Promise<Observable<DeltaMessage> | undefined> {
     const found = await this.controlGraph.find({ hash: lastHash.encode() });
     if (found.size) {
-      const entry = this.controlGraph.describe(found.values().next().value) as Subject;
+      const entry = this.controlGraph.describe1(found.values().next().value) as Subject;
       return new Observable(subs => {
         this.emitJournalAfter(entry as JournalEntry, subs);
       });
@@ -166,7 +166,7 @@ export class SuSetDataset extends JrqlGraph {
   }
 
   private async loadJournal(): Promise<Journal> {
-    return await this.controlGraph.describe('qs:journal') as Journal;
+    return await this.controlGraph.describe1('qs:journal') as Journal;
   }
 
   async transact(prepare: () => Promise<[TreeClock, PatchQuads]>): Promise<MeldJournalEntry> {

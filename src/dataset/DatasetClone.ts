@@ -143,12 +143,7 @@ export class DatasetClone implements MeldClone {
 
   transact(request: Pattern): Observable<Subject> {
     if (isRead(request)) {
-      return new Observable(subs => {
-        this.dataset.read(request).then(subjects => {
-          subjects.forEach(subject => subs.next(subject));
-          subs.complete();
-        }, err => subs.error(err));
-      });
+      return this.dataset.read(request);
     } else {
       return new Observable(subs => {
         this.dataset.transact(async () => {

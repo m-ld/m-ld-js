@@ -1,14 +1,14 @@
 import { Iri } from 'jsonld/jsonld-spec';
 import {
   Context, Read, Subject, GroupLike, Update,
-  isDescribe, isGroup, isSubject, isUpdate, asGroup, Group, isSelect, isGroupLike, Result, Select
+  isDescribe, isGroup, isSubject, isUpdate, asGroup, Group, isSelect, isGroupLike, Result, Variable
 } from '../m-ld/jsonrql';
-import { NamedNode, Quad, Term, Variable, Quad_Subject, Quad_Predicate, Quad_Object } from 'rdf-js';
+import { NamedNode, Quad, Term, Variable as VariableNode, Quad_Subject, Quad_Predicate, Quad_Object } from 'rdf-js';
 import { compact, fromRDF, toRDF } from 'jsonld';
 import { namedNode, defaultGraph, variable, quad as createQuad, blankNode } from '@rdfjs/data-model';
 import { Graph, PatchQuads } from '.';
-import { toArray, flatMap, defaultIfEmpty } from 'rxjs/operators';
-import { from, of, EMPTY } from 'rxjs';
+import { toArray, flatMap, defaultIfEmpty, map, filter, first, take, distinct } from 'rxjs/operators';
+import { from, of, EMPTY, Observable } from 'rxjs';
 import { toArray as array, shortId, flatten } from '../util';
 import { QuadSolution } from './QuadSolution';
 
@@ -23,15 +23,11 @@ export class JrqlGraph {
     readonly defaultContext: Context = {}) {
   }
 
-  // TODO: Make this return an Observable<Subject>
-  async read(query: Read, context: Context = query['@context'] || this.defaultContext): Promise<Subject[]> {
-    if (!query['@where'] && isDescribe(query)) {
-      const subject = await this.describe(query['@describe'], context);
-      return subject ? [subject] : [];
+  read(query: Read, context: Context = query['@context'] || this.defaultContext): Observable<Subject> {
+    if (isDescribe(query) && (!query['@where'] || isGroupLike(query['@where']))) {
+      return this.describe(query['@describe'], query['@where'], context);
     } else if (isSelect(query) && query['@where'] && isGroupLike(query['@where'])) {
-      const solutions = await this.matchSolutions(await this.quads(query['@where'], context));
-      return from(solutions).pipe(flatMap(async solution =>
-        solutionSubject(query['@select'], solution, context)), toArray()).toPromise();
+      return this.select(query['@select'], query['@where'], context);
     }
     throw new Error('Read type not supported.');
   }
@@ -40,7 +36,7 @@ export class JrqlGraph {
     if (Array.isArray(query) || isGroup(query) || isSubject(query)) {
       return this.write({ '@insert': query } as Update);
     } else if (isUpdate(query) && !query['@where']) {
-      return await this.update(query, context);
+      return this.update(query, context);
     }
     throw new Error('Write type not supported.');
   }
@@ -54,12 +50,32 @@ export class JrqlGraph {
     return patch;
   }
 
-  async describe(describe: Iri, context: Context = this.defaultContext): Promise<Subject | undefined> {
-    const quads = await this.graph.match(await resolve(describe, context)).pipe(toArray()).toPromise();
-    if (quads.length) {
-      quads.forEach(quad => quad.graph = defaultGraph());
-      return toSubject(quads, context);
+  select(select: Result[] | Result, where: GroupLike, context: Context = this.defaultContext): Observable<Subject> {
+    return from(this.quads(where, context).then(quads => this.matchSolutions(quads))).pipe(flatMap(solutions =>
+      from(solutions).pipe(flatMap(solution => solutionSubject(select, solution, context)))));
+  }
+
+  describe(describe: Iri | Variable, where?: GroupLike, context: Context = this.defaultContext): Observable<Subject> {
+    const varName = matchVar(describe);
+    if (varName) {
+      return from(this.quads(where || {}, context).then(quads => this.matchSolutions(quads))).pipe(flatMap(solutions =>
+        from(solutions).pipe(
+          map(solution => solution.vars[varName]?.value),
+          filter(iri => !!iri),
+          distinct(),
+          flatMap(iri => this.describe(iri, undefined, context)))));
+    } else {
+      return from(resolve(describe, context))
+        .pipe(flatMap(iri => this.graph.match(iri)))
+        .pipe(toArray(), flatMap(quads => {
+          quads.forEach(quad => quad.graph = defaultGraph());
+          return quads.length ? from(toSubject(quads, context)) : EMPTY;
+        }));
     }
+  }
+
+  async describe1(describe: Iri, context: Context = this.defaultContext): Promise<Subject | undefined> {
+    return this.describe(describe, undefined, context).pipe(take(1)).toPromise();
   }
 
   async find(jrqlPattern: Subject | Group,
@@ -123,12 +139,12 @@ async function solutionSubject(results: Result[] | Result, solution: QuadSolutio
   return Object.assign({}, ...Object.entries(subject).map(([key, value]) => {
     const varName = matchHiddenVar(key), newKey = varName ? '?' + varName : key;
     if (isSelected(results, newKey))
-      return { [newKey]: value }
+      return { [newKey]: value };
   }));
 }
 
 async function toSubject(quads: Quad[], context: Context): Promise<Subject> {
-  return await compact(await fromRDF(quads), context || {});
+  return compact(await fromRDF(quads), context || {});
 }
 
 export async function resolve(iri: Iri, context?: Context): Promise<NamedNode> {
@@ -191,7 +207,7 @@ function unhideVars(quads: Quad[]) {
   });
 }
 
-function unhideVar<T extends Term>(term: T): T | Variable {
+function unhideVar<T extends Term>(term: T): T | VariableNode {
   switch (term.termType) {
     case 'NamedNode':
       const varName = matchHiddenVar(term.value);
