@@ -1,11 +1,11 @@
 import { Iri } from 'jsonld/jsonld-spec';
 import {
   Context, Read, Subject, GroupLike, Update,
-  isDescribe, isGroup, isSubject, isUpdate, asGroup, Group
+  isDescribe, isGroup, isSubject, isUpdate, asGroup, Group, isSelect, isGroupLike, Result, Select
 } from '../m-ld/jsonrql';
 import { NamedNode, Quad, Term, Variable, Quad_Subject, Quad_Predicate, Quad_Object } from 'rdf-js';
 import { compact, fromRDF, toRDF } from 'jsonld';
-import { namedNode, defaultGraph, variable } from '@rdfjs/data-model';
+import { namedNode, defaultGraph, variable, quad as createQuad, blankNode } from '@rdfjs/data-model';
 import { Graph, PatchQuads } from '.';
 import { toArray, flatMap, defaultIfEmpty } from 'rxjs/operators';
 import { from, of, EMPTY } from 'rxjs';
@@ -28,6 +28,10 @@ export class JrqlGraph {
     if (!query['@where'] && isDescribe(query)) {
       const subject = await this.describe(query['@describe'], context);
       return subject ? [subject] : [];
+    } else if (isSelect(query) && query['@where'] && isGroupLike(query['@where'])) {
+      const solutions = await this.matchSolutions(await this.quads(query['@where'], context));
+      return from(solutions).pipe(flatMap(async solution =>
+        solutionSubject(query['@select'], solution, context)), toArray()).toPromise();
     }
     throw new Error('Read type not supported.');
   }
@@ -54,7 +58,7 @@ export class JrqlGraph {
     const quads = await this.graph.match(await resolve(describe, context)).pipe(toArray()).toPromise();
     if (quads.length) {
       quads.forEach(quad => quad.graph = defaultGraph());
-      return await compact(await fromRDF(quads), context || {});
+      return toSubject(quads, context);
     }
   }
 
@@ -110,6 +114,23 @@ export class JrqlGraph {
   }
 }
 
+async function solutionSubject(results: Result[] | Result, solution: QuadSolution, context: Context) {
+  const solutionId = blankNode();
+  // Construct quads that represent the solution's variable values
+  const subject = await toSubject(Object.entries(solution.vars).map(([name, term]) =>
+    createQuad(solutionId, namedNode(hiddenVar(name)), term)), context);
+  // Unhide the variables and strip out anything that's not selected
+  return Object.assign({}, ...Object.entries(subject).map(([key, value]) => {
+    const varName = matchHiddenVar(key), newKey = varName ? '?' + varName : key;
+    if (isSelected(results, newKey))
+      return { [newKey]: value }
+  }));
+}
+
+async function toSubject(quads: Quad[], context: Context): Promise<Subject> {
+  return await compact(await fromRDF(quads), context || {});
+}
+
 export async function resolve(iri: Iri, context?: Context): Promise<NamedNode> {
   return namedNode(context ? (await compact({
     '@id': iri,
@@ -133,8 +154,10 @@ function hideVars(subjects: Subject | Subject[], top: boolean = true) {
     // Process predicates and objects
     Object.entries(subject).forEach(([key, value]) => {
       const varKey = hideVar(key);
-      if (typeof value === 'object')
+      if (typeof value === 'object') // TODO: JSON-LD value object (with @value)
         hideVars(Array.isArray(value) ? value as Subject[] : value as Subject, false);
+      else if (typeof value === 'string')
+        value = hideVar(value);
       subject[varKey] = value;
       if (varKey !== key)
         delete subject[key];
@@ -149,9 +172,15 @@ function hideVars(subjects: Subject | Subject[], top: boolean = true) {
 }
 
 function hideVar(token: string): string {
+  const name = matchVar(token);
   // Allow anonymous variables as '?'
+  return name === '' ? genVar() : name ? hiddenVar(name) : token;
+}
+
+function matchVar(token: string): string | undefined {
   const match = /^\?([\d\w]*)$/g.exec(token);
-  return match ? match[1] ? hiddenVar(match[1]) : genVar() : token;
+  if (match)
+    return match[1];
 }
 
 function unhideVars(quads: Quad[]) {
@@ -165,11 +194,17 @@ function unhideVars(quads: Quad[]) {
 function unhideVar<T extends Term>(term: T): T | Variable {
   switch (term.termType) {
     case 'NamedNode':
-      const match = /^http:\/\/json-rql.org\/var#([\d\w]+)$/g.exec(term.value);
-      if (match)
-        return variable(match[1]);
+      const varName = matchHiddenVar(term.value);
+      if (varName)
+        return variable(varName);
   }
   return term;
+}
+
+function matchHiddenVar(value: string): string | undefined {
+  const match = /^http:\/\/json-rql.org\/var#([\d\w]+)$/g.exec(value);
+  if (match)
+    return match[1];
 }
 
 function genVar() {
@@ -180,3 +215,7 @@ function hiddenVar(name: string) {
   return 'http://json-rql.org/var#' + name;
 }
 
+function isSelected(results: Result[] | Result, key: string) {
+  return results === '*' || key.startsWith('@') ||
+    (Array.isArray(results) ? results.includes(key) : results === key);
+}

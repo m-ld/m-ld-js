@@ -44,6 +44,10 @@ export function isGroup(p: Pattern): p is Group {
 
 export type GroupLike = Subject[] | Subject | Group;
 
+export function isGroupLike(pattern: Pattern[] | Pattern): pattern is GroupLike {
+  return Array.isArray(pattern) ? pattern.every(isGroupLike) : !isQuery(pattern);
+}
+
 export function asGroup(g: GroupLike, context?: Context): Group {
   let group: Group;
   if ('@graph' in g) {
