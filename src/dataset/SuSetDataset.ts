@@ -1,5 +1,5 @@
 import { MeldDelta, MeldJournalEntry, JsonDelta, Snapshot, DeltaMessage, UUID } from '../m-ld';
-import { Quad, Triple } from 'rdf-js';
+import { Quad, Triple, Term } from 'rdf-js';
 import { namedNode } from '@rdfjs/data-model';
 import { TreeClock } from '../clocks';
 import { Hash } from '../hash';
@@ -7,9 +7,9 @@ import { Context, Subject } from '../m-ld/jsonrql';
 import { Dataset, PatchQuads, Patch } from '.';
 import { Iri } from 'jsonld/jsonld-spec';
 import { JrqlGraph } from './JrqlGraph';
-import { reify as reifyTriples, JsonDeltaBagBlock, newDelta, asMeldDelta, toTimeString, fromTimeString } from '../m-ld/JsonDelta';
-import { Observable, Subscriber } from 'rxjs';
-import { toArray, bufferCount } from 'rxjs/operators';
+import { JsonDeltaBagBlock, newDelta, asMeldDelta, toTimeString, fromTimeString, reify, unreify } from '../m-ld/JsonDelta';
+import { Observable, Subscriber, from } from 'rxjs';
+import { toArray, bufferCount, flatMap } from 'rxjs/operators';
 import { flatten } from '../util';
 import { generate as uuid } from 'short-uuid';
 
@@ -41,13 +41,24 @@ interface JournalEntry {
   next?: JournalEntry['@id']
 }
 
+const TIDS_CONTEXT: Context = {
+  qs: 'http://qs.m-ld.org/',
+  hash: 'qs:hash/', // Namespace for triple hashes
+  tid: 'qs:#tid' // Property of a triple hashes
+};
+
+interface HashTid {
+  '@id': Iri,
+  tid: UUID // Transaction ID
+}
+
 /**
  * Writeable Graph, similar to a Dataset, but with a slightly different transaction API.
  * Journals every transaction and creates m-ld compliant deltas.
  */
 export class SuSetDataset extends JrqlGraph {
   private readonly controlGraph: JrqlGraph;
-  private readonly metaGraph: JrqlGraph;
+  private readonly tidsGraph: JrqlGraph;
 
   constructor(
     private readonly dataset: Dataset) {
@@ -55,7 +66,8 @@ export class SuSetDataset extends JrqlGraph {
     // Named graph for control quads e.g. Journal
     this.controlGraph = new JrqlGraph(
       dataset.graph(namedNode(CONTROL_CONTEXT.qs + 'control')), CONTROL_CONTEXT);
-    this.metaGraph = new JrqlGraph(dataset.graph(namedNode(CONTROL_CONTEXT.qs + 'meta')));
+    this.tidsGraph = new JrqlGraph(
+      dataset.graph(namedNode(CONTROL_CONTEXT.qs + 'tids')), TIDS_CONTEXT);
   }
 
   get id() {
@@ -160,21 +172,20 @@ export class SuSetDataset extends JrqlGraph {
   async transact(prepare: () => Promise<[TreeClock, PatchQuads]>): Promise<MeldJournalEntry> {
     return this.dataset.transact(async () => {
       const [time, patch] = await prepare();
+      const deletedTripleTids = await this.findTriplesTids(patch.oldQuads);
       const delta = await newDelta({
         tid: uuid(),
         insert: patch.newQuads,
-        // Find reifications of old quads
-        delete: [/*TODO*/]
+        // Delta has reifications of old quads, which we infer from found triple tids
+        delete: flatten(patch.oldQuads.map((quad, i) =>
+          flatten(deletedTripleTids[i].map(tidQuad => reify(quad, tidQuad.object.value)))))
       });
-      // Include reifications in final patch
-      const reifications = {
-        oldQuads: delta.delete,
-        // Reified new quads
-        newQuads: this.reify(delta.insert, delta.tid)
-      };
+      // Include tid changes in final patch
+      const tidPatch = (await this.newTripleTids(delta.insert, delta.tid))
+        .concat({ oldQuads: flatten(deletedTripleTids) });
       // Include journaling in final patch
       const [journaling, entry] = await this.journal(delta, time, false);
-      return [patch.concat(reifications).concat(journaling), entry] as [Patch, MeldJournalEntry];
+      return [patch.concat(tidPatch).concat(journaling), entry] as [Patch, MeldJournalEntry];
     });
   }
 
@@ -182,24 +193,39 @@ export class SuSetDataset extends JrqlGraph {
     return this.dataset.transact(async () => {
       // Check we haven't seen this transaction before in the journal
       if (!(await this.controlGraph.find({ tid: msg.tid })).size) {
-        const delta = await asMeldDelta(msg), patch = new PatchQuads([/*TODO*/], delta.insert);
-        // Include reifications in final patch
-        const reifications = {
-          oldQuads: [] as Quad[], // TODO
-          newQuads: this.reify(delta.insert, delta.tid)
-        }
+        const delta = await asMeldDelta(msg);
+        const patch = new PatchQuads([], delta.insert);
+        // The delta's delete contains reifications of deleted triples
+        const tripleTidPatch = await Object.entries(deletedTidsByTripleId(delta))
+          .reduce(async (tripleTidPatch, [tripleId, [triple, theirTids]]) => {
+            // For each unique deleted triple, subtract the claimed tids from the tids we have
+            const ourTripleTids = await this.findTripleTids(tripleId);
+            const oldQuads = ourTripleTids.filter(tripleTid => theirTids.includes(tripleTid.object.value));
+            // If no tids are left, delete the triple in our graph
+            if (oldQuads.length == ourTripleTids.length)
+              patch.oldQuads.push(triple);
+            return (await tripleTidPatch).concat({ oldQuads });
+          }, this.newTripleTids(delta.insert, delta.tid));
         // Include journaling in final patch
         const [journaling,] = await this.journal(delta, time, true);
-        return patch.concat(reifications).concat(journaling);
+        return patch.concat(tripleTidPatch).concat(journaling);
       }
     });
   }
 
-  private reify(quads: Quad[], tid: UUID): Quad[] {
-    const reified = reifyTriples(quads, tid);
-    // Reifications go in the 'meta' graph so they are not included in queries
-    reified.forEach(quad => quad.graph = this.metaGraph.graph.name);
-    return reified;
+  private newTripleTids(quads: Quad[], tid: UUID): Promise<PatchQuads> {
+    return this.tidsGraph.insert(quads.map(quad =>
+      ({ '@id': tripleId(quad), tid } as HashTid)));
+  }
+
+  private async findTriplesTids(quads: Quad[]): Promise<Quad[][]> {
+    return from(quads).pipe(
+      flatMap(quad => this.findTripleTids(tripleId(quad))),
+      toArray()).toPromise();
+  }
+
+  private findTripleTids(tripleId: string): Promise<Quad[]> {
+    return this.tidsGraph.findQuads({ '@id': tripleId } as Partial<HashTid>);
   }
 
   async applySnapshot(data: Observable<Triple[]>, lastHash: Hash, lastTime: TreeClock, localTime: TreeClock) {
@@ -259,3 +285,37 @@ export class SuSetDataset extends JrqlGraph {
     });
   }
 }
+
+function deletedTidsByTripleId(delta: MeldDelta): { [tripleId: string]: [Triple, UUID[]] } {
+  return unreify(delta.delete)
+    .map(([triple, tid]) => [tripleId(triple), triple, tid] as [string, Triple, UUID])
+    .reduce((tripleTids, [tripleId, triple, tid]) => {
+      const [, tids] = tripleTids[tripleId] || [triple, []];
+      tripleTids[tripleId] = [triple, tids.concat(tid)];
+      return tripleTids;
+    }, {} as {
+      [tripleId: string]: [Triple, UUID[]];
+    });
+}
+
+function tripleId(quad: Quad): string {
+  return 'hash:' + hashTriple(quad).encode();
+}
+
+function hashTriple(triple: Triple): Hash {
+  switch (triple.object.termType) {
+    case 'Literal': return Hash.digest(
+      triple.subject.value,
+      triple.predicate.value,
+      triple.object.termType,
+      triple.object.value || '',
+      triple.object.datatype.value || '',
+      triple.object.language || '');
+    default: return Hash.digest(
+      triple.subject.value,
+      triple.predicate.value,
+      triple.object.termType,
+      triple.object.value);
+  }
+}
+

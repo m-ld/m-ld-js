@@ -23,8 +23,10 @@ export class PatchQuads implements Patch {
     readonly newQuads: Quad[]) {
   }
 
-  concat({ oldQuads, newQuads }: { oldQuads: Quad[], newQuads: Quad[] }) {
-    return new PatchQuads(this.oldQuads.concat(oldQuads), this.newQuads.concat(newQuads));
+  concat({ oldQuads, newQuads }: { oldQuads?: Quad[], newQuads?: Quad[] }) {
+    return new PatchQuads(
+      oldQuads ? this.oldQuads.concat(oldQuads) : this.oldQuads,
+      newQuads ? this.newQuads.concat(newQuads) : this.newQuads);
   }
 }
 

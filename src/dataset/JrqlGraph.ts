@@ -3,12 +3,12 @@ import {
   Context, Read, Subject, GroupLike, Update,
   isDescribe, isGroup, isSubject, isUpdate, asGroup, Group
 } from '../m-ld/jsonrql';
-import { NamedNode, Quad, Term, Variable, Quad_Subject, Quad_Predicate, Quad_Object, Quad_Graph } from 'rdf-js';
+import { NamedNode, Quad, Term, Variable, Quad_Subject, Quad_Predicate, Quad_Object } from 'rdf-js';
 import { compact, fromRDF, toRDF } from 'jsonld';
 import { namedNode, defaultGraph, variable } from '@rdfjs/data-model';
 import { Graph, PatchQuads } from '.';
-import { toArray, flatMap, mergeScan, tap, defaultIfEmpty } from 'rxjs/operators';
-import { from, Observable, of, EMPTY } from 'rxjs';
+import { toArray, flatMap, defaultIfEmpty } from 'rxjs/operators';
+import { from, of, EMPTY } from 'rxjs';
 import { toArray as array, shortId, flatten } from '../util';
 import { QuadSolution } from './QuadSolution';
 
@@ -60,8 +60,13 @@ export class JrqlGraph {
 
   async find(jrqlPattern: Subject | Group,
     context: Context = jrqlPattern['@context'] || this.defaultContext): Promise<Set<Iri>> {
-    const patterns = await this.quads(jrqlPattern, context);
-    return new Set((await this.matchQuads(patterns)).map(quad => quad.subject.value));
+    const quads = await this.findQuads(jrqlPattern, context);
+    return new Set(quads.map(quad => quad.subject.value));
+  }
+
+  async findQuads(jrqlPattern: Subject | Group,
+    context: Context = jrqlPattern['@context'] || this.defaultContext): Promise<Quad[]> {
+    return this.matchQuads(await this.quads(jrqlPattern, context));
   }
 
   async insert(insert: GroupLike, context: Context = this.defaultContext): Promise<PatchQuads> {
@@ -98,7 +103,7 @@ export class JrqlGraph {
         defaultIfEmpty(), // Produces null if no quads
         // match each quad against already-found solutions
         flatMap(quad => from(solutions).pipe(flatMap(solution => {
-          const matchingSolution = quad ? solution.intersect(pattern, quad) : solution;
+          const matchingSolution = quad ? solution.join(pattern, quad) : solution;
           return matchingSolution ? of(matchingSolution) : EMPTY;
         }))), toArray()).toPromise();
     }, Promise.resolve([QuadSolution.EMPTY]));

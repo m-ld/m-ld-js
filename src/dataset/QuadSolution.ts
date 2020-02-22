@@ -10,16 +10,16 @@ export class QuadSolution {
     readonly quads: Quad[]) {
   }
 
-  intersect(pattern: Quad, actual: Quad): QuadSolution | null {
+  join(pattern: Quad, actual: Quad): QuadSolution | null {
     let vars: VarValues | null = this.vars;
-    vars = intersectVar(pattern, actual, 'subject', vars);
-    vars = intersectVar(pattern, actual, 'predicate', vars);
-    vars = intersectVar(pattern, actual, 'object', vars);
+    vars = joinVar(pattern, actual, 'subject', vars);
+    vars = joinVar(pattern, actual, 'predicate', vars);
+    vars = joinVar(pattern, actual, 'object', vars);
     return vars ? new QuadSolution(vars, [...this.quads, actual]) : null;
   }
 }
 
-function intersectVar(pattern: Quad, actual: Quad,
+function joinVar(pattern: Quad, actual: Quad,
   pos: Exclude<keyof Quad, 'equals'>, vars: VarValues | null): VarValues | null {
   if (vars && pattern[pos].termType == 'Variable') {
     if (vars[pattern[pos].value]) {
