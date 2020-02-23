@@ -17,8 +17,8 @@ export class DatasetClone implements MeldClone {
   private readonly updateReceiver: PartialObserver<DeltaMessage> = {
     next: delta => this.messageService.receive(delta, this.orderingBuffer, acceptedMsg =>
       this.dataset.apply(acceptedMsg.data, this.localTime)),
-    error: err => this.updates.error(err),
-    complete: () => this.updates.complete()
+    error: err => this.close(err),
+    complete: () => this.close()
   };
 
   constructor(dataset: Dataset,
@@ -159,6 +159,15 @@ export class DatasetClone implements MeldClone {
   }
 
   follow(): Observable<Update> {
-    throw new Error('Method not implemented.');
+    return this.dataset.updates;
+  }
+
+  close(err?: any) {
+    console.log('Shutting down clone ' + err ? 'due to ' + err : 'normally');
+    this.dataset.close(err);
+    if (err)
+      this.updates.error(err);
+    else
+      this.updates.complete();
   }
 }

@@ -69,7 +69,7 @@ export class JrqlGraph {
         .pipe(flatMap(iri => this.graph.match(iri)))
         .pipe(toArray(), flatMap(quads => {
           quads.forEach(quad => quad.graph = defaultGraph());
-          return quads.length ? from(toSubject(quads, context)) : EMPTY;
+          return quads.length ? from(toGroupLike(quads, context)) : EMPTY;
         }));
     }
   }
@@ -133,7 +133,7 @@ export class JrqlGraph {
 async function solutionSubject(results: Result[] | Result, solution: QuadSolution, context: Context) {
   const solutionId = blankNode();
   // Construct quads that represent the solution's variable values
-  const subject = await toSubject(Object.entries(solution.vars).map(([name, term]) =>
+  const subject = await toGroupLike(Object.entries(solution.vars).map(([name, term]) =>
     createQuad(solutionId, namedNode(hiddenVar(name)), term)), context);
   // Unhide the variables and strip out anything that's not selected
   return Object.assign({}, ...Object.entries(subject).map(([key, value]) => {
@@ -143,7 +143,7 @@ async function solutionSubject(results: Result[] | Result, solution: QuadSolutio
   }));
 }
 
-async function toSubject(quads: Quad[], context: Context): Promise<Subject> {
+export async function toGroupLike(quads: Quad[], context: Context): Promise<GroupLike> {
   return compact(await fromRDF(quads), context || {});
 }
 

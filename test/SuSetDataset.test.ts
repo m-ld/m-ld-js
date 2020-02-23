@@ -2,11 +2,23 @@ import { SuSetDataset } from '../src/dataset/SuSetDataset';
 import { memStore } from './testClones';
 import { TreeClock } from '../src/clocks';
 import { Hash } from '../src/hash';
+import { first } from 'rxjs/operators';
+
+const fred = {
+  '@id': 'http://test.m-ld.org/fred',
+  'http://test.m-ld.org/#name': 'Fred'
+};
 
 describe('SU-Set Dataset', () => {
   let ds: SuSetDataset;
 
-  beforeEach(() => ds = new SuSetDataset(memStore()));
+  function captureUpdate() {
+    return ds.updates.pipe(first()).toPromise();
+  }
+
+  beforeEach(() => {
+    ds = new SuSetDataset(memStore());
+  });
 
   describe('when initialised', () => {
     beforeEach(async () => ds.initialise());
@@ -50,12 +62,11 @@ describe('SU-Set Dataset', () => {
       });
 
       test('transacts an insert', async () => {
+        const willUpdate = captureUpdate();
+
         const msg = await ds.transact(async () => [
           time = time.ticked(),
-          await ds.insert({
-            '@id': 'http://test.m-ld.org/fred',
-            'http://test.m-ld.org/#name': 'Fred'
-          })
+          await ds.insert(fred)
         ]);
 
         expect(msg.time.equals(time)).toBe(true);
@@ -66,9 +77,13 @@ describe('SU-Set Dataset', () => {
         expect(insertedJsonLd).toHaveProperty(['@graph', 'http://test.m-ld.org/#name'], 'Fred');
 
         expect(JSON.parse(msg.data.delete)).toHaveProperty('@graph', {});
+
+        await expect(willUpdate).resolves.toHaveProperty('@insert', fred);
       });
 
       test('applies an insert delta', async () => {
+        const willUpdate = captureUpdate();
+
         await ds.apply({
           tid: 'B6FVbHGtFxXhdLKEVmkcd',
           insert: '{"@graph":{"@id":"http://test.m-ld.org/fred","http://test.m-ld.org/#name":"Fred"}}',
@@ -76,6 +91,8 @@ describe('SU-Set Dataset', () => {
         }, time = time.ticked());
         await expect(ds.find({ '@id': 'http://test.m-ld.org/fred' }))
           .resolves.toEqual(new Set(['http://test.m-ld.org/fred']));
+
+        await expect(willUpdate).resolves.toHaveProperty('@insert', fred);
       });
 
       describe('with an initial triple', () => {
@@ -87,10 +104,7 @@ describe('SU-Set Dataset', () => {
         beforeEach(async () => {
           firstTid = (await ds.transact(async () => [
             time = time.ticked(),
-            await ds.insert({
-              '@id': 'http://test.m-ld.org/fred',
-              'http://test.m-ld.org/#name': 'Fred'
-            })
+            await ds.insert(fred)
           ])).data.tid;
         });
 
@@ -116,6 +130,8 @@ describe('SU-Set Dataset', () => {
         });
 
         test('transacts a delete', async () => {
+          const willUpdate = captureUpdate();
+
           const msg = await ds.transact(async () => [
             time = time.ticked(),
             await ds.delete({ '@id': 'http://test.m-ld.org/fred' })
@@ -132,9 +148,13 @@ describe('SU-Set Dataset', () => {
           expect(deletedJsonLd).toHaveProperty(['@graph', 's'], 'http://test.m-ld.org/fred');
           expect(deletedJsonLd).toHaveProperty(['@graph', 'p'], 'http://test.m-ld.org/#name');
           expect(deletedJsonLd).toHaveProperty(['@graph', 'o'], 'Fred');
+
+          await expect(willUpdate).resolves.toHaveProperty('@delete', fred);
         });
 
         test('applies a delete delta', async () => {
+          const willUpdate = captureUpdate();
+
           await ds.apply({
             tid: 'uSX1mPGhuWAEH56RLwYmvG',
             insert: '{"@graph":{}}',
@@ -145,6 +165,8 @@ describe('SU-Set Dataset', () => {
           }, time = time.ticked());
           await expect(ds.find({ '@id': 'http://test.m-ld.org/fred' }))
             .resolves.toEqual(new Set());
+
+          await expect(willUpdate).resolves.toHaveProperty('@delete', fred);
         });
       });
     });

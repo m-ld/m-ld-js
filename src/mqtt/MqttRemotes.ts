@@ -107,14 +107,14 @@ export class MqttRemotes implements MeldRemotes {
         }
       },
       // Local m-ld clone has stopped normally. It will no longer accept messages
-      complete: () => this.shutdown(),
+      complete: () => this.close(),
       // Local m-ld clone has stopped unexpectedly.
       // The application will already know, so just shut down gracefully.
-      error: err => this.shutdown(err)
+      error: err => this.close(err)
     });
   }
 
-  private shutdown(err?: any) {
+  private close(err?: any) {
     console.log('Shutting down MQTT remote proxy ' + err ? 'due to ' + err : 'normally');
     this.presence.leave(this.mqtt, this.id, this.id);
     this.mqtt.end();
