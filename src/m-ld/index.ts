@@ -6,7 +6,7 @@ import { Observable } from 'rxjs';
 import { Message } from '../messages';
 import { Triple } from 'rdf-js';
 import { Hash } from '../hash';
-import { Pattern, Subject, Update } from './jsonrql';
+import { Pattern, Subject, Update, Group } from './jsonrql';
 
 export type DeltaMessage = Message<TreeClock, JsonDelta>;
 
@@ -65,9 +65,14 @@ export interface MeldLocal extends Meld {
   readonly updates: Observable<MeldJournalEntry>;
 }
 
+export interface StrictUpdate extends Update {
+  '@insert': Subject | Group;
+  '@delete': Subject | Group;
+}
+
 export interface MeldStore {
   transact(request: Pattern): Observable<Subject>;
-  follow(after?: number): Observable<Update>;
+  follow(after?: number): Observable<StrictUpdate>;
 }
 
 export type MeldClone = MeldLocal & MeldStore;

@@ -1,6 +1,7 @@
 import { MeldApi } from '../src/m-ld/MeldApi';
 import { Subject, Select, Describe } from '../src/m-ld/jsonrql';
 import { genesisClone } from './testClones';
+import { first } from 'rxjs/operators';
 
 describe('Meld API', () => {
   let api: MeldApi;
@@ -10,15 +11,19 @@ describe('Meld API', () => {
   });
 
   test('retrieves a JSON-LD subject', async () => {
+    const captureUpdate = api.follow().pipe(first()).toPromise();
     await api.transact({ '@id': 'fred', name: 'Fred' } as Subject).toPromise();
+    await expect(captureUpdate).resolves.toEqual({ '@insert': { '@id': 'fred', name: 'Fred' }, '@delete': {} });
     await expect(api.get('fred').toPromise())
       .resolves.toMatchObject({ '@id': 'fred', name: 'Fred' });
   });
 
   test('deletes a subject by path', async () => {
     await api.transact({ '@id': 'fred', name: 'Fred' } as Subject).toPromise();
+    const captureUpdate = api.follow().pipe(first()).toPromise();
     await api.delete('fred').toPromise();
     await expect(api.get('fred').toPromise()).resolves.toBeUndefined();
+    await expect(captureUpdate).resolves.toEqual({ '@delete': { '@id': 'fred', name: 'Fred' }, '@insert': {} });
   });
 
   test('deletes an object by path', async () => {

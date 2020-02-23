@@ -1,9 +1,10 @@
-import { MeldStore } from '.';
-import { Context, Subject, Describe, Pattern, Update } from './jsonrql';
+import { MeldStore, StrictUpdate } from '.';
+import { Context, Subject, Describe, Pattern, Update, Group } from './jsonrql';
 import { Observable } from 'rxjs';
-import { map } from 'rxjs/operators';
+import { map, flatMap } from 'rxjs/operators';
+import { compact } from 'jsonld';
 
-export class MeldApi {
+export class MeldApi implements MeldStore {
   private readonly context: Context;
 
   constructor(domain: string, context: Context | null, readonly store: MeldStore) {
@@ -31,18 +32,28 @@ export class MeldApi {
 
   // TODO: post, put
 
-  transact(request: Pattern, implicitContext?: Context): Observable<Subject> {
-    implicitContext = implicitContext || this.context;
+  transact(request: Pattern, implicitContext: Context = this.context): Observable<Subject> {
     return (this.store.transact({
       ...request,
       // Apply the given implicit context to the request, explicit context wins
       '@context': { ...implicitContext, ...request['@context'] || {} }
     })).pipe(map((subject: Subject) => {
       // Strip the given implicit context from the request
-      const { '@context': context, ...rtn } = subject;
-      if (implicitContext && context)
-        Object.keys(implicitContext).forEach((k: keyof Context) => delete context[k]);
-      return context && Object.keys(context).length ? { ...rtn, '@context': context } : rtn;
+      return this.stripImplicitContext(subject, implicitContext);
     }));
+  }
+
+  follow(after?: number): Observable<StrictUpdate> {
+    return this.store.follow(after).pipe(flatMap(async update => ({
+      '@delete': this.stripImplicitContext(await compact(update['@delete'], this.context), this.context),
+      '@insert': this.stripImplicitContext(await compact(update['@insert'], this.context), this.context)
+    })));
+  }
+
+  private stripImplicitContext(jsonld: Subject | Group, implicitContext: Context) {
+    const { '@context': context, ...rtn } = jsonld;
+    if (implicitContext && context)
+      Object.keys(implicitContext).forEach((k: keyof Context) => delete context[k]);
+    return context && Object.keys(context).length ? { ...rtn, '@context': context } : rtn;
   }
 }

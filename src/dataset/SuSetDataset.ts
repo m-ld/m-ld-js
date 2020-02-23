@@ -1,4 +1,4 @@
-import { MeldDelta, MeldJournalEntry, JsonDelta, Snapshot, DeltaMessage, UUID } from '../m-ld';
+import { MeldDelta, MeldJournalEntry, JsonDelta, Snapshot, DeltaMessage, UUID, StrictUpdate } from '../m-ld';
 import { Quad, Triple } from 'rdf-js';
 import { namedNode, defaultGraph } from '@rdfjs/data-model';
 import { TreeClock } from '../clocks';
@@ -59,7 +59,7 @@ interface HashTid {
 export class SuSetDataset extends JrqlGraph {
   private readonly controlGraph: JrqlGraph;
   private readonly tidsGraph: JrqlGraph;
-  private readonly updateSource: Source<Update> = new Source;
+  private readonly updateSource: Source<StrictUpdate> = new Source;
 
   constructor(
     private readonly dataset: Dataset) {
@@ -198,7 +198,7 @@ export class SuSetDataset extends JrqlGraph {
         .concat({ oldQuads: flatten(deletedTripleTids) });
       // Include journaling in final patch
       const [journaling, entry] = await this.journal(delta, time, false);
-      this.postUpdate(patch);
+      await this.postUpdate(patch);
       return [patch.concat(tidPatch).concat(journaling), entry] as [Patch, MeldJournalEntry];
     });
   }
@@ -222,7 +222,7 @@ export class SuSetDataset extends JrqlGraph {
           }, this.newTripleTids(delta.insert, delta.tid));
         // Include journaling in final patch
         const [journaling,] = await this.journal(delta, time, true);
-        this.postUpdate(patch);
+        await this.postUpdate(patch);
         return patch.concat(tripleTidPatch).concat(journaling);
       }
     });
