@@ -1,4 +1,5 @@
 import { Iri } from "jsonld/jsonld-spec";
+import { toArray } from '../util';
 
 export type Variable = string;
 
@@ -23,10 +24,19 @@ export interface Context {
   [key: string]: TermDef | undefined;
 }
 
+export interface ValueObject {
+  '@value': number | string | boolean;
+  '@type'?: Iri;
+  '@language'?: string;
+  '@index'?: string;
+}
+
+export type JrqlObject = number | string | boolean | Subject | ValueObject;
+
 export interface Subject extends Pattern {
   '@id'?: Iri;
   '@type'?: Iri;
-  [key: string]: any;
+  [key: string]: JrqlObject | JrqlObject[] | Context | undefined;
 }
 
 export function isSubject(p: Pattern): p is Subject {
@@ -62,6 +72,10 @@ export function asGroup(g: GroupLike, context?: Context): Group {
     group = { '@graph': subject };
   }
   return context ? { '@context': context, ...group } : group;
+}
+
+export function asSubjects(g: GroupLike, context?: Context): Subject[] {
+  return toArray(asGroup(g)['@graph']);
 }
 
 export interface Query extends Pattern {

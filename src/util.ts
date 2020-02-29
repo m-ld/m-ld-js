@@ -3,7 +3,7 @@ export function flatten<T>(bumpy: T[][]): T[] {
 }
 
 export function toArray<T>(value?: T | T[]): T[] {
-  return value ? Array.isArray(value) ? value : [value] : [];
+  return value == null ? [] : ([] as T[]).concat(value).filter(v => v != null);
 }
 
 export function jsonFrom(payload: Buffer): any {

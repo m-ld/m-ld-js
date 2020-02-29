@@ -4,10 +4,10 @@ import {
   isDescribe, isGroup, isSubject, isUpdate, asGroup, Group, isSelect, isGroupLike, Result, Variable
 } from '../m-ld/jsonrql';
 import { NamedNode, Quad, Term, Variable as VariableNode, Quad_Subject, Quad_Predicate, Quad_Object } from 'rdf-js';
-import { compact, fromRDF, toRDF } from 'jsonld';
+import { compact, flatten as flatJsonLd, fromRDF, toRDF } from 'jsonld';
 import { namedNode, defaultGraph, variable, quad as createQuad, blankNode } from '@rdfjs/data-model';
 import { Graph, PatchQuads } from '.';
-import { toArray, flatMap, defaultIfEmpty, map, filter, first, take, distinct } from 'rxjs/operators';
+import { toArray, flatMap, defaultIfEmpty, map, filter, take, distinct } from 'rxjs/operators';
 import { from, of, EMPTY, Observable } from 'rxjs';
 import { toArray as array, shortId, flatten } from '../util';
 import { QuadSolution } from './QuadSolution';
@@ -65,11 +65,12 @@ export class JrqlGraph {
           distinct(),
           flatMap(iri => this.describe(iri, undefined, context)))));
     } else {
-      return from(resolve(describe, context))
-        .pipe(flatMap(iri => this.graph.match(iri)))
-        .pipe(toArray(), flatMap(quads => {
+      return from(resolve(describe, context)).pipe(
+        flatMap(iri => this.graph.match(iri)),
+        toArray(),
+        flatMap(quads => {
           quads.forEach(quad => quad.graph = defaultGraph());
-          return quads.length ? from(toGroupLike(quads, context)) : EMPTY;
+          return quads.length ? from(toSubject(quads, context)) : EMPTY;
         }));
     }
   }
@@ -133,7 +134,7 @@ export class JrqlGraph {
 async function solutionSubject(results: Result[] | Result, solution: QuadSolution, context: Context) {
   const solutionId = blankNode();
   // Construct quads that represent the solution's variable values
-  const subject = await toGroupLike(Object.entries(solution.vars).map(([name, term]) =>
+  const subject = await toSubject(Object.entries(solution.vars).map(([name, term]) =>
     createQuad(solutionId, namedNode(hiddenVar(name)), term)), context);
   // Unhide the variables and strip out anything that's not selected
   return Object.assign({}, ...Object.entries(subject).map(([key, value]) => {
@@ -143,8 +144,19 @@ async function solutionSubject(results: Result[] | Result, solution: QuadSolutio
   }));
 }
 
-export async function toGroupLike(quads: Quad[], context: Context): Promise<GroupLike> {
-  return compact(await fromRDF(quads), context || {});
+/**
+ * @returns a single subject compacted against the given context
+ */
+export async function toSubject(quads: Quad[], context: Context): Promise<Subject> {
+  return compact(await fromRDF(quads), context || {}) as unknown as Subject;
+}
+
+/**
+ * @returns a flattened group compacted against the given context
+ * @see https://www.w3.org/TR/json-ld11/#flattened-document-form
+ */
+export async function toGroup(quads: Quad[], context: Context): Promise<Group> {
+  return flatJsonLd(await fromRDF(quads), context || {}) as unknown as Group;
 }
 
 export async function resolve(iri: Iri, context?: Context): Promise<NamedNode> {

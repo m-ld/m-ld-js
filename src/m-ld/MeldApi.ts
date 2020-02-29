@@ -2,7 +2,7 @@ import { MeldStore, StrictUpdate } from '.';
 import { Context, Subject, Describe, Pattern, Update, Group } from './jsonrql';
 import { Observable } from 'rxjs';
 import { map, flatMap } from 'rxjs/operators';
-import { compact } from 'jsonld';
+import { flatten } from 'jsonld';
 
 export class MeldApi implements MeldStore {
   private readonly context: Context;
@@ -23,7 +23,7 @@ export class MeldApi implements MeldStore {
     return this.transact({
       '@delete': [
         { '@id': path },
-        // TODO: This is wrong, multiple patterns INTERSECT in BGP (not UNION)
+        // BUG: This is wrong, multiple patterns INTERSECT in BGP (not UNION)
         // https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#BGPsparql
         { '?': { '@id': path } }
       ]
@@ -45,12 +45,18 @@ export class MeldApi implements MeldStore {
 
   follow(after?: number): Observable<StrictUpdate> {
     return this.store.follow(after).pipe(flatMap(async update => ({
-      '@delete': this.stripImplicitContext(await compact(update['@delete'], this.context), this.context),
-      '@insert': this.stripImplicitContext(await compact(update['@insert'], this.context), this.context)
+      '@delete': this.stripImplicitContext(await this.regroup(update['@delete']), this.context),
+      '@insert': this.stripImplicitContext(await this.regroup(update['@insert']), this.context)
     })));
   }
 
-  private stripImplicitContext(jsonld: Subject | Group, implicitContext: Context) {
+  private async regroup(group: Group) {
+    return await flatten(group, this.context) as Group;
+  }
+
+  private stripImplicitContext(jsonld: Subject, implicitContext: Context): Subject;
+  private stripImplicitContext(jsonld: Group, implicitContext: Context): Group;
+  private stripImplicitContext(jsonld: Subject | Group, implicitContext: Context): Subject | Group {
     const { '@context': context, ...rtn } = jsonld;
     if (implicitContext && context)
       Object.keys(implicitContext).forEach((k: keyof Context) => delete context[k]);

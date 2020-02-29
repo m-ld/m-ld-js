@@ -13,7 +13,10 @@ describe('Meld API', () => {
   test('retrieves a JSON-LD subject', async () => {
     const captureUpdate = api.follow().pipe(first()).toPromise();
     await api.transact({ '@id': 'fred', name: 'Fred' } as Subject).toPromise();
-    await expect(captureUpdate).resolves.toEqual({ '@insert': { '@id': 'fred', name: 'Fred' }, '@delete': {} });
+    await expect(captureUpdate).resolves.toEqual({
+      '@insert': { '@graph': [{ '@id': 'fred', name: 'Fred' }] },
+      '@delete': { '@graph': [] }
+    });
     await expect(api.get('fred').toPromise())
       .resolves.toMatchObject({ '@id': 'fred', name: 'Fred' });
   });
@@ -23,7 +26,10 @@ describe('Meld API', () => {
     const captureUpdate = api.follow().pipe(first()).toPromise();
     await api.delete('fred').toPromise();
     await expect(api.get('fred').toPromise()).resolves.toBeUndefined();
-    await expect(captureUpdate).resolves.toEqual({ '@delete': { '@id': 'fred', name: 'Fred' }, '@insert': {} });
+    await expect(captureUpdate).resolves.toEqual({
+      '@delete': { '@graph': [{ '@id': 'fred', name: 'Fred' }] },
+      '@insert': { '@graph': [] }
+    });
   });
 
   test('deletes an object by path', async () => {

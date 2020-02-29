@@ -1,4 +1,4 @@
-import { Future } from '../src/util';
+import { Future, toArray } from '../src/util';
 
 test('Future can be resolved', async () => {
   const f = new Future<string>();
@@ -14,4 +14,16 @@ test('Future can be rejected', async () => {
   } catch (e) {
     expect(e).toBe('no');
   }
+});
+
+test('graphy to array', () => {
+  expect(toArray()).toEqual([]);
+  expect(toArray(null)).toEqual([]);
+  expect(toArray('')).toEqual(['']);
+  expect(toArray(0)).toEqual([0]);
+  expect(toArray([0])).toEqual([0]);
+  expect(toArray([0, 0])).toEqual([0, 0]);
+  expect(toArray([0, 1])).toEqual([0, 1]);
+  expect(toArray([0, null])).toEqual([0]);
+  expect(toArray([0, undefined])).toEqual([0]);
 });

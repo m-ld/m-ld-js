@@ -66,8 +66,8 @@ export interface MeldLocal extends Meld {
 }
 
 export interface StrictUpdate extends Update {
-  '@insert': Subject | Group;
-  '@delete': Subject | Group;
+  '@insert': Group;
+  '@delete': Group;
 }
 
 export interface MeldStore {

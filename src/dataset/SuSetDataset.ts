@@ -3,10 +3,10 @@ import { Quad, Triple } from 'rdf-js';
 import { namedNode, defaultGraph } from '@rdfjs/data-model';
 import { TreeClock } from '../clocks';
 import { Hash } from '../hash';
-import { Context, Subject, Update } from '../m-ld/jsonrql';
+import { Context, Subject } from '../m-ld/jsonrql';
 import { Dataset, PatchQuads, Patch } from '.';
 import { Iri } from 'jsonld/jsonld-spec';
-import { JrqlGraph, toGroupLike } from './JrqlGraph';
+import { JrqlGraph, toGroup } from './JrqlGraph';
 import { JsonDeltaBagBlock, newDelta, asMeldDelta, toTimeString, fromTimeString, reify, unreify } from '../m-ld/JsonDelta';
 import { Observable, Subscriber, from, Subject as Source } from 'rxjs';
 import { toArray, bufferCount, flatMap } from 'rxjs/operators';
@@ -25,14 +25,14 @@ const CONTROL_CONTEXT: Context = {
   next: { '@id': 'qs:#next', '@type': '@id' } // Property of a journal entry
 };
 
-interface Journal {
+interface Journal extends Subject {
   '@id': 'qs:journal', // Singleton object
   tail: JournalEntry['@id'],
   lastDelivered: JournalEntry['@id'],
   time: string // JSON-encoded TreeClock
 }
 
-interface JournalEntry {
+interface JournalEntry extends Subject {
   '@id': Iri,
   hash: string, // Encoded Hash
   delta: string, // JSON-encoded JsonDelta
@@ -47,7 +47,7 @@ const TIDS_CONTEXT: Context = {
   tid: 'qs:#tid' // Property of a triple hashes
 };
 
-interface HashTid {
+interface HashTid extends Subject {
   '@id': Iri,
   tid: UUID // Transaction ID
 }
@@ -75,7 +75,7 @@ export class SuSetDataset extends JrqlGraph {
     return this.dataset.id;
   }
 
-  get updates(): Observable<Update> {
+  get updates(): Observable<StrictUpdate> {
     return this.updateSource;
   }
 
@@ -96,16 +96,16 @@ export class SuSetDataset extends JrqlGraph {
     startingTime?: TreeClock, localTime?: TreeClock): Promise<Patch> {
     const encodedHash = startingHash.encode();
     const entryId = 'entry:' + encodedHash;
-    const insert = await this.controlGraph.insert({
+    const insert = await this.controlGraph.insert([{
       '@id': 'qs:journal',
       lastDelivered: entryId,
       time: toTimeString(localTime),
-      tail: {
-        '@id': entryId,
-        hash: encodedHash,
-        time: toTimeString(startingTime)
-      } as Partial<JournalEntry>
-    } as Journal);
+      tail: entryId,
+    } as Journal, {
+      '@id': entryId,
+      hash: encodedHash,
+      time: toTimeString(startingTime)
+    } as Partial<JournalEntry>]);
     // Delete matches everything in all graphs
     return { oldQuads: {}, newQuads: insert.newQuads };
   }
@@ -158,7 +158,7 @@ export class SuSetDataset extends JrqlGraph {
   async operationsSince(lastHash: Hash): Promise<Observable<DeltaMessage> | undefined> {
     const found = await this.controlGraph.find({ hash: lastHash.encode() });
     if (found.size) {
-      const entry = this.controlGraph.describe1(found.values().next().value) as Subject;
+      const entry = await this.controlGraph.describe1(found.values().next().value) as Subject;
       return new Observable(subs => {
         this.emitJournalAfter(entry as JournalEntry, subs);
       });
@@ -198,7 +198,7 @@ export class SuSetDataset extends JrqlGraph {
         .concat({ oldQuads: flatten(deletedTripleTids) });
       // Include journaling in final patch
       const [journaling, entry] = await this.journal(delta, time, false);
-      await this.postUpdate(patch);
+      this.postUpdate(patch);
       return [patch.concat(tidPatch).concat(journaling), entry] as [Patch, MeldJournalEntry];
     });
   }
@@ -222,7 +222,7 @@ export class SuSetDataset extends JrqlGraph {
           }, this.newTripleTids(delta.insert, delta.tid));
         // Include journaling in final patch
         const [journaling,] = await this.journal(delta, time, true);
-        await this.postUpdate(patch);
+        this.postUpdate(patch);
         return patch.concat(tripleTidPatch).concat(journaling);
       }
     });
@@ -230,8 +230,8 @@ export class SuSetDataset extends JrqlGraph {
 
   private async postUpdate(patch: PatchQuads) {
     this.updateSource.next({
-      '@delete': await toGroupLike(patch.oldQuads, this.defaultContext),
-      '@insert': await toGroupLike(patch.newQuads, this.defaultContext)
+      '@delete': await toGroup(patch.oldQuads, this.defaultContext),
+      '@insert': await toGroup(patch.newQuads, this.defaultContext)
     });
   }
 

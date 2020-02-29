@@ -78,7 +78,7 @@ describe('SU-Set Dataset', () => {
 
         expect(JSON.parse(msg.data.delete)).toHaveProperty('@graph', {});
 
-        await expect(willUpdate).resolves.toHaveProperty('@insert', fred);
+        await expect(willUpdate).resolves.toHaveProperty('@insert', { '@graph': [fred] });
       });
 
       test('applies an insert delta', async () => {
@@ -92,7 +92,7 @@ describe('SU-Set Dataset', () => {
         await expect(ds.find({ '@id': 'http://test.m-ld.org/fred' }))
           .resolves.toEqual(new Set(['http://test.m-ld.org/fred']));
 
-        await expect(willUpdate).resolves.toHaveProperty('@insert', fred);
+        await expect(willUpdate).resolves.toHaveProperty('@insert', { '@graph': [fred] });
       });
 
       describe('with an initial triple', () => {
@@ -149,7 +149,7 @@ describe('SU-Set Dataset', () => {
           expect(deletedJsonLd).toHaveProperty(['@graph', 'p'], 'http://test.m-ld.org/#name');
           expect(deletedJsonLd).toHaveProperty(['@graph', 'o'], 'Fred');
 
-          await expect(willUpdate).resolves.toHaveProperty('@delete', fred);
+          await expect(willUpdate).resolves.toHaveProperty('@delete', { '@graph': [fred] });
         });
 
         test('applies a delete delta', async () => {
@@ -166,7 +166,7 @@ describe('SU-Set Dataset', () => {
           await expect(ds.find({ '@id': 'http://test.m-ld.org/fred' }))
             .resolves.toEqual(new Set());
 
-          await expect(willUpdate).resolves.toHaveProperty('@delete', fred);
+          await expect(willUpdate).resolves.toHaveProperty('@delete', { '@graph': [fred] });
         });
       });
     });
