@@ -31,12 +31,20 @@ export interface ValueObject {
   '@index'?: string;
 }
 
-export type JrqlObject = number | string | boolean | Subject | ValueObject;
+export function isValueObject(value: JrqlValue): value is ValueObject {
+  return typeof value == 'object' && '@value' in value;
+}
+
+export interface Reference {
+  '@id': Iri;
+}
+
+export type JrqlValue = number | string | boolean | Subject | Reference | ValueObject;
 
 export interface Subject extends Pattern {
   '@id'?: Iri;
   '@type'?: Iri;
-  [key: string]: JrqlObject | JrqlObject[] | Context | undefined;
+  [key: string]: JrqlValue | JrqlValue[] | Context | undefined;
 }
 
 export function isSubject(p: Pattern): p is Subject {
@@ -130,9 +138,12 @@ export function isSelect(p: Pattern): p is Select {
   return '@select' in p;
 }
 
-export interface Update extends Query {
-  '@insert'?: GroupLike;
-  '@delete'?: GroupLike;
+export interface DeleteInsert<T extends GroupLike = GroupLike> {
+  '@insert': T;
+  '@delete': T;
+}
+
+export interface Update extends Query, Partial<DeleteInsert<GroupLike>> {
 }
 
 export function isUpdate(p: Pattern): p is Update {

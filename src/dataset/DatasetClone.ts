@@ -1,5 +1,5 @@
-import { MeldClone, Snapshot, DeltaMessage, MeldRemotes, MeldJournalEntry, StrictUpdate } from '../m-ld';
-import { Pattern, Subject, Update, isRead } from '../m-ld/jsonrql';
+import { MeldClone, Snapshot, DeltaMessage, MeldRemotes, MeldJournalEntry } from '../m-ld';
+import { Pattern, Subject, isRead, Group, DeleteInsert } from '../m-ld/jsonrql';
 import { Observable, Subject as Source, PartialObserver, merge, empty, from, concat } from 'rxjs';
 import { TreeClock } from '../clocks';
 import { SuSetDataset } from './SuSetDataset';
@@ -158,7 +158,7 @@ export class DatasetClone implements MeldClone {
     }
   }
 
-  follow(): Observable<StrictUpdate> {
+  follow(): Observable<DeleteInsert<Group>> {
     return this.dataset.updates;
   }
 

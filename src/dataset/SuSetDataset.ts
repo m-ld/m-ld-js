@@ -1,9 +1,9 @@
-import { MeldDelta, MeldJournalEntry, JsonDelta, Snapshot, DeltaMessage, UUID, StrictUpdate } from '../m-ld';
+import { MeldDelta, MeldJournalEntry, JsonDelta, Snapshot, DeltaMessage, UUID } from '../m-ld';
 import { Quad, Triple } from 'rdf-js';
 import { namedNode, defaultGraph } from '@rdfjs/data-model';
 import { TreeClock } from '../clocks';
 import { Hash } from '../hash';
-import { Context, Subject } from '../m-ld/jsonrql';
+import { Context, Subject, Group, DeleteInsert } from '../m-ld/jsonrql';
 import { Dataset, PatchQuads, Patch } from '.';
 import { Iri } from 'jsonld/jsonld-spec';
 import { JrqlGraph, toGroup } from './JrqlGraph';
@@ -59,7 +59,7 @@ interface HashTid extends Subject {
 export class SuSetDataset extends JrqlGraph {
   private readonly controlGraph: JrqlGraph;
   private readonly tidsGraph: JrqlGraph;
-  private readonly updateSource: Source<StrictUpdate> = new Source;
+  private readonly updateSource: Source<DeleteInsert<Group>> = new Source;
 
   constructor(
     private readonly dataset: Dataset) {
@@ -75,7 +75,7 @@ export class SuSetDataset extends JrqlGraph {
     return this.dataset.id;
   }
 
-  get updates(): Observable<StrictUpdate> {
+  get updates(): Observable<DeleteInsert<Group>> {
     return this.updateSource;
   }
 
@@ -95,7 +95,7 @@ export class SuSetDataset extends JrqlGraph {
   private async reset(startingHash: Hash,
     startingTime?: TreeClock, localTime?: TreeClock): Promise<Patch> {
     const encodedHash = startingHash.encode();
-    const entryId = 'entry:' + encodedHash;
+    const entryId = toPrefixedId('entry', encodedHash);
     const insert = await this.controlGraph.insert([{
       '@id': 'qs:journal',
       lastDelivered: entryId,
@@ -278,7 +278,7 @@ export class SuSetDataset extends JrqlGraph {
   private async journal(delta: MeldDelta, time: TreeClock, remote: boolean): Promise<[PatchQuads, MeldJournalEntry]> {
     const [journal, oldTail] = await this.journalTail();
     const block = new JsonDeltaBagBlock(Hash.decode(oldTail.hash)).next(delta.json);
-    const entryId = 'entry:' + block.id.encode();
+    const entryId = toPrefixedId('entry', block.id.encode());
     const delivered = () => this.markDelivered(entryId);
     return [
       (await this.controlGraph.write({
@@ -321,7 +321,7 @@ function deletedTidsByTripleId(delta: MeldDelta): { [tripleId: string]: [Triple,
 }
 
 function tripleId(quad: Quad): string {
-  return 'hash:' + hashTriple(quad).encode();
+  return toPrefixedId('hash', hashTriple(quad).encode());
 }
 
 function hashTriple(triple: Triple): Hash {
@@ -341,3 +341,6 @@ function hashTriple(triple: Triple): Hash {
   }
 }
 
+function toPrefixedId(prefix: string, ...path: string[]) {
+  return `${prefix}:${path.map(encodeURIComponent).join('/')}`;
+}
