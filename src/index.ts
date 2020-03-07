@@ -6,9 +6,10 @@ import { MeldApi } from './m-ld/MeldApi';
 import { Context } from './m-ld/jsonrql';
 import { MqttRemotes } from './mqtt/MqttRemotes';
 import { IClientOptions, connect } from 'async-mqtt';
+import { MeldRemotes, MeldStore } from './m-ld';
 
 export { MeldApi };
-  
+
 type MeldMqttOpts = Omit<IClientOptions, 'clientId' | 'will'> &
   ({ hostname: string } | { host: string, port: number })
 
@@ -21,20 +22,28 @@ export interface MeldConfig {
   mqttOpts: MeldMqttOpts;
 }
 
-export async function clone(ldb: AbstractLevelDOWN, config: MeldConfig) {
-  const cloneId = config.id || generate();
-  const mqttOpts = { ...config.mqttOpts, clientId: cloneId };
+export async function clone(ldb: AbstractLevelDOWN, config: MeldConfig): Promise<MeldApi> {
+  const theConfig = { ...config, id: config.id || generate() };
+  const remotes = await initRemotes(theConfig);
+  const clone = await initLocal(ldb, theConfig, remotes);
+  return new MeldApi(config.domain, theConfig.context || null, clone);
+}
+
+async function initLocal(ldb: AbstractLevelDOWN,
+  config: MeldConfig & { id: string }, remotes: MeldRemotes): Promise<MeldStore> {
+  const clone = new DatasetClone(new QuadStoreDataset(
+    ldb, { ...config.ldbOpts, id: config.id }), remotes);
+  clone.genesis = !!config.genesis;
+  await clone.initialise();
+  return clone;
+}
+
+async function initRemotes(config: MeldConfig): Promise<MeldRemotes> {
+  const mqttOpts = { ...config.mqttOpts, clientId: config.id };
   const mqtt = connect(mqttOpts);
   mqtt.options = mqttOpts; // Bug in async-mqtt
   const remotes = new MqttRemotes(config.domain, mqtt);
   await remotes.initialise();
-
-  const clone = new DatasetClone(new QuadStoreDataset(ldb, {
-    ...config.ldbOpts,
-    id: cloneId
-  }), remotes);
-  clone.genesis = !!config.genesis;
-  await clone.initialise();
-
-  return new MeldApi(config.domain, config.context || null, clone);
+  return remotes;
 }
+
