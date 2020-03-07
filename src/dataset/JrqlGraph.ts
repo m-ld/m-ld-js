@@ -116,18 +116,24 @@ export class JrqlGraph {
   }
 
   private async matchSolutions(patterns: Quad[]): Promise<QuadSolution[]> {
+    // TODO: return Observable<QuadSolution>. The last pattern results can be streamed.
     // reduce async from a single empty solution
-    return patterns.reduce(async (willSolve, pattern) => {
-      const solutions = await willSolve;
-      // find matching quads for each pattern quad
-      return this.graph.match(...asMatchTerms(pattern)).pipe(
-        defaultIfEmpty(), // TODO: Produces null if no quads, incorrect according to BGP
-        // match each quad against already-found solutions
-        flatMap(quad => from(solutions).pipe(flatMap(solution => {
-          const matchingSolution = quad ? solution.join(pattern, quad) : solution;
-          return matchingSolution ? of(matchingSolution) : EMPTY;
-        }))), toArray()).toPromise();
-    }, Promise.resolve([QuadSolution.EMPTY]));
+    const solutions = await patterns.reduce(
+      async (willSolve, pattern) => {
+        const solutions = await willSolve;
+        // find matching quads for each pattern quad
+        return this.graph.match(...asMatchTerms(pattern)).pipe(
+          defaultIfEmpty(), // BUG: Produces null if no quads, incorrect according to BGP
+          // match each quad against already-found solutions
+          flatMap(quad => from(solutions).pipe(flatMap(solution => {
+            const matchingSolution = quad ? solution.join(pattern, quad) : solution;
+            return matchingSolution ? of(matchingSolution) : EMPTY;
+          }))), toArray()).toPromise();
+      },
+      // Start the reduction with an empty quad solution
+      Promise.resolve([QuadSolution.EMPTY]));
+    // Remove the initial empty quad solution if it's still there
+    return solutions.filter(solution => solution.quads.length);
   }
 }
 
@@ -144,11 +150,16 @@ async function solutionSubject(results: Result[] | Result, solution: QuadSolutio
   }));
 }
 
+async function rdfToJson(quads: Quad[]) {
+  // Using native types to avoid unexpected value objects
+  return fromRDF(quads, { useNativeTypes: true });
+}
+
 /**
  * @returns a single subject compacted against the given context
  */
 export async function toSubject(quads: Quad[], context: Context): Promise<Subject> {
-  return compact(await fromRDF(quads), context || {}) as unknown as Subject;
+  return compact(await rdfToJson(quads), context || {}) as unknown as Subject;
 }
 
 /**
@@ -156,7 +167,7 @@ export async function toSubject(quads: Quad[], context: Context): Promise<Subjec
  * @see https://www.w3.org/TR/json-ld11/#flattened-document-form
  */
 export async function toGroup(quads: Quad[], context: Context): Promise<Group> {
-  return flatJsonLd(await fromRDF(quads), context || {}) as unknown as Group;
+  return flatJsonLd(await rdfToJson(quads), context || {}) as unknown as Group;
 }
 
 export async function resolve(iri: Iri, context?: Context): Promise<NamedNode> {

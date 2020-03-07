@@ -145,16 +145,13 @@ export class DatasetClone implements MeldClone {
     if (isRead(request)) {
       return this.dataset.read(request);
     } else {
-      return new Observable(subs => {
-        this.dataset.transact(async () => {
-          const patch = await this.dataset.write(request);
-          return [this.messageService.send(), patch];
-        }).then(journalEntry => {
-          // Publish the MeldJournalEntry
-          this.updates.next(journalEntry);
-          subs.complete();
-        }, err => subs.error(err));
-      });
+      return from(this.dataset.transact(async () => {
+        const patch = await this.dataset.write(request);
+        return [this.messageService.send(), patch];
+      }).then(journalEntry => {
+        // Publish the MeldJournalEntry
+        this.updates.next(journalEntry);
+      })).pipe(ignoreElements()); // Ignores the void promise result
     }
   }
 

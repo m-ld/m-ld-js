@@ -46,12 +46,32 @@ describe('Meld API', () => {
       .resolves.toMatchObject({ '?f': { '@id': 'fred' } });
   });
 
+  test('selects not found', async () => {
+    await api.transact({ '@id': 'fred', name: 'Fred' } as Subject).toPromise();
+    await expect(api.transact({
+      '@select': '?w', '@where': { '@id': '?w', name: 'Wilma' }
+    } as Select).toPromise())
+      .resolves.toBeUndefined(); // toPromise undefined for empty Observable
+  });
+
   test('describes where', async () => {
     await api.transact({ '@id': 'fred', name: 'Fred' } as Subject).toPromise();
     await expect(api.transact({
       '@describe': '?f', '@where': { '@id': '?f', name: 'Fred' }
     } as Describe).toPromise())
       .resolves.toMatchObject({ '@id': 'fred', name: 'Fred' });
+  });
+
+  test('describes with boolean value', async () => {
+    await api.transact({ '@id': 'fred', married: true } as Subject).toPromise();
+    await expect(api.transact({ '@describe': 'fred' } as Describe).toPromise())
+      .resolves.toMatchObject({ '@id': 'fred', married: true });
+  });
+
+  test('describes with double value', async () => {
+    await api.transact({ '@id': 'fred', name: 'Fred', age: 40.5 } as Subject).toPromise();
+    await expect(api.transact({ '@describe': 'fred' } as Describe).toPromise())
+      .resolves.toMatchObject({ '@id': 'fred', name: 'Fred', age: 40.5 });
   });
 });
 

@@ -138,7 +138,6 @@ export class SuSetDataset extends JrqlGraph {
       this.loadJournal().then(async (journal) => {
         const last = await this.controlGraph.describe1(journal.lastDelivered) as JournalEntry;
         await this.emitJournalAfter(last, subs);
-        subs.complete();
       });
     });
   }

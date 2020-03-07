@@ -7,6 +7,9 @@ import { first } from 'rxjs/operators';
 const fred = {
   '@id': 'http://test.m-ld.org/fred',
   'http://test.m-ld.org/#name': 'Fred'
+}, barney = {
+  '@id': 'http://test.m-ld.org/barney',
+  'http://test.m-ld.org/#name': 'Barney'
 };
 
 describe('SU-Set Dataset', () => {
@@ -168,6 +171,16 @@ describe('SU-Set Dataset', () => {
 
           await expect(willUpdate).resolves.toHaveProperty('@delete', { '@graph': [fred] });
         });
+
+        test('transacts another insert', async () => {
+          const msg = await ds.transact(async () => [
+            time = time.ticked(),
+            await ds.insert(barney)
+          ]);
+          expect(msg.time.equals(time)).toBe(true);
+
+          await expect(ds.describe1('http://test.m-ld.org/barney')).resolves.toEqual(barney);
+        })
       });
     });
   });

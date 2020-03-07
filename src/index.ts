@@ -5,10 +5,12 @@ import { AbstractLevelDOWN, AbstractOpenOptions } from 'abstract-leveldown';
 import { MeldApi } from './m-ld/MeldApi';
 import { Context } from './m-ld/jsonrql';
 import { MqttRemotes } from './mqtt/MqttRemotes';
-import { MqttClient } from 'mqtt';
-import { AsyncClient } from 'async-mqtt';
+import { IClientOptions, connect } from 'async-mqtt';
 
 export { MeldApi };
+  
+type MeldMqttOpts = Omit<IClientOptions, 'clientId' | 'will'> &
+  ({ hostname: string } | { host: string, port: number })
 
 export interface MeldConfig {
   domain: string;
@@ -16,18 +18,23 @@ export interface MeldConfig {
   genesis?: boolean;
   ldbOpts?: AbstractOpenOptions;
   context?: Context;
+  mqttOpts: MeldMqttOpts;
 }
 
-export async function clone(ldb: AbstractLevelDOWN, mqtt: MqttClient, config: MeldConfig) {
-  const remotes = new MqttRemotes(config.domain, new AsyncClient(mqtt));
+export async function clone(ldb: AbstractLevelDOWN, config: MeldConfig) {
+  const cloneId = config.id || generate();
+  const mqttOpts = { ...config.mqttOpts, clientId: cloneId };
+  const mqtt = connect(mqttOpts);
+  mqtt.options = mqttOpts; // Bug in async-mqtt
+  const remotes = new MqttRemotes(config.domain, mqtt);
   await remotes.initialise();
 
   const clone = new DatasetClone(new QuadStoreDataset(ldb, {
     ...config.ldbOpts,
-    id: config.id || generate()
+    id: cloneId
   }), remotes);
   clone.genesis = !!config.genesis;
   await clone.initialise();
-  
+
   return new MeldApi(config.domain, config.context || null, clone);
 }
