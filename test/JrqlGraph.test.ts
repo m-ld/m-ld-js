@@ -35,4 +35,22 @@ describe('json-rql Graph handler', () => {
     expect(quads[0].object.termType).toBe('Literal');
     expect(quads[0].object.value).toBe('Fred');
   });
+
+  test('quadifies with numeric property', async () => {
+    const quads = await jrqlGraph.quads({ '@id': 'fred', age: 40 });
+    expect(quads.length).toBe(1);
+    expect(namedNode('http://test.m-ld.org/fred').equals(quads[0].subject)).toBe(true);
+    expect(namedNode('http://test.m-ld.org/#age').equals(quads[0].predicate)).toBe(true);
+    expect(quads[0].object.termType).toBe('Literal');
+    expect(quads[0].object.value).toBe('40');
+  });
+
+  test('quadifies with numeric array property', async () => {
+    const quads = await jrqlGraph.quads({ '@id': 'fred', age: [40] });
+    expect(quads.length).toBe(1);
+    expect(namedNode('http://test.m-ld.org/fred').equals(quads[0].subject)).toBe(true);
+    expect(namedNode('http://test.m-ld.org/#age').equals(quads[0].predicate)).toBe(true);
+    expect(quads[0].object.termType).toBe('Literal');
+    expect(quads[0].object.value).toBe('40');
+  });
 });

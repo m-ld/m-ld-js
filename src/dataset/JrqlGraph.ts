@@ -1,7 +1,7 @@
 import { Iri } from 'jsonld/jsonld-spec';
 import {
   Context, Read, Subject, GroupLike, Update,
-  isDescribe, isGroup, isSubject, isUpdate, asGroup, Group, isSelect, isGroupLike, Result, Variable
+  isDescribe, isGroup, isSubject, isUpdate, asGroup, Group, isSelect, isGroupLike, Result, Variable, JrqlValue, isValueObject, isReference
 } from '../m-ld/jsonrql';
 import { NamedNode, Quad, Term, Variable as VariableNode, Quad_Subject, Quad_Predicate, Quad_Object } from 'rdf-js';
 import { compact, flatten as flatJsonLd, fromRDF, toRDF } from 'jsonld';
@@ -188,25 +188,32 @@ function asTermMatch<T extends Term>(term: T): T | undefined {
     return term;
 }
 
-function hideVars(subjects: Subject | Subject[], top: boolean = true) {
-  array(subjects).forEach(subject => {
-    // Process predicates and objects
-    Object.entries(subject).forEach(([key, value]) => {
-      const varKey = hideVar(key);
-      if (typeof value === 'object') // TODO: JSON-LD value object (with @value)
-        hideVars(Array.isArray(value) ? value as Subject[] : value as Subject, false);
-      else if (typeof value === 'string')
-        value = hideVar(value);
-      subject[varKey] = value;
-      if (varKey !== key)
-        delete subject[key];
-    });
-    // Identity-only subjects at top level => implicit wildcard p-o
-    if (top && Object.keys(subject).every(k => k === '@id'))
-      subject[genVar()] = { '@id': genVar() };
-    // Anonymous subjects => wildcard subject
-    if (!subject['@id'])
-      subject['@id'] = genVar();
+function hideVars(values: JrqlValue | JrqlValue[], top: boolean = true) {
+  array(values).forEach(value => {
+    // TODO: JSON-LD value object (with @value)
+    if (typeof value === 'object' && !isValueObject(value)) {
+      // If this is a Reference, we treat it as a Subject
+      const subject: Subject = value as Subject;
+      // Process predicates and objects
+      Object.entries(subject).forEach(([key, value]) => {
+        if (key !== '@context') {
+          const varKey = hideVar(key);
+          if (typeof value === 'object') {
+            hideVars(value as JrqlValue | JrqlValue[], false);
+          } else if (typeof value === 'string') {
+            subject[varKey] = hideVar(value);
+          }
+          if (varKey !== key)
+            delete subject[key];
+        }
+      });
+      // References at top level => implicit wildcard p-o
+      if (top && isReference(subject))
+        subject[genVar()] = { '@id': genVar() };
+      // Anonymous subjects => wildcard subject
+      if (!subject['@id'])
+        subject['@id'] = genVar();
+    }
   });
 }
 

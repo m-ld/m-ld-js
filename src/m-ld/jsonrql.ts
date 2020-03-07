@@ -39,6 +39,10 @@ export interface Reference {
   '@id': Iri;
 }
 
+export function isReference(value: JrqlValue): value is Reference {
+  return typeof value == 'object' && Object.keys(value).every(k => k === '@id');
+}
+
 export type JrqlValue = number | string | boolean | Subject | Reference | ValueObject;
 
 export interface Subject extends Pattern {
