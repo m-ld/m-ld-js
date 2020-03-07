@@ -36,6 +36,15 @@ describe('json-rql Graph handler', () => {
     expect(quads[0].object.value).toBe('Fred');
   });
 
+  test('quadifies anonymous reference predicate', async () => {
+    const quads = await jrqlGraph.quads({ '?': { '@id': 'fred' } });
+    expect(quads.length).toBe(1);
+    expect(quads[0].subject.termType).toBe('Variable');
+    expect(quads[0].predicate.termType).toBe('Variable');
+    expect(quads[0].object.termType).toBe('NamedNode');
+    expect(quads[0].object.value).toBe('http://test.m-ld.org/fred');
+  });
+
   test('quadifies with numeric property', async () => {
     const quads = await jrqlGraph.quads({ '@id': 'fred', age: 40 });
     expect(quads.length).toBe(1);

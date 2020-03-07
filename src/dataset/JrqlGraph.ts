@@ -201,8 +201,9 @@ function hideVars(values: JrqlValue | JrqlValue[], top: boolean = true) {
           if (typeof value === 'object') {
             hideVars(value as JrqlValue | JrqlValue[], false);
           } else if (typeof value === 'string') {
-            subject[varKey] = hideVar(value);
+            value = hideVar(value);
           }
+          subject[varKey] = value;
           if (varKey !== key)
             delete subject[key];
         }

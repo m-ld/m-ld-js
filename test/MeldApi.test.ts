@@ -32,6 +32,12 @@ describe('Meld API', () => {
     });
   });
 
+  test('deletes a property by path', async () => {
+    await api.transact({ '@id': 'fred', name: 'Fred', wife: { '@id': 'wilma' } } as Subject).toPromise();
+    await api.delete('wilma').toPromise();
+    await expect(api.get('fred').toPromise()).resolves.toEqual({ '@id': 'fred', name: 'Fred' });
+  });
+
   test('deletes an object by path', async () => {
     await api.transact({ '@id': 'fred', wife: { '@id': 'wilma' } } as Subject).toPromise();
     await api.delete('wilma').toPromise();
