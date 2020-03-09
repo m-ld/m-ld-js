@@ -38,7 +38,7 @@ export function zeroIfNull(value: number | null) {
 
 export class TreeClock implements CausalClock<TreeClock> {
   constructor(
-    private readonly isId: boolean,
+    readonly isId: boolean,
     private readonly ticks: number,
     private readonly fork: TreeClockFork | null) {
   }

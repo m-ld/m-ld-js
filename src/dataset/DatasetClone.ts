@@ -12,7 +12,6 @@ export class DatasetClone implements MeldClone {
   readonly updates: Source<MeldJournalEntry> = new Source;
   private readonly dataset: SuSetDataset;
   private messageService: TreeClockMessageService;
-  private isGenesis: boolean = false;
   private readonly orderingBuffer: DeltaMessage[] = [];
   private readonly updateReceiver: PartialObserver<DeltaMessage> = {
     next: delta => this.messageService.receive(delta, this.orderingBuffer, acceptedMsg =>
@@ -26,10 +25,6 @@ export class DatasetClone implements MeldClone {
     this.dataset = new SuSetDataset(dataset);
   }
 
-  set genesis(isGenesis: boolean) {
-    this.isGenesis = isGenesis;
-  }
-
   get id() {
     return this.dataset.id;
   }
@@ -37,21 +32,19 @@ export class DatasetClone implements MeldClone {
   async initialise(): Promise<void> {
     await this.dataset.initialise();
     // Establish a clock for this clone
-    let newClone: boolean = true, time: TreeClock | null;
-    if (this.isGenesis) {
-      time = TreeClock.GENESIS;
-    } else if (newClone = !(time = await this.dataset.loadClock())) {
+    let newClone = false, time = await this.dataset.loadClock();
+    if (!time) {
+      newClone = true;
       time = await this.remotes.newClock();
+      await this.dataset.saveClock(time, true);
     }
-    if (newClone)
-      this.dataset.saveClock(time, true);
     this.messageService = new TreeClockMessageService(time);
     // Flush unsent operations
     await new Promise<void>((resolve, reject) => {
       this.dataset.unsentLocalOperations().subscribe(
         entry => this.updates.next(entry), reject, resolve);
     });
-    if (this.isGenesis) {
+    if (time.isId) { // Top-level is Id, never been forked
       // No rev-up to do, so just subscribe to updates from later clones
       this.remotes.updates.subscribe(this.updateReceiver);
     } else {

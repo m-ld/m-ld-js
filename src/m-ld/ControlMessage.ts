@@ -1,6 +1,10 @@
 import { Hash } from '../hash';
 import { TreeClock } from '../clocks';
-import { toTimeString, fromTimeString } from './JsonDelta';
+import { toTimeString } from './JsonDelta';
+
+export interface Hello {
+  id: string;
+}
 
 export namespace Request {
   export interface NewClock { }

@@ -4,12 +4,13 @@ import { mock } from 'jest-mock-extended';
 import { Observable } from 'rxjs';
 import { Dataset, QuadStoreDataset } from '../src/dataset';
 import MemDown from 'memdown';
+import { TreeClock } from '../src/clocks';
 
 export async function genesisClone(remotes?: MeldRemotes) {
   const clone = new DatasetClone(memStore(), remotes || mock<MeldRemotes>({
-    updates: mock<Observable<DeltaMessage>>()
+    updates: mock<Observable<DeltaMessage>>(),
+    newClock: () => Promise.resolve(TreeClock.GENESIS)
   }));
-  clone.genesis = true;
   await clone.initialise();
   return clone;
 }

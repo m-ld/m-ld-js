@@ -14,12 +14,11 @@ type MeldMqttOpts = Omit<IClientOptions, 'clientId' | 'will'> &
   ({ hostname: string } | { host: string, port: number })
 
 export interface MeldConfig {
-  domain: string;
   id?: string;
-  genesis?: boolean;
+  domain: string;
   ldbOpts?: AbstractOpenOptions;
-  context?: Context;
   mqttOpts: MeldMqttOpts;
+  context?: Context;
 }
 
 export async function clone(ldb: AbstractLevelDOWN, config: MeldConfig): Promise<MeldApi> {
@@ -33,7 +32,6 @@ async function initLocal(ldb: AbstractLevelDOWN,
   config: MeldConfig & { id: string }, remotes: MeldRemotes): Promise<MeldStore> {
   const clone = new DatasetClone(new QuadStoreDataset(
     ldb, { ...config.ldbOpts, id: config.id }), remotes);
-  clone.genesis = !!config.genesis;
   await clone.initialise();
   return clone;
 }
