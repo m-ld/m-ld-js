@@ -1,3 +1,6 @@
+import { Quad } from 'rdf-js';
+import { fromRDF } from 'jsonld';
+
 export function flatten<T>(bumpy: T[][]): T[] {
   return ([] as T[]).concat(...bumpy);
 }
@@ -8,6 +11,11 @@ export function toArray<T>(value?: T | T[]): T[] {
 
 export function jsonFrom(payload: Buffer): any {
   return JSON.parse(payload.toString());
+}
+
+export function rdfToJson(quads: Quad[]): Promise<any> {
+  // Using native types to avoid unexpected value objects
+  return fromRDF(quads, { useNativeTypes: true });
 }
 
 export class Future<T> implements PromiseLike<T> {

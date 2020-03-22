@@ -4,12 +4,12 @@ import {
   isDescribe, isGroup, isSubject, isUpdate, asGroup, Group, isSelect, isGroupLike, Result, Variable, JrqlValue, isValueObject, isReference
 } from '../m-ld/jsonrql';
 import { NamedNode, Quad, Term, Variable as VariableNode, Quad_Subject, Quad_Predicate, Quad_Object } from 'rdf-js';
-import { compact, flatten as flatJsonLd, fromRDF, toRDF } from 'jsonld';
+import { compact, flatten as flatJsonLd, toRDF } from 'jsonld';
 import { namedNode, defaultGraph, variable, quad as createQuad, blankNode } from '@rdfjs/data-model';
 import { Graph, PatchQuads } from '.';
 import { toArray, flatMap, defaultIfEmpty, map, filter, take, distinct } from 'rxjs/operators';
 import { from, of, EMPTY, Observable } from 'rxjs';
-import { toArray as array, shortId, flatten } from '../util';
+import { toArray as array, shortId, flatten, rdfToJson } from '../util';
 import { QuadSolution } from './QuadSolution';
 
 /**
@@ -148,11 +148,6 @@ async function solutionSubject(results: Result[] | Result, solution: QuadSolutio
     if (isSelected(results, newKey))
       return { [newKey]: value };
   }));
-}
-
-async function rdfToJson(quads: Quad[]) {
-  // Using native types to avoid unexpected value objects
-  return fromRDF(quads, { useNativeTypes: true });
 }
 
 /**

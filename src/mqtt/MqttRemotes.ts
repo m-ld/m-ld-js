@@ -7,12 +7,13 @@ import { MqttTopic, SEND_TOPIC, REPLY_TOPIC, SendParams, ReplyParams, DirectPara
 import { TopicParams } from 'mqtt-pattern';
 import { MqttPresence } from './MqttPresence';
 import { Response, Request, Hello } from '../m-ld/ControlMessage';
-import { Future, jsonFrom } from '../util';
+import { Future, jsonFrom, rdfToJson } from '../util';
 import { map, finalize, flatMap } from 'rxjs/operators';
-import { fromRDF, toRDF } from 'jsonld';
+import { toRDF } from 'jsonld';
 import { Triple } from 'rdf-js';
 import { fromTimeString, toTimeString } from '../m-ld/JsonDelta';
 import { Hash } from '../hash';
+import AsyncLock = require('async-lock');
 
 export type MqttRemotesOptions = Omit<IClientOptions, 'clientId'>;
 
@@ -46,6 +47,7 @@ export class MqttRemotes implements MeldRemotes {
   private readonly recentlySentTo: Set<string> = new Set;
   private readonly consuming: { [address: string]: Source<any> } = {};
   private isGenesis: boolean = true;
+  private readonly notifyLock = new AsyncLock();
 
   constructor(domain: string, private readonly id: string, opts: MeldMqttOpts,
     connect: (opts: IClientOptions) => AsyncMqttClient = defaultConnect) {
@@ -248,7 +250,7 @@ export class MqttRemotes implements MeldRemotes {
       time, dataAddress, lastHash, updatesAddress
     }), true);
     // Ack has been sent, start streaming the data and updates
-    this.produce(data, dataAddress, jsonFromTriples);
+    this.produce(data, dataAddress, rdfToJson);
     this.produce(updates, updatesAddress, jsonFromDelta);
   }
 
@@ -271,21 +273,23 @@ export class MqttRemotes implements MeldRemotes {
 
   private produce<T>(data: Observable<T>, subAddress: string, toJson: (datum: T) => Promise<any>) {
     const address = this.controlSubAddress(subAddress);
+
     const subs = data.subscribe({
-      next: datum => toJson(datum)
-        .then(json => this.notify(address, { next: json }))
+      next: datum => this.notify(address, toJson(datum).then(json => ({ next: json })))
         .catch(error => {
           // All our productions are guaranteed delivery
-          this.notify(address, { error });
+          this.notify(address, Promise.resolve({ error }));
           subs.unsubscribe();
         }),
-      complete: () => this.notify(address, { complete: true }),
-      error: error => this.notify(address, { error })
+      complete: () => this.notify(address, Promise.resolve({ complete: true })),
+      error: error => this.notify(address, Promise.resolve({ error }))
     });
   }
 
-  private async notify(address: string, notification: JsonNotification): Promise<unknown> {
-    return this.mqtt.publish(address, JSON.stringify(notification));
+  private async notify(address: string, notification: Promise<JsonNotification>): Promise<unknown> {
+    // Use of a lock guarantees delivery ordering despite promise ordering
+    return this.notifyLock.acquire(address, async () =>
+      this.mqtt.publish(address, JSON.stringify(await notification)));
   }
 
   private async reply({ fromId: toId, messageId: sentMessageId }: DirectParams, json: any, expectAck?: boolean) {
@@ -330,10 +334,6 @@ export class MqttRemotes implements MeldRemotes {
 
 async function triplesFromJson(json: any): Promise<Triple[]> {
   return await toRDF(json) as Triple[];
-}
-
-async function jsonFromTriples(triples: Triple[]): Promise<any> {
-  return await fromRDF(triples);
 }
 
 function deltaFromJson(json: any): DeltaMessage {

@@ -5,9 +5,9 @@ import { literal, namedNode, triple as newTriple } from '@rdfjs/data-model';
 import { HashBagBlock } from '../blocks';
 import { Hash } from '../hash';
 import { asGroup, GroupLike, Context, Group } from './jsonrql';
-import { fromRDF, compact, toRDF } from 'jsonld';
+import { compact, toRDF } from 'jsonld';
 import { Iri } from 'jsonld/jsonld-spec';
-import { flatten } from '../util';
+import { flatten, rdfToJson } from '../util';
 import { TreeClock } from '../clocks';
 
 //TODO: Correct all implementations to use generic @base for reification
@@ -97,7 +97,7 @@ export async function asMeldDelta(delta: JsonDelta): Promise<MeldDelta> {
 }
 
 async function toJson(triples: Triple[], context: Context): Promise<string> {
-  const jsonld = await fromRDF(triples);
+  const jsonld = await rdfToJson(triples);
   const group = asGroup(await compact(jsonld, context || {}) as GroupLike);
   delete group['@context'];
   return JSON.stringify(group);
