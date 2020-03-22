@@ -1,6 +1,5 @@
 import { Hash } from '../hash';
 import { TreeClock } from '../clocks';
-import { toTimeString } from './JsonDelta';
 
 export interface Hello {
   id: string;
@@ -82,14 +81,14 @@ export namespace Response {
   export const NewClock = {
     toJson: (res: NewClock) => ({
       '@type': 'http://control.m-ld.org/response/clock', ...res,
-      clock: toTimeString(res.clock)
+      clock: res.clock.toJson()
     })
   }
 
   export const Snapshot = {
     toJson: (res: Snapshot) => ({
       '@type': 'http://control.m-ld.org/response/snapshot', ...res,
-      time: toTimeString(res.time),
+      time: res.time.toJson(),
       lastHash: res.lastHash.encode()
     })
   }
@@ -105,7 +104,7 @@ export namespace Response {
       case 'http://control.m-ld.org/response/clock':
         return { ...json, clock: TreeClock.fromJson(json.clock) };
       case 'http://control.m-ld.org/response/snapshot':
-        return { ...json, time: TreeClock.fromJson(json.time), lastHash: Hash.decode(json.time) };
+        return { ...json, time: TreeClock.fromJson(json.time), lastHash: Hash.decode(json.lastHash) };
       case 'http://control.m-ld.org/response/revup':
         return { ...json };
     }

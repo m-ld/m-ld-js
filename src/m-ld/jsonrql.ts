@@ -35,8 +35,9 @@ export function isValueObject(value: JrqlValue): value is ValueObject {
   return typeof value == 'object' && '@value' in value;
 }
 
-export interface Reference {
-  '@id': Iri;
+export type Resource<T> = { '@id': Iri; } & T;
+
+export interface Reference extends Resource<object> {
 }
 
 export function isReference(value: JrqlValue): value is Reference {

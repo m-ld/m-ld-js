@@ -1,6 +1,6 @@
 import { TopicParams, matches } from 'mqtt-pattern';
 import { MqttTopic } from './MqttTopic';
-import { ISubscriptionMap, AsyncMqttClient } from 'async-mqtt';
+import { ISubscriptionMap, AsyncMqttClient, IClientOptions, IClientPublishOptions } from 'async-mqtt';
 
 
 interface PresenceParams extends TopicParams {
@@ -9,13 +9,22 @@ interface PresenceParams extends TopicParams {
 }
 const PRESENCE_TOPIC = new MqttTopic<PresenceParams>(
   ['__presence', { '+': 'domain' }, { '#': 'clientConsumer' }]);
+const PRESENCE_OPTS: Required<Pick<IClientPublishOptions, 'qos' | 'retain'>> = { qos: 1, retain: true };
 
 export class MqttPresence {
   private readonly presenceTopic: MqttTopic<PresenceParams>;
   private readonly presentMap: { [clientId: string]: { [consumerId: string]: string } } = {};
 
-  constructor(domain: string) {
+  constructor(domain: string, private readonly clientId: string) {
     this.presenceTopic = PRESENCE_TOPIC.with({ domain });
+  }
+
+  get will(): IClientOptions['will'] {
+    return {
+      ...PRESENCE_OPTS,
+      topic: this.presenceTopic.with({ clientConsumer: [this.clientId] }).address,
+      payload: '-'
+    };
   }
 
   get subscriptions(): ISubscriptionMap {
@@ -24,16 +33,16 @@ export class MqttPresence {
     return subscriptions;
   }
 
-  async join(mqtt: AsyncMqttClient, clientId: string, consumerId: string, address: string) {
+  async join(mqtt: AsyncMqttClient, consumerId: string, address: string) {
     await mqtt.publish(this.presenceTopic.with({
-      clientConsumer: [clientId, consumerId]
-    }).address, address);
+      clientConsumer: [this.clientId, consumerId]
+    }).address, address, PRESENCE_OPTS);
   }
 
-  async leave(mqtt: AsyncMqttClient, clientId: string, consumerId?: string) {
+  async leave(mqtt: AsyncMqttClient, consumerId?: string) {
     await mqtt.publish(this.presenceTopic.with({
-      clientConsumer: consumerId ? [clientId, consumerId] : [clientId]
-    }).address, '-');
+      clientConsumer: consumerId ? [this.clientId, consumerId] : [this.clientId]
+    }).address, '-', PRESENCE_OPTS);
   }
 
   present(address: string): Set<string> {

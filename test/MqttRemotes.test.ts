@@ -4,7 +4,7 @@ import { AsyncMqttClient, IPublishPacket } from 'async-mqtt';
 import { EventEmitter } from 'events';
 import { MeldJournalEntry, MeldLocal } from '../src/m-ld';
 import { TreeClock } from '../src/clocks';
-import { Subject } from 'rxjs';
+import { Subject as Source } from 'rxjs';
 
 describe('New MQTT remotes', () => {
   let mqtt: AsyncMqttClient & MockProxy<AsyncMqttClient>;
@@ -31,7 +31,6 @@ describe('New MQTT remotes', () => {
 
   beforeEach(() => {
     mqtt = new EventEmitter() as AsyncMqttClient & MockProxy<AsyncMqttClient>;
-    mqtt.options = { clientId: 'client1' };
     mqtt = mock<AsyncMqttClient>(mqtt);
     // jest-mock-extended typing is confused by the AsyncMqttClient overloads, hence <any>
     mqtt.subscribe.mockReturnValue(<any>Promise.resolve([]));
@@ -39,7 +38,7 @@ describe('New MQTT remotes', () => {
       remotePublish(topic, <string>msg).then(() => published);
       return <any>published;
     });
-    remotes = new MqttRemotes('test.m-ld.org', mqtt);
+    remotes = new MqttRemotes('test.m-ld.org', 'client1', { hostname: 'unused' }, () => mqtt);
   });
 
   describe('when genesis', () => {
@@ -57,6 +56,16 @@ describe('New MQTT remotes', () => {
         '__send/client1/+/+/test.m-ld.org/control': 0,
         '__reply/client1/+/+/+': 0
       });
+      expect(mqtt.publish.mock.calls).toEqual([
+        // Setting retained presence on the channel
+        ['__presence/test.m-ld.org/client1/client1',
+          'test.m-ld.org/control',
+          { qos: 1, retain: true }],
+        // Setting retained last joined clone (no longer genesis)
+        ['test.m-ld.org/control',
+          '{"id":"client1"}',
+          { qos: 1, retain: true }]
+      ]);
     });
 
     test('can get new clock', async () => {
@@ -79,7 +88,7 @@ describe('New MQTT remotes', () => {
         data: { tid: 't1', insert: '{}', delete: '{}' },
         delivered: jest.fn()
       };
-      const updates = new Subject<MeldJournalEntry>();
+      const updates = new Source<MeldJournalEntry>();
       // This weirdness is due to jest-mock-extended trying to mock arrays
       remotes.connect({ ...mock<MeldLocal>(), updates });
       updates.next(entry);
@@ -87,6 +96,18 @@ describe('New MQTT remotes', () => {
       expect(mqtt.publish).toBeCalled();
       await published;
       expect(entry.delivered).toBeCalled();
+    });
+
+    test('closes with connected clone', () => {
+      const updates = new Source<MeldJournalEntry>();
+      // This weirdness is due to jest-mock-extended trying to mock arrays
+      remotes.connect({ ...mock<MeldLocal>(), updates });
+      updates.complete();
+
+      expect(mqtt.publish).toHaveBeenLastCalledWith(
+        '__presence/test.m-ld.org/client1/client1',
+        '-',
+        { qos: 1, retain: true });
     });
   });
 

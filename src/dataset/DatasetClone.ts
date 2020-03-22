@@ -38,6 +38,7 @@ export class DatasetClone implements MeldClone {
       time = await this.remotes.newClock();
       await this.dataset.saveClock(time, true);
     }
+    console.info(`${this.id} has time ${time}`);
     this.messageService = new TreeClockMessageService(time);
     // Flush unsent operations
     await new Promise<void>((resolve, reject) => {

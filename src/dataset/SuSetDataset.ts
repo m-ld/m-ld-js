@@ -249,8 +249,9 @@ export class SuSetDataset extends JrqlGraph {
     return this.tidsGraph.findQuads({ '@id': tripleId } as Partial<HashTid>);
   }
 
-  async applySnapshot(data: Observable<Triple[]>, lastHash: Hash, lastTime: TreeClock, localTime: TreeClock) {
-    this.dataset.transact(async () => {
+  async applySnapshot(data: Observable<Triple[]>,
+    lastHash: Hash, lastTime: TreeClock, localTime: TreeClock): Promise<void> {
+    return this.dataset.transact(async () => {
       const reset = await this.reset(lastHash, lastTime, localTime);
       return {
         oldQuads: reset.oldQuads,

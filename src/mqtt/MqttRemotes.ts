@@ -1,7 +1,7 @@
 import { Snapshot, DeltaMessage, MeldRemotes, MeldLocal } from '../m-ld';
 import { Observable, Subject as Source } from 'rxjs';
 import { TreeClock } from '../clocks';
-import { AsyncMqttClient, IClientOptions, ISubscriptionMap } from 'async-mqtt';
+import { AsyncMqttClient, IClientOptions, ISubscriptionMap, connect as defaultConnect } from 'async-mqtt';
 import { generate as uuid } from 'short-uuid';
 import { MqttTopic, SEND_TOPIC, REPLY_TOPIC, SendParams, ReplyParams, DirectParams } from './MqttTopic';
 import { TopicParams } from 'mqtt-pattern';
@@ -27,8 +27,11 @@ interface JsonNotification {
   error?: any;
 }
 
+export type MeldMqttOpts = Omit<IClientOptions, 'will' | 'clientId'> &
+  ({ hostname: string } | { host: string, port: number })
+
 export class MqttRemotes implements MeldRemotes {
-  private readonly id: string;
+  private readonly mqtt: AsyncMqttClient;
   private readonly initialised: Future<void>;
   private clone?: MeldLocal;
   private readonly remoteUpdates: Source<DeltaMessage> = new Source;
@@ -38,35 +41,34 @@ export class MqttRemotes implements MeldRemotes {
   private readonly replyTopic: MqttTopic<ReplyParams>;
   private readonly presence: MqttPresence;
   private readonly replyResolvers: {
-    [messageId: string]: [(res: Response) => void, PromiseLike<null> | null]
+    [messageId: string]: [(res: Response | null) => void, PromiseLike<null> | null]
   } = {};
   private readonly recentlySentTo: Set<string> = new Set;
   private readonly consuming: { [address: string]: Source<any> } = {};
   private isGenesis: boolean = true;
 
-  constructor(domain: string, private readonly mqtt: AsyncMqttClient) {
-    if (!mqtt.options.clientId)
-      throw new Error('MQTT for m-ld remotes must have a client Id');
+  constructor(domain: string, private readonly id: string, opts: MeldMqttOpts,
+    connect: (opts: IClientOptions) => AsyncMqttClient = defaultConnect) {
 
-    this.id = mqtt.options.clientId;
     this.initialised = new Future;
-    this.presence = new MqttPresence(domain);
+    this.presence = new MqttPresence(domain, id);
     this.operationsTopic = OPERATIONS_TOPIC.with({ domain });
     this.controlTopic = CONTROL_TOPIC.with({ domain });
     // We only listen for control requests
     this.sentTopic = SEND_TOPIC.with({ toId: this.id, address: this.controlTopic.path });
     this.replyTopic = REPLY_TOPIC.with({ toId: this.id });
+    this.mqtt = connect({ ...opts, will: this.presence.will });
 
     // Set up listeners
-    mqtt.on('message', (topic, payload) => {
+    this.mqtt.on('message', (topic, payload) => {
       this.presence.onMessage(topic, payload);
       this.onMessage(topic, payload);
     });
 
     // When MQTT dies irrecoverably, tell the clone (it will shut down)
-    mqtt.on('error', err => this.remoteUpdates.error(err));
+    this.mqtt.on('error', err => this.remoteUpdates.error(err));
 
-    mqtt.on('connect', async () => {
+    this.mqtt.on('connect', async () => {
       try {
         // Subscribe as required
         const subscriptions: ISubscriptionMap = { ...this.presence.subscriptions };
@@ -74,12 +76,12 @@ export class MqttRemotes implements MeldRemotes {
         subscriptions[this.controlTopic.address] = 1;
         subscriptions[this.sentTopic.address] = 0;
         subscriptions[this.replyTopic.address] = 0;
-        const grants = await mqtt.subscribe(subscriptions);
+        const grants = await this.mqtt.subscribe(subscriptions);
         if (!grants.every(grant => subscriptions[grant.topic] == grant.qos))
           throw new Error('Requested QoS was not granted');
 
         // Join the presence on this domain
-        await this.presence.join(mqtt, this.id, this.id, this.controlTopic.address);
+        await this.presence.join(this.mqtt, this.id, this.controlTopic.address);
 
         // Tell the world that a clone has connected
         this.mqtt.publish(this.controlTopic.address,
@@ -105,7 +107,7 @@ export class MqttRemotes implements MeldRemotes {
         try {
           // Delta received from the local clone. Relay to the domain
           await this.mqtt.publish(
-            this.operationsTopic.address, JSON.stringify(msg));
+            this.operationsTopic.address, JSON.stringify(msg), { qos: 1 });
           // When done, mark the message as delivered
           msg.delivered();
         } catch (err) {
@@ -122,8 +124,8 @@ export class MqttRemotes implements MeldRemotes {
   }
 
   private close(err?: any) {
-    console.log('Shutting down MQTT remote proxy ' + err ? 'due to ' + err : 'normally');
-    this.presence.leave(this.mqtt, this.id, this.id);
+    console.info('Shutting down MQTT remotes ' + (err ? 'due to ' + err : 'normally'));
+    this.presence.leave(this.mqtt, this.id);
     this.mqtt.end();
   }
 
@@ -302,7 +304,7 @@ export class MqttRemotes implements MeldRemotes {
   private onReply(json: any, replyParams: ReplyParams) {
     if (replyParams.sentMessageId in this.replyResolvers) {
       const [resolve, ack] = this.replyResolvers[replyParams.sentMessageId];
-      resolve(Response.fromJson(json));
+      resolve(json != null ? Response.fromJson(json) : null);
       if (ack) // A m-ld ack is a reply to a reply with a null body
         ack.then(() => this.reply(replyParams, null));
     }
