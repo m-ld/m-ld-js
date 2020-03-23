@@ -4,7 +4,9 @@
     "target": "es5",
     "module": "commonjs",
     "moduleResolution": "node",
-    "sourceMap": true,
+    "sourceMap": false,
+    "inlineSourceMap": true,
+    "inlineSources": true,
     "declaration": true,
     "strictNullChecks": true,
     "outDir": "dist"
