@@ -130,6 +130,8 @@ export class SuSetDataset extends JrqlGraph {
 
   private async journalTail(): Promise<[Journal, JournalEntry]> {
     const journal = await this.loadJournal();
+    if (!journal?.tail)
+      throw new Error('Journal has no tail');
     return [journal, await this.controlGraph.describe1(journal.tail) as JournalEntry];
   }
 
@@ -137,17 +139,20 @@ export class SuSetDataset extends JrqlGraph {
     return new Observable(subs => {
       this.loadJournal().then(async (journal) => {
         const last = await this.controlGraph.describe1(journal.lastDelivered) as JournalEntry;
-        await this.emitJournalAfter(last, subs);
+        await this.emitJournalAfter(last, subs, 'localOnly');
       });
     });
   }
 
-  private async emitJournalAfter(entry: JournalEntry, subs: Subscriber<MeldJournalEntry>) {
+  private async emitJournalAfter(entry: JournalEntry,
+    subs: Subscriber<MeldJournalEntry>, localOnly?: 'localOnly') {
     if (entry.next) {
       entry = await this.controlGraph.describe1(entry.next) as JournalEntry;
-      const delivered = () => this.markDelivered(entry['@id']);
-      const time = TreeClock.fromJson(entry.time) as TreeClock; // Never null
-      subs.next({ time, data: JSON.parse(entry.delta), delivered });
+      if (!localOnly || !entry.remote) {
+        const delivered = () => this.markDelivered(entry['@id']);
+        const time = TreeClock.fromJson(entry.time) as TreeClock; // Never null
+        subs.next({ time, data: JSON.parse(entry.delta), delivered });
+      }
       await this.emitJournalAfter(entry, subs);
     } else {
       subs.complete();
@@ -182,7 +187,7 @@ export class SuSetDataset extends JrqlGraph {
   }
 
   async transact(prepare: () => Promise<[TreeClock, PatchQuads]>): Promise<MeldJournalEntry> {
-    return this.dataset.transact(async () => {
+    return this.dataset.transact<MeldJournalEntry>(async () => {
       const [time, patch] = await prepare();
       const deletedTripleTids = await this.findTriplesTids(patch.oldQuads);
       const delta = await newDelta({
@@ -198,7 +203,7 @@ export class SuSetDataset extends JrqlGraph {
       // Include journaling in final patch
       const [journaling, entry] = await this.journal(delta, time, false);
       this.postUpdate(patch);
-      return [patch.concat(tidPatch).concat(journaling), entry] as [Patch, MeldJournalEntry];
+      return [patch.concat(tidPatch).concat(journaling), entry];
     });
   }
 

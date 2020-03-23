@@ -47,7 +47,7 @@ export class MqttRemotes implements MeldRemotes {
   private readonly recentlySentTo: Set<string> = new Set;
   private readonly consuming: { [address: string]: Source<any> } = {};
   private isGenesis: boolean = true;
-  private readonly notifyLock = new AsyncLock();
+  private readonly notifyLock = new AsyncLock;
 
   constructor(domain: string, private readonly id: string, opts: MeldMqttOpts,
     connect: (opts: IClientOptions) => AsyncMqttClient = defaultConnect) {

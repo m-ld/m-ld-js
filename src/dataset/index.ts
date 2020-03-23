@@ -65,6 +65,7 @@ export interface DatasetOptions extends AbstractOpenOptions {
 export class QuadStoreDataset implements Dataset {
   readonly id: string;
   private readonly store: RdfStore;
+  private readonly lock = new AsyncLock;
 
   constructor(abstractLevelDown: AbstractLevelDOWN, opts: DatasetOptions) {
     this.id = opts.id;
@@ -76,7 +77,7 @@ export class QuadStoreDataset implements Dataset {
   }
 
   transact<T>(prepare: () => Promise<Patch | [Patch | undefined, T] | undefined | void>): Promise<T | void> {
-    return new AsyncLock().acquire(this.id, async () => {
+    return this.lock.acquire(this.id, async () => {
       const prep = await prepare();
       const [patch, rtn] = Array.isArray(prep) ? prep : [prep, undefined];
       if (patch)
