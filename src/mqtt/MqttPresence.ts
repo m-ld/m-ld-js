@@ -10,6 +10,9 @@ interface PresenceParams extends TopicParams {
 const PRESENCE_TOPIC = new MqttTopic<PresenceParams>(
   ['__presence', { '+': 'domain' }, { '#': 'clientConsumer' }]);
 const PRESENCE_OPTS: Required<Pick<IClientPublishOptions, 'qos' | 'retain'>> = { qos: 1, retain: true };
+// FIXME SPEC: Leave payload should be empty, so that it is not retained
+// http://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.html#_Toc385349265
+const LEAVE_PAYLOAD = '-';
 
 export class MqttPresence {
   private readonly presenceTopic: MqttTopic<PresenceParams>;
@@ -23,7 +26,7 @@ export class MqttPresence {
     return {
       ...PRESENCE_OPTS,
       topic: this.presenceTopic.with({ clientConsumer: [this.clientId] }).address,
-      payload: '-'
+      payload: LEAVE_PAYLOAD
     };
   }
 
@@ -42,7 +45,7 @@ export class MqttPresence {
   async leave(mqtt: AsyncMqttClient, consumerId?: string) {
     await mqtt.publish(this.presenceTopic.with({
       clientConsumer: consumerId ? [this.clientId, consumerId] : [this.clientId]
-    }).address, '-', PRESENCE_OPTS);
+    }).address, LEAVE_PAYLOAD, PRESENCE_OPTS);
   }
 
   present(address: string): Set<string> {
@@ -60,7 +63,7 @@ export class MqttPresence {
     this.presenceTopic.match(topic, presence => {
       const address = payload.toString(),
         [clientId, consumerId] = presence.clientConsumer;
-      if (address === '-') {
+      if (address === LEAVE_PAYLOAD) {
         if (consumerId && this.presentMap[clientId]) {
           delete this.presentMap[clientId][consumerId];
           if (!Object.keys(this.presentMap[clientId]).length)

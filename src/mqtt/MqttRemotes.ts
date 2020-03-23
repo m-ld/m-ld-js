@@ -10,7 +10,7 @@ import { Response, Request, Hello } from '../m-ld/ControlMessage';
 import { Future, jsonFrom, rdfToJson } from '../util';
 import { map, finalize, flatMap } from 'rxjs/operators';
 import { toRDF } from 'jsonld';
-import { Triple } from 'rdf-js';
+import { Quad } from 'rdf-js';
 import { fromTimeString, toTimeString } from '../m-ld/JsonDelta';
 import { Hash } from '../hash';
 import AsyncLock = require('async-lock');
@@ -141,7 +141,7 @@ export class MqttRemotes implements MeldRemotes {
     const res = await this.send<Response.Snapshot>(Request.Snapshot.JSON, ack);
     const snapshot: Snapshot = {
       time: res.time,
-      data: (await this.consume(res.dataAddress)).pipe(flatMap(triplesFromJson)),
+      data: (await this.consume(res.dataAddress)).pipe(flatMap(quadsFromJson)),
       lastHash: res.lastHash,
       updates: (await this.consume(res.updatesAddress)).pipe(map(deltaFromJson))
     };
@@ -332,8 +332,8 @@ export class MqttRemotes implements MeldRemotes {
   }
 }
 
-async function triplesFromJson(json: any): Promise<Triple[]> {
-  return await toRDF(json) as Triple[];
+async function quadsFromJson(json: any): Promise<Quad[]> {
+  return await toRDF(json) as Quad[];
 }
 
 function deltaFromJson(json: any): DeltaMessage {

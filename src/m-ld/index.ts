@@ -4,7 +4,7 @@
 import { TreeClock } from '../clocks';
 import { Observable } from 'rxjs';
 import { Message } from '../messages';
-import { Triple } from 'rdf-js';
+import { Triple, Quad } from 'rdf-js';
 import { Hash } from '../hash';
 import { Pattern, Subject, Group, DeleteInsert } from './jsonrql';
 
@@ -40,14 +40,20 @@ export interface MeldDelta {
    * For any m-ld delta, there are many possible serialisations.
    * A delta carries its serialisation with it, for journaling and hashing.
    */
-  readonly json: JsonDelta
+  readonly json: JsonDelta;
 }
 
 export type JsonDelta = {
-  [key in Exclude<keyof MeldDelta, 'json'>]: string
+  [key in Exclude<keyof MeldDelta, 'json'>]: string;
 }
 
-export interface Snapshot extends Message<TreeClock, Observable<Triple[]>> {
+/**
+ * An observable of quad arrays. Quads, because it must include the TID graph;
+ * arrays for batching (sender decides array size).
+ */
+// FIXME: Not compliant with Java implementation
+// https://github.com/gsvarovsky/m-ld/issues/10
+export interface Snapshot extends Message<TreeClock, Observable<Quad[]>> {
   readonly lastHash: Hash;
   readonly updates: Observable<DeltaMessage>;
 }

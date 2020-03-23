@@ -8,7 +8,7 @@ import { Dataset, PatchQuads, Patch } from '.';
 import { Iri } from 'jsonld/jsonld-spec';
 import { JrqlGraph, toGroup } from './JrqlGraph';
 import { JsonDeltaBagBlock, newDelta, asMeldDelta, toTimeString, fromTimeString, reify, unreify } from '../m-ld/JsonDelta';
-import { Observable, Subscriber, from, Subject as Source } from 'rxjs';
+import { Observable, Subscriber, from, Subject as Source, merge } from 'rxjs';
 import { toArray, bufferCount, flatMap } from 'rxjs/operators';
 import { flatten } from '../util';
 import { generate as uuid } from 'short-uuid';
@@ -249,7 +249,7 @@ export class SuSetDataset extends JrqlGraph {
     return this.tidsGraph.findQuads({ '@id': tripleId } as Partial<HashTid>);
   }
 
-  async applySnapshot(data: Observable<Triple[]>,
+  async applySnapshot(data: Observable<Quad[]>,
     lastHash: Hash, lastTime: TreeClock, localTime: TreeClock): Promise<void> {
     return this.dataset.transact(async () => {
       const reset = await this.reset(lastHash, lastTime, localTime);
@@ -269,7 +269,10 @@ export class SuSetDataset extends JrqlGraph {
         resolve({
           time: fromTimeString(tail.time) as TreeClock,
           lastHash: Hash.decode(tail.hash),
-          data: this.graph.match().pipe(bufferCount(10)) // TODO buffer config
+          data: merge(
+            this.graph.match(),
+            this.tidsGraph.graph.match())
+            .pipe(bufferCount(10)) // TODO buffer config
         });
       }).catch(reject);
     });

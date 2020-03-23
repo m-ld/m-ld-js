@@ -8,8 +8,8 @@
     "tsc:version": "tsc --version",
     "clean": "rm -rf dist",
     "build": "npm run test && tsc",
-    "dev": "jest --watch",
-    "test": "jest"
+    "dev": "jest --watch --silent",
+    "test": "jest --silent"
   },
   "repository": {
     "type": "git",
