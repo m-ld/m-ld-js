@@ -59,7 +59,7 @@ export class MqttRemotes implements MeldRemotes {
     // We only listen for control requests
     this.sentTopic = SEND_TOPIC.with({ toId: this.id, address: this.controlTopic.path });
     this.replyTopic = REPLY_TOPIC.with({ toId: this.id });
-    this.mqtt = connect({ ...opts, will: this.presence.will });
+    this.mqtt = connect({ ...opts, clientId: id, will: this.presence.will });
 
     // Set up listeners
     this.mqtt.on('message', (topic, payload) => {

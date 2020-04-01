@@ -50,7 +50,7 @@ describe('New MQTT remotes', () => {
 
     test('subscribes to topics', () => {
       expect(mqtt.subscribe).toBeCalledWith({
-        '__presence/test.m-ld.org/#': 1,
+        '__presence/test.m-ld.org/+': 1,
         'test.m-ld.org/operations': 1,
         'test.m-ld.org/control': 1,
         '__send/client1/+/+/test.m-ld.org/control': 0,
@@ -58,8 +58,8 @@ describe('New MQTT remotes', () => {
       });
       expect(mqtt.publish.mock.calls).toEqual([
         // Setting retained presence on the channel
-        ['__presence/test.m-ld.org/client1/client1',
-          'test.m-ld.org/control',
+        ['__presence/test.m-ld.org/client1',
+          '{"client1":"test.m-ld.org/control"}',
           { qos: 1, retain: true }],
         // Setting retained last joined clone (no longer genesis)
         ['test.m-ld.org/control',
@@ -105,8 +105,8 @@ describe('New MQTT remotes', () => {
       updates.complete();
 
       expect(mqtt.publish).toHaveBeenLastCalledWith(
-        '__presence/test.m-ld.org/client1/client1',
-        '-',
+        '__presence/test.m-ld.org/client1',
+        '',
         { qos: 1, retain: true });
     });
   });
@@ -131,7 +131,7 @@ describe('New MQTT remotes', () => {
     test('can get clock', async () => {
       const newClock = TreeClock.GENESIS.forked().right;
       // Set presence of client2's consumer
-      await remotePublish('__presence/test.m-ld.org/client2/consumer2', 'test.m-ld.org/control');
+      await remotePublish('__presence/test.m-ld.org/client2', '{"consumer2":"test.m-ld.org/control"}');
       remoteSubscribe((topic, json) => {
         const [type, toId, fromId, messageId, domain,] = topic.split('/');
         if (type === '__send' && json['@type'] === 'http://control.m-ld.org/request/clock') {
