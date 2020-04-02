@@ -20,13 +20,24 @@ export function rdfToJson(quads: Quad[]): Promise<any> {
 
 export class Future<T> implements PromiseLike<T> {
   private resolver: (t: T) => void;
-  private rejecter: (err: any) => void;
+  private rejecter: (err?: any) => void;
+  private finalised: boolean = false;
   readonly promise: Promise<T>;
 
   constructor() {
     this.promise = new Promise<T>((resolve, reject) => {
-      this.resolver = resolve;
-      this.rejecter = reject;
+      this.resolver = (value?: T | PromiseLike<T> | undefined) => {
+        if (!this.finalised) {
+          this.finalised = true;
+          resolve(value);
+        }
+      };
+      this.rejecter = reason => {
+        if (!this.finalised) {
+          this.finalised = true;
+          reject(reason);
+        }
+      };
     });
   }
 

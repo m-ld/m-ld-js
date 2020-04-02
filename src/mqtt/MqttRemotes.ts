@@ -29,7 +29,7 @@ interface JsonNotification {
 }
 
 export type MeldMqttOpts = Omit<IClientOptions, 'will' | 'clientId'> &
-  ({ hostname: string } | { host: string, port: number })
+  ({ hostname: string } | { host: string, port: number }) & { sendTimeout?: number }
 
 export class MqttRemotes implements MeldRemotes {
   private readonly mqtt: AsyncMqttClient;
@@ -48,12 +48,14 @@ export class MqttRemotes implements MeldRemotes {
   private readonly consuming: { [address: string]: Source<any> } = {};
   private isGenesis: boolean = true;
   private readonly notifyLock = new AsyncLock;
+  private readonly sendTimeout: number;
 
   constructor(domain: string, private readonly id: string, opts: MeldMqttOpts,
     connect: (opts: IClientOptions) => AsyncMqttClient = defaultConnect) {
 
     this.initialised = new Future;
     this.presence = new MqttPresence(domain, id);
+    this.sendTimeout = opts.sendTimeout || 2000;
     this.operationsTopic = OPERATIONS_TOPIC.with({ domain });
     this.controlTopic = CONTROL_TOPIC.with({ domain });
     // We only listen for control requests
@@ -219,10 +221,17 @@ export class MqttRemotes implements MeldRemotes {
     await this.mqtt.publish(
       this.nextSendAddress(messageId),
       JSON.stringify(json));
-    return new Promise<T>((resolve: (t: T) => void, reject) => {
-      // TODO: reject on timeout
-      this.replyResolvers[messageId] = [resolve, ack];
-    })
+    return this.getResponse<T>(messageId, ack);
+  }
+
+  private getResponse<T extends Response | null>(messageId: string, ack: PromiseLike<null> | null) {
+    const response = new Future<T>();
+    this.replyResolvers[messageId] = [response.resolve, ack];
+    setTimeout(() => {
+      response.reject(new Error('Send timeout exceeded.'));
+      delete this.replyResolvers[messageId];
+    }, this.sendTimeout);
+    return response;
   }
 
   private onSent(json: any, sentParams: SendParams) {
@@ -297,12 +306,8 @@ export class MqttRemotes implements MeldRemotes {
     await this.mqtt.publish(REPLY_TOPIC.with({
       messageId, fromId: this.id, toId, sentMessageId
     }).address, JSON.stringify(json));
-    if (expectAck) {
-      return new Promise<void>((resolve: () => void, reject) => {
-        // TODO: reject on timeout
-        this.replyResolvers[messageId] = [resolve, null];
-      })
-    }
+    if (expectAck)
+      return this.getResponse<null>(messageId, null);
   }
 
   private onReply(json: any, replyParams: ReplyParams) {
