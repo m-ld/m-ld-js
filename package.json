@@ -10,7 +10,7 @@
     "build": "npm run test && tsc",
     "dev": "jest --watch --silent",
     "test": "jest --silent",
-    "publish-patch": "npm version patch -m \"Patch version\" && git push && npm publish"
+    "publish-patch": "npm run build && npm version patch -m \"Patch version\" && git push && npm publish"
   },
   "repository": {
     "type": "git",
