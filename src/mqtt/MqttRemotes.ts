@@ -158,7 +158,7 @@ export class MqttRemotes implements MeldRemotes {
 
   private async revupFromNext(lastHash: Hash, tried: Set<string>): Promise<Observable<DeltaMessage> | undefined> {
     const ack = new Future<null>();
-    const res = await this.send<Response.Revup>(Request.Revup.toJson({ lastHash }), ack);
+    const res = await this.send<Response.Revup>(new Request.Revup(lastHash).toJson(), ack);
     if (res.hashFound) {
       const updates = (await this.consume(res.updatesAddress)).pipe(map(deltaFromJson));
       // Ack the response to start the streams
@@ -238,26 +238,26 @@ export class MqttRemotes implements MeldRemotes {
     // Ignore control messages before we have a clone
     if (this.clone) {
       const req = Request.fromJson(json);
-      if (Request.isNewClock(req)) {
+      if (req instanceof Request.NewClock) {
         this.replyClock(sentParams, this.clone.newClock());
-      } else if (Request.isSnapshot(req)) {
+      } else if (req instanceof Request.Snapshot) {
         this.replySnapshot(sentParams, this.clone.snapshot());
-      } else if (Request.isRevup(req)) {
+      } else if (req instanceof Request.Revup) {
         this.replyRevup(sentParams, this.clone.revupFrom(req.lastHash));
       }
     }
   }
 
   private async replyClock(sentParams: SendParams, clock: Promise<TreeClock>) {
-    this.reply(sentParams, Response.NewClock.toJson({ clock: await clock }));
+    this.reply(sentParams, new Response.NewClock(await clock).toJson());
   }
 
   private async replySnapshot(sentParams: SendParams, snapshot: Promise<Snapshot>) {
     const { time, lastHash, data, updates } = await snapshot;
     const dataAddress = uuid(), updatesAddress = uuid();
-    await this.reply(sentParams, Response.Snapshot.toJson({
+    await this.reply(sentParams, new Response.Snapshot(
       time, dataAddress, lastHash, updatesAddress
-    }), true);
+    ).toJson(), true);
     // Ack has been sent, start streaming the data and updates
     this.produce(data, dataAddress, rdfToJson);
     this.produce(updates, updatesAddress, jsonFromDelta);
@@ -268,15 +268,11 @@ export class MqttRemotes implements MeldRemotes {
     const revup = await willRevup;
     if (revup) {
       const updatesAddress = uuid();
-      await this.reply(sentParams, Response.Revup.toJson({
-        hashFound: true, updatesAddress
-      }), true);
+      await this.reply(sentParams, new Response.Revup(true, updatesAddress).toJson(), true);
       // Ack has been sent, start streaming the updates
       this.produce(revup, updatesAddress, jsonFromDelta);
     } else if (this.clone) {
-      this.reply(sentParams, Response.Revup.toJson({
-        hashFound: false, updatesAddress: this.clone.id
-      }));
+      this.reply(sentParams, new Response.Revup(false, this.clone.id).toJson());
     }
   }
 

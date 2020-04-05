@@ -1,56 +1,41 @@
 import { Hash } from '../hash';
 import { TreeClock } from '../clocks';
 
+////////////////////////////////////////////////////////////////////////////////
+// TODO: Protect all of this with json-schema
+
 export interface Hello {
   id: string;
 }
 
 export namespace Request {
-  export interface NewClock { }
-
-  export function isNewClock(req: Request): req is NewClock {
-    return req === NewClock.INSTANCE; // See fromJson
+  export class NewClock {
+    static readonly JSON = { '@type': 'http://control.m-ld.org/request/clock' };
   }
 
-  export interface Snapshot { }
-
-  export function isSnapshot(req: Request): req is Snapshot {
-    return req === Snapshot.INSTANCE; // See fromJson
+  export class Snapshot {
+    static readonly JSON = { '@type': 'http://control.m-ld.org/request/snapshot' };
   }
 
-  export interface Revup {
-    lastHash: Hash;
-  }
-
-  export function isRevup(req: Request): req is Revup {
-    return 'lastHash' in req;
-  }
-
-  export const NewClock = {
-    INSTANCE: {} as NewClock,
-    JSON: { '@type': 'http://control.m-ld.org/request/clock' }
-  }
-
-  export const Snapshot = {
-    INSTANCE: {} as Snapshot,
-    JSON: { '@type': 'http://control.m-ld.org/request/snapshot' }
-  }
-
-  export const Revup = {
-    toJson: (res: Revup) => ({
-      '@type': 'http://control.m-ld.org/request/revup', ...res
-    })
+  export class Revup {
+    constructor(readonly lastHash: Hash) { };
+    readonly toJson = () => ({
+      '@type': 'http://control.m-ld.org/request/revup',
+      lastHash: this.lastHash.encode()
+    });
   }
 
   // If return type is Request the type system thinks it's always NewClock
-  export function fromJson(json: any): any {
-    switch (json['@type']) {
-      case 'http://control.m-ld.org/request/clock':
-        return NewClock.INSTANCE; // See isNewClock
-      case 'http://control.m-ld.org/request/snapshot':
-        return Snapshot.INSTANCE; // See isSnapshot
-      case 'http://control.m-ld.org/request/revup':
-        return { lastHash: json.lastHash };
+  export function fromJson(json: any): Request {
+    if (typeof json === 'object' && typeof json['@type'] === 'string') {
+      switch (json['@type']) {
+        case 'http://control.m-ld.org/request/clock':
+          return new NewClock;
+        case 'http://control.m-ld.org/request/snapshot':
+          return new Snapshot;
+        case 'http://control.m-ld.org/request/revup':
+          return new Revup(Hash.decode(json.lastHash));
+      }
     }
     throw new Error('Bad request JSON');
   }
@@ -58,55 +43,65 @@ export namespace Request {
 export type Request = Request.NewClock | Request.Snapshot | Request.Revup;
 
 export namespace Response {
-  export interface NewClock {
-    clock: TreeClock;
+  export class NewClock {
+    constructor(
+      readonly clock: TreeClock) {
+    };
+    
+    readonly toJson = () => ({
+      '@type': 'http://control.m-ld.org/response/clock',
+      clock: this.clock.toJson()
+    });
   }
 
-  export interface Snapshot {
-    time: TreeClock;
-    dataAddress: string;
-    lastHash: Hash;
-    updatesAddress: string;
+  export class Snapshot {
+    constructor(
+      readonly time: TreeClock,
+      readonly dataAddress: string,
+      readonly lastHash: Hash,
+      readonly updatesAddress: string) {
+    }
+    
+    readonly toJson = () => ({
+      '@type': 'http://control.m-ld.org/response/snapshot',
+      time: this.time.toJson(),
+      dataAddress: this.dataAddress,
+      lastHash: this.lastHash.encode(),
+      updatesAddress: this.updatesAddress
+    });
   }
 
-  export interface Revup {
-    hashFound: boolean;
-    /**
-     * If !hashFound this should be a stable identifier of the answering clone,
-     * to allow detection of a re-send.
-     */
-    updatesAddress: string;
-  }
-
-  export const NewClock = {
-    toJson: (res: NewClock) => ({
-      '@type': 'http://control.m-ld.org/response/clock', ...res,
-      clock: res.clock.toJson()
-    })
-  }
-
-  export const Snapshot = {
-    toJson: (res: Snapshot) => ({
-      '@type': 'http://control.m-ld.org/response/snapshot', ...res,
-      time: res.time.toJson(),
-      lastHash: res.lastHash.encode()
-    })
-  }
-
-  export const Revup = {
-    toJson: (res: Revup) => ({
-      '@type': 'http://control.m-ld.org/response/revup', ...res
+  export class Revup {
+    constructor(
+      readonly hashFound: boolean,
+      /**
+       * If !hashFound this should be a stable identifier of the answering clone,
+       * to allow detection of a re-send.
+       */
+      readonly updatesAddress: string) {
+    }
+    
+    readonly toJson = () => ({
+      '@type': 'http://control.m-ld.org/response/revup',
+      hashFound: this.hashFound,
+      updatesAddress: this.updatesAddress
     })
   }
 
   export function fromJson(json: any): Response {
-    switch (json['@type']) {
-      case 'http://control.m-ld.org/response/clock':
-        return { ...json, clock: TreeClock.fromJson(json.clock) };
-      case 'http://control.m-ld.org/response/snapshot':
-        return { ...json, time: TreeClock.fromJson(json.time), lastHash: Hash.decode(json.lastHash) };
-      case 'http://control.m-ld.org/response/revup':
-        return { ...json };
+    if (typeof json === 'object' && typeof json['@type'] === 'string') {
+      switch (json['@type']) {
+        case 'http://control.m-ld.org/response/clock':
+          const clock = TreeClock.fromJson(json.clock);
+          if (clock)
+            return new NewClock(clock);
+        case 'http://control.m-ld.org/response/snapshot':
+          const time = TreeClock.fromJson(json.time);
+          if (time)
+            return new Snapshot(time, json.dataAddress, Hash.decode(json.lastHash), json.updatesAddress);
+        case 'http://control.m-ld.org/response/revup':
+          return new Revup(json.hashFound, json.updatesAddress);
+      }
     }
     throw new Error('Bad response JSON');
   }

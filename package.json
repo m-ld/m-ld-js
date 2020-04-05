@@ -9,7 +9,8 @@
     "clean": "rm -rf dist",
     "build": "npm run test && tsc",
     "dev": "jest --watch --silent",
-    "test": "jest --silent"
+    "test": "jest --silent",
+    "publish-patch": "npm version patch -m \"Patch version\" && git push && npm publish"
   },
   "repository": {
     "type": "git",
