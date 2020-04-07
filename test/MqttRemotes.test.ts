@@ -53,6 +53,7 @@ describe('New MQTT remotes', () => {
         '__presence/test.m-ld.org/+': 1,
         'test.m-ld.org/operations': 1,
         'test.m-ld.org/control': 1,
+        'test.m-ld.org/registry': 1,
         '__send/client1/+/+/test.m-ld.org/control': 0,
         '__reply/client1/+/+/+': 0
       });
@@ -62,7 +63,7 @@ describe('New MQTT remotes', () => {
           '{"client1":"test.m-ld.org/control"}',
           { qos: 1, retain: true }],
         // Setting retained last joined clone (no longer genesis)
-        ['test.m-ld.org/control',
+        ['test.m-ld.org/registry',
           '{"id":"client1"}',
           { qos: 1, retain: true }]
       ]);
@@ -114,7 +115,7 @@ describe('New MQTT remotes', () => {
   describe('when not genesis', () => {
     beforeEach(async () => {
       // Send retained Hello
-      remotePublish('test.m-ld.org/control', { id: 'client2' });
+      remotePublish('test.m-ld.org/registry', { id: 'client2' });
       mqtt.emit('connect');
       await remotes.initialise();
     });
