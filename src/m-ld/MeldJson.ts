@@ -1,19 +1,16 @@
 import { MeldDelta, JsonDelta, UUID } from '.';
 import { Triple, NamedNode } from 'rdf-js';
-import { generate as uuid } from 'short-uuid';
-import { literal, namedNode, triple as newTriple } from '@rdfjs/data-model';
+import { literal, namedNode, blankNode, triple as newTriple } from '@rdfjs/data-model';
 import { HashBagBlock } from '../blocks';
 import { Hash } from '../hash';
-import { asGroup, GroupLike, Context, Group } from './jsonrql';
+import { asGroup, GroupLike, Group } from './jsonrql';
 import { compact, toRDF } from 'jsonld';
-import { Iri } from 'jsonld/jsonld-spec';
-import { flatten, rdfToJson } from '../util';
+import { rdfToJson } from '../util';
 import { TreeClock } from '../clocks';
 
-//TODO: Correct all implementations to use generic @base for reification
-namespace jena {
-  export const $id = 'http://jena.m-ld.org/jena-delta/';
-  export const tid: NamedNode = namedNode($id + '#tid'); // Reification ID property
+namespace meld {
+  export const $id = 'http://m-ld.org';
+  export const tid: NamedNode = namedNode($id + '/#tid'); // TID property
 }
 namespace rdf {
   export const $id = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#';
@@ -24,22 +21,38 @@ namespace rdf {
   export const object = namedNode($id + 'object');
 }
 
+export function hashTriple(triple: Triple): Hash {
+  switch (triple.object.termType) {
+    case 'Literal': return Hash.digest(
+      triple.subject.value,
+      triple.predicate.value,
+      triple.object.termType,
+      triple.object.value || '',
+      triple.object.datatype.value || '',
+      triple.object.language || '');
+    default: return Hash.digest(
+      triple.subject.value,
+      triple.predicate.value,
+      triple.object.termType,
+      triple.object.value);
+  }
+}
+
 // See https://jena.apache.org/documentation/notes/reification.html
-export function reify(triple: Triple, tid: UUID): Triple[] {
-  const rid = namedNode(jena.$id + uuid());
+export function reify(triple: Triple, tids: UUID[]): Triple[] {
+  const rid = blankNode();
   return [
     newTriple(rid, rdf.type, rdf.Statement),
     newTriple(rid, rdf.subject, triple.subject),
     newTriple(rid, rdf.predicate, triple.predicate),
-    newTriple(rid, rdf.object, triple.object),
-    newTriple(rid, jena.tid, literal(tid))
-  ];
+    newTriple(rid, rdf.object, triple.object)
+  ].concat(tids.map(tid => newTriple(rid, meld.tid, literal(tid))));
 }
 
-export function unreify(reifications: Triple[]): [Triple, UUID][] {
+export function unreify(reifications: Triple[]): [Triple, UUID[]][] {
   return Object.values(reifications.reduce((rids, reification) => {
     const rid = reification.subject.value;
-    let [triple, tid] = rids[rid] || [{}, null];
+    let [triple, tids] = rids[rid] || [{}, []];
     switch (reification.predicate.value) {
       case rdf.subject.value:
         if (reification.object.termType == 'NamedNode')
@@ -52,13 +65,13 @@ export function unreify(reifications: Triple[]): [Triple, UUID][] {
       case rdf.object.value:
         triple.object = reification.object;
         break;
-      case jena.tid.value:
-        tid = reification.object.value;
+      case meld.tid.value:
+        tids.push(reification.object.value);
         break;
     }
-    rids[rid] = [triple, tid];
+    rids[rid] = [triple, tids];
     return rids;
-  }, {} as { [rid: string]: [Triple, UUID] }));
+  }, {} as { [rid: string]: [Triple, UUID[]] }));
 }
 
 export class JsonDeltaBagBlock extends HashBagBlock<JsonDelta> {
@@ -67,10 +80,14 @@ export class JsonDeltaBagBlock extends HashBagBlock<JsonDelta> {
   protected hash = (data: JsonDelta) => Hash.digest(data.tid, data.insert, data.delete);
 }
 
-const DELETE_CONTEXT = {
-  '@base': jena.$id,
+/**
+ * @see m-ld/m-ld-core/src/main/java/org/m_ld/MeldResource.java
+ */
+const DEFAULT_CONTEXT = {
+  '@base': meld.$id,
   rdf: rdf.$id,
-  tid: jena.tid.value,
+  xs: 'http://www.w3.org/2001/XMLSchema#',
+  tid: meld.tid.value,
   s: { '@type': '@id', '@id': 'rdf:subject' },
   p: { '@type': '@id', '@id': 'rdf:predicate' },
   o: 'rdf:object'
@@ -81,8 +98,8 @@ export async function newDelta(delta: Omit<MeldDelta, 'json'>): Promise<MeldDelt
     ...delta,
     json: {
       tid: delta.tid,
-      insert: await toJson(delta.insert, {}),
-      delete: await toJson(delta.delete, DELETE_CONTEXT)
+      insert: JSON.stringify(await toMeldJson(delta.insert)),
+      delete: JSON.stringify(await toMeldJson(delta.delete))
     }
   };
 }
@@ -90,22 +107,22 @@ export async function newDelta(delta: Omit<MeldDelta, 'json'>): Promise<MeldDelt
 export async function asMeldDelta(delta: JsonDelta): Promise<MeldDelta> {
   return {
     tid: delta.tid,
-    insert: await fromJson(delta.insert, {}),
-    delete: await fromJson(delta.delete, DELETE_CONTEXT),
+    insert: await fromMeldJson(JSON.parse(delta.insert)),
+    delete: await fromMeldJson(JSON.parse(delta.delete)),
     json: delta
   }
 }
 
-async function toJson(triples: Triple[], context: Context): Promise<string> {
+export async function toMeldJson(triples: Triple[]): Promise<any> {
   const jsonld = await rdfToJson(triples);
-  const group = asGroup(await compact(jsonld, context || {}) as GroupLike);
+  const group = asGroup(await compact(jsonld, DEFAULT_CONTEXT) as GroupLike);
   delete group['@context'];
-  return JSON.stringify(group);
+  return group;
 }
 
-async function fromJson(json: string, context: Context): Promise<Triple[]> {
-  const jsonld = JSON.parse(json) as Group;
-  jsonld['@context'] = context;
+export async function fromMeldJson(json: any): Promise<Triple[]> {
+  const jsonld = json as Group;
+  jsonld['@context'] = DEFAULT_CONTEXT;
   return await toRDF(jsonld) as Triple[];
 }
 

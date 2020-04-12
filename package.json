@@ -7,7 +7,7 @@
   "scripts": {
     "tsc:version": "tsc --version",
     "clean": "rm -rf dist",
-    "build": "npm run test && tsc",
+    "build": "npm run clean && npm run test && tsc",
     "dev": "jest --watch --silent",
     "test": "jest --silent",
     "publish-patch": "npm run build && npm version patch -m \"Patch version\" && git push && npm publish"

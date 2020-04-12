@@ -7,11 +7,11 @@ import { MqttTopic, SEND_TOPIC, REPLY_TOPIC, SendParams, ReplyParams, DirectPara
 import { TopicParams } from 'mqtt-pattern';
 import { MqttPresence } from './MqttPresence';
 import { Response, Request, Hello } from '../m-ld/ControlMessage';
-import { Future, jsonFrom, rdfToJson } from '../util';
+import { Future, jsonFrom } from '../util';
 import { map, finalize, flatMap } from 'rxjs/operators';
 import { toRDF } from 'jsonld';
 import { Quad } from 'rdf-js';
-import { fromTimeString, toTimeString } from '../m-ld/JsonDelta';
+import { fromTimeString, toTimeString, toMeldJson, fromMeldJson } from '../m-ld/MeldJson';
 import { Hash } from '../hash';
 import AsyncLock = require('async-lock');
 
@@ -147,7 +147,7 @@ export class MqttRemotes implements MeldRemotes {
     const res = await this.send<Response.Snapshot>(Request.Snapshot.JSON, ack);
     const snapshot: Snapshot = {
       time: res.time,
-      data: (await this.consume(res.dataAddress)).pipe(flatMap(quadsFromJson)),
+      data: (await this.consume(res.dataAddress)).pipe(flatMap(fromMeldJson)),
       lastHash: res.lastHash,
       updates: (await this.consume(res.updatesAddress)).pipe(map(deltaFromJson))
     };
@@ -263,7 +263,7 @@ export class MqttRemotes implements MeldRemotes {
       time, dataAddress, lastHash, updatesAddress
     ).toJson(), true);
     // Ack has been sent, start streaming the data and updates
-    this.produce(data, dataAddress, rdfToJson);
+    this.produce(data, dataAddress, toMeldJson);
     this.produce(updates, updatesAddress, jsonFromDelta);
   }
 
@@ -335,10 +335,6 @@ export class MqttRemotes implements MeldRemotes {
       throw new Error(`No-one present on ${this.controlTopic.address} to send message to`);
     }
   }
-}
-
-async function quadsFromJson(json: any): Promise<Quad[]> {
-  return await toRDF(json) as Quad[];
 }
 
 function deltaFromJson(json: any): DeltaMessage {
