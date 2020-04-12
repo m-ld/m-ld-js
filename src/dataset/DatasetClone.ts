@@ -79,7 +79,8 @@ export class DatasetClone implements MeldClone {
     await new Promise<void>((resolve, reject) => {
       this.messageService.deliver(snapshotMsg, this.orderingBuffer, acceptedMsg => {
         if (acceptedMsg == snapshotMsg) {
-          this.dataset.applySnapshot(snapshot.data, snapshot.lastHash, snapshot.time, this.localTime)
+          this.dataset.applySnapshot(
+            snapshot.data, snapshot.lastHash, snapshot.time, this.localTime)
             .then(resolve, reject);
         } else {
           this.dataset.apply(acceptedMsg.data, this.localTime);
