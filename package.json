@@ -5,12 +5,12 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "tsc:version": "tsc --version",
     "clean": "rm -rf dist",
     "build": "npm run clean && npm run test && tsc",
     "dev": "jest --watch --silent",
     "test": "jest --silent",
-    "publish-patch": "npm run build && npm version patch -m \"Patch version\" && git push && npm publish"
+    "publish-patch": "npm run build && npm version patch -m \"Patch version\" && git push && npm publish",
+    "compliance": "node compliance/test.js"
   },
   "repository": {
     "type": "git",
@@ -23,11 +23,14 @@
   },
   "homepage": "https://github.com/gsvarovsky/m-ld-js#readme",
   "devDependencies": {
+    "@gsvarovsky/m-ld-spec": "0.1.0",
     "@types/jest": "^24.0.23",
     "@types/memdown": "^3.0.0",
+    "aedes": "^0.41.0",
     "jest": "^24.9.0",
     "jest-mock-extended": "^1.0.8",
     "memdown": "^5.1.0",
+    "restify": "^8.5.1",
     "ts-jest": "^24.1.0",
     "typescript": "^3.7.2"
   },
