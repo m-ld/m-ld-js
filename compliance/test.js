@@ -9,7 +9,7 @@ const httpUrl = new URL('http://localhost:3000');
 const orchestrator = require('./orchestrator');
 
 // Debug flag stops Jest from squashing stdout lines
-global.debug = true;
+global.debug = false;
 
 const http = restify.createServer();
 http.use(restify.plugins.queryParser());

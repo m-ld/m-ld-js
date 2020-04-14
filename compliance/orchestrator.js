@@ -104,7 +104,7 @@ function registerRequest(req, res, next) {
   requests[req.id()] = [res, next];
 }
 
-function withClone(cloneId, op, next) {
+function withClone(cloneId, op/*(subprocess, tmpDir)*/, next) {
   if (cloneId in clones) {
     op(...clones[cloneId]);
   } else {
