@@ -155,11 +155,11 @@ export class DatasetClone implements MeldClone {
   }
 
   close(err?: any) {
-    console.log('Shutting down clone ' + err ? 'due to ' + err : 'normally');
-    this.dataset.close(err);
+    console.log(`Shutting down clone ${err ? 'due to ' + err : 'normally'}`);
     if (err)
       this.updates.error(err);
     else
       this.updates.complete();
+    return this.dataset.close(err);
   }
 }

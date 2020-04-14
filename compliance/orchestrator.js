@@ -4,12 +4,14 @@ const { join } = require('path');
 const clones = {/* cloneId: subprocess */ };
 const requests = {/* requestId: [res, next] */ };
 
+exports.routes = { start, transact, destroy };
 exports.afterRequest = req => delete requests[req.id()];
 exports.onExit = () => Object.values(clones).forEach(p => p.kill());
 
-exports.start = (req, res, next) => {
+function start(req, res, next) {
+  registerRequest(req, res, next);
   const { cloneId, domain } = req.query;
-  const cloneProcess = fork(join(__dirname, 'clone.js'), [cloneId, domain]);
+  const cloneProcess = fork(join(__dirname, 'clone.js'), [cloneId, domain, req.id()]);
   clones[cloneId] = cloneProcess;
 
   const handlers = {
@@ -32,6 +34,14 @@ exports.start = (req, res, next) => {
       const { requestId, err } = message;
       const [, next] = requests[requestId];
       next(new Error(err));
+    },
+    destroyed: message => {
+      const { requestId } = message;
+      const [res, next] = requests[requestId];
+      clones[cloneId].kill();
+      delete clones[cloneId];
+      res.send({ '@type': 'destroyed', cloneId });
+      next();
     }
   };
 
@@ -41,12 +51,12 @@ exports.start = (req, res, next) => {
   });
 }
 
-exports.transact = (req, res, next) => {
-  const requestId = registerRequest(req, res, next);
+function transact(req, res, next) {
+  registerRequest(req, res, next);
   const { cloneId } = req.query;
   if (cloneId in clones) {
     clones[cloneId].send({
-      id: requestId,
+      id: req.id(),
       '@type': 'transact',
       request: req.body
     });
@@ -56,19 +66,16 @@ exports.transact = (req, res, next) => {
   }
 }
 
-exports.destroy = (req, res, next) => {
+function destroy(req, res, next) {
+  registerRequest(req, res, next);
   const { cloneId } = req.query;
-  global.debug && console.debug(`Destroying clone ${cloneId}`);
   if (cloneId in clones) {
-    clones[cloneId].kill();
-    delete clones[cloneId];
+    global.debug && console.debug(`Destroying clone ${cloneId}`);
+    clones[cloneId].send({ id: req.id(), '@type': 'destroy' });
   }
-  res.send({ '@type': 'destroyed', cloneId });
-  next();
 }
 
 function registerRequest(req, res, next) {
   requests[req.id()] = [res, next];
-  return requestId;
 }
 

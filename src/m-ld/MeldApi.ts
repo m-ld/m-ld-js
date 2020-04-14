@@ -17,8 +17,8 @@ export class MeldApi implements MeldStore {
     this.context['@vocab'] = this.context['@vocab'] || new URL('/#', this.context['@base']).href;
   }
 
-  close(err?: any): void {
-    this.store.close(err);
+  close(err?: any): Promise<void> {
+    return this.store.close(err);
   }
 
   get(path: string): Observable<Subject> {

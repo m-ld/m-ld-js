@@ -74,7 +74,7 @@ export interface MeldLocal extends Meld {
 export interface MeldStore {
   transact(request: Pattern): Observable<Subject>;
   follow(after?: number): Observable<DeleteInsert<Group>>;
-  close(err?: any): void;
+  close(err?: any): Promise<void>;
 }
 
 export type MeldClone = MeldLocal & MeldStore;

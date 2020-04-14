@@ -132,7 +132,7 @@ export class MqttRemotes implements MeldRemotes {
   }
 
   private close(err?: any) {
-    console.info('Shutting down MQTT remotes ' + (err ? 'due to ' + err : 'normally'));
+    console.info(`Shutting down MQTT remotes ${err ? 'due to ' + err : 'normally'}`);
     this.presence.leave(this.mqtt, this.id);
     this.mqtt.end();
   }

@@ -83,12 +83,13 @@ export class SuSetDataset extends JrqlGraph {
       return this.dataset.transact(() => this.reset(Hash.random()));
   }
 
-  close(err?: any) {
-    console.log('Shutting down dataset ' + err ? 'due to ' + err : 'normally');
+  async close(err?: any): Promise<void> {
+    console.log(`Shutting down dataset ${err ? 'due to ' + err : 'normally'}`);
     if (err)
       this.updateSource.error(err);
     else
       this.updateSource.complete();
+    return this.dataset.close();
   }
 
   private async reset(startingHash: Hash,

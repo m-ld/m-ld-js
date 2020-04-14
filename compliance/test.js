@@ -14,9 +14,8 @@ global.debug = true;
 const http = restify.createServer();
 http.use(restify.plugins.queryParser());
 http.use(restify.plugins.bodyParser());
-http.post('/start', orchestrator.start);
-http.post('/transact', orchestrator.transact);
-http.post('/destroy', orchestrator.destroy);
+Object.entries(orchestrator.routes)
+  .forEach(([path, route]) => http.post('/' + path, route));
 http.on('after', orchestrator.afterRequest);
 const connectHttp = promisify(http.listen.bind(http));
 const connectMqtt = promisify(mqtt.listen.bind(mqtt));

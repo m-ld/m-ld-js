@@ -5,6 +5,7 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
+    "link-local-m-ld-spec": "sudo npm link ../m-ld-spec",
     "clean": "rm -rf dist",
     "build": "npm run clean && npm run test && tsc",
     "dev": "jest --watch --silent",
@@ -29,8 +30,10 @@
     "aedes": "^0.41.0",
     "jest": "^24.9.0",
     "jest-mock-extended": "^1.0.8",
+    "leveldown": "^5.6.0",
     "memdown": "^5.1.0",
     "restify": "^8.5.1",
+    "tmp": "^0.1.0",
     "ts-jest": "^24.1.0",
     "typescript": "^3.7.2"
   },

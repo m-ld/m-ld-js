@@ -47,6 +47,8 @@ export interface Dataset {
    */
   transact(prepare: () => Promise<Patch | undefined | void>): Promise<void>;
   transact<T>(prepare: () => Promise<[Patch | undefined, T]>): Promise<T>;
+
+  close(): Promise<void>;
 }
 
 /**
@@ -67,7 +69,7 @@ export class QuadStoreDataset implements Dataset {
   private readonly store: RdfStore;
   private readonly lock = new AsyncLock;
 
-  constructor(abstractLevelDown: AbstractLevelDOWN, opts: DatasetOptions) {
+  constructor(private readonly abstractLevelDown: AbstractLevelDOWN, opts: DatasetOptions) {
     this.id = opts.id;
     this.store = new RdfStore(abstractLevelDown, opts);
   }
@@ -84,6 +86,11 @@ export class QuadStoreDataset implements Dataset {
         await this.store.patch(patch.oldQuads, patch.newQuads);
       return rtn;
     });
+  }
+
+  close(): Promise<void> {
+    return new Promise((resolve, reject) =>
+      this.abstractLevelDown.close(err => err ? reject(err) : resolve()));
   }
 }
 
