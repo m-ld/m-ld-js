@@ -1,19 +1,28 @@
 const { fork } = require('child_process');
 const { join } = require('path');
+const { dirSync } = require('tmp');
 
-const clones = {/* cloneId: subprocess */ };
+const clones = {/* cloneId: [subprocess, tmpDir] */ };
 const requests = {/* requestId: [res, next] */ };
 
-exports.routes = { start, transact, destroy };
+exports.routes = { start, transact, stop, kill, destroy };
 exports.afterRequest = req => delete requests[req.id()];
 exports.onExit = () => Object.values(clones).forEach(p => p.kill());
 
 function start(req, res, next) {
   registerRequest(req, res, next);
   const { cloneId, domain } = req.query;
-  const cloneProcess = fork(join(__dirname, 'clone.js'), [cloneId, domain, req.id()]);
-  clones[cloneId] = cloneProcess;
-
+  let tmpDir;
+  if (cloneId in clones) {
+    tmpDir = clones[cloneId][1];
+    if (clones[cloneId][0])
+      return next(new Error(`Clone ${cloneId} is already started`));
+  } else {
+    tmpDir = dirSync({ unsafeCleanup: true });
+  }
+  const cloneProcess = fork(join(__dirname, 'clone.js'),
+    [cloneId, domain, tmpDir.name, req.id()]);
+  clones[cloneId] = [cloneProcess, tmpDir];
   const handlers = {
     started: message => {
       res.send(message);
@@ -38,13 +47,17 @@ function start(req, res, next) {
     destroyed: message => {
       const { requestId } = message;
       const [res, next] = requests[requestId];
-      clones[cloneId].kill();
+      console.info(`Destroying data of clone ${cloneId}`);
+      tmpDir.removeCallback();
+      killCloneProcess(cloneId, 'destroyed', res, next);
       delete clones[cloneId];
-      res.send({ '@type': 'destroyed', cloneId });
-      next();
+    },
+    stopped: message => {
+      const { requestId } = message;
+      const [res, next] = requests[requestId];
+      killCloneProcess(cloneId, 'stopped', res, next);
     }
   };
-
   cloneProcess.on('message', message => {
     if (message['@type'] in handlers)
       handlers[message['@type']](message);
@@ -54,28 +67,56 @@ function start(req, res, next) {
 function transact(req, res, next) {
   registerRequest(req, res, next);
   const { cloneId } = req.query;
-  if (cloneId in clones) {
-    clones[cloneId].send({
+  withClone(cloneId, cloneProcess => {
+    cloneProcess.send({
       id: req.id(),
       '@type': 'transact',
       request: req.body
     });
     res.header('transfer-encoding', 'chunked');
-  } else {
-    next(new Error(`Clone ${cloneId} not available`));
-  }
+  });
+}
+
+function stop(req, res, next) {
+  registerRequest(req, res, next);
+  const { cloneId } = req.query;
+  withClone(cloneId, cloneProcess => {
+    global.debug && console.debug(`Stopping clone ${cloneId}`);
+    cloneProcess.send({ id: req.id(), '@type': 'stop' });
+  });
+}
+
+function kill(req, res, next) {
+  const { cloneId } = req.query;
+  killCloneProcess(cloneId, 'killed', res, next);
 }
 
 function destroy(req, res, next) {
   registerRequest(req, res, next);
   const { cloneId } = req.query;
-  if (cloneId in clones) {
+  withClone(cloneId, cloneProcess => {
     global.debug && console.debug(`Destroying clone ${cloneId}`);
-    clones[cloneId].send({ id: req.id(), '@type': 'destroy' });
-  }
+    cloneProcess.send({ id: req.id(), '@type': 'destroy' });
+  });
 }
 
 function registerRequest(req, res, next) {
   requests[req.id()] = [res, next];
 }
 
+function withClone(cloneId, op, next) {
+  if (cloneId in clones) {
+    op(...clones[cloneId]);
+  } else {
+    next(new Error(`Clone ${cloneId} not available`));
+  }
+}
+
+function killCloneProcess(cloneId, type, res, next) {
+  withClone(cloneId, (cloneProcess, tmpDir) => {
+    cloneProcess.kill();
+    clones[cloneId] = [null, tmpDir];
+    res.send({ '@type': type, cloneId });
+    next();
+  }, next);
+}

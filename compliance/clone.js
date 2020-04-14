@@ -1,11 +1,9 @@
 const leveldown = require('leveldown');
 const { clone } = require('../dist');
-const { dirSync } = require('tmp');
 
-const [, , cloneId, domain, requestId] = process.argv;
-const tmpDir = dirSync({ unsafeCleanup: true })
+const [, , cloneId, domain, tmpDirName, requestId] = process.argv;
 
-clone(leveldown(tmpDir.name), {
+clone(leveldown(tmpDirName), {
   '@id': cloneId, '@domain': domain,
   mqttOpts: { host: 'localhost', port: 1883 }
 }).then(meld => {
@@ -23,12 +21,14 @@ clone(leveldown(tmpDir.name), {
         requestId: message.id, '@type': 'error', err: `${err}`
       })
     }),
-    destroy: message => meld.close().then(() => {
-      tmpDir.removeCallback();
-      return process.send({
-        requestId: message.id, '@type': 'destroyed'
-      });
-    }).catch(err => process.send({
+    stop: message => meld.close().then(() => process.send({
+      requestId: message.id, '@type': 'stopped'
+    })).catch(err => process.send({
+      requestId: message.id, '@type': 'error', err: `${err}`
+    })),
+    destroy: message => meld.close().then(() => process.send({
+      requestId: message.id, '@type': 'destroyed'
+    })).catch(err => process.send({
       requestId: message.id, '@type': 'error', err: `${err}`
     }))
   };
