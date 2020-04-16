@@ -7,7 +7,7 @@ const requests = {/* requestId: [res, next] */ };
 
 exports.routes = { start, transact, stop, kill, destroy };
 exports.afterRequest = req => delete requests[req.id()];
-exports.onExit = () => Object.values(clones).forEach(p => p.kill());
+exports.onExit = () => Object.values(clones).forEach(([p,]) => p && p.kill());
 
 function start(req, res, next) {
   registerRequest(req, res, next);
@@ -20,6 +20,7 @@ function start(req, res, next) {
   } else {
     tmpDir = dirSync({ unsafeCleanup: true });
   }
+  console.info(`Starting clone ${cloneId} on domain ${domain}`);
   const cloneProcess = fork(join(__dirname, 'clone.js'),
     [cloneId, domain, tmpDir.name, req.id()]);
   clones[cloneId] = [cloneProcess, tmpDir];
@@ -114,9 +115,12 @@ function withClone(cloneId, op/*(subprocess, tmpDir)*/, next) {
 
 function killCloneProcess(cloneId, type, res, next) {
   withClone(cloneId, (cloneProcess, tmpDir) => {
+    global.debug && console.debug(`Killing clone ${cloneId}`);
     cloneProcess.kill();
-    clones[cloneId] = [null, tmpDir];
-    res.send({ '@type': type, cloneId });
-    next();
+    cloneProcess.on('exit', () => {
+      clones[cloneId] = [null, tmpDir];
+      res.send({ '@type': type, cloneId });
+      next();
+    });
   }, next);
 }
