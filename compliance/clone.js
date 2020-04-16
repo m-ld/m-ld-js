@@ -33,7 +33,7 @@ clone(leveldown(tmpDirName), {
   });
 }).catch(err => {
   console.error(`${cloneId}: ${err}`);
-  send(requestId, 'error', { err: `${err}` });
+  send(requestId, 'unstarted', { err: `${err}` });
 });
 
 function send(requestId, type, params) {

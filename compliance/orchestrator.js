@@ -1,7 +1,7 @@
 const { fork } = require('child_process');
 const { join } = require('path');
 const { dirSync } = require('tmp');
-const { BadRequestError, InternalError, NotFoundError } = require('restify-errors');
+const { BadRequestError, InternalServerError, NotFoundError } = require('restify-errors');
 
 const clones = {/* cloneId: [subprocess, tmpDir] */ };
 const requests = {/* requestId: [res, next] */ };
@@ -30,6 +30,9 @@ function start(req, res, next) {
       res.send(message);
       next(false);
     },
+    unstarted: message => {
+      killCloneProcess(cloneId, new InternalServerError(message.err), res, next);
+    },
     next: message => {
       const { requestId, body } = message;
       const [res,] = requests[requestId];
@@ -44,13 +47,12 @@ function start(req, res, next) {
     error: message => {
       const { requestId, err } = message;
       const [, next] = requests[requestId];
-      next(new InternalError(err));
+      next(new InternalServerError(err));
     },
     destroyed: message => {
       const { requestId } = message;
       const [res, next] = requests[requestId];
-      console.info(`${cloneId}: Destroying clone data`);
-      tmpDir.removeCallback();
+      destroyData(cloneId, tmpDir);
       killCloneProcess(cloneId, 'destroyed', res, next);
       delete clones[cloneId];
     },
@@ -96,10 +98,22 @@ function kill(req, res, next) {
 function destroy(req, res, next) {
   registerRequest(req, res, next);
   const { cloneId } = req.query;
-  withClone(cloneId, cloneProcess => {
+  withClone(cloneId, (cloneProcess, tmpDir) => {
     global.debug && console.debug(`${cloneId}: Destroying clone`);
-    cloneProcess.send({ id: req.id(), '@type': 'destroy' });
+    if (cloneProcess) {
+      cloneProcess.send({ id: req.id(), '@type': 'destroy' });
+    } else {
+      destroyData(cloneId, tmpDir);
+      delete clones[cloneId];
+      res.send({ '@type': 'destroyed', cloneId });
+      next(false);
+    }
   }, next);
+}
+
+function destroyData(cloneId, tmpDir) {
+  console.info(`${cloneId}: Destroying clone data`);
+  tmpDir.removeCallback();
 }
 
 function registerRequest(req, res, next) {
@@ -114,14 +128,18 @@ function withClone(cloneId, op/*(subprocess, tmpDir)*/, next) {
   }
 }
 
-function killCloneProcess(cloneId, type, res, next) {
+function killCloneProcess(cloneId, reason, res, next) {
   withClone(cloneId, (cloneProcess, tmpDir) => {
     global.debug && console.debug(`${cloneId}: Killing clone process`);
     cloneProcess.kill();
     cloneProcess.on('exit', () => {
       clones[cloneId] = [null, tmpDir];
-      res.send({ '@type': type, cloneId });
-      next();
+      if (reason instanceof Error) {
+        next(reason);
+      } else {
+        res.send({ '@type': reason, cloneId });
+        next();
+      }
     });
   }, next);
 }
