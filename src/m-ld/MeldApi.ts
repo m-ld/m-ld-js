@@ -51,9 +51,9 @@ export class MeldApi implements MeldStore {
 
   follow(after?: number): Observable<DeleteInsert<Group>> {
     return this.store.follow(after).pipe(flatMap(async update => ({
-        '@delete': this.stripImplicitContext(await this.regroup(update['@delete']), this.context),
-        '@insert': this.stripImplicitContext(await this.regroup(update['@insert']), this.context)
-      })));
+      '@delete': this.stripImplicitContext(await this.regroup(update['@delete']), this.context),
+      '@insert': this.stripImplicitContext(await this.regroup(update['@insert']), this.context)
+    })));
   }
 
   private async regroup(group?: Group): Promise<Group> {

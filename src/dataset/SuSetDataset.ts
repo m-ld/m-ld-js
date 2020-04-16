@@ -84,7 +84,7 @@ export class SuSetDataset extends JrqlGraph {
   }
 
   async close(err?: any): Promise<void> {
-    console.log(`Shutting down dataset ${err ? 'due to ' + err : 'normally'}`);
+    console.log(`${this.id}: Shutting down dataset ${err ? 'due to ' + err : 'normally'}`);
     if (err)
       this.updateSource.error(err);
     else
@@ -140,7 +140,7 @@ export class SuSetDataset extends JrqlGraph {
       this.loadJournal().then(async (journal) => {
         const last = await this.controlGraph.describe1(journal.lastDelivered) as JournalEntry;
         await this.emitJournalAfter(last, subs, 'localOnly');
-      });
+      }).catch(err => subs.error(err));
     });
   }
 

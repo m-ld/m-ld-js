@@ -89,8 +89,8 @@ export class QuadStoreDataset implements Dataset {
   }
 
   close(): Promise<void> {
-    return new Promise((resolve, reject) =>
-      this.abstractLevelDown.close(err => err ? reject(err) : resolve()));
+    // Make efforts to ensure no transactions are running
+    return this.lock.acquire(this.id, done => this.abstractLevelDown.close(done));
   }
 }
 
@@ -102,10 +102,15 @@ class QuadStoreGraph implements Graph {
 
   match(subject?: Quad_Subject, predicate?: Quad_Predicate, object?: Quad_Object): Observable<Quad> {
     return new Observable(subs => {
-      this.store.match(subject, predicate, object, this.name)
-        .on('data', quad => subs.next(quad))
-        .on('error', err => subs.error(err))
-        .on('end', () => subs.complete());
-    });    
+      try {
+        this.store.match(subject, predicate, object, this.name)
+          .on('data', quad => subs.next(quad))
+          .on('error', err => subs.error(err))
+          .on('end', () => subs.complete());
+      } catch (error) {
+        // match can throw! (Bug in quadstore)
+        subs.error(error);
+      }
+    });
   }
 }

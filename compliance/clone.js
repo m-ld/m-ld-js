@@ -1,6 +1,8 @@
 const leveldown = require('leveldown');
 const { clone } = require('../dist');
 
+Error.stackTraceLimit = Infinity;
+
 const [, , cloneId, domain, tmpDirName, requestId] = process.argv;
 
 clone(leveldown(tmpDirName), {
@@ -30,7 +32,7 @@ clone(leveldown(tmpDirName), {
       send(message.id, 'error', { err: `No handler for ${message['@type']}` });
   });
 }).catch(err => {
-  console.error(err);
+  console.error(`${cloneId}: ${err}`);
   send(requestId, 'error', { err: `${err}` });
 });
 

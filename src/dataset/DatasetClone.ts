@@ -1,15 +1,16 @@
 import { MeldClone, Snapshot, DeltaMessage, MeldRemotes, MeldJournalEntry } from '../m-ld';
 import { Pattern, Subject, isRead, Group, DeleteInsert } from '../m-ld/jsonrql';
-import { Observable, Subject as Source, PartialObserver, merge, empty, from, concat } from 'rxjs';
+import { Observable, Subject as Source, PartialObserver, merge, empty, from, concat, asapScheduler } from 'rxjs';
 import { TreeClock } from '../clocks';
 import { SuSetDataset } from './SuSetDataset';
 import { TreeClockMessageService } from '../messages';
 import { Dataset } from '.';
-import { catchError, publishReplay, refCount, filter, ignoreElements, materialize, dematerialize } from 'rxjs/operators';
+import { catchError, publishReplay, refCount, filter, ignoreElements, materialize, dematerialize, tap, observeOn } from 'rxjs/operators';
 import { Hash } from '../hash';
 
 export class DatasetClone implements MeldClone {
-  readonly updates: Source<MeldJournalEntry> = new Source;
+  readonly updates: Observable<MeldJournalEntry>;
+  private readonly updateSource: Source<MeldJournalEntry> = new Source;
   private readonly dataset: SuSetDataset;
   private messageService: TreeClockMessageService;
   private readonly orderingBuffer: DeltaMessage[] = [];
@@ -23,6 +24,8 @@ export class DatasetClone implements MeldClone {
   constructor(dataset: Dataset,
     private readonly remotes: MeldRemotes) {
     this.dataset = new SuSetDataset(dataset);
+    // Update notifications are delayed to ensure internal processing has priority
+    this.updates = this.updateSource.pipe(observeOn(asapScheduler));
   }
 
   get id() {
@@ -38,12 +41,12 @@ export class DatasetClone implements MeldClone {
       time = await this.remotes.newClock();
       await this.dataset.saveClock(time, true);
     }
-    console.info(`${this.id} has time ${time}`);
+    console.info(`${this.id}: has time ${time}`);
     this.messageService = new TreeClockMessageService(time);
     // Flush unsent operations
     await new Promise<void>((resolve, reject) => {
       this.dataset.unsentLocalOperations().subscribe(
-        entry => this.updates.next(entry), reject, resolve);
+        entry => this.updateSource.next(entry), reject, resolve);
     });
     if (time.isId) { // Top-level is Id, never been forked
       // No rev-up to do, so just subscribe to updates from later clones
@@ -68,7 +71,7 @@ export class DatasetClone implements MeldClone {
 
   private revupLost(err: any) {
     // Not a catastrophe but may get ordering overflow later
-    console.warn(`Revup lost with ${err}`);
+    console.warn(`${this.id}: Revup lost with ${err}`);
     return empty();
   }
 
@@ -123,7 +126,7 @@ export class DatasetClone implements MeldClone {
   }
 
   private asCompletable(): Observable<never> {
-    return this.updates.pipe(ignoreElements());
+    return this.updateSource.pipe(ignoreElements());
   }
 
   private get localTime() {
@@ -145,7 +148,7 @@ export class DatasetClone implements MeldClone {
         return [this.messageService.send(), patch];
       }).then(journalEntry => {
         // Publish the MeldJournalEntry
-        this.updates.next(journalEntry);
+        this.updateSource.next(journalEntry);
       })).pipe(ignoreElements()); // Ignores the void promise result
     }
   }
@@ -155,11 +158,11 @@ export class DatasetClone implements MeldClone {
   }
 
   close(err?: any) {
-    console.log(`Shutting down clone ${err ? 'due to ' + err : 'normally'}`);
+    console.log(`${this.id}: Shutting down clone ${err ? 'due to ' + err : 'normally'}`);
     if (err)
-      this.updates.error(err);
+      this.updateSource.error(err);
     else
-      this.updates.complete();
+      this.updateSource.complete();
     return this.dataset.close(err);
   }
 }

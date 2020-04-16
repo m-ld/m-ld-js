@@ -132,7 +132,7 @@ export class MqttRemotes implements MeldRemotes {
   }
 
   private close(err?: any) {
-    console.info(`Shutting down MQTT remotes ${err ? 'due to ' + err : 'normally'}`);
+    console.info(`${this.id}: Shutting down MQTT remotes ${err ? 'due to ' + err : 'normally'}`);
     this.presence.leave(this.mqtt, this.id);
     this.mqtt.end();
   }
@@ -282,16 +282,18 @@ export class MqttRemotes implements MeldRemotes {
 
   private produce<T>(data: Observable<T>, subAddress: string, toJson: (datum: T) => Promise<any>) {
     const address = this.controlSubAddress(subAddress);
-
+    // If notifications fail due to MQTT death, the recipient will find out from the broker
+    // so here we make best efforts to notify an error and then give up.
+    const logError = (err: any) => console.warn(`${this.id}: ${err}`);
     const subs = data.subscribe({
       next: datum => this.notify(address, toJson(datum).then(json => ({ next: json })))
         .catch(error => {
           // All our productions are guaranteed delivery
-          this.notify(address, Promise.resolve({ error }));
+          this.notify(address, Promise.resolve({ error })).catch(logError);
           subs.unsubscribe();
         }),
-      complete: () => this.notify(address, Promise.resolve({ complete: true })),
-      error: error => this.notify(address, Promise.resolve({ error }))
+      complete: () => this.notify(address, Promise.resolve({ complete: true })).catch(logError),
+      error: error => this.notify(address, Promise.resolve({ error })).catch(logError)
     });
   }
 

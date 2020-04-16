@@ -1,6 +1,7 @@
 const { fork } = require('child_process');
 const { join } = require('path');
 const { dirSync } = require('tmp');
+const { BadRequestError, InternalError, NotFoundError } = require('restify-errors');
 
 const clones = {/* cloneId: [subprocess, tmpDir] */ };
 const requests = {/* requestId: [res, next] */ };
@@ -16,11 +17,11 @@ function start(req, res, next) {
   if (cloneId in clones) {
     tmpDir = clones[cloneId][1];
     if (clones[cloneId][0])
-      return next(new Error(`Clone ${cloneId} is already started`));
+      return next(new BadRequestError(`Clone ${cloneId} is already started`));
   } else {
     tmpDir = dirSync({ unsafeCleanup: true });
   }
-  console.info(`Starting clone ${cloneId} on domain ${domain}`);
+  console.info(`${cloneId}: Starting clone on domain ${domain}`);
   const cloneProcess = fork(join(__dirname, 'clone.js'),
     [cloneId, domain, tmpDir.name, req.id()]);
   clones[cloneId] = [cloneProcess, tmpDir];
@@ -43,12 +44,12 @@ function start(req, res, next) {
     error: message => {
       const { requestId, err } = message;
       const [, next] = requests[requestId];
-      next(new Error(err));
+      next(new InternalError(err));
     },
     destroyed: message => {
       const { requestId } = message;
       const [res, next] = requests[requestId];
-      console.info(`Destroying data of clone ${cloneId}`);
+      console.info(`${cloneId}: Destroying clone data`);
       tmpDir.removeCallback();
       killCloneProcess(cloneId, 'destroyed', res, next);
       delete clones[cloneId];
@@ -75,16 +76,16 @@ function transact(req, res, next) {
       request: req.body
     });
     res.header('transfer-encoding', 'chunked');
-  });
+  }, next);
 }
 
 function stop(req, res, next) {
   registerRequest(req, res, next);
   const { cloneId } = req.query;
   withClone(cloneId, cloneProcess => {
-    global.debug && console.debug(`Stopping clone ${cloneId}`);
+    global.debug && console.debug(`${cloneId}: Stopping clone`);
     cloneProcess.send({ id: req.id(), '@type': 'stop' });
-  });
+  }, next);
 }
 
 function kill(req, res, next) {
@@ -96,9 +97,9 @@ function destroy(req, res, next) {
   registerRequest(req, res, next);
   const { cloneId } = req.query;
   withClone(cloneId, cloneProcess => {
-    global.debug && console.debug(`Destroying clone ${cloneId}`);
+    global.debug && console.debug(`${cloneId}: Destroying clone`);
     cloneProcess.send({ id: req.id(), '@type': 'destroy' });
-  });
+  }, next);
 }
 
 function registerRequest(req, res, next) {
@@ -109,13 +110,13 @@ function withClone(cloneId, op/*(subprocess, tmpDir)*/, next) {
   if (cloneId in clones) {
     op(...clones[cloneId]);
   } else {
-    next(new Error(`Clone ${cloneId} not available`));
+    next(new NotFoundError(`Clone ${cloneId} not available`));
   }
 }
 
 function killCloneProcess(cloneId, type, res, next) {
   withClone(cloneId, (cloneProcess, tmpDir) => {
-    global.debug && console.debug(`Killing clone ${cloneId}`);
+    global.debug && console.debug(`${cloneId}: Killing clone process`);
     cloneProcess.kill();
     cloneProcess.on('exit', () => {
       clones[cloneId] = [null, tmpDir];
