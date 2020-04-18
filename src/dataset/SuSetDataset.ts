@@ -13,11 +13,23 @@ import { toArray, bufferCount, flatMap, reduce, observeOn } from 'rxjs/operators
 import { flatten } from '../util';
 import { generate as uuid } from 'short-uuid';
 
+const TIDS_CONTEXT: Context = {
+  qs: 'http://qs.m-ld.org/',
+  hash: 'qs:hash/', // Namespace for triple hashes
+  tid: 'qs:#tid' // Property of a triple hash
+};
+
+interface HashTid extends Subject {
+  '@id': Iri,
+  tid: UUID // Transaction ID
+}
+
 const CONTROL_CONTEXT: Context = {
   qs: 'http://qs.m-ld.org/',
   tail: { '@id': 'qs:#tail', '@type': '@id' }, // Property of the journal
   lastDelivered: { '@id': 'qs:#lastDelivered', '@type': '@id' }, // Property of the journal
   entry: 'qs:journal/entry/', // Namespace for journal entries
+  tid: 'qs:#tid', // Property of a journal entry
   hash: 'qs:#hash', // Property of a journal entry
   delta: 'qs:#delta', // Property of a journal entry
   remote: 'qs:#remote', // Property of a journal entry
@@ -32,24 +44,15 @@ interface Journal extends Subject {
   time: string // JSON-encoded TreeClock
 }
 
-interface JournalEntry extends Subject {
-  '@id': Iri,
+/**
+ * A journal entry includes a transaction Id
+ */
+interface JournalEntry extends HashTid {
   hash: string, // Encoded Hash
   delta: string, // JSON-encoded JsonDelta
   remote: boolean,
   time: string, // JSON-encoded TreeClock
   next?: JournalEntry['@id']
-}
-
-const TIDS_CONTEXT: Context = {
-  qs: 'http://qs.m-ld.org/',
-  hash: 'qs:hash/', // Namespace for triple hashes
-  tid: 'qs:#tid' // Property of a triple hash
-};
-
-interface HashTid extends Subject {
-  '@id': Iri,
-  tid: UUID // Transaction ID
 }
 
 /**
@@ -160,7 +163,7 @@ export class SuSetDataset extends JrqlGraph {
   }
 
   async operationsSince(lastHash: Hash): Promise<Observable<DeltaMessage> | undefined> {
-    const found = await this.controlGraph.find({ hash: lastHash.encode() });
+    const found = await this.controlGraph.find({ hash: lastHash.encode() } as Partial<JournalEntry>);
     if (found.size) {
       const entry = await this.controlGraph.describe1(found.values().next().value) as Subject;
       return new Observable(subs => {
@@ -209,7 +212,7 @@ export class SuSetDataset extends JrqlGraph {
   async apply(msg: JsonDelta, time: TreeClock): Promise<void> {
     return this.dataset.transact(async () => {
       // Check we haven't seen this transaction before in the journal
-      if (!(await this.controlGraph.find({ tid: msg.tid })).size) {
+      if (!(await this.controlGraph.find({ tid: msg.tid } as Partial<JournalEntry>)).size) {
         const delta = await asMeldDelta(msg);
         const patch = new PatchQuads([], delta.insert);
         // The delta's delete contains reifications of deleted triples

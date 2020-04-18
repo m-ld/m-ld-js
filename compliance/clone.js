@@ -31,6 +31,12 @@ clone(leveldown(tmpDirName), {
     else
       send(message.id, 'error', { err: `No handler for ${message['@type']}` });
   });
+
+  meld.follow().subscribe({
+    next: update => send(requestId, 'updated', update),
+    complete: () => send(requestId, 'closed'),
+    error: err => sendError(requestId, err)
+  });
 }).catch(err => {
   console.error(`${cloneId}: ${err}`);
   send(requestId, 'unstarted', { err: `${err}` });
@@ -41,5 +47,9 @@ function send(requestId, type, params) {
 }
 
 function errorHandler(message) {
-  return err => send(message.id, 'error', { err: `${err}` });
+  return err => sendError(message.id, err);
+}
+
+function sendError(requestId, err) {
+  return send(requestId, 'error', { err: `${err}` });
 }

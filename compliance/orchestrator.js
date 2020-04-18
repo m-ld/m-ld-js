@@ -13,6 +13,7 @@ exports.onExit = () => Object.values(clones).forEach(([p,]) => p && p.kill());
 function start(req, res, next) {
   registerRequest(req, res, next);
   const { cloneId, domain } = req.query;
+  res.header('transfer-encoding', 'chunked');
   let tmpDir;
   if (cloneId in clones) {
     tmpDir = clones[cloneId][1];
@@ -22,12 +23,16 @@ function start(req, res, next) {
     tmpDir = dirSync({ unsafeCleanup: true });
   }
   console.info(`${cloneId}: Starting clone on domain ${domain}`);
-  const cloneProcess = fork(join(__dirname, 'clone.js'),
+  const cloneProcess = fork(
+    join(__dirname, 'clone.js'),
     [cloneId, domain, tmpDir.name, req.id()]);
   clones[cloneId] = [cloneProcess, tmpDir];
+
   const handlers = {
-    started: message => {
-      res.send(message);
+    started: message => res.write(JSON.stringify(message)),
+    updated: message => res.write(JSON.stringify(message)),
+    closed: () => {
+      res.end();
       next(false);
     },
     unstarted: message => {
