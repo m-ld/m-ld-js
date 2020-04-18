@@ -33,7 +33,7 @@ clone(leveldown(tmpDirName), {
   });
 
   meld.follow().subscribe({
-    next: update => send(requestId, 'updated', update),
+    next: update => send(requestId, 'updated', { body: update }),
     complete: () => send(requestId, 'closed'),
     error: err => sendError(requestId, err)
   });
