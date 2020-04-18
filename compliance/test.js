@@ -8,7 +8,7 @@ const mqttPort = 1883;
 const httpUrl = new URL('http://localhost:3000');
 const orchestrator = require('./orchestrator');
 
-// Debug flag stops Jest from squashing stdout lines
+// Debug flag
 global.debug = false;
 
 const http = restify.createServer();
