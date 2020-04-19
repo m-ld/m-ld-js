@@ -42,3 +42,11 @@ Promise.all([
     process.exit(code);
   });
 });
+
+aedes.on('publish', function (packet, client) {
+  if (client) {
+    const { topic, qos, retain } = packet;
+    global.debug && console.log(
+      client.id, { topic, qos, retain }, packet.payload.toString())
+  }
+});
