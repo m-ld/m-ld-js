@@ -50,7 +50,7 @@ function start(req, res, next) {
     global.debug && console.debug(`${cloneId}: Clone MQTT port is ${mqttServer.address().port}`);
     if (err)
       return next(new InternalServerError(err));
-    
+
     clones[cloneId] = {
       process: fork(join(__dirname, 'clone.js'),
         [cloneId, domain, tmpDir.name, req.id(), mqttServer.address().port],
@@ -190,14 +190,22 @@ function killCloneProcess(cloneId, reason, res, next) {
     clone.process.kill();
     clone.process.on('exit', () => {
       clone.process = null;
+      function done(err) {
+        if (err) {
+          next(new InternalServerError(err));
+        } else {
+          res.send({ '@type': reason, cloneId });
+          next();
+        }
+      }
       if (reason instanceof Error) {
         next(reason);
       } else {
-        res.send({ '@type': reason, cloneId });
-        next();
+        if (clone.mqtt.server.listening)
+          clone.mqtt.server.close(done);
+        else
+          done();
       }
     });
-    if (clone.mqtt.server.listening)
-      clone.mqtt.server.close();
   }, next);
 }
