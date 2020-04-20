@@ -7,11 +7,12 @@
   "scripts": {
     "link-local-m-ld-spec": "sudo npm link ../m-ld-spec",
     "clean": "rm -rf dist",
+    "build-quick": "tsc",
     "build": "npm run clean && npm run test && tsc",
     "dev": "jest --watch --silent",
     "test": "jest --silent",
-    "publish-patch": "npm run build && npm version patch -m \"Patch version\" && git push && npm publish",
-    "compliance": "node compliance/test.js"
+    "compliance": "node compliance/test.js",
+    "publish-patch": "npm run build && npm version patch -m \"Patch version\" && git push && npm publish"
   },
   "repository": {
     "type": "git",

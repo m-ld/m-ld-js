@@ -2,13 +2,34 @@ const { fork } = require('child_process');
 const { join } = require('path');
 const { dirSync } = require('tmp');
 const { BadRequestError, InternalServerError, NotFoundError } = require('restify-errors');
-
-const clones = {/* cloneId: [subprocess, tmpDir] */ };
+const { createServer } = require('net');
+const inspector = require('inspector');
+const aedes = require('aedes')();
+const clones = {/* cloneId: { process, tmpDir, mqtt: { client, server } } */ };
 const requests = {/* requestId: [res, next] */ };
 
-exports.routes = { start, transact, stop, kill, destroy };
+exports.routes = { start, transact, stop, kill, destroy, partition };
 exports.afterRequest = req => delete requests[req.id()];
-exports.onExit = () => Object.values(clones).forEach(([p,]) => p && p.kill());
+exports.onExit = () => Object.values(clones).forEach(
+  ({ process }) => process && process.kill());
+
+aedes.on('publish', function (packet, client) {
+  if (client) {
+    const { topic, qos, retain } = packet;
+    global.debug && console.log(
+      client.id, { topic, qos, retain },
+      global.debug > 1 ? packet.payload.toString() : '');
+  }
+});
+
+aedes.on('client', client => {
+  if (client.id in clones) {
+    global.debug && console.debug(`${client.id}: MQTT client connecting`);
+    clones[client.id].mqtt.client = client;
+  } else {
+    console.warn(`${client.id}: Unexpected MQTT client`);
+  }
+});
 
 function start(req, res, next) {
   registerRequest(req, res, next);
@@ -16,68 +37,79 @@ function start(req, res, next) {
   res.header('transfer-encoding', 'chunked');
   let tmpDir;
   if (cloneId in clones) {
-    tmpDir = clones[cloneId][1];
-    if (clones[cloneId][0])
+    tmpDir = clones[cloneId].tmpDir;
+    if (clones[cloneId].process)
       return next(new BadRequestError(`Clone ${cloneId} is already started`));
   } else {
     tmpDir = dirSync({ unsafeCleanup: true });
   }
   console.info(`${cloneId}: Starting clone on domain ${domain}`);
-  const cloneProcess = fork(
-    join(__dirname, 'clone.js'),
-    [cloneId, domain, tmpDir.name, req.id()]);
-  clones[cloneId] = [cloneProcess, tmpDir];
 
-  const handlers = {
-    started: message => res.write(JSON.stringify(message)),
-    updated: message => res.write(JSON.stringify(message)),
-    closed: () => {
-      res.end();
-      next(false);
-    },
-    unstarted: message => {
-      killCloneProcess(cloneId, new InternalServerError(message.err), res, next);
-    },
-    next: message => {
-      const { requestId, body } = message;
-      const [res,] = requests[requestId];
-      res.write(JSON.stringify(body));
-    },
-    complete: message => {
-      const { requestId } = message;
-      const [res, next] = requests[requestId];
-      res.end();
-      next(false);
-    },
-    error: message => {
-      const { requestId, err } = message;
-      const [, next] = requests[requestId];
-      next(new InternalServerError(err));
-    },
-    destroyed: message => {
-      const { requestId } = message;
-      const [res, next] = requests[requestId];
-      destroyData(cloneId, tmpDir);
-      killCloneProcess(cloneId, 'destroyed', res, next);
-      delete clones[cloneId];
-    },
-    stopped: message => {
-      const { requestId } = message;
-      const [res, next] = requests[requestId];
-      killCloneProcess(cloneId, 'stopped', res, next);
-    }
-  };
-  cloneProcess.on('message', message => {
-    if (message['@type'] in handlers)
-      handlers[message['@type']](message);
+  const mqttServer = createServer(aedes.handle);
+  mqttServer.listen(err => {
+    global.debug && console.debug(`${cloneId}: Clone MQTT port is ${mqttServer.address().port}`);
+    if (err)
+      return next(new InternalServerError(err));
+    
+    clones[cloneId] = {
+      process: fork(join(__dirname, 'clone.js'),
+        [cloneId, domain, tmpDir.name, req.id(), mqttServer.address().port],
+        { execArgv: inspector.url() ? ['--inspect-brk=40895'] : [] }),
+      tmpDir,
+      mqtt: { server: mqttServer }
+    };
+
+    const handlers = {
+      started: message => res.write(JSON.stringify(message)),
+      updated: message => res.write(JSON.stringify(message)),
+      closed: () => {
+        res.end();
+        next(false);
+      },
+      unstarted: message => {
+        killCloneProcess(cloneId, new InternalServerError(message.err), res, next);
+      },
+      next: message => {
+        const { requestId, body } = message;
+        const [res,] = requests[requestId];
+        res.write(JSON.stringify(body));
+      },
+      complete: message => {
+        const { requestId } = message;
+        const [res, next] = requests[requestId];
+        res.end();
+        next(false);
+      },
+      error: message => {
+        const { requestId, err } = message;
+        const [, next] = requests[requestId];
+        next(new InternalServerError(err));
+      },
+      destroyed: message => {
+        const { requestId } = message;
+        const [res, next] = requests[requestId];
+        destroyData(cloneId, tmpDir);
+        killCloneProcess(cloneId, 'destroyed', res, next);
+        delete clones[cloneId];
+      },
+      stopped: message => {
+        const { requestId } = message;
+        const [res, next] = requests[requestId];
+        killCloneProcess(cloneId, 'stopped', res, next);
+      }
+    };
+    clones[cloneId].process.on('message', message => {
+      if (message['@type'] in handlers)
+        handlers[message['@type']](message);
+    });
   });
 }
 
 function transact(req, res, next) {
   registerRequest(req, res, next);
   const { cloneId } = req.query;
-  withClone(cloneId, cloneProcess => {
-    cloneProcess.send({
+  withClone(cloneId, ({ process }) => {
+    process.send({
       id: req.id(),
       '@type': 'transact',
       request: req.body
@@ -89,9 +121,9 @@ function transact(req, res, next) {
 function stop(req, res, next) {
   registerRequest(req, res, next);
   const { cloneId } = req.query;
-  withClone(cloneId, cloneProcess => {
+  withClone(cloneId, ({ process }) => {
     global.debug && console.debug(`${cloneId}: Stopping clone`);
-    cloneProcess.send({ id: req.id(), '@type': 'stop' });
+    process.send({ id: req.id(), '@type': 'stop' });
   }, next);
 }
 
@@ -103,10 +135,10 @@ function kill(req, res, next) {
 function destroy(req, res, next) {
   registerRequest(req, res, next);
   const { cloneId } = req.query;
-  withClone(cloneId, (cloneProcess, tmpDir) => {
+  withClone(cloneId, ({ process, tmpDir }) => {
     global.debug && console.debug(`${cloneId}: Destroying clone`);
-    if (cloneProcess) {
-      cloneProcess.send({ id: req.id(), '@type': 'destroy' });
+    if (process) {
+      process.send({ id: req.id(), '@type': 'destroy' });
     } else {
       destroyData(cloneId, tmpDir);
       delete clones[cloneId];
@@ -114,6 +146,25 @@ function destroy(req, res, next) {
       next(false);
     }
   }, next);
+}
+
+function partition(req, res, next) {
+  const { cloneId } = req.query;
+  withClone(cloneId, ({ mqtt }) => {
+    global.debug && console.debug(`${cloneId}: Partitioning clone`);
+    if (mqtt.server.listening) {
+      if (mqtt.client)
+        mqtt.client.conn.destroy();
+      mqtt.server.close(err => {
+        if (err) {
+          next(new InternalServerError(err));
+        } else {
+          res.send({ '@type': 'partitioned' });
+          next(false);
+        }
+      });
+    }
+  });
 }
 
 function destroyData(cloneId, tmpDir) {
@@ -127,18 +178,18 @@ function registerRequest(req, res, next) {
 
 function withClone(cloneId, op/*(subprocess, tmpDir)*/, next) {
   if (cloneId in clones) {
-    op(...clones[cloneId]);
+    op(clones[cloneId]);
   } else {
     next(new NotFoundError(`Clone ${cloneId} not available`));
   }
 }
 
 function killCloneProcess(cloneId, reason, res, next) {
-  withClone(cloneId, (cloneProcess, tmpDir) => {
+  withClone(cloneId, clone => {
     global.debug && console.debug(`${cloneId}: Killing clone process`);
-    cloneProcess.kill();
-    cloneProcess.on('exit', () => {
-      clones[cloneId] = [null, tmpDir];
+    clone.process.kill();
+    clone.process.on('exit', () => {
+      clone.process = null;
       if (reason instanceof Error) {
         next(reason);
       } else {
@@ -146,5 +197,7 @@ function killCloneProcess(cloneId, reason, res, next) {
         next();
       }
     });
+    if (clone.mqtt.server.listening)
+      clone.mqtt.server.close();
   }, next);
 }

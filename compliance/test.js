@@ -1,15 +1,11 @@
 const { spawn } = require('child_process');
 const { join } = require('path');
-const { promisify } = require('util');
 const restify = require('restify');
-const aedes = require('aedes')();
-const mqtt = require('net').createServer(aedes.handle);
-const mqttPort = 1883;
-const httpUrl = new URL('http://localhost:3000');
 const orchestrator = require('./orchestrator');
+const httpUrl = new URL('http://localhost:3000');
 
-// Debug flag
-global.debug = false;
+// Debug level - 0=info, 1=debug, 2=trace
+global.debug = 0;
 
 const http = restify.createServer();
 http.use(restify.plugins.queryParser());
@@ -17,12 +13,8 @@ http.use(restify.plugins.bodyParser());
 Object.entries(orchestrator.routes)
   .forEach(([path, route]) => http.post('/' + path, route));
 http.on('after', orchestrator.afterRequest);
-const connectHttp = promisify(http.listen.bind(http));
-const connectMqtt = promisify(mqtt.listen.bind(mqtt));
-Promise.all([
-  connectHttp(httpUrl.port).then(() => console.log(`Orchestrator listening on ${httpUrl.port}`)),
-  connectMqtt(mqttPort).then(() => console.log(`MQTT broker listening on ${mqttPort}`))
-]).then(() => {
+http.listen(httpUrl.port, () => {
+  console.log(`Orchestrator listening on ${httpUrl.port}`);
   const test = spawn('npm', ['run', 'test'], {
     cwd: join(__dirname, '..', 'node_modules', '@gsvarovsky', 'm-ld-spec'),
     env: { ...process.env, MELD_ORCHESTRATOR_URL: httpUrl.toString() },
@@ -38,15 +30,6 @@ Promise.all([
     console.log(`Test process exited with code ${code}`);
     orchestrator.onExit();
     http.close();
-    mqtt.close();
     process.exit(code);
   });
-});
-
-aedes.on('publish', function (packet, client) {
-  if (client) {
-    const { topic, qos, retain } = packet;
-    global.debug && console.log(
-      client.id, { topic, qos, retain }, packet.payload.toString())
-  }
 });

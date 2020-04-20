@@ -72,8 +72,9 @@ export class MqttRemotes implements MeldRemotes {
       this.onMessage(topic, payload);
     });
 
-    // When MQTT dies irrecoverably, tell the clone (it will shut down)
+    // When MQTT dies irrecoverably or closes, tell the clone (it will shut down)
     this.mqtt.on('error', err => this.remoteUpdates.error(err));
+    this.mqtt.on('close', () => this.remoteUpdates.complete());
 
     this.mqtt.on('connect', async () => {
       try {

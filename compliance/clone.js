@@ -3,11 +3,16 @@ const { clone } = require('../dist');
 
 Error.stackTraceLimit = Infinity;
 
-const [, , cloneId, domain, tmpDirName, requestId] = process.argv;
+const [, , cloneId, domain, tmpDirName, requestId, mqttPort] = process.argv;
 
 clone(leveldown(tmpDirName), {
   '@id': cloneId, '@domain': domain,
-  mqttOpts: { host: 'localhost', port: 1883 }
+  mqttOpts: {
+    host: 'localhost',
+    port: Number(mqttPort),
+    connectTimeout: 100, // Short for testing partitioning
+    keepalive: 1 // Short for testing partitioning
+  }
 }).then(meld => {
   send(requestId, 'started', { cloneId });
 
