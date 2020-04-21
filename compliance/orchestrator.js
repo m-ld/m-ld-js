@@ -54,7 +54,7 @@ function start(req, res, next) {
     clones[cloneId] = {
       process: fork(join(__dirname, 'clone.js'),
         [cloneId, domain, tmpDir.name, req.id(), mqttServer.address().port],
-        { execArgv: inspector.url() ? ['--inspect-brk=40895'] : [] }),
+        { execArgv: inspector.url() ? [`--inspect-brk=${global.nextDebugPort++}`] : [] }),
       tmpDir,
       mqtt: { server: mqttServer }
     };
@@ -64,7 +64,7 @@ function start(req, res, next) {
       updated: message => res.write(JSON.stringify(message)),
       closed: () => {
         res.end();
-        next(false);
+        next();
       },
       unstarted: message => {
         killCloneProcess(cloneId, new InternalServerError(message.err), res, next);
@@ -78,7 +78,7 @@ function start(req, res, next) {
         const { requestId } = message;
         const [res, next] = requests[requestId];
         res.end();
-        next(false);
+        next();
       },
       error: message => {
         const { requestId, err } = message;
@@ -143,7 +143,7 @@ function destroy(req, res, next) {
       destroyData(cloneId, tmpDir);
       delete clones[cloneId];
       res.send({ '@type': 'destroyed', cloneId });
-      next(false);
+      next();
     }
   }, next);
 }
@@ -160,7 +160,7 @@ function partition(req, res, next) {
           next(new InternalServerError(err));
         } else {
           res.send({ '@type': 'partitioned' });
-          next(false);
+          next();
         }
       });
     }
@@ -193,19 +193,14 @@ function killCloneProcess(cloneId, reason, res, next) {
       function done(err) {
         if (err) {
           next(new InternalServerError(err));
+        } else if (reason instanceof Error) {
+          next(reason);
         } else {
           res.send({ '@type': reason, cloneId });
           next();
         }
       }
-      if (reason instanceof Error) {
-        next(reason);
-      } else {
-        if (clone.mqtt.server.listening)
-          clone.mqtt.server.close(done);
-        else
-          done();
-      }
+      return clone.mqtt.server.listening ? clone.mqtt.server.close(done) : done();
     });
   }, next);
 }

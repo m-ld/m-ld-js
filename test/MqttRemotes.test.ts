@@ -57,16 +57,11 @@ describe('New MQTT remotes', () => {
         '__send/client1/+/+/test.m-ld.org/control': 0,
         '__reply/client1/+/+/+': 0
       });
-      expect(mqtt.publish.mock.calls).toEqual([
-        // Setting retained presence on the channel
-        ['__presence/test.m-ld.org/client1',
-          '{"client1":"test.m-ld.org/control"}',
-          { qos: 1, retain: true }],
-        // Setting retained last joined clone (no longer genesis)
-        ['test.m-ld.org/registry',
-          '{"id":"client1"}',
-          { qos: 1, retain: true }]
-      ]);
+      // Setting retained last joined clone (no longer genesis)
+      expect(mqtt.publish).toBeCalledWith(
+        'test.m-ld.org/registry',
+        '{"id":"client1"}',
+        { qos: 1, retain: true });
     });
 
     test('can get new clock', async () => {
@@ -92,6 +87,11 @@ describe('New MQTT remotes', () => {
       const updates = new Source<MeldJournalEntry>();
       // This weirdness is due to jest-mock-extended trying to mock arrays
       remotes.connect({ ...mock<MeldLocal>(), updates });
+      // Setting retained presence on the channel
+      expect(mqtt.publish).toBeCalledWith(
+        '__presence/test.m-ld.org/client1',
+        '{"client1":"test.m-ld.org/control"}',
+        { qos: 1, retain: true });
       updates.next(entry);
 
       expect(mqtt.publish).toBeCalled();

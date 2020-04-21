@@ -89,10 +89,7 @@ export class MqttRemotes implements MeldRemotes {
         if (!grants.every(grant => subscriptions[grant.topic] == grant.qos))
           throw new Error('Requested QoS was not granted');
 
-        // Join the presence on this domain
-        await this.presence.join(this.mqtt, this.id, this.controlTopic.address);
-
-        // Tell the world that a clone has connected
+        // Tell the world that we will be a clone on this domain
         this.mqtt.publish(this.registryTopic.address,
           JSON.stringify({ id: this.id } as Hello), { qos: 1, retain: true });
       } catch (err) {
@@ -111,6 +108,9 @@ export class MqttRemotes implements MeldRemotes {
 
   connect(clone: MeldLocal): void {
     this.clone = clone;
+    // Join the presence on this domain
+    this.presence.join(this.mqtt, this.id, this.controlTopic.address);
+    // Start sending updates from the local clone to the remotes
     clone.updates.subscribe({
       next: async msg => {
         try {

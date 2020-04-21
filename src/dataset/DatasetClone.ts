@@ -101,6 +101,7 @@ export class DatasetClone implements MeldClone {
   }
 
   async snapshot(): Promise<Snapshot> {
+    console.info(`${this.id}: Compiling snapshot`);
     const dataSnapshot = await this.dataset.takeSnapshot();
     return {
       time: dataSnapshot.time,
