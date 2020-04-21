@@ -25,7 +25,7 @@
   },
   "homepage": "https://github.com/gsvarovsky/m-ld-js#readme",
   "devDependencies": {
-    "@gsvarovsky/m-ld-spec": "0.1.1",
+    "@gsvarovsky/m-ld-spec": "0.1.2",
     "@types/jest": "^24.9.1",
     "@types/memdown": "^3.0.0",
     "aedes": "^0.41.0",
