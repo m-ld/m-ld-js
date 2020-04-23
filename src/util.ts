@@ -1,7 +1,7 @@
 import { Quad } from 'rdf-js';
 import { fromRDF } from 'jsonld';
 import { concat, Observable, OperatorFunction, Subscription } from "rxjs";
-import { publish } from "rxjs/operators";
+import { publish, tap } from "rxjs/operators";
 
 export function flatten<T>(bumpy: T[][]): T[] {
   return ([] as T[]).concat(...bumpy);
@@ -66,13 +66,15 @@ export function shortId(len: number = 8) {
   });
 }
 
+export function tapComplete<T>(done: Future<void>): OperatorFunction<T, T> {
+  return tap({ complete: () => done.resolve(), error: done.reject });
+}
+
 /**
  * Delays notifications from a source until a signal is received from a notifier.
  * @see https://ncjamieson.com/how-to-write-delayuntil/
  */
-export function delayUntil<T>(
-  notifier: Observable<any>
-): OperatorFunction<T, T> {
+export function delayUntil<T>(notifier: Observable<any>): OperatorFunction<T, T> {
   return source =>
     source.pipe(
       publish(published => {
