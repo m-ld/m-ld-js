@@ -264,8 +264,8 @@ export class MqttRemotes implements MeldRemotes {
       time, dataAddress, lastHash, updatesAddress
     ).toJson(), true);
     // Ack has been sent, start streaming the data and updates
-    this.produce(data, dataAddress, toMeldJson);
-    this.produce(updates, updatesAddress, jsonFromDelta);
+    this.produce(data, dataAddress, toMeldJson, 'snapshot');
+    this.produce(updates, updatesAddress, jsonFromDelta, 'updates');
   }
 
   private async replyRevup(sentParams: SendParams,
@@ -275,13 +275,15 @@ export class MqttRemotes implements MeldRemotes {
       const updatesAddress = uuid();
       await this.reply(sentParams, new Response.Revup(true, updatesAddress).toJson(), true);
       // Ack has been sent, start streaming the updates
-      this.produce(revup, updatesAddress, jsonFromDelta);
+      this.produce(revup, updatesAddress, jsonFromDelta, 'updates');
     } else if (this.clone) {
       this.reply(sentParams, new Response.Revup(false, this.clone.id).toJson());
     }
   }
 
-  private produce<T>(data: Observable<T>, subAddress: string, toJson: (datum: T) => Promise<any>) {
+  private produce<T>(data: Observable<T>, subAddress: string,
+    toJson: (datum: T) => Promise<any>, type: 'snapshot' | 'updates') {
+    
     const address = this.controlSubAddress(subAddress);
     // If notifications fail due to MQTT death, the recipient will find out from the broker
     // so here we make best efforts to notify an error and then give up.
@@ -293,8 +295,11 @@ export class MqttRemotes implements MeldRemotes {
           this.notify(address, Promise.resolve({ error })).catch(logError);
           subs.unsubscribe();
         }),
-      complete: () => this.notify(address, Promise.resolve({ complete: true })).catch(logError),
-      error: error => this.notify(address, Promise.resolve({ error })).catch(logError)
+      complete: () => this.notify(address, Promise.resolve({ complete: true }))
+        .then(() => console.info(`${this.id}: Completed production of ${type}`))
+        .catch(logError),
+      error: error => this.notify(address, Promise.resolve({ error }))
+        .catch(logError)
     });
   }
 

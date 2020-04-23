@@ -153,7 +153,7 @@ export class SuSetDataset extends JrqlGraph {
       entry = await this.controlGraph.describe1(entry.next) as JournalEntry;
       if (!localOnly || !entry.remote) {
         const delivered = () => this.markDelivered(entry['@id']);
-        const time = TreeClock.fromJson(entry.time) as TreeClock; // Never null
+        const time = fromTimeString(entry.time) as TreeClock; // Never null
         subs.next({ time, data: JSON.parse(entry.delta), delivered });
       }
       await this.emitJournalAfter(entry, subs);
@@ -166,9 +166,7 @@ export class SuSetDataset extends JrqlGraph {
     const found = await this.controlGraph.find({ hash: lastHash.encode() } as Partial<JournalEntry>);
     if (found.size) {
       const entry = await this.controlGraph.describe1(found.values().next().value) as Subject;
-      return new Observable(subs => {
-        this.emitJournalAfter(entry as JournalEntry, subs);
-      });
+      return new Observable(subs => { this.emitJournalAfter(entry as JournalEntry, subs); });
     }
   }
 
@@ -278,17 +276,16 @@ export class SuSetDataset extends JrqlGraph {
     lastHash: Hash, lastTime: TreeClock, localTime: TreeClock): Promise<void> {
     // First reset the dataset with the given parameters
     await this.dataset.transact(() => this.reset(lastHash, lastTime, localTime));
-    return data.pipe(flatMap(async batch => {
-      // For each batch of reified quads with TIDs, first unreify
-      return this.dataset.transact(async () => from(unreify(batch)).pipe(
+    // For each batch of reified quads with TIDs, first unreify
+    return data.pipe(
+      flatMap(async batch => this.dataset.transact(async () => from(unreify(batch)).pipe(
         // For each triple in the batch, insert the TIDs into the tids graph
         flatMap(async ([triple, tids]) => (await this.newTripleTids(triple, tids))
           // And include the triple itself
           .concat({ newQuads: [{ ...triple, graph: defaultGraph() }] })),
         // Concat all of the resultant batch patches together
         reduce((batchPatch, entryPatch) => batchPatch.concat(entryPatch)))
-        .toPromise());
-    })).toPromise(); // Resolves when all batches are processed
+        .toPromise()))).toPromise(); // Resolves when all batches are processed
   }
 
   /**

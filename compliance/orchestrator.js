@@ -34,7 +34,6 @@ aedes.on('client', client => {
 function start(req, res, next) {
   registerRequest(req, res, next);
   const { cloneId, domain } = req.query;
-  res.header('transfer-encoding', 'chunked');
   let tmpDir;
   if (cloneId in clones) {
     tmpDir = clones[cloneId].tmpDir;
@@ -60,8 +59,13 @@ function start(req, res, next) {
     };
 
     const handlers = {
-      started: message => res.write(JSON.stringify(message)),
-      updated: message => res.write(JSON.stringify(message)),
+      started: message => {
+        res.header('transfer-encoding', 'chunked');
+        return res.write(JSON.stringify(message));
+      },
+      updated: message => {
+        return res.write(JSON.stringify(message));
+      },
       closed: () => {
         res.end();
         next();

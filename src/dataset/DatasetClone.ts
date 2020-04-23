@@ -7,6 +7,7 @@ import { TreeClockMessageService } from '../messages';
 import { Dataset } from '.';
 import { catchError, publishReplay, refCount, filter, ignoreElements, materialize, dematerialize, tap, observeOn } from 'rxjs/operators';
 import { Hash } from '../hash';
+import { delayUntil } from '../util';
 
 export class DatasetClone implements MeldClone {
   readonly updates: Observable<MeldJournalEntry>;
@@ -50,22 +51,28 @@ export class DatasetClone implements MeldClone {
     });
     if (time.isId) { // Top-level is Id, never been forked
       // No rev-up to do, so just subscribe to updates from later clones
+      console.info(`${this.id}: Genesis clone subscribing to updates`);
       this.remotes.updates.subscribe(this.updateReceiver);
     } else {
+      console.info(`${this.id}: Subscribing to updates`);
       const remoteRevups = new Source<DeltaMessage>();
       merge(this.remotes.updates, remoteRevups.pipe(catchError(this.revupLost)))
         .subscribe(this.updateReceiver);
       if (newClone) {
+        console.info(`${this.id}: New clone requesting snapshot`);
         await this.requestSnapshot(remoteRevups);
       } else {
         const revup = await this.remotes.revupFrom(await this.dataset.lastHash());
         if (revup) {
+          console.info(`${this.id}: revving-up from collaborator`);
           revup.subscribe(remoteRevups);
         } else {
+          console.info(`${this.id}: cannot rev-up, requesting snapshot`);
           await this.requestSnapshot(remoteRevups);
         }
       }
     }
+    console.info(`${this.id}: started.`);
     this.remotes.connect(this);
   }
 
@@ -79,18 +86,21 @@ export class DatasetClone implements MeldClone {
     const snapshot = await this.remotes.snapshot();
     // Deliver the message immediately through the message service
     const snapshotMsg = { time: snapshot.time } as DeltaMessage;
-    await new Promise<void>((resolve, reject) => {
+    const delivered = new Promise<void>((resolve, reject) => {
       this.messageService.deliver(snapshotMsg, this.orderingBuffer, acceptedMsg => {
         if (acceptedMsg == snapshotMsg) {
-          this.dataset.applySnapshot(
-            snapshot.data, snapshot.lastHash, snapshot.time, this.localTime)
+          this.dataset.applySnapshot(snapshot.data, snapshot.lastHash, snapshot.time, this.localTime)
             .then(resolve, reject);
-        } else {
+        }
+        else {
           this.dataset.apply(acceptedMsg.data, this.localTime);
         }
       });
-      snapshot.updates.subscribe(remoteRevups);
     });
+    // Delay all updates until the snapshot has been fully delivered
+    // This is because a snapshot is applied in multiple transactions
+    snapshot.updates.pipe(delayUntil(from(delivered))).subscribe(remoteRevups);
+    return delivered;
   }
 
   async newClock(): Promise<TreeClock> {
@@ -108,14 +118,14 @@ export class DatasetClone implements MeldClone {
       // Snapshotting holds open a transaction, so buffer/replay triples
       data: dataSnapshot.data.pipe(publishReplay(), refCount()),
       lastHash: dataSnapshot.lastHash,
-      updates: this.remoteUpdatesBeforeNow()
+      updates: this.remoteUpdatesBefore(dataSnapshot.time)
     };
   }
 
-  private remoteUpdatesBeforeNow(): Observable<DeltaMessage> {
-    const now = this.localTime;
+  private remoteUpdatesBefore(now: TreeClock): Observable<DeltaMessage> {
     const updatesBeforeNow = merge(
       // #1 Anything that arrives stamped prior to now
+      // FIXME: but only if we accept it! It could be a duplicate.
       this.remotes.updates.pipe(filter(message => message.time.anyLt(now))),
       // #2 Anything currently in our ordering buffer
       from(this.orderingBuffer));
@@ -135,9 +145,10 @@ export class DatasetClone implements MeldClone {
   }
 
   async revupFrom(lastHash: Hash): Promise<Observable<DeltaMessage> | undefined> {
+    const maybeMissed = this.remoteUpdatesBefore(this.localTime);
     const operations = await this.dataset.operationsSince(lastHash);
     if (operations)
-      return concat(operations, this.remoteUpdatesBeforeNow());
+      return concat(operations, maybeMissed);
   }
 
   transact(request: Pattern): Observable<Subject> {

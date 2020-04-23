@@ -2,7 +2,7 @@ import { SuSetDataset } from '../src/dataset/SuSetDataset';
 import { memStore } from './testClones';
 import { TreeClock } from '../src/clocks';
 import { Hash } from '../src/hash';
-import { first } from 'rxjs/operators';
+import { first, toArray } from 'rxjs/operators';
 
 const fred = {
   '@id': 'http://test.m-ld.org/fred',
@@ -180,6 +180,20 @@ describe('SU-Set Dataset', () => {
           expect(msg.time.equals(time)).toBe(true);
 
           await expect(ds.describe1('http://test.m-ld.org/barney')).resolves.toEqual(barney);
+        })
+
+        test('answers operations since first', async () => {
+          const lastHash = await ds.lastHash();
+          const msg = await ds.transact(async () => [
+            time = time.ticked(),
+            await ds.insert(barney)
+          ]);
+          const ops = await ds.operationsSince(lastHash);
+          expect(ops).not.toBeNull();
+          if (ops == null) return; // Compiler avoidance
+          const opArray = await ops.pipe(toArray()).toPromise();
+          expect(opArray.length).toBe(1);
+          expect(msg.time.equals(opArray[0].time)).toBe(true);
         })
       });
     });
