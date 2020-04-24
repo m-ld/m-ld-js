@@ -201,17 +201,17 @@ export class SuSetDataset extends JrqlGraph {
       const tidPatch = (await this.newTriplesTid(delta.insert, delta.tid))
         .concat({ oldQuads: flatten(deletedTriplesTids.map(tripleTids => tripleTids.tids)) });
       // Include journaling in final patch
-      const [journaling, entry] = await this.journal(delta, time, false);
+      const [journaling, entry] = await this.journal(delta, time);
       this.notifyUpdate(patch);
       return [patch.concat(tidPatch).concat(journaling), entry];
     });
   }
 
-  async apply(msg: JsonDelta, time: TreeClock): Promise<void> {
+  async apply(msgData: JsonDelta, msgTime: TreeClock, localTime: TreeClock): Promise<void> {
     return this.dataset.transact(async () => {
       // Check we haven't seen this transaction before in the journal
-      if (!(await this.controlGraph.find({ tid: msg.tid } as Partial<JournalEntry>)).size) {
-        const delta = await asMeldDelta(msg);
+      if (!(await this.controlGraph.find({ tid: msgData.tid } as Partial<JournalEntry>)).size) {
+        const delta = await asMeldDelta(msgData);
         const patch = new PatchQuads([], delta.insert);
         // The delta's delete contains reifications of deleted triples
         const tripleTidPatch = await unreify(delta.delete)
@@ -225,7 +225,7 @@ export class SuSetDataset extends JrqlGraph {
             return (await tripleTidPatch).concat({ oldQuads: toRemove });
           }, this.newTriplesTid(delta.insert, delta.tid));
         // Include journaling in final patch
-        const [journaling,] = await this.journal(delta, time, true);
+        const [journaling,] = await this.journal(delta, localTime, msgTime);
         this.notifyUpdate(patch);
         return patch.concat(tripleTidPatch).concat(journaling);
       }
@@ -308,7 +308,8 @@ export class SuSetDataset extends JrqlGraph {
     });
   }
 
-  private async journal(delta: MeldDelta, time: TreeClock, remote: boolean): Promise<[PatchQuads, MeldJournalEntry]> {
+  private async journal(delta: MeldDelta, localTime: TreeClock, remoteTime?: TreeClock):
+    Promise<[PatchQuads, MeldJournalEntry]> {
     const [journal, oldTail] = await this.journalTail();
     const block = new JsonDeltaBagBlock(Hash.decode(oldTail.hash)).next(delta.json);
     const entryId = toPrefixedId('entry', block.id.encode());
@@ -320,15 +321,16 @@ export class SuSetDataset extends JrqlGraph {
           { '@id': 'qs:journal', tail: entryId } as Partial<Journal>,
           { '@id': journal.tail, next: entryId } as Partial<JournalEntry>,
           {
-            '@id': entryId, remote,
+            '@id': entryId,
+            remote: !!remoteTime,
             hash: block.id.encode(),
             tid: delta.tid,
-            time: toTimeString(time),
+            time: toTimeString(remoteTime ?? localTime),
             delta: JSON.stringify(delta.json)
           } as JournalEntry
         ]
-      })).concat(await this.patchClock(journal, time)),
-      { time, data: delta.json, delivered }
+      })).concat(await this.patchClock(journal, localTime)),
+      { time: localTime, data: delta.json, delivered }
     ];
   };
 

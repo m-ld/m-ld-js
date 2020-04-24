@@ -11,11 +11,13 @@ export abstract class MessageService<C extends CausalClock<C>> {
     return this.peek();
   }
 
-  receive<M extends Message<C, unknown>>(message: M, buffer: M[], process: (message: M) => void) {
+  receive<M extends Message<C, unknown>>(
+    message: M, buffer: M[], process: (message: M) => void) {
     if (this.readyFor(message.time)) {
       this.event();
       this.deliver(message, buffer, process);
     } else {
+      console.debug(`Enqueued message with time ${message.time}`);
       buffer.push(message);
     }
   }

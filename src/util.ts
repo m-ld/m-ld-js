@@ -66,6 +66,11 @@ export function shortId(len: number = 8) {
   });
 }
 
+export function tapCount<T>(done: Future<number>): OperatorFunction<T, T> {
+  let n = 0;
+  return tap({ next: () => n++, complete: () => done.resolve(n), error: done.reject });
+}
+
 export function tapComplete<T>(done: Future<void>): OperatorFunction<T, T> {
   return tap({ complete: () => done.resolve(), error: done.reject });
 }

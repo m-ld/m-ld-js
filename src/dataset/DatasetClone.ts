@@ -7,7 +7,7 @@ import { TreeClockMessageService } from '../messages';
 import { Dataset } from '.';
 import { publishReplay, refCount, filter, ignoreElements, observeOn, takeUntil } from 'rxjs/operators';
 import { Hash } from '../hash';
-import { delayUntil, Future, tapComplete } from '../util';
+import { delayUntil, Future, tapComplete, tapCount } from '../util';
 
 export class DatasetClone implements MeldClone {
   readonly updates: Observable<MeldJournalEntry>;
@@ -16,8 +16,8 @@ export class DatasetClone implements MeldClone {
   private messageService: TreeClockMessageService;
   private readonly orderingBuffer: DeltaMessage[] = [];
   private readonly updateReceiver: PartialObserver<DeltaMessage> = {
-    next: delta => this.messageService.receive(delta, this.orderingBuffer, acceptedMsg =>
-      this.dataset.apply(acceptedMsg.data, this.localTime)),
+    next: delta => this.messageService.receive(delta, this.orderingBuffer,
+      msg => this.dataset.apply(msg.data, msg.time, this.localTime)),
     error: err => this.close(err),
     complete: () => this.close()
   };
@@ -46,7 +46,9 @@ export class DatasetClone implements MeldClone {
     this.messageService = new TreeClockMessageService(time);
     // Flush unsent operations
     await new Promise<void>((resolve, reject) => {
-      this.dataset.unsentLocalOperations().subscribe(
+      const counted = new Future<number>();
+      counted.then(n => n && console.info(`${this.id}: Emitting ${n} unsent operations`));
+      this.dataset.unsentLocalOperations().pipe(tapCount(counted)).subscribe(
         entry => this.updateSource.next(entry), reject, resolve);
     });
     if (time.isId) { // Top-level is Id, never been forked
@@ -112,6 +114,8 @@ export class DatasetClone implements MeldClone {
   }
 
   private remoteUpdatesBefore(now: TreeClock, until: PromiseLike<void>): Observable<DeltaMessage> {
+    if (this.orderingBuffer.length)
+      console.info(`${this.id}: Emitting ${this.orderingBuffer.length} from ordering buffer`);
     return merge(
       // #1 Anything currently in our ordering buffer
       from(this.orderingBuffer),
@@ -154,6 +158,11 @@ export class DatasetClone implements MeldClone {
 
   close(err?: any) {
     console.log(`${this.id}: Shutting down clone ${err ? 'due to ' + err : 'normally'}`);
+    if (this.orderingBuffer.length) {
+      console.warn(`${this.id}: closed with ${this.orderingBuffer.length} items in ordering buffer
+      \tfirst: ${this.orderingBuffer[0]}
+      \ttime: ${this.localTime}`);
+    }
     if (err)
       this.updateSource.error(err);
     else
