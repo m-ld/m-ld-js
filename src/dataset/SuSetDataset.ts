@@ -334,11 +334,13 @@ export class SuSetDataset extends JrqlGraph {
     ];
   };
 
-  private async markDelivered(entryId: Iri): Promise<PatchQuads> {
-    const journal = await this.loadJournal();
-    return await this.controlGraph.write({
-      '@delete': { '@id': 'qs:journal', lastDelivered: journal.lastDelivered } as Partial<Journal>,
-      '@insert': { '@id': 'qs:journal', lastDelivered: entryId } as Partial<Journal>
+  private async markDelivered(entryId: Iri) {
+    this.dataset.transact(async () => {
+      const journal = await this.loadJournal();
+      return this.controlGraph.write({
+        '@delete': { '@id': 'qs:journal', lastDelivered: journal.lastDelivered } as Partial<Journal>,
+        '@insert': { '@id': 'qs:journal', lastDelivered: entryId } as Partial<Journal>
+      });
     });
   }
 }

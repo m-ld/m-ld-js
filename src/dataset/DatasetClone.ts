@@ -160,8 +160,8 @@ export class DatasetClone implements MeldClone {
     console.log(`${this.id}: Shutting down clone ${err ? 'due to ' + err : 'normally'}`);
     if (this.orderingBuffer.length) {
       console.warn(`${this.id}: closed with ${this.orderingBuffer.length} items in ordering buffer
-      \tfirst: ${this.orderingBuffer[0]}
-      \ttime: ${this.localTime}`);
+      first: ${this.orderingBuffer[0].data.tid} @ ${this.orderingBuffer[0].time}
+      time: ${this.localTime}`);
     }
     if (err)
       this.updateSource.error(err);
