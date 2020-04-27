@@ -348,7 +348,7 @@ export class MqttRemotes implements MeldRemotes {
 function deltaFromJson(json: any): DeltaMessage {
   const time = fromTimeString(json.time);
   if (time)
-    return { time, data: json.data };
+    return { time, data: json.data, toString: DeltaMessage.toString };
   else
     throw new Error('No time in message');
 }

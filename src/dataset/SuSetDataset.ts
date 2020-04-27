@@ -158,7 +158,7 @@ export class SuSetDataset extends JrqlGraph {
       if (!localOnly || !entry.remote) {
         const delivered = () => this.markDelivered(entry['@id']);
         const time = fromTimeString(entry.time) as TreeClock; // Never null
-        subs.next({ time, data: JSON.parse(entry.delta), delivered });
+        subs.next({ time, data: JSON.parse(entry.delta), delivered, toString: DeltaMessage.toString });
       }
       await this.emitJournalAfter(entry, subs);
     } else {

@@ -18,9 +18,9 @@ export class DatasetClone implements MeldClone {
   private readonly orderingBuffer: DeltaMessage[] = [];
   private readonly updateReceiver: PartialObserver<DeltaMessage> = {
     next: delta => {
-      this.log.trace(`${this.id}: Receiving ${delta} @ ${this.localTime}`);
+      this.log.debug(`${this.id}: Receiving ${delta} @ ${this.localTime}`);
       this.messageService.receive(delta, this.orderingBuffer, msg => {
-        this.log.trace(`${this.id}: Accepting ${delta}`);
+        this.log.debug(`${this.id}: Accepting ${delta}`);
         this.dataset.apply(msg.data, msg.time, this.localTime);
       });
     },
@@ -36,7 +36,7 @@ export class DatasetClone implements MeldClone {
     // Update notifications are delayed to ensure internal processing has priority
     this.updates = this.updateSource.pipe(
       observeOn(asapScheduler),
-      tap(msg => this.log.trace(`${this.id}: Sending ${msg}`)));
+      tap(msg => this.log.debug(`${this.id}: Sending ${msg}`)));
     this.log = getLogger(this.id);
     this.log.setLevel(logLevel);
   }
@@ -71,9 +71,9 @@ export class DatasetClone implements MeldClone {
       this.log.info(`${this.id}: Subscribing to updates`);
       const remoteRevups = new Source<DeltaMessage>();
       const revvedUp = new Future<void>();
-      concat(
+      merge(
         remoteRevups.pipe(tapComplete(revvedUp)),
-        // Don't allow through updates until the rev-up is complete
+        // Allow through updates when the rev-up is complete
         this.remotes.updates.pipe(delayUntil(from(revvedUp))))
         .subscribe(this.updateReceiver);
       if (newClone) {
@@ -120,8 +120,7 @@ export class DatasetClone implements MeldClone {
     return {
       time, lastHash, updates,
       // Snapshotting holds open a transaction, so buffer/replay triples
-      data: data.pipe(
-        publishReplay(), refCount(), tapComplete(sentSnapshot))
+      data: data.pipe(publishReplay(), refCount(), tapComplete(sentSnapshot))
     };
   }
 
@@ -136,7 +135,7 @@ export class DatasetClone implements MeldClone {
       this.remotes.updates.pipe(
         filter(message => message.time.anyLt(now)),
         takeUntil(from(until)))).pipe(tap(msg =>
-          this.log.trace(`${this.id}: Sending update ${msg}`)));
+          this.log.debug(`${this.id}: Sending update ${msg}`)));
   }
 
   private get localTime() {
@@ -148,8 +147,10 @@ export class DatasetClone implements MeldClone {
     const maybeMissed = this.remoteUpdatesBefore(this.localTime, sentOperations);
     const operations = await this.dataset.operationsSince(lastHash);
     if (operations)
-      return concat(operations.pipe(tapComplete(sentOperations), tap(msg =>
-        this.log.trace(`${this.id}: Sending rev-up ${msg}`))), maybeMissed);
+      return merge(
+        operations.pipe(tapComplete(sentOperations), tap(msg =>
+          this.log.debug(`${this.id}: Sending rev-up ${msg}`))),
+        maybeMissed.pipe(delayUntil(from(sentOperations))));
   }
 
   transact(request: Pattern): Observable<Subject> {

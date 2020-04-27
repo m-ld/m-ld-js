@@ -22,7 +22,8 @@ export namespace DeltaMessage {
   }
 
   export function toString(this: DeltaMessage) {
-    return `${JSON.stringify(this.data)} @ ${this.time}`;
+    return `${JSON.stringify(this.data)}
+    @ ${this.time}`;
   }
 }
 
@@ -55,8 +56,6 @@ export type JsonDelta = {
  * An observable of quad arrays. Quads, because it must include the TID graph;
  * arrays for batching (sender decides array size).
  */
-// FIXME: Not compliant with Java implementation
-// https://github.com/gsvarovsky/m-ld/issues/10
 export interface Snapshot extends Message<TreeClock, Observable<Quad[]>> {
   readonly lastHash: Hash;
   readonly updates: Observable<DeltaMessage>;

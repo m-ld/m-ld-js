@@ -6,7 +6,7 @@ const httpUrl = new URL('http://localhost:3000');
 const inspector = require('inspector');
 const LOG = require('loglevel');
 
-LOG.setLevel(LOG.levels.DEBUG);
+LOG.setLevel(LOG.levels.INFO);
 LOG.getLogger('aedes').setLevel(LOG.levels.INFO);
 global.nextDebugPort = 40895;
 
