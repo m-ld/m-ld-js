@@ -109,7 +109,8 @@ export async function asMeldDelta(delta: JsonDelta): Promise<MeldDelta> {
     tid: delta.tid,
     insert: await fromMeldJson(JSON.parse(delta.insert)),
     delete: await fromMeldJson(JSON.parse(delta.delete)),
-    json: delta
+    json: delta,
+    toString: () => `${this.tid}: ${JSON.stringify(this.json)}`
   }
 }
 

@@ -1,9 +1,11 @@
 const leveldown = require('leveldown');
 const { clone } = require('../dist');
+const LOG = require('loglevel');
 
 Error.stackTraceLimit = Infinity;
 
-const [, , cloneId, domain, tmpDirName, requestId, mqttPort] = process.argv;
+const [, , cloneId, domain, tmpDirName, requestId, mqttPort, logLevel] = process.argv;
+LOG.setLevel(Number(logLevel));
 
 clone(leveldown(tmpDirName), {
   '@id': cloneId, '@domain': domain,
@@ -12,7 +14,8 @@ clone(leveldown(tmpDirName), {
     port: Number(mqttPort),
     connectTimeout: 100, // Short for testing partitioning
     keepalive: 1 // Short for testing partitioning
-  }
+  },
+  logLevel: Number(logLevel)
 }).then(meld => {
   send(requestId, 'started', { cloneId });
 
@@ -43,7 +46,7 @@ clone(leveldown(tmpDirName), {
     error: err => sendError(requestId, err)
   });
 }).catch(err => {
-  console.error(`${cloneId}: ${err}`);
+  LOG.error(`${cloneId}: ${err}`);
   send(requestId, 'unstarted', { err: `${err}` });
 });
 

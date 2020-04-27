@@ -8,7 +8,7 @@ import { Triple, Quad } from 'rdf-js';
 import { Hash } from '../hash';
 import { Pattern, Subject, Group, DeleteInsert } from './jsonrql';
 
-export type DeltaMessage = Message<TreeClock, JsonDelta>;
+export type DeltaMessage = Message<TreeClock, JsonDelta> & Object;
 
 export namespace DeltaMessage {
   export function toJson(msg: DeltaMessage): any {
@@ -18,7 +18,11 @@ export namespace DeltaMessage {
   export function fromJson(json: any): DeltaMessage | undefined {
     const time = TreeClock.fromJson(json.time);
     if (time && json.data)
-      return { time, data: json.data };
+      return { time, data: json.data, toString };
+  }
+
+  export function toString(this: DeltaMessage) {
+    return `${JSON.stringify(this.data)} @ ${this.time}`;
   }
 }
 
@@ -31,7 +35,7 @@ export interface Meld {
   revupFrom(lastHash: Hash): Promise<Observable<DeltaMessage> | undefined>;
 }
 
-export interface MeldDelta {
+export interface MeldDelta extends Object {
   readonly tid: UUID;
   readonly insert: Triple[];
   readonly delete: Triple[];
@@ -44,7 +48,7 @@ export interface MeldDelta {
 }
 
 export type JsonDelta = {
-  [key in Exclude<keyof MeldDelta, 'json'>]: string;
+  [key in 'tid' | 'insert' | 'delete']: string;
 }
 
 /**

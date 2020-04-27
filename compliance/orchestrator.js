@@ -3,6 +3,7 @@ const { join } = require('path');
 const { dirSync } = require('tmp');
 const { BadRequestError, InternalServerError, NotFoundError } = require('restify-errors');
 const { createServer } = require('net');
+const LOG = require('loglevel');
 const inspector = require('inspector');
 const aedes = require('aedes')();
 const clones = {/* cloneId: { process, tmpDir, mqtt: { client, server } } */ };
@@ -14,20 +15,22 @@ exports.onExit = () => Object.values(clones).forEach(
   ({ process }) => process && process.kill());
 
 aedes.on('publish', function (packet, client) {
+  const log = LOG.getLogger('aedes');
   if (client) {
     const { topic, qos, retain } = packet;
-    global.debug && console.log(
+    log.debug(
       client.id, { topic, qos, retain },
-      global.debug > 1 ? packet.payload.toString() : '');
+      log.getLevel() <= LOG.levels.TRACE ? packet.payload.toString() : '');
   }
 });
 
 aedes.on('client', client => {
+  const log = LOG.getLogger('aedes');
   if (client.id in clones) {
-    global.debug && console.debug(`${client.id}: MQTT client connecting`);
+    log.debug(`${client.id}: MQTT client connecting`);
     clones[client.id].mqtt.client = client;
   } else {
-    console.warn(`${client.id}: Unexpected MQTT client`);
+    log.warn(`${client.id}: Unexpected MQTT client`);
   }
 });
 
@@ -42,17 +45,17 @@ function start(req, res, next) {
   } else {
     tmpDir = dirSync({ unsafeCleanup: true });
   }
-  console.info(`${cloneId}: Starting clone on domain ${domain}`);
+  LOG.info(`${cloneId}: Starting clone on domain ${domain}`);
 
   const mqttServer = createServer(aedes.handle);
   mqttServer.listen(err => {
-    global.debug && console.debug(`${cloneId}: Clone MQTT port is ${mqttServer.address().port}`);
+    LOG.debug(`${cloneId}: Clone MQTT port is ${mqttServer.address().port}`);
     if (err)
       return next(new InternalServerError(err));
 
     clones[cloneId] = {
       process: fork(join(__dirname, 'clone.js'),
-        [cloneId, domain, tmpDir.name, req.id(), mqttServer.address().port],
+        [cloneId, domain, tmpDir.name, req.id(), mqttServer.address().port, LOG.getLevel()],
         { execArgv: inspector.url() ? [`--inspect-brk=${global.nextDebugPort++}`] : [] }),
       tmpDir,
       mqtt: { server: mqttServer }
@@ -126,7 +129,7 @@ function stop(req, res, next) {
   registerRequest(req, res, next);
   const { cloneId } = req.query;
   withClone(cloneId, ({ process }) => {
-    global.debug && console.debug(`${cloneId}: Stopping clone`);
+    LOG.debug(`${cloneId}: Stopping clone`);
     process.send({ id: req.id(), '@type': 'stop' });
   }, next);
 }
@@ -140,7 +143,7 @@ function destroy(req, res, next) {
   registerRequest(req, res, next);
   const { cloneId } = req.query;
   withClone(cloneId, ({ process, tmpDir }) => {
-    global.debug && console.debug(`${cloneId}: Destroying clone`);
+    LOG.debug(`${cloneId}: Destroying clone`);
     if (process) {
       process.send({ id: req.id(), '@type': 'destroy' });
     } else {
@@ -155,7 +158,7 @@ function destroy(req, res, next) {
 function partition(req, res, next) {
   const { cloneId } = req.query;
   withClone(cloneId, ({ mqtt }) => {
-    global.debug && console.debug(`${cloneId}: Partitioning clone`);
+    LOG.debug(`${cloneId}: Partitioning clone`);
     if (mqtt.server.listening) {
       if (mqtt.client)
         mqtt.client.conn.destroy();
@@ -172,7 +175,7 @@ function partition(req, res, next) {
 }
 
 function destroyData(cloneId, tmpDir) {
-  console.info(`${cloneId}: Destroying clone data`);
+  LOG.info(`${cloneId}: Destroying clone data`);
   tmpDir.removeCallback();
 }
 
@@ -190,7 +193,7 @@ function withClone(cloneId, op/*(subprocess, tmpDir)*/, next) {
 
 function killCloneProcess(cloneId, reason, res, next) {
   withClone(cloneId, clone => {
-    global.debug && console.debug(`${cloneId}: Killing clone process`);
+    LOG.debug(`${cloneId}: Killing clone process`);
     clone.process.kill();
     clone.process.on('exit', () => {
       clone.process = null;

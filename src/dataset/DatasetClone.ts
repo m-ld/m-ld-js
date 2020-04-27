@@ -5,9 +5,10 @@ import { TreeClock } from '../clocks';
 import { SuSetDataset } from './SuSetDataset';
 import { TreeClockMessageService } from '../messages';
 import { Dataset } from '.';
-import { publishReplay, refCount, filter, ignoreElements, observeOn, takeUntil } from 'rxjs/operators';
+import { publishReplay, refCount, filter, ignoreElements, observeOn, takeUntil, tap } from 'rxjs/operators';
 import { Hash } from '../hash';
 import { delayUntil, Future, tapComplete, tapCount } from '../util';
+import { LogLevelDesc, getLogger, Logger } from 'loglevel';
 
 export class DatasetClone implements MeldClone {
   readonly updates: Observable<MeldJournalEntry>;
@@ -16,17 +17,28 @@ export class DatasetClone implements MeldClone {
   private messageService: TreeClockMessageService;
   private readonly orderingBuffer: DeltaMessage[] = [];
   private readonly updateReceiver: PartialObserver<DeltaMessage> = {
-    next: delta => this.messageService.receive(delta, this.orderingBuffer,
-      msg => this.dataset.apply(msg.data, msg.time, this.localTime)),
+    next: delta => {
+      this.log.trace(`${this.id}: Receiving ${delta} @ ${this.localTime}`);
+      this.messageService.receive(delta, this.orderingBuffer, msg => {
+        this.log.trace(`${this.id}: Accepting ${delta}`);
+        this.dataset.apply(msg.data, msg.time, this.localTime);
+      });
+    },
     error: err => this.close(err),
     complete: () => this.close()
   };
+  private readonly log: Logger;
 
   constructor(dataset: Dataset,
-    private readonly remotes: MeldRemotes) {
-    this.dataset = new SuSetDataset(dataset);
+    private readonly remotes: MeldRemotes,
+    logLevel: LogLevelDesc = 'info') {
+    this.dataset = new SuSetDataset(dataset, logLevel);
     // Update notifications are delayed to ensure internal processing has priority
-    this.updates = this.updateSource.pipe(observeOn(asapScheduler));
+    this.updates = this.updateSource.pipe(
+      observeOn(asapScheduler),
+      tap(msg => this.log.trace(`${this.id}: Sending ${msg}`)));
+    this.log = getLogger(this.id);
+    this.log.setLevel(logLevel);
   }
 
   get id() {
@@ -42,21 +54,21 @@ export class DatasetClone implements MeldClone {
       time = await this.remotes.newClock();
       await this.dataset.saveClock(time, true);
     }
-    console.info(`${this.id}: has time ${time}`);
+    this.log.info(`${this.id}: has time ${time}`);
     this.messageService = new TreeClockMessageService(time);
     // Flush unsent operations
     await new Promise<void>((resolve, reject) => {
       const counted = new Future<number>();
-      counted.then(n => n && console.info(`${this.id}: Emitting ${n} unsent operations`));
+      counted.then(n => n && this.log.info(`${this.id}: Emitting ${n} unsent operations`));
       this.dataset.unsentLocalOperations().pipe(tapCount(counted)).subscribe(
         entry => this.updateSource.next(entry), reject, resolve);
     });
     if (time.isId) { // Top-level is Id, never been forked
       // No rev-up to do, so just subscribe to updates from later clones
-      console.info(`${this.id}: Genesis clone subscribing to updates`);
+      this.log.info(`${this.id}: Genesis clone subscribing to updates`);
       this.remotes.updates.subscribe(this.updateReceiver);
     } else {
-      console.info(`${this.id}: Subscribing to updates`);
+      this.log.info(`${this.id}: Subscribing to updates`);
       const remoteRevups = new Source<DeltaMessage>();
       const revvedUp = new Future<void>();
       concat(
@@ -65,20 +77,20 @@ export class DatasetClone implements MeldClone {
         this.remotes.updates.pipe(delayUntil(from(revvedUp))))
         .subscribe(this.updateReceiver);
       if (newClone) {
-        console.info(`${this.id}: New clone requesting snapshot`);
+        this.log.info(`${this.id}: New clone requesting snapshot`);
         await this.requestSnapshot(remoteRevups);
       } else {
         const revup = await this.remotes.revupFrom(await this.dataset.lastHash());
         if (revup) {
-          console.info(`${this.id}: revving-up from collaborator`);
+          this.log.info(`${this.id}: revving-up from collaborator`);
           revup.subscribe(remoteRevups);
         } else {
-          console.info(`${this.id}: cannot rev-up, requesting snapshot`);
+          this.log.info(`${this.id}: cannot rev-up, requesting snapshot`);
           await this.requestSnapshot(remoteRevups);
         }
       }
     }
-    console.info(`${this.id}: started.`);
+    this.log.info(`${this.id}: started.`);
     this.remotes.connect(this);
   }
 
@@ -101,7 +113,7 @@ export class DatasetClone implements MeldClone {
   }
 
   async snapshot(): Promise<Snapshot> {
-    console.info(`${this.id}: Compiling snapshot`);
+    this.log.info(`${this.id}: Compiling snapshot`);
     const sentSnapshot = new Future<void>();
     const updates = this.remoteUpdatesBefore(this.localTime, sentSnapshot);
     const { time, data, lastHash } = await this.dataset.takeSnapshot();
@@ -115,7 +127,7 @@ export class DatasetClone implements MeldClone {
 
   private remoteUpdatesBefore(now: TreeClock, until: PromiseLike<void>): Observable<DeltaMessage> {
     if (this.orderingBuffer.length)
-      console.info(`${this.id}: Emitting ${this.orderingBuffer.length} from ordering buffer`);
+      this.log.info(`${this.id}: Emitting ${this.orderingBuffer.length} from ordering buffer`);
     return merge(
       // #1 Anything currently in our ordering buffer
       from(this.orderingBuffer),
@@ -123,7 +135,8 @@ export class DatasetClone implements MeldClone {
       // FIXME: but only if we accept it! It could be a duplicate.
       this.remotes.updates.pipe(
         filter(message => message.time.anyLt(now)),
-        takeUntil(from(until))));
+        takeUntil(from(until)))).pipe(tap(msg =>
+          this.log.trace(`${this.id}: Sending update ${msg}`)));
   }
 
   private get localTime() {
@@ -135,7 +148,8 @@ export class DatasetClone implements MeldClone {
     const maybeMissed = this.remoteUpdatesBefore(this.localTime, sentOperations);
     const operations = await this.dataset.operationsSince(lastHash);
     if (operations)
-      return concat(operations.pipe(tapComplete(sentOperations)), maybeMissed);
+      return concat(operations.pipe(tapComplete(sentOperations), tap(msg =>
+        this.log.trace(`${this.id}: Sending rev-up ${msg}`))), maybeMissed);
   }
 
   transact(request: Pattern): Observable<Subject> {
@@ -157,10 +171,10 @@ export class DatasetClone implements MeldClone {
   }
 
   close(err?: any) {
-    console.log(`${this.id}: Shutting down clone ${err ? 'due to ' + err : 'normally'}`);
+    this.log.info(`${this.id}: Shutting down clone ${err ? 'due to ' + err : 'normally'}`);
     if (this.orderingBuffer.length) {
-      console.warn(`${this.id}: closed with ${this.orderingBuffer.length} items in ordering buffer
-      first: ${this.orderingBuffer[0].data.tid} @ ${this.orderingBuffer[0].time}
+      this.log.warn(`${this.id}: closed with ${this.orderingBuffer.length} items in ordering buffer
+      first: ${this.orderingBuffer[0]}
       time: ${this.localTime}`);
     }
     if (err)

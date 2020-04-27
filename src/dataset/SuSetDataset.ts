@@ -12,6 +12,7 @@ import { Observable, Subscriber, from, Subject as Source, asapScheduler } from '
 import { toArray, bufferCount, flatMap, reduce, observeOn } from 'rxjs/operators';
 import { flatten } from '../util';
 import { generate as uuid } from 'short-uuid';
+import { LogLevelDesc, getLogger, Logger } from 'loglevel';
 
 const TIDS_CONTEXT: Context = {
   qs: 'http://qs.m-ld.org/',
@@ -64,9 +65,10 @@ export class SuSetDataset extends JrqlGraph {
   private readonly tidsGraph: JrqlGraph;
   private readonly updateSource: Source<DeleteInsert<Group>> = new Source;
   readonly updates: Observable<DeleteInsert<Group>>
+  private readonly log: Logger;
 
   constructor(
-    private readonly dataset: Dataset) {
+    private readonly dataset: Dataset, logLevel: LogLevelDesc = 'info') {
     super(dataset.graph());
     // Named graph for control quads e.g. Journal
     this.controlGraph = new JrqlGraph(
@@ -75,6 +77,8 @@ export class SuSetDataset extends JrqlGraph {
       dataset.graph(namedNode(CONTROL_CONTEXT.qs + 'tids')), TIDS_CONTEXT);
     // Update notifications are strictly ordered but don't hold up transactions
     this.updates = this.updateSource.pipe(observeOn(asapScheduler));
+    this.log = getLogger(this.id);
+    this.log.setLevel(logLevel);
   }
 
   get id(): string {
@@ -87,7 +91,7 @@ export class SuSetDataset extends JrqlGraph {
   }
 
   async close(err?: any): Promise<void> {
-    console.log(`${this.id}: Shutting down dataset ${err ? 'due to ' + err : 'normally'}`);
+    this.log.info(`${this.id}: Shutting down dataset ${err ? 'due to ' + err : 'normally'}`);
     if (err)
       this.updateSource.error(err);
     else
@@ -330,7 +334,7 @@ export class SuSetDataset extends JrqlGraph {
           } as JournalEntry
         ]
       })).concat(await this.patchClock(journal, localTime)),
-      { time: localTime, data: delta.json, delivered }
+      { time: localTime, data: delta.json, delivered, toString: DeltaMessage.toString }
     ];
   };
 

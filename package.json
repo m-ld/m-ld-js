@@ -61,6 +61,7 @@
     "async-mqtt": "^2.5.0",
     "bn.js": "^5.1.1",
     "jsonld": "^2.0.2",
+    "loglevel": "^1.6.8",
     "mqtt-pattern": "^1.2.0",
     "quadstore": "^6.0.1",
     "rxjs": "^6.5.5",
