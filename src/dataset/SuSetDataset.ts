@@ -10,7 +10,7 @@ import { JrqlGraph, toGroup } from './JrqlGraph';
 import { JsonDeltaBagBlock, newDelta, asMeldDelta, toTimeString, fromTimeString, reify, unreify, hashTriple } from '../m-ld/MeldJson';
 import { Observable, Subscriber, from, Subject as Source, asapScheduler } from 'rxjs';
 import { toArray, bufferCount, flatMap, reduce, observeOn } from 'rxjs/operators';
-import { flatten } from '../util';
+import { flatten, Future, tapComplete } from '../util';
 import { generate as uuid } from 'short-uuid';
 import { LogLevelDesc, getLogger, Logger } from 'loglevel';
 
@@ -275,13 +275,17 @@ export class SuSetDataset extends JrqlGraph {
   /**
    * Applies a snapshot to this dataset.
    * Caution: uses multiple transactions, so the world must be held up by the caller.
+   * @param data a hot observable of snapshot data in batches of quads
+   * @param lastHash the last hash of the snapshot dataset
+   * @param lastTime the last time of the snapshot dataset (not the local time of the provider)
+   * @param localTime the time of the local process, to be saved
    */
   async applySnapshot(data: Observable<Quad[]>,
-    lastHash: Hash, lastTime: TreeClock, localTime: TreeClock): Promise<void> {
+    lastHash: Hash, lastTime: TreeClock, localTime: TreeClock) {
     // First reset the dataset with the given parameters
-    await this.dataset.transact(() => this.reset(lastHash, lastTime, localTime));
+    const haveReset = this.dataset.transact(() => this.reset(lastHash, lastTime, localTime));
     // For each batch of reified quads with TIDs, first unreify
-    return data.pipe(
+    const snapshotApplied = data.pipe(
       flatMap(async batch => this.dataset.transact(async () => from(unreify(batch)).pipe(
         // For each triple in the batch, insert the TIDs into the tids graph
         flatMap(async ([triple, tids]) => (await this.newTripleTids(triple, tids))
@@ -289,7 +293,8 @@ export class SuSetDataset extends JrqlGraph {
           .concat({ newQuads: [{ ...triple, graph: defaultGraph() }] })),
         // Concat all of the resultant batch patches together
         reduce((batchPatch, entryPatch) => batchPatch.concat(entryPatch)))
-        .toPromise()))).toPromise(); // Resolves when all batches are processed
+        .toPromise()))).toPromise();
+    return Promise.all([haveReset, snapshotApplied]);
   }
 
   /**
@@ -300,14 +305,17 @@ export class SuSetDataset extends JrqlGraph {
   async takeSnapshot(): Promise<Omit<Snapshot, 'updates'>> {
     return new Promise((resolve, reject) => {
       this.dataset.transact(async () => {
+        const dataEmitted = new Future<void>();
         const [, tail] = await this.journalTail();
         resolve({
           time: fromTimeString(tail.time) as TreeClock,
           lastHash: Hash.decode(tail.hash),
           data: this.graph.match().pipe(
             bufferCount(10), // TODO batch size config
-            flatMap(async (batch) => this.reify(await this.findTriplesTids(batch))))
+            flatMap(async (batch) => this.reify(await this.findTriplesTids(batch))),
+            tapComplete(dataEmitted))
         });
+        await dataEmitted; // If this rejects, data will error
       }).catch(reject);
     });
   }
