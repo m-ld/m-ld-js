@@ -170,7 +170,9 @@ export class SuSetDataset extends JrqlGraph {
     const found = await this.controlGraph.find({ hash: lastHash.encode() } as Partial<JournalEntry>);
     if (found.size) {
       const entry = await this.controlGraph.describe1(found.values().next().value) as Subject;
-      return new Observable(subs => { this.emitJournalAfter(entry as JournalEntry, subs); });
+      return new Observable(subs => {
+        this.emitJournalAfter(entry as JournalEntry, subs).catch(err => subs.error(err));
+      });
     }
   }
 
