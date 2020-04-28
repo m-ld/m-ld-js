@@ -2,7 +2,7 @@ import { SuSetDataset } from '../src/dataset/SuSetDataset';
 import { memStore } from './testClones';
 import { TreeClock } from '../src/clocks';
 import { Hash } from '../src/hash';
-import { first } from 'rxjs/operators';
+import { first, toArray } from 'rxjs/operators';
 
 const fred = {
   '@id': 'http://test.m-ld.org/fred',
@@ -48,18 +48,18 @@ describe('SU-Set Dataset', () => {
     });
 
     describe('with an initial time', () => {
-      let time = TreeClock.GENESIS.ticked();
+      let { left: localTime, right: remoteTime } = TreeClock.GENESIS.forked();
 
-      beforeEach(async () => ds.saveClock(time, true));
+      beforeEach(async () => ds.saveClock(localTime = localTime.ticked(), true));
 
       test('answers the time', async () => {
         const savedTime = await ds.loadClock();
-        expect(savedTime && savedTime.equals(time)).toBe(true);
+        expect(savedTime && savedTime.equals(localTime)).toBe(true);
       });
 
       test('answers an empty snapshot', async () => {
         const snapshot = await ds.takeSnapshot();
-        expect(snapshot.time.equals(time)).toBe(true);
+        expect(snapshot.time.equals(localTime)).toBe(true);
         expect(snapshot.lastHash).toBeTruthy();
         await expect(snapshot.data.toPromise()).resolves.toBeUndefined();
       });
@@ -68,11 +68,11 @@ describe('SU-Set Dataset', () => {
         const willUpdate = captureUpdate();
 
         const msg = await ds.transact(async () => [
-          time = time.ticked(),
+          localTime = localTime.ticked(),
           await ds.insert(fred)
         ]);
 
-        expect(msg.time.equals(time)).toBe(true);
+        expect(msg.time.equals(localTime)).toBe(true);
         expect(msg.data.tid).toBeTruthy();
 
         const insertedJsonLd = JSON.parse(msg.data.insert);
@@ -91,7 +91,8 @@ describe('SU-Set Dataset', () => {
           tid: 'B6FVbHGtFxXhdLKEVmkcd',
           insert: '{"@graph":{"@id":"http://test.m-ld.org/fred","http://test.m-ld.org/#name":"Fred"}}',
           delete: '{"@graph":{}}'
-        }, time = time.ticked());
+        }, remoteTime = remoteTime.ticked(), localTime = localTime.ticked());
+
         await expect(ds.find({ '@id': 'http://test.m-ld.org/fred' }))
           .resolves.toEqual(new Set(['http://test.m-ld.org/fred']));
 
@@ -106,7 +107,7 @@ describe('SU-Set Dataset', () => {
 
         beforeEach(async () => {
           firstTid = (await ds.transact(async () => [
-            time = time.ticked(),
+            localTime = localTime.ticked(),
             await ds.insert(fred)
           ])).data.tid;
         });
@@ -118,7 +119,7 @@ describe('SU-Set Dataset', () => {
 
         test('answers the new time', async () => {
           const newTime = await ds.loadClock();
-          expect(newTime && newTime.equals(time)).toBe(true);
+          expect(newTime && newTime.equals(localTime)).toBe(true);
         });
 
         test('has an unsent operation', async () => {
@@ -127,7 +128,7 @@ describe('SU-Set Dataset', () => {
 
         test('answers a snapshot', async () => {
           const snapshot = await ds.takeSnapshot();
-          expect(snapshot.time.equals(time)).toBe(true);
+          expect(snapshot.time.equals(localTime)).toBe(true);
           expect(snapshot.lastHash.equals(firstHash)).toBe(false);
           await expect(snapshot.data.toPromise()).resolves.toBeDefined();
         });
@@ -136,11 +137,11 @@ describe('SU-Set Dataset', () => {
           const willUpdate = captureUpdate();
 
           const msg = await ds.transact(async () => [
-            time = time.ticked(),
+            localTime = localTime.ticked(),
             await ds.delete({ '@id': 'http://test.m-ld.org/fred' })
           ]);
 
-          expect(msg.time.equals(time)).toBe(true);
+          expect(msg.time.equals(localTime)).toBe(true);
           expect(msg.data.tid).toBeTruthy();
 
           expect(JSON.parse(msg.data.insert)).toHaveProperty('@graph', {});
@@ -165,7 +166,8 @@ describe('SU-Set Dataset', () => {
             delete: `{"@graph":{"@id":"b4vMkTurWFf6qjBuhkRvjX","@type":"rdf:Statement",
               "tid":"${firstTid}","o":"Fred","p":"http://test.m-ld.org/#name",
               "s":"http://test.m-ld.org/fred"}}`
-          }, time = time.ticked());
+          }, remoteTime = remoteTime.ticked(), localTime = localTime.ticked());
+
           await expect(ds.find({ '@id': 'http://test.m-ld.org/fred' }))
             .resolves.toEqual(new Set());
 
@@ -174,12 +176,44 @@ describe('SU-Set Dataset', () => {
 
         test('transacts another insert', async () => {
           const msg = await ds.transact(async () => [
-            time = time.ticked(),
+            localTime = localTime.ticked(),
             await ds.insert(barney)
           ]);
-          expect(msg.time.equals(time)).toBe(true);
+          expect(msg.time.equals(localTime)).toBe(true);
 
           await expect(ds.describe1('http://test.m-ld.org/barney')).resolves.toEqual(barney);
+        })
+
+        test('answers local operation since first', async () => {
+          const lastHash = await ds.lastHash();
+          await ds.transact(async () => [
+            localTime = localTime.ticked(),
+            await ds.insert(barney)
+          ]);
+          const ops = await ds.operationsSince(lastHash);
+          expect(ops).not.toBeNull();
+          if (ops == null) return; // Compiler avoidance
+          const opArray = await ops.pipe(toArray()).toPromise();
+          expect(opArray.length).toBe(1);
+          expect(localTime.equals(opArray[0].time)).toBe(true);
+        })
+
+        test('answers remote operation since first', async () => {
+          const lastHash = await ds.lastHash();
+          await ds.apply({
+            tid: 'uSX1mPGhuWAEH56RLwYmvG',
+            insert: '{"@graph":{}}',
+            delete: `{"@graph":{"@id":"b4vMkTurWFf6qjBuhkRvjX","@type":"rdf:Statement",
+              "tid":"${firstTid}","o":"Fred","p":"http://test.m-ld.org/#name",
+              "s":"http://test.m-ld.org/fred"}}`
+          }, remoteTime = remoteTime.ticked(), localTime = localTime.ticked());
+
+          const ops = await ds.operationsSince(lastHash);
+          expect(ops).not.toBeNull();
+          if (ops == null) return; // Compiler avoidance
+          const opArray = await ops.pipe(toArray()).toPromise();
+          expect(opArray.length).toBe(1);
+          expect(remoteTime.equals(opArray[0].time)).toBe(true);
         })
       });
     });

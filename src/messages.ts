@@ -11,12 +11,23 @@ export abstract class MessageService<C extends CausalClock<C>> {
     return this.peek();
   }
 
-  receive<M extends Message<C, unknown>>(message: M, buffer: M[], process: (message: M) => void) {
+  /**
+   * Call to process newly received message data from the wire.
+   *
+   * @param message the message from the wire
+   * @param buffer  a buffer for out-of-order messages
+   * @param process the local message data consumer, which will receive message data in order
+   * @return <code>true</code> if the message was delivered, <code>false</code> if buffered
+   */
+  receive<M extends Message<C, unknown>>(
+    message: M, buffer: M[], process: (message: M) => void): boolean {
     if (this.readyFor(message.time)) {
       this.event();
       this.deliver(message, buffer, process);
+      return true;
     } else {
       buffer.push(message);
+      return false;
     }
   }
 

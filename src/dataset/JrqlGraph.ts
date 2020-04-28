@@ -8,7 +8,7 @@ import { compact, flatten as flatJsonLd, toRDF } from 'jsonld';
 import { namedNode, defaultGraph, variable, quad as createQuad, blankNode } from '@rdfjs/data-model';
 import { Graph, PatchQuads } from '.';
 import { toArray, flatMap, defaultIfEmpty, map, filter, take, distinct } from 'rxjs/operators';
-import { from, of, EMPTY, Observable } from 'rxjs';
+import { from, of, EMPTY, Observable, throwError } from 'rxjs';
 import { toArray as array, shortId, flatten, rdfToJson } from '../util';
 import { QuadSolution } from './QuadSolution';
 
@@ -29,7 +29,7 @@ export class JrqlGraph {
     } else if (isSelect(query) && query['@where'] && isGroupLike(query['@where'])) {
       return this.select(query['@select'], query['@where'], context);
     }
-    throw new Error('Read type not supported.');
+    return throwError(new Error('Read type not supported.'));
   }
 
   async write(query: GroupLike | Update, context?: Context): Promise<PatchQuads> {

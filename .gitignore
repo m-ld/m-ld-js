@@ -44,3 +44,6 @@ dist/
 
 # Mac
 .DS_Store
+
+# VSCode config
+.vscode
