@@ -307,7 +307,7 @@ export class SuSetDataset extends JrqlGraph {
   async takeSnapshot(): Promise<Omit<Snapshot, 'updates'>> {
     return new Promise((resolve, reject) => {
       this.dataset.transact(async () => {
-        const dataEmitted = new Future<void>();
+        const dataEmitted = new Future;
         const [, tail] = await this.journalTail();
         resolve({
           time: fromTimeString(tail.time) as TreeClock,

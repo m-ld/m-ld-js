@@ -18,6 +18,7 @@ export interface MeldConfig {
   ldbOpts?: AbstractOpenOptions;
   mqttOpts: MeldMqttOpts;
   logLevel?: LogLevelDesc;
+  reconnectDelayMillis?: number;
 }
 
 export async function clone(ldb: AbstractLevelDOWN, config: MeldConfig): Promise<MeldApi> {
@@ -29,8 +30,8 @@ export async function clone(ldb: AbstractLevelDOWN, config: MeldConfig): Promise
 
 async function initLocal(ldb: AbstractLevelDOWN,
   config: Resource<MeldConfig>, remotes: MeldRemotes): Promise<MeldStore> {
-  const clone = new DatasetClone(new QuadStoreDataset(
-    ldb, { ...config.ldbOpts, id: config['@id'] }), remotes, config.logLevel ?? 'info');
+  const dataset = new QuadStoreDataset(ldb, { ...config.ldbOpts, id: config['@id'] });
+  const clone = new DatasetClone(dataset, remotes, config);
   await clone.initialise();
   return clone;
 }

@@ -62,7 +62,9 @@ export interface Snapshot extends Message<TreeClock, Observable<Quad[]>> {
 }
 
 export interface MeldRemotes extends Meld {
-  connect(clone: MeldLocal): void;
+  setLocal(clone: MeldLocal): void;
+  localReady: boolean;
+  readonly connected: boolean;
 }
 
 export interface MeldJournalEntry extends DeltaMessage {
