@@ -8,9 +8,8 @@
     "link-local-m-ld-spec": "sudo npm link ../m-ld-spec",
     "clean": "rm -rf dist",
     "build-quick": "tsc",
-    "build": "npm run clean && npm run test && tsc",
+    "build": "npm run clean && jest --silent && tsc",
     "dev": "jest --watch --silent",
-    "test": "jest --silent",
     "compliance": "node compliance/test.js",
     "publish-patch": "npm run build && npm version patch -m \"Patch version\" && git push && npm publish"
   },

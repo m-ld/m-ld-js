@@ -55,25 +55,26 @@ export class MqttPresence {
       myConsumers ? JSON.stringify(myConsumers) : LEAVE_PAYLOAD, PRESENCE_OPTS);
   }
 
-  present(address: string): Set<string> {
-    const rtn = new Set<string>();
-    Object.keys(this.presence).forEach(clientId => {
-      Object.keys(this.presence[clientId]).forEach(consumerId => {
+  *present(address: string): IterableIterator<string> {
+    for (let clientId in this.presence) {
+      for (let consumerId in this.presence[clientId]) {
         if (matches(this.presence[clientId][consumerId], address))
-          rtn.add(consumerId);
-      });
-    });
-    return rtn;
+          yield consumerId;
+      };
+    }
   }
 
-  onMessage(topic: string, payload: Buffer) {
-    this.domainTopic.match(topic, presence => {
+  onMessage(topic: string, payload: Buffer): boolean {
+    const presence = this.domainTopic.match(topic);
+    if (presence) {
       if (payload.toString() === LEAVE_PAYLOAD) {
         this.left(presence.client);
       } else {
         this.presence[presence.client] = jsonFrom(payload);
       }
-    });
+      return true;
+    }
+    return false;
   }
 
   private left(clientId: string, consumerId?: string) {

@@ -1,28 +1,28 @@
 import { MeldClone, Snapshot, DeltaMessage, MeldRemotes, MeldJournalEntry } from '../m-ld';
 import { Pattern, Subject, isRead, Group, DeleteInsert } from '../m-ld/jsonrql';
-import { Observable, Subject as Source, PartialObserver, merge, from, asapScheduler, Observer, EMPTY, Subscription } from 'rxjs';
+import { Observable, Subject as Source, PartialObserver, merge, from, Observer, Subscription } from 'rxjs';
 import { TreeClock } from '../clocks';
 import { SuSetDataset } from './SuSetDataset';
 import { TreeClockMessageService } from '../messages';
 import { Dataset } from '.';
-import { publishReplay, refCount, filter, ignoreElements, observeOn, takeUntil, tap, isEmpty, mergeAll, finalize, debounceTime } from 'rxjs/operators';
+import { publishReplay, refCount, filter, ignoreElements, takeUntil, tap, isEmpty, mergeAll, finalize, first } from 'rxjs/operators';
 import { Hash } from '../hash';
 import { delayUntil, Future, tapComplete, tapCount, ReentrantLock } from '../util';
-import { LogLevelDesc, getLogger, Logger } from 'loglevel';
+import { LogLevelDesc } from 'loglevel';
 import { MeldError, HAS_UNSENT } from '../m-ld/MeldError';
+import { AbstractMeld } from '../AbstractMeld';
 
 export interface DatasetCloneOpts {
   logLevel?: LogLevelDesc; // = 'info'
   reconnectDelayMillis?: number; // = 1000
 }
 
-export class DatasetClone implements MeldClone {
-  readonly updates: Observable<MeldJournalEntry>;
-  private readonly updateSource: Source<MeldJournalEntry> = new Source;
+export class DatasetClone extends AbstractMeld<MeldJournalEntry> implements MeldClone {
   private readonly dataset: SuSetDataset;
   private messageService: TreeClockMessageService;
   private readonly orderingBuffer: DeltaMessage[] = [];
-  private readonly updateReceiver: PartialObserver<DeltaMessage> = {
+
+  private readonly remoteUpdateReceiver: PartialObserver<DeltaMessage> = {
     next: delta => {
       this.log.debug(`${this.id}: Receiving ${delta} @ ${this.localTime}`);
       this.messageService.receive(delta, this.orderingBuffer, msg => {
@@ -30,98 +30,75 @@ export class DatasetClone implements MeldClone {
         this.dataset.apply(msg.data, msg.time, this.localTime);
       });
     },
-    error: err => {
-      // TODO: https://github.com/gsvarovsky/m-ld-spec/issues/8
-      this.log.warn(`${this.id}: ${err}`);
-      this.reconnect.next();
-    },
-    complete: () => {
-      this.log.debug(`${this.id}: Connection to remotes lost`);
-      this.reconnect.next();
-    }
+    error: err => this.close(err),
+    complete: () => this.close()
   };
+  private remoteUpdatesSub: Subscription | null = null;
   private connectLock = new ReentrantLock;
-  private readonly reconnect = new Source<boolean>();
-  private readonly reconnectSub: Subscription;
-  private updatesSub: Subscription | undefined;
-  private readonly log: Logger;
+  private newClone: boolean = false;
 
   constructor(dataset: Dataset,
     private readonly remotes: MeldRemotes,
-    opts: DatasetCloneOpts) {
-    this.dataset = new SuSetDataset(dataset, opts.logLevel);
-    // Update notifications are delayed to ensure internal processing has priority
-    this.updates = this.updateSource.pipe(observeOn(asapScheduler),
-      tap(msg => this.log.debug(`${this.id}: Sending ${msg}`)));
-    // Reconnections are debounced due to the number of ways they can happen
-    // TODO: Configure reconnect delay
-    this.reconnectSub = this.reconnect
-      .pipe(debounceTime(opts.reconnectDelayMillis ?? 1000))
-      .subscribe(newClone => this.connect(newClone));
-    this.log = getLogger(this.id);
-    this.log.setLevel(opts.logLevel ?? 'info');
-  }
-
-  get id() {
-    return this.dataset.id;
+    logLevel: LogLevelDesc = 'info') {
+    super(dataset.id, logLevel);
+    this.dataset = new SuSetDataset(dataset, logLevel);
+    this.remotes.setLocal(this);
   }
 
   async initialise(): Promise<void> {
     await this.dataset.initialise();
     // Establish a clock for this clone
-    let newClone = false, time = await this.dataset.loadClock();
+    let time = await this.dataset.loadClock();
     if (!time) {
-      newClone = true;
       time = await this.remotes.newClock();
+      this.newClone = !time.isId; // New clone means non-genesis
       await this.dataset.saveClock(time, true);
     }
     this.log.info(`${this.id}: has time ${time}`);
     this.messageService = new TreeClockMessageService(time);
-    return this.connect(newClone);
-  }
-
-  /**
-   * @param newClone if {@code true} this is definitely a new clone (if undefined, may still be)
-   */
-  private async connect(newClone?: boolean): Promise<void> {
-    if (this.updatesSub != null)
-      this.updatesSub.unsubscribe();
-    // Don't bother trying to connect if we're partitioned
-    if (this.remotes.connected) {
-      // Block transactions while connecting
-      return this.connectLock.acquire(this.id, () => {
-        this.remotes.setLocal(this);
-        return this.doConnect(newClone).then(() => {
-          this.remotes.localReady = true;
-        }, err => {
+    this.remotes.online.subscribe(online => {
+      if (online) {
+        this.connect().then(() => this.setOnline(true), err => {
+          // This usually indicates that the remotes have gone offline during
+          // our connection attempt. If they have reconnected, another attempt
+          // will have already been queued on the connect lock.
           this.log.info(`${this.id}: Can't connect to remotes due to ${err}`);
-          // Try again later
-          this.reconnect.next(newClone);
         });
-      });
+      }
+    });
+    if (this.newClone) {
+      // For a new non-genesis clone, the first connect is essential
+      await this.online.pipe(filter(online => online), first()).toPromise();
     } else {
-      this.reconnect.next(newClone);
+      // Allow an existing or genesis clone to be online with offline remotes
+      if (!await AbstractMeld.isOnline(this.remotes))
+        this.setOnline(true);
     }
   }
 
-  private async doConnect(newClone?: boolean) {
-    this.log.info(`${this.id}: Connecting to remotes`);
-    await this.flushUnsentOperations();
-    if (this.localTime.isId) { // Top-level is Id, never been forked
-      // No rev-up to do, so just subscribe to updates from later clones
-      this.log.info(`${this.id}: Genesis clone subscribing to updates`);
-      this.subscribeToUpdates();
-    } else {
-      const revups = new Source<DeltaMessage>();
-      this.subscribeToUpdates(revups);
-      if (newClone) {
-        this.log.info(`${this.id}: New clone requesting snapshot`);
-        await this.requestSnapshot(revups);
+  private connect(): Promise<void> {
+    if (this.remoteUpdatesSub != null)
+      this.remoteUpdatesSub.unsubscribe();
+    // Block transactions and other connect attempts while connecting
+    return this.connectLock.acquire(this.id, async () => {
+      this.log.info(`${this.id}: Connecting to remotes`);
+      await this.flushUnsentOperations();
+      if (this.localTime.isId) { // Top-level is Id, never been forked
+        // No rev-up to do, so just subscribe to updates from later clones
+        this.log.info(`${this.id}: Genesis clone subscribing to updates`);
+        this.subscribeToUpdates();
       } else {
-        await this.tryRevup(revups);
+        const revups = new Source<DeltaMessage>();
+        this.subscribeToUpdates(revups);
+        if (this.newClone) {
+          this.log.info(`${this.id}: New clone requesting snapshot`);
+          await this.requestSnapshot(revups);
+        } else {
+          await this.tryRevup(revups);
+        }
       }
-    }
-    this.log.info(`${this.id}: connected.`);
+      this.log.info(`${this.id}: connected.`);
+    });
   }
 
   private subscribeToUpdates(revups?: Observable<DeltaMessage>) {
@@ -135,7 +112,7 @@ export class DatasetClone implements MeldClone {
     } else {
       remoteUpdates = this.remotes.updates;
     }
-    this.updatesSub = remoteUpdates.subscribe(this.updateReceiver);
+    this.remoteUpdatesSub = remoteUpdates.subscribe(this.remoteUpdateReceiver);
   }
 
   private async tryRevup(consumeRevups: Observer<DeltaMessage>) {
@@ -155,7 +132,7 @@ export class DatasetClone implements MeldClone {
       const counted = new Future<number>();
       counted.then(n => n && this.log.info(`${this.id}: Emitting ${n} unsent operations`));
       this.dataset.unsentLocalOperations().pipe(tapCount(counted))
-        .subscribe(entry => this.updateSource.next(entry), reject, resolve);
+        .subscribe(entry => this.nextUpdate(entry), reject, resolve);
     });
   }
 
@@ -233,7 +210,7 @@ export class DatasetClone implements MeldClone {
           return [this.messageService.send(), patch];
         }).then(journalEntry => {
           // Publish the MeldJournalEntry
-          this.updateSource.next(journalEntry);
+          this.nextUpdate(journalEntry);
         })).pipe(ignoreElements()); // Ignores the void promise result
       }
     })).pipe(mergeAll(), finalize(() => this.connectLock.leave(this.id)));
@@ -250,13 +227,9 @@ export class DatasetClone implements MeldClone {
       first: ${this.orderingBuffer[0]}
       time: ${this.localTime}`);
     }
-    if (err)
-      this.updateSource.error(err);
-    else
-      this.updateSource.complete();
-    this.reconnectSub.unsubscribe();
-    if (this.updatesSub != null)
-      this.updatesSub.unsubscribe();
+    super.close(err);
+    if (this.remoteUpdatesSub != null)
+      this.remoteUpdatesSub.unsubscribe();
     return this.dataset.close(err);
   }
 }

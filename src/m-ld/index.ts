@@ -30,7 +30,22 @@ export namespace DeltaMessage {
 export type UUID = string;
 
 export interface Meld {
+  /**
+   * Updates from this Meld. The stream is hot and continuous.
+   * Completion or an error means that this Meld has closed.
+   * @see online
+   */
   readonly updates: Observable<DeltaMessage>;
+  /**
+   * Online-ness of this Meld. To be 'online' means that it is able
+   * to collaborate with newly starting clones via snapshot & rev-up.
+   * The stream is hot and continuous, but will also always emit
+   * the current state to new subscribers (Rx BehaviourSubject).
+   * Completion or an error means that this Meld has closed.
+   * @see updates
+   */
+  readonly online: Observable<boolean>;
+
   newClock(): Promise<TreeClock>;
   snapshot(): Promise<Snapshot>;
   revupFrom(lastHash: Hash): Promise<Observable<DeltaMessage> | undefined>;
@@ -63,8 +78,6 @@ export interface Snapshot extends Message<TreeClock, Observable<Quad[]>> {
 
 export interface MeldRemotes extends Meld {
   setLocal(clone: MeldLocal): void;
-  localReady: boolean;
-  readonly connected: boolean;
 }
 
 export interface MeldJournalEntry extends DeltaMessage {

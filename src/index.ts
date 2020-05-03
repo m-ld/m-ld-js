@@ -18,29 +18,25 @@ export interface MeldConfig {
   ldbOpts?: AbstractOpenOptions;
   mqttOpts: MeldMqttOpts;
   logLevel?: LogLevelDesc;
-  reconnectDelayMillis?: number;
 }
 
 export async function clone(ldb: AbstractLevelDOWN, config: MeldConfig): Promise<MeldApi> {
   const theConfig = { ...config, '@id': config['@id'] ?? generate() };
-  const remotes = await initRemotes(theConfig);
-  const clone = await initLocal(ldb, theConfig, remotes);
+  const clone = await initLocal(ldb, theConfig, initRemotes(theConfig));
   return new MeldApi(config['@domain'], theConfig['@context'] || null, clone);
 }
 
 async function initLocal(ldb: AbstractLevelDOWN,
   config: Resource<MeldConfig>, remotes: MeldRemotes): Promise<MeldStore> {
   const dataset = new QuadStoreDataset(ldb, { ...config.ldbOpts, id: config['@id'] });
-  const clone = new DatasetClone(dataset, remotes, config);
+  const clone = new DatasetClone(dataset, remotes, config.logLevel);
   await clone.initialise();
   return clone;
 }
 
-async function initRemotes(config: Resource<MeldConfig>): Promise<MeldRemotes> {
-  const remotes = new MqttRemotes(config['@domain'], config['@id'], {
+function initRemotes(config: Resource<MeldConfig>): MeldRemotes {
+  return new MqttRemotes(config['@domain'], config['@id'], {
     ...config.mqttOpts, logLevel: config.mqttOpts.logLevel ?? config.logLevel
   });
-  await remotes.initialise();
-  return remotes;
 }
 
