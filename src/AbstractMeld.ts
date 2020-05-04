@@ -35,7 +35,7 @@ export abstract class AbstractMeld<M extends DeltaMessage> implements Meld {
   }
 
   protected isOnline(): Promise<boolean> {
-    return AbstractMeld.isOnline(this);
+    return isOnline(this);
   }
 
   protected static isOnline(meld: Meld): Promise<boolean> {
@@ -56,3 +56,7 @@ export abstract class AbstractMeld<M extends DeltaMessage> implements Meld {
     }
   }
 }
+
+export function isOnline(meld: Meld): Promise<boolean> {
+  return meld.online.pipe(first()).toPromise();
+};

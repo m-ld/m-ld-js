@@ -14,7 +14,7 @@ import { Hash } from '../hash';
 import AsyncLock = require('async-lock');
 import { LogLevelDesc } from 'loglevel';
 import { MeldError, BAD_UPDATE, NONE_VISIBLE } from '../m-ld/MeldError';
-import { AbstractMeld } from '../AbstractMeld';
+import { AbstractMeld, isOnline } from '../AbstractMeld';
 
 interface DomainParams extends TopicParams { domain: string; }
 const OPERATIONS_TOPIC = new MqttTopic<DomainParams>([{ '+': 'domain' }, 'operations']);
@@ -101,7 +101,7 @@ export class MqttRemotes extends AbstractMeld<DeltaMessage> implements MeldRemot
         await this.mqtt.publish(this.registryTopic.address,
           JSON.stringify({ id: this.id } as Hello), { qos: 1, retain: true });
         // If the clone is already online, update the presence if we can
-        if (this.clone != null && await AbstractMeld.isOnline(this.clone))
+        if (this.clone != null && await isOnline(this.clone))
           this.present(true).catch(err => this.log.warn(err));
       } catch (err) {
         // This is a catastrophe - we can't even get bootstrapped

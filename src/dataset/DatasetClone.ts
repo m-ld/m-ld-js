@@ -1,16 +1,16 @@
 import { MeldClone, Snapshot, DeltaMessage, MeldRemotes, MeldJournalEntry } from '../m-ld';
 import { Pattern, Subject, isRead, Group, DeleteInsert } from '../m-ld/jsonrql';
-import { Observable, Subject as Source, PartialObserver, merge, from, Observer, Subscription } from 'rxjs';
+import { Observable, Subject as Source, PartialObserver, merge, from, Observer, Subscription, defer } from 'rxjs';
 import { TreeClock } from '../clocks';
 import { SuSetDataset } from './SuSetDataset';
 import { TreeClockMessageService } from '../messages';
 import { Dataset } from '.';
-import { publishReplay, refCount, filter, ignoreElements, takeUntil, tap, isEmpty, mergeAll, finalize, first } from 'rxjs/operators';
+import { publishReplay, refCount, filter, ignoreElements, takeUntil, tap, isEmpty, mergeAll, finalize, first, flatMap } from 'rxjs/operators';
 import { Hash } from '../hash';
 import { delayUntil, Future, tapComplete, tapCount, ReentrantLock } from '../util';
 import { LogLevelDesc } from 'loglevel';
 import { MeldError, HAS_UNSENT } from '../m-ld/MeldError';
-import { AbstractMeld } from '../AbstractMeld';
+import { AbstractMeld, isOnline } from '../AbstractMeld';
 
 export interface DatasetCloneOpts {
   logLevel?: LogLevelDesc; // = 'info'
@@ -71,7 +71,7 @@ export class DatasetClone extends AbstractMeld<MeldJournalEntry> implements Meld
       await this.online.pipe(filter(online => online), first()).toPromise();
     } else {
       // Allow an existing or genesis clone to be online with offline remotes
-      if (!await AbstractMeld.isOnline(this.remotes))
+      if (!await isOnline(this.remotes))
         this.setOnline(true);
     }
   }
@@ -200,20 +200,24 @@ export class DatasetClone extends AbstractMeld<MeldJournalEntry> implements Meld
   }
 
   transact(request: Pattern): Observable<Subject> {
-    // Block connect while transacting
-    return from(this.connectLock.enter(this.id).then(() => {
-      if (isRead(request)) {
-        return this.dataset.read(request);
-      } else {
-        return from(this.dataset.transact(async () => {
+    if (isRead(request)) {
+      // For a read, every subscriber re-runs the query
+      // TODO: Wire up unsubscribe (cancel cursor)
+      return defer(() => this.connectLock.enter(this.id))
+        .pipe(flatMap(() => this.dataset.read(request)),
+          finalize(() => this.connectLock.leave(this.id)));
+    } else {
+      // For a write, execute immediately
+      return from(this.connectLock.enter(this.id)
+        .then(() => this.dataset.transact(async () => {
           const patch = await this.dataset.write(request);
           return [this.messageService.send(), patch];
-        }).then(journalEntry => {
-          // Publish the MeldJournalEntry
-          this.nextUpdate(journalEntry);
-        })).pipe(ignoreElements()); // Ignores the void promise result
-      }
-    })).pipe(mergeAll(), finalize(() => this.connectLock.leave(this.id)));
+        }))
+        // Publish the MeldJournalEntry
+        .then(journalEntry => this.nextUpdate(journalEntry))
+        .finally(() => this.connectLock.leave(this.id)))
+        .pipe(ignoreElements()); // Ignores the void promise result
+    }
   }
 
   follow(): Observable<DeleteInsert<Group>> {
