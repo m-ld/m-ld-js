@@ -1,38 +1,74 @@
 import { DatasetClone } from '../src/dataset/DatasetClone';
 import { Subject, Describe } from '../src/m-ld/jsonrql';
-import { genesisClone } from './testClones';
+import { genesisClone, mockRemotes } from './testClones';
+import { NEVER, of, Subject as Source } from 'rxjs';
+import { isOnline, comesOnline } from '../src/AbstractMeld';
+import { MeldDelta } from '../src/m-ld';
+import { toArray, take, skip, timeout } from 'rxjs/operators';
+import { TreeClock } from '../src/clocks';
 
-describe('Meld store implementation', () => {
-  let store: DatasetClone;
+describe('Dataset clone', () => {
+  describe('initialisation', () => {
+    test('starts offline with unknown remotes', async () => {
+      const clone = await genesisClone(mockRemotes(NEVER, of(null)));
+      await expect(isOnline(clone)).resolves.toBe(false);
+    });
 
-  beforeEach(async () => {
-    store = await genesisClone(); 
+    test('connects if remotes online', async () => {
+      const clone = await genesisClone(mockRemotes(NEVER, of(true)));
+      await expect(comesOnline(clone)).resolves.toBe(true);
+    });
+
+    test('comes online if siloed', async () => {
+      const clone = await genesisClone(mockRemotes(NEVER, of(null, false)));
+      await expect(comesOnline(clone)).resolves.toBe(true);
+    });
+
+    test('stays online without reconnect if siloed', async () => {
+      const clone = await genesisClone(mockRemotes(NEVER, of(true, false)));
+      await expect(clone.online.pipe(take(2), toArray()).toPromise()).resolves.toEqual([null, true]);
+      await expect(clone.online.pipe(skip(2), timeout(50)).toPromise()).rejects.toThrow();
+    });
+
+    test('non-genesis fails to initialise if siloed', async () => {
+      // This is a bit of a con: how did we get a clock if we're offline?
+      await expect(genesisClone(mockRemotes(NEVER, of(false),
+        TreeClock.GENESIS.forked().left))).rejects.toThrow();
+    });
   });
 
-  test('not found is empty', async () => {
-    await expect(store.transact({
-      '@describe': 'http://test.m-ld.org/fred'
-    } as Describe).toPromise()).resolves.toBeUndefined();
-  });
+  describe('as a m-ld store', () => {
+    let store: DatasetClone;
 
-  test('stores a JSON-LD object', async () => {
-    await expect(store.transact({
-      '@id': 'http://test.m-ld.org/fred',
-      'http://test.m-ld.org/#name': 'Fred'
-    } as Subject).toPromise())
-      // Expecting nothing to be emitted for an insert
-      .resolves.toBeUndefined();
-  });
+    beforeEach(async () => {
+      store = await genesisClone();
+    });
 
-  test('retrieves a JSON-LD object', async () => {
-    await store.transact({
-      '@id': 'http://test.m-ld.org/fred',
-      'http://test.m-ld.org/#name': 'Fred'
-    } as Subject).toPromise();
-    const fred = await store.transact({
-      '@describe': 'http://test.m-ld.org/fred'
-    } as Describe).toPromise();
-    expect(fred['@id']).toBe('http://test.m-ld.org/fred');
-    expect(fred['http://test.m-ld.org/#name']).toBe('Fred');
+    test('not found is empty', async () => {
+      await expect(store.transact({
+        '@describe': 'http://test.m-ld.org/fred'
+      } as Describe).toPromise()).resolves.toBeUndefined();
+    });
+
+    test('stores a JSON-LD object', async () => {
+      await expect(store.transact({
+        '@id': 'http://test.m-ld.org/fred',
+        'http://test.m-ld.org/#name': 'Fred'
+      } as Subject).toPromise())
+        // Expecting nothing to be emitted for an insert
+        .resolves.toBeUndefined();
+    });
+
+    test('retrieves a JSON-LD object', async () => {
+      await store.transact({
+        '@id': 'http://test.m-ld.org/fred',
+        'http://test.m-ld.org/#name': 'Fred'
+      } as Subject).toPromise();
+      const fred = await store.transact({
+        '@describe': 'http://test.m-ld.org/fred'
+      } as Describe).toPromise();
+      expect(fred['@id']).toBe('http://test.m-ld.org/fred');
+      expect(fred['http://test.m-ld.org/#name']).toBe('Fred');
+    });
   });
 });

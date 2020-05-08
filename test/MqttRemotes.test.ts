@@ -1,61 +1,72 @@
 import { MqttRemotes } from '../src/mqtt/MqttRemotes';
-import { MockProxy, mock } from 'jest-mock-extended';
-import { AsyncMqttClient, IPublishPacket } from 'async-mqtt';
-import { EventEmitter } from 'events';
+import { MockProxy } from 'jest-mock-extended';
+import { AsyncMqttClient } from 'async-mqtt';
 import { MeldJournalEntry } from '../src/m-ld';
 import { TreeClock } from '../src/clocks';
 import { Subject as Source, of } from 'rxjs';
-import { mockLocal } from './testClones';
+import { mockLocal, MockMqtt, mockMqtt } from './testClones';
+import { filter, first, take, toArray } from 'rxjs/operators';
+import { Future } from '../src/util';
+import { comesOnline, isOnline } from '../src/AbstractMeld';
 
 describe('New MQTT remotes', () => {
-  let mqtt: AsyncMqttClient & MockProxy<AsyncMqttClient>;
+  let mqtt: MockMqtt & MockProxy<AsyncMqttClient>;
   let remotes: MqttRemotes;
-  let published: Promise<IPublishPacket>;
-
-  function remotePublish(topic: string, json: any) {
-    return new Promise<void>((resolve) => setImmediate(mqtt => {
-      mqtt.emit('message', topic, Buffer.from(
-        typeof json === 'string' ? json : JSON.stringify(json)));
-      resolve();
-    }, mqtt)); // Pass current mqtt in case of sync test
-  }
-
-  function remoteSubscribe(subscriber: (topic: string, json: any) => void) {
-    mqtt.on('message', (topic, payload) => {
-      try {
-        subscriber(topic, JSON.parse(payload.toString()));
-      } catch (err) {
-        subscriber(topic, payload.toString());
-      }
-    });
-  }
 
   beforeEach(() => {
-    published = Promise.resolve(mock<IPublishPacket>());
-    mqtt = new EventEmitter() as AsyncMqttClient & MockProxy<AsyncMqttClient>;
-    mqtt = mock<AsyncMqttClient>(mqtt);
-    // jest-mock-extended typing is confused by the AsyncMqttClient overloads, hence <any>
-    mqtt.subscribe.mockReturnValue(<any>Promise.resolve([]));
-    mqtt.publish.mockImplementation((topic, msg) => {
-      remotePublish(topic, <string>msg).then(() => published);
-      return <any>published;
-    });
+    mqtt = mockMqtt();
     remotes = new MqttRemotes('test.m-ld.org', 'client1', { hostname: 'unused' }, () => mqtt);
+  });
+
+  test('online starts unknown', async () => {
+    await expect(isOnline(remotes)).resolves.toBe(null);
+  });
+
+  test('goes offline if no other clones', async () => {
+    mqtt.mockConnect();
+    await expect(remotes.online.pipe(take(2), toArray()).toPromise())
+      .resolves.toEqual([null, false]);
+  });
+
+  test('goes online if clone already present', async () => {
+    mqtt.mockPublish(
+      '__presence/test.m-ld.org/client2',
+      '{"consumer2":"test.m-ld.org/control"}');
+    mqtt.mockConnect();
+    await expect(remotes.online.pipe(take(2), toArray()).toPromise())
+      .resolves.toEqual([null, true]);
+  });
+
+  test('sets presence with local clone on connect', async () => {
+    remotes.setLocal(mockLocal());
+    mqtt.mockConnect();
+    // Presence is joined when the remotes' online status resolves
+    await comesOnline(remotes, false);
+    expect(mqtt.publish).lastCalledWith(
+      '__presence/test.m-ld.org/client1',
+      '{"client1":"test.m-ld.org/control"}',
+      { qos: 1, retain: true });
   });
 
   describe('when genesis', () => {
     // No more setup
-    beforeEach(() => mqtt.emit('connect'));
+    beforeEach(() => mqtt.mockConnect());
 
     test('subscribes to topics', () => {
       expect(mqtt.subscribe).toBeCalledWith({
-        '__presence/test.m-ld.org/+': 1,
+        '__presence/test.m-ld.org/+': 1
+      });
+      expect(mqtt.subscribe).toBeCalledWith({
         'test.m-ld.org/operations': 1,
         'test.m-ld.org/control': 1,
         'test.m-ld.org/registry': 1,
         '__send/client1/+/+/test.m-ld.org/control': 0,
         '__reply/client1/+/+/+': 0
       });
+      // Presence ghost message
+      expect(mqtt.publish).toBeCalledWith(
+        '__presence/test.m-ld.org/client1', '-',
+        { qos: 1 });
       // Setting retained last joined clone (no longer genesis)
       expect(mqtt.publish).toBeCalledWith(
         'test.m-ld.org/registry',
@@ -68,7 +79,7 @@ describe('New MQTT remotes', () => {
     });
 
     test('emits remote operations', async () => {
-      remotePublish('test.m-ld.org/operations', {
+      mqtt.mockPublish('test.m-ld.org/operations', {
         time: TreeClock.GENESIS.forked().left.toJson(),
         data: { tid: 't1', insert: '{}', delete: '{}' }
       });
@@ -77,29 +88,58 @@ describe('New MQTT remotes', () => {
       })).resolves.toHaveProperty('data');
     });
 
-    test('publishes local operations', async () => {
+    test('goes online if clone appears', async () => {
+      mqtt.mockPublish(
+        '__presence/test.m-ld.org/client2',
+        '{"consumer2":"test.m-ld.org/control"}');
+      await expect(remotes.online.pipe(take(3), toArray()).toPromise())
+        .resolves.toEqual([null, false, true]);
+    });
+
+    test('sets presence with local clone', async () => {
+      remotes.setLocal(mockLocal());
+      // Presence is joined when the remotes' online status resolves
+      await comesOnline(remotes, false);
+      expect(mqtt.publish).lastCalledWith(
+        '__presence/test.m-ld.org/client1',
+        '{"client1":"test.m-ld.org/control"}',
+        { qos: 1, retain: true });
+    });
+
+    test('publishes local operations if online', async () => {
+      // Set someone else's presence so we're marked online
+      mqtt.mockPublish(
+        '__presence/test.m-ld.org/client2',
+        '{"consumer2":"test.m-ld.org/control"}');
+      await comesOnline(remotes);
+      const delivered = new Future<boolean>();
+
       const entry = {
         time: TreeClock.GENESIS.forked().left,
         data: { tid: 't1', insert: '{}', delete: '{}' },
-        delivered: jest.fn()
+        delivered: () => delivered.resolve(true)
       };
       const updates = new Source<MeldJournalEntry>();
-      remotes.setLocal(mockLocal(updates, of(true)));
+      remotes.setLocal(mockLocal(updates));
       // Setting retained presence on the channel
       expect(mqtt.publish).lastCalledWith(
         '__presence/test.m-ld.org/client1',
         '{"client1":"test.m-ld.org/control"}',
         { qos: 1, retain: true });
       updates.next(entry);
-
       expect(mqtt.publish).toBeCalled();
-      await published;
-      expect(entry.delivered).toBeCalled();
+      await mqtt.lastPublish();
+      await expect(delivered).resolves.toBe(true);
     });
 
-    test('closes with local clone', () => {
+    test('online goes unknown if mqtt closes', async () => {
+      mqtt.emit('close');
+      await expect(isOnline(remotes)).resolves.toBe(null);
+    });
+
+    test('closes with local clone', async () => {
       const updates = new Source<MeldJournalEntry>();
-      remotes.setLocal(mockLocal(updates, of(true)));
+      remotes.setLocal(mockLocal(updates));
       updates.complete();
 
       expect(mqtt.publish).lastCalledWith(
@@ -111,10 +151,9 @@ describe('New MQTT remotes', () => {
 
   describe('when not genesis', () => {
     beforeEach(() => {
-mqtt.on('message', (topic, payload) => console.log(topic, payload.toString()));
       // Send retained Hello (remotes already constructed & listening)
-      remotePublish('test.m-ld.org/registry', { id: 'client2' });
-      mqtt.emit('connect');
+      mqtt.mockPublish('test.m-ld.org/registry', { id: 'client2' });
+      mqtt.mockConnect();
     });
 
     test('cannot get new clock if no peers', async () => {
@@ -126,17 +165,17 @@ mqtt.on('message', (topic, payload) => console.log(topic, payload.toString()));
       };
     });
 
-    xtest('can get clock', async () => {
+    test('can get clock', async () => {
       const newClock = TreeClock.GENESIS.forked().right;
       // Set presence of client2's consumer
-      await remotePublish('__presence/test.m-ld.org/client2', '{"consumer2":"test.m-ld.org/control"}');
-      remoteSubscribe((topic, json) => {
+      await mqtt.mockPublish('__presence/test.m-ld.org/client2', '{"consumer2":"test.m-ld.org/control"}');
+      mqtt.mockSubscribe((topic, json) => {
         const [type, toId, fromId, messageId, domain,] = topic.split('/');
         if (type === '__send' && json['@type'] === 'http://control.m-ld.org/request/clock') {
           expect(toId).toBe('consumer2');
           expect(fromId).toBe('client1');
           expect(domain).toBe('test.m-ld.org');
-          remotePublish('__reply/client1/consumer2/reply1/' + messageId, {
+          mqtt.mockPublish('__reply/client1/consumer2/reply1/' + messageId, {
             '@type': 'http://control.m-ld.org/response/clock',
             clock: newClock.toJson()
           });

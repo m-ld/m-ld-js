@@ -31,7 +31,7 @@ export type UUID = string;
 
 export interface Meld {
   /**
-   * Updates from this Meld. The stream is hot and continuous.
+   * Updates from this Meld. The stream is hot, continuous and multicast.
    * Completion or an error means that this Meld has closed.
    * @see online
    */
@@ -39,12 +39,13 @@ export interface Meld {
   /**
    * Online-ness of this Meld. To be 'online' means that it is able
    * to collaborate with newly starting clones via snapshot & rev-up.
-   * The stream is hot and continuous, but will also always emit
+   * A value of null indicates unknown (e.g. starting or disconnected).
+   * The stream is hot, continuous and multicast, but will also always emit
    * the current state to new subscribers (Rx BehaviourSubject).
    * Completion or an error means that this Meld has closed.
    * @see updates
    */
-  readonly online: Observable<boolean>;
+  readonly online: Observable<boolean | null>;
 
   newClock(): Promise<TreeClock>;
   snapshot(): Promise<Snapshot>;

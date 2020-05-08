@@ -142,7 +142,7 @@ export class SuSetDataset extends JrqlGraph {
     return [journal, await this.controlGraph.describe1(journal.tail) as JournalEntry];
   }
 
-  unsentLocalOperations(): Observable<MeldJournalEntry> {
+  undeliveredLocalOperations(): Observable<MeldJournalEntry> {
     return new Observable(subs => {
       this.loadJournal().then(async (journal) => {
         const last = await this.controlGraph.describe1(journal.lastDelivered) as JournalEntry;
@@ -166,14 +166,25 @@ export class SuSetDataset extends JrqlGraph {
     }
   }
 
-  async operationsSince(lastHash: Hash): Promise<Observable<DeltaMessage> | undefined> {
-    const found = await this.controlGraph.find({ hash: lastHash.encode() } as Partial<JournalEntry>);
-    if (found.size) {
-      const entry = await this.controlGraph.describe1(found.values().next().value) as Subject;
-      return new Observable(subs => {
-        this.emitJournalAfter(entry as JournalEntry, subs).catch(err => subs.error(err));
-      });
-    }
+  /**
+   * A revup requester will have just sent out any undelivered updates.
+   * To ensure we have processed those (relying on the message layer ordering)
+   * we always process a revup request in a transaction lock.
+   */
+  operationsSince(lastHash: Hash): Promise<Observable<DeltaMessage> | undefined> {
+    return new Promise(async (resolve, reject) => {
+      this.dataset.transact(async () => {
+        const found = await this.controlGraph.find({ hash: lastHash.encode() } as Partial<JournalEntry>);
+        if (found.size) {
+          const entry = await this.controlGraph.describe1(found.values().next().value) as Subject;
+          resolve(new Observable(subs => {
+            this.emitJournalAfter(entry as JournalEntry, subs).catch(err => subs.error(err));
+          }));
+        } else {
+          resolve();
+        }
+      }).catch(reject);
+    });
   }
 
   private async patchClock(journal: Journal, time: TreeClock, newClone?: boolean): Promise<PatchQuads> {

@@ -12,8 +12,10 @@ clone(leveldown(tmpDirName), {
   mqttOpts: {
     host: 'localhost',
     port: Number(mqttPort),
-    connectTimeout: 100, // Short for testing partitioning
-    keepalive: 1 // Short for testing partitioning
+     // Short timeouts as everything is local
+    connectTimeout: 100,
+    sendTimeout: 100,
+    keepalive: 1
   },
   logLevel: Number(logLevel)
 }).then(meld => {

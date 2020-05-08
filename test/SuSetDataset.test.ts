@@ -35,7 +35,7 @@ describe('SU-Set Dataset', () => {
     });
 
     test('has no unsent operations', async () => {
-      await expect(ds.unsentLocalOperations().toPromise()).resolves.toBeUndefined();
+      await expect(ds.undeliveredLocalOperations().toPromise()).resolves.toBeUndefined();
     });
 
     test('does not answer operations since garbage', async () => {
@@ -123,7 +123,7 @@ describe('SU-Set Dataset', () => {
         });
 
         test('has an unsent operation', async () => {
-          await expect(ds.unsentLocalOperations().toPromise()).resolves.toBeDefined();
+          await expect(ds.undeliveredLocalOperations().toPromise()).resolves.toBeDefined();
         });
 
         test('answers a snapshot', async () => {
