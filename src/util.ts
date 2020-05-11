@@ -3,6 +3,7 @@ import { fromRDF } from 'jsonld';
 import { concat, Observable, OperatorFunction, Subscription } from "rxjs";
 import { publish, tap } from "rxjs/operators";
 import AsyncLock = require('async-lock');
+import { LogLevelDesc, Logger, getLogger, getLoggers } from 'loglevel';
 
 export function flatten<T>(bumpy: T[][]): T[] {
   return ([] as T[]).concat(...bumpy);
@@ -69,7 +70,20 @@ export function shortId(len: number = 8) {
 
 export function tapCount<T>(done: Future<number>): OperatorFunction<T, T> {
   let n = 0;
-  return tap({ next: () => n++, complete: () => done.resolve(n), error: done.reject });
+  return tap({
+    next: () => n++,
+    complete: () => done.resolve(n),
+    error: done.reject
+  });
+}
+
+export function tapLast<T>(done: Future<T | undefined>): OperatorFunction<T, T> {
+  let last: T | undefined;
+  return tap({
+    next: item => { last = item; },
+    complete: () => done.resolve(last),
+    error: done.reject
+  });
 }
 
 export function tapComplete<T>(done: Future): OperatorFunction<T, T> {
@@ -143,4 +157,19 @@ export class ReentrantLock extends AsyncLock {
       unref.resolve();
     }
   }
+}
+
+export function getIdLogger(ctor: Function, id: string, logLevel: LogLevelDesc = 'info') {
+  const loggerName = `${ctor.name}.${id}`;
+  const loggerInitialised = loggerName in getLoggers();
+  const log = getLogger(loggerName);
+  if (!loggerInitialised) {
+    const originalFactory = log.methodFactory;
+    log.methodFactory = (methodName, logLevel, loggerName) => {
+      const method = originalFactory(methodName, logLevel, loggerName);
+      return (...msg: any[]) => method.apply(undefined, [id, ctor.name].concat(msg));
+    };
+  }
+  log.setLevel(logLevel);
+  return log;
 }

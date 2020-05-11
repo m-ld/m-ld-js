@@ -1,4 +1,4 @@
-import { MeldDelta, MeldJournalEntry, JsonDelta, Snapshot, DeltaMessage, UUID } from '../m-ld';
+import { MeldDelta, MeldJournalEntry, JsonDelta, Snapshot, UUID } from '../m-ld';
 import { Quad, Triple } from 'rdf-js';
 import { namedNode, defaultGraph } from '@rdfjs/data-model';
 import { TreeClock } from '../clocks';
@@ -9,10 +9,10 @@ import { Iri } from 'jsonld/jsonld-spec';
 import { JrqlGraph, toGroup } from './JrqlGraph';
 import { JsonDeltaBagBlock, newDelta, asMeldDelta, toTimeString, fromTimeString, reify, unreify, hashTriple } from '../m-ld/MeldJson';
 import { Observable, Subscriber, from, Subject as Source, asapScheduler } from 'rxjs';
-import { toArray, bufferCount, flatMap, reduce, observeOn } from 'rxjs/operators';
-import { flatten, Future, tapComplete } from '../util';
+import { toArray, bufferCount, flatMap, reduce, observeOn, first } from 'rxjs/operators';
+import { flatten, Future, tapComplete, getIdLogger } from '../util';
 import { generate as uuid } from 'short-uuid';
-import { LogLevelDesc, getLogger, Logger } from 'loglevel';
+import { LogLevelDesc, Logger } from 'loglevel';
 
 const TIDS_CONTEXT: Context = {
   qs: 'http://qs.m-ld.org/',
@@ -77,8 +77,7 @@ export class SuSetDataset extends JrqlGraph {
       dataset.graph(namedNode(CONTROL_CONTEXT.qs + 'tids')), TIDS_CONTEXT);
     // Update notifications are strictly ordered but don't hold up transactions
     this.updates = this.updateSource.pipe(observeOn(asapScheduler));
-    this.log = getLogger(this.id);
-    this.log.setLevel(logLevel);
+    this.log = getIdLogger(this.constructor, this.id, logLevel);
   }
 
   get id(): string {
@@ -91,7 +90,7 @@ export class SuSetDataset extends JrqlGraph {
   }
 
   async close(err?: any): Promise<void> {
-    this.log.info(`${this.id}: Shutting down dataset ${err ? 'due to ' + err : 'normally'}`);
+    this.log.info(`Shutting down dataset ${err ? 'due to ' + err : 'normally'}`);
     if (err)
       this.updateSource.error(err);
     else
@@ -146,21 +145,21 @@ export class SuSetDataset extends JrqlGraph {
     return new Observable(subs => {
       this.loadJournal().then(async (journal) => {
         const last = await this.controlGraph.describe1(journal.lastDelivered) as JournalEntry;
-        await this.emitJournalAfter(last, subs, 'localOnly');
+        await this.emitJournalFrom(last.next, subs, 'localOnly');
       }).catch(err => subs.error(err));
     });
   }
 
-  private async emitJournalAfter(entry: JournalEntry,
+  private async emitJournalFrom(entryId: JournalEntry['@id'] | undefined,
     subs: Subscriber<MeldJournalEntry>, localOnly?: 'localOnly') {
-    if (entry.next) {
-      entry = await this.controlGraph.describe1(entry.next) as JournalEntry;
+    if (entryId) {
+      const entry = await this.controlGraph.describe1(entryId) as JournalEntry;
       if (!localOnly || !entry.remote) {
         const delivered = () => this.markDelivered(entry['@id']);
         const time = fromTimeString(entry.time) as TreeClock; // Never null
-        subs.next({ time, data: JSON.parse(entry.delta), delivered, toString: DeltaMessage.toString });
+        subs.next(new MeldJournalEntry(time, JSON.parse(entry.delta), delivered));
       }
-      await this.emitJournalAfter(entry, subs);
+      await this.emitJournalFrom(entry.next, subs);
     } else {
       subs.complete();
     }
@@ -171,20 +170,38 @@ export class SuSetDataset extends JrqlGraph {
    * To ensure we have processed those (relying on the message layer ordering)
    * we always process a revup request in a transaction lock.
    */
-  operationsSince(lastHash: Hash): Promise<Observable<DeltaMessage> | undefined> {
+  operationsSince(time: TreeClock): Promise<Observable<MeldJournalEntry> | undefined> {
     return new Promise(async (resolve, reject) => {
       this.dataset.transact(async () => {
-        const found = await this.controlGraph.find({ hash: lastHash.encode() } as Partial<JournalEntry>);
-        if (found.size) {
-          const entry = await this.controlGraph.describe1(found.values().next().value) as Subject;
+        const [, tail] = await this.journalTail();
+        const found = await this.findLastGt(time, tail.time, tail['@id']);
+        if (found) {
+          const entry = await this.controlGraph.describe1(found) as JournalEntry;
           resolve(new Observable(subs => {
-            this.emitJournalAfter(entry as JournalEntry, subs).catch(err => subs.error(err));
+            this.emitJournalFrom(entry.next, subs).catch(err => subs.error(err));
           }));
         } else {
-          resolve();
+          resolve(undefined);
         }
       }).catch(reject);
     });
+  }
+
+  private async findLastGt(time: TreeClock, entryTime: string, entryId: Iri): Promise<Iri | undefined> {
+    // FIXME: Inefficient to recurse up the journal then emit back down it. Approx timestamp?
+    // anyLt ignores the clock ID ticks, so we must compare clocks with the same ID using update
+    if (time.anyLt(time.update(<TreeClock>fromTimeString(entryTime)))) {
+      // Try the previous journal entry
+      const prevEntry = await this.controlGraph
+        .describe('?prev', { '@id': '?prev', next: entryId })
+        .pipe(first(null, {} as Subject)).toPromise();
+      // If not found, we have reached the start of the journal
+      if (prevEntry.time)
+        return this.findLastGt(time, <string>prevEntry.time, <Iri>prevEntry['@id']);
+    } else {
+      // All of the given time is greater than the entry time
+      return entryId;
+    }
   }
 
   private async patchClock(journal: Journal, time: TreeClock, newClone?: boolean): Promise<PatchQuads> {
@@ -228,6 +245,7 @@ export class SuSetDataset extends JrqlGraph {
     return this.dataset.transact(async () => {
       // Check we haven't seen this transaction before in the journal
       if (!(await this.controlGraph.find({ tid: msgData.tid } as Partial<JournalEntry>)).size) {
+        this.log.debug(`Applying tid: ${msgData.tid}`);
         const delta = await asMeldDelta(msgData);
         const patch = new PatchQuads([], delta.insert);
         // The delta's delete contains reifications of deleted triples
@@ -245,6 +263,8 @@ export class SuSetDataset extends JrqlGraph {
         const [journaling,] = await this.journal(delta, localTime, msgTime);
         this.notifyUpdate(patch);
         return patch.concat(tripleTidPatch).concat(journaling);
+      } else {
+        this.log.debug(`Rejecting tid: ${msgData.tid} as duplicate`);
       }
     });
   }
@@ -355,7 +375,7 @@ export class SuSetDataset extends JrqlGraph {
           } as JournalEntry
         ]
       })).concat(await this.patchClock(journal, localTime)),
-      { time: localTime, data: delta.json, delivered, toString: DeltaMessage.toString }
+      new MeldJournalEntry(localTime, delta.json, delivered)
     ];
   };
 

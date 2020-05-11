@@ -1,14 +1,14 @@
 import { MeldClone, Snapshot, DeltaMessage, MeldRemotes, MeldJournalEntry } from '../m-ld';
 import { Pattern, Subject, isRead, Group, DeleteInsert } from '../m-ld/jsonrql';
-import { Observable, Subject as Source, merge, from, Observer, defer, NEVER } from 'rxjs';
+import { Observable, Subject as Source, merge, from, Observer, defer, NEVER, EMPTY, concat } from 'rxjs';
 import { TreeClock } from '../clocks';
 import { SuSetDataset } from './SuSetDataset';
 import { TreeClockMessageService } from '../messages';
 import { Dataset } from '.';
-import { publishReplay, refCount, filter, ignoreElements, takeUntil, tap, isEmpty, finalize, first, flatMap, switchAll } from 'rxjs/operators';
+import { publishReplay, refCount, filter, ignoreElements, takeUntil, tap, isEmpty, finalize, first, flatMap, switchAll, toArray } from 'rxjs/operators';
 import { Hash } from '../hash';
-import { delayUntil, Future, tapComplete, tapCount, ReentrantLock } from '../util';
-import { LogLevelDesc } from 'loglevel';
+import { delayUntil, Future, tapComplete, tapCount, ReentrantLock, tapLast } from '../util';
+import { LogLevelDesc, levels } from 'loglevel';
 import { MeldError, HAS_UNSENT } from '../m-ld/MeldError';
 import { AbstractMeld, isOnline, comesOnline } from '../AbstractMeld';
 
@@ -46,9 +46,10 @@ export class DatasetClone extends AbstractMeld<MeldJournalEntry> implements Meld
     this.messageService = new TreeClockMessageService(time);
     this.remoteUpdates.pipe(switchAll()).subscribe({
       next: delta => {
-        this.log.debug('Receiving', delta, '@', this.localTime);
+        const logBody = this.log.getLevel() < levels.DEBUG ? delta : `tid: ${delta.data.tid}`;
+        this.log.debug('Receiving', logBody, '@', this.localTime);
         this.messageService.receive(delta, this.orderingBuffer, msg => {
-          this.log.debug('Accepting', delta);
+          this.log.debug('Accepting', logBody);
           this.dataset.apply(msg.data, msg.time, this.localTime);
         });
       },
@@ -100,6 +101,7 @@ export class DatasetClone extends AbstractMeld<MeldJournalEntry> implements Meld
     if (this.localTime.isId) {
       this.remoteUpdates.next(this.remotes.updates);
     } else {
+      // TODO: Change this source to a new Observable(subs)
       const revups = new Source<DeltaMessage>();
       // Updates must be paused during revups because the collaborator might
       // send an update while also sending revups of its own prior updates.
@@ -120,10 +122,16 @@ export class DatasetClone extends AbstractMeld<MeldJournalEntry> implements Meld
 
   private async tryRevup(consumeRevups: Observer<DeltaMessage>) {
     // For a new clone, last hash is random so this will return undefined
-    const revup = await this.remotes.revupFrom(await this.dataset.lastHash());
+    const revup = await this.remotes.revupFrom(this.localTime);
     if (revup) {
       this.log.info('revving-up from collaborator');
-      revup.subscribe(consumeRevups);
+      const lastRevup = new Future<DeltaMessage | undefined>();
+      revup.pipe(tapLast(lastRevup)).subscribe(consumeRevups);
+      // Emit anything in our journal that post-dates the last revup
+      lastRevup
+        .then(lastEntry => lastEntry && this.dataset.operationsSince(lastEntry.time))
+        .then(recent => recent && recent.subscribe(this.nextUpdate))
+        .then(null, err => this.log.warn(err)); // TODO Check for data risk
     } else {
       this.log.info('cannot rev-up, requesting snapshot');
       await this.requestSnapshot(consumeRevups);
@@ -135,7 +143,7 @@ export class DatasetClone extends AbstractMeld<MeldJournalEntry> implements Meld
       const counted = new Future<number>();
       counted.then(n => n && this.log.info(`Emitting ${n} unsent operations`));
       this.dataset.undeliveredLocalOperations().pipe(tapCount(counted))
-        .subscribe(entry => this.nextUpdate(entry), reject, resolve);
+        .subscribe(this.nextUpdate, reject, resolve);
     });
   }
 
@@ -146,12 +154,18 @@ export class DatasetClone extends AbstractMeld<MeldJournalEntry> implements Meld
 
     const snapshot = await this.remotes.snapshot();
     this.messageService.join(snapshot.time);
-    const delivered = this.dataset.applySnapshot(
-      snapshot.data, snapshot.lastHash, snapshot.time, this.localTime);
+
+    // If we have any operations since the snapshot, re-emit them
+    const reEmits = this.dataset.operationsSince(snapshot.time)
+      .then(recent => (recent ?? EMPTY).pipe(tap(this.nextUpdate), toArray()).toPromise());
+    // Start delivering the snapshot when we have done re-emitting
+    const delivered = reEmits.then(() => this.dataset.applySnapshot(
+      snapshot.data, snapshot.lastHash, snapshot.time, this.localTime));
     // Delay all updates until the snapshot has been fully delivered
     // This is because a snapshot is applied in multiple transactions
-    snapshot.updates.pipe(delayUntil(from(delivered))).subscribe(consumeRevups);
-    return delivered;
+    const updates = snapshot.updates.pipe(delayUntil(from(delivered)));
+    concat(updates, from(reEmits).pipe(flatMap(from))).subscribe(consumeRevups);
+    return delivered; // We can go online as soon as the snapshot is delivered
   }
 
   async newClock(): Promise<TreeClock> {
@@ -165,7 +179,7 @@ export class DatasetClone extends AbstractMeld<MeldJournalEntry> implements Meld
     return this.onlineLock.acquire(this.id, async () => {
       this.log.info('Compiling snapshot');
       const sentSnapshot = new Future;
-      const updates = this.remoteUpdatesBefore(this.localTime, sentSnapshot);
+      const updates = this.remoteUpdatesBeforeNow(sentSnapshot);
       const { time, data, lastHash } = await this.dataset.takeSnapshot();
       return {
         time, lastHash, updates,
@@ -175,11 +189,11 @@ export class DatasetClone extends AbstractMeld<MeldJournalEntry> implements Meld
     });
   }
 
-  async revupFrom(lastHash: Hash): Promise<Observable<DeltaMessage> | undefined> {
+  async revupFrom(time: TreeClock): Promise<Observable<DeltaMessage> | undefined> {
     return this.onlineLock.acquire(this.id, async () => {
       const sentOperations = new Future;
-      const maybeMissed = this.remoteUpdatesBefore(this.localTime, sentOperations);
-      const operations = await this.dataset.operationsSince(lastHash);
+      const maybeMissed = this.remoteUpdatesBeforeNow(sentOperations);
+      const operations = await this.dataset.operationsSince(time);
       if (operations)
         return merge(
           operations.pipe(tapComplete(sentOperations), tap(msg =>
@@ -188,9 +202,10 @@ export class DatasetClone extends AbstractMeld<MeldJournalEntry> implements Meld
     });
   }
 
-  private remoteUpdatesBefore(now: TreeClock, until: PromiseLike<void>): Observable<DeltaMessage> {
+  private remoteUpdatesBeforeNow(until: PromiseLike<void>): Observable<DeltaMessage> {
     if (this.orderingBuffer.length)
       this.log.info(`Emitting ${this.orderingBuffer.length} from ordering buffer`);
+    const now = this.localTime;
     return merge(
       // #1 Anything currently in our ordering buffer
       from(this.orderingBuffer),
@@ -221,7 +236,7 @@ export class DatasetClone extends AbstractMeld<MeldJournalEntry> implements Meld
           return [this.messageService.send(), patch];
         }))
         // Publish the MeldJournalEntry
-        .then(journalEntry => this.nextUpdate(journalEntry))
+        .then(this.nextUpdate)
         .finally(() => this.onlineLock.leave(this.id)))
         .pipe(ignoreElements()); // Ignores the void promise result
     }

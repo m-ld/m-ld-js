@@ -1,3 +1,5 @@
+const inspect = Symbol.for('nodejs.util.inspect.custom');
+
 export interface CausalClock<T> {
   anyLt(other: T): boolean;
 }
@@ -179,6 +181,9 @@ export class TreeClock implements CausalClock<TreeClock> {
     ].filter(p => p);
     return (content.length == 1 ? content[0] || '' : content).toString();
   }
+
+  // v8(chrome/nodejs) console
+  [inspect] = () => this.toString();
 
   toJson(): any {
     return {

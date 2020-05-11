@@ -196,7 +196,9 @@ function hideVars(values: JrqlValue | JrqlValue[], top: boolean = true) {
           if (typeof value === 'object') {
             hideVars(value as JrqlValue | JrqlValue[], false);
           } else if (typeof value === 'string') {
-            value = hideVar(value);
+            const varVal = hideVar(value);
+            if (varVal !== value)
+              value = !key.startsWith('@') ? { '@id': varVal } : varVal;
           }
           subject[varKey] = value;
           if (varKey !== key)

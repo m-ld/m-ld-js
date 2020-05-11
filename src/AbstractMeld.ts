@@ -1,9 +1,9 @@
-import { Meld, Snapshot, DeltaMessage, MeldJournalEntry } from './m-ld';
+import { Meld, Snapshot, DeltaMessage } from './m-ld';
 import { TreeClock } from './clocks';
-import { Hash } from './hash';
 import { Observable, Subject as Source, BehaviorSubject, asapScheduler } from 'rxjs';
-import { observeOn, tap, distinctUntilChanged, first, skip, filter } from 'rxjs/operators';
-import { LogLevelDesc, Logger, getLogger, getLoggers } from 'loglevel';
+import { observeOn, tap, distinctUntilChanged, first, skip } from 'rxjs/operators';
+import { LogLevelDesc, Logger } from 'loglevel';
+import { getIdLogger } from './util';
 
 export abstract class AbstractMeld<M extends DeltaMessage> implements Meld {
   readonly updates: Observable<M>;
@@ -11,20 +11,11 @@ export abstract class AbstractMeld<M extends DeltaMessage> implements Meld {
 
   private readonly updateSource: Source<M> = new Source;
   private readonly onlineSource: Source<boolean | null> = new BehaviorSubject(null);
+
   protected readonly log: Logger;
 
   constructor(readonly id: string, logLevel: LogLevelDesc = 'info') {
-    const loggerName = `${this.constructor.name}.${this.id}`;
-    const loggerInitialised = loggerName in getLoggers();
-    this.log = getLogger(loggerName);
-    if (!loggerInitialised) {
-      const originalFactory = this.log.methodFactory;
-      this.log.methodFactory = (methodName, logLevel, loggerName) => {
-        const method = originalFactory(methodName, logLevel, loggerName);
-        return (...msg: any[]) => method.apply(undefined, [this.id, this.constructor.name].concat(msg));
-      };
-    }
-    this.log.setLevel(logLevel);
+    this.log = getIdLogger(this.constructor, id, logLevel);
 
     // Update notifications are delayed to ensure internal processing has priority
     this.updates = this.updateSource.pipe(observeOn(asapScheduler),
@@ -36,21 +27,13 @@ export abstract class AbstractMeld<M extends DeltaMessage> implements Meld {
       this.log.debug('is', online ? 'online' : 'offline'));
   }
 
-  protected nextUpdate(update: M) {
-    this.updateSource.next(update);
-  }
-
-  protected setOnline(online: boolean | null) {
-    this.onlineSource.next(online);
-  }
-
-  protected isOnline(): Promise<boolean | null> {
-    return isOnline(this);
-  }
+  protected nextUpdate = (update: M) => this.updateSource.next(update);
+  protected setOnline = (online: boolean | null) => this.onlineSource.next(online);
+  protected isOnline = (): Promise<boolean | null> => isOnline(this);
 
   abstract newClock(): Promise<TreeClock>;
   abstract snapshot(): Promise<Snapshot>;
-  abstract revupFrom(lastHash: Hash): Promise<Observable<DeltaMessage> | undefined>;
+  abstract revupFrom(time: TreeClock): Promise<Observable<DeltaMessage> | undefined>;
 
   close(err?: any) {
     if (err) {

@@ -28,6 +28,8 @@ interface JsonNotification {
   error?: any;
 }
 
+const CHANNEL_ID_HEADER = '__channel.id';
+
 export type MeldMqttOpts = Omit<IClientOptions, 'will' | 'clientId'> &
   ({ hostname: string } | { host: string, port: number }) & { sendTimeout?: number, logLevel?: LogLevelDesc }
 
@@ -119,7 +121,10 @@ export class MqttRemotes extends AbstractMeld<DeltaMessage> implements MeldRemot
             try {
               // Delta received from the local clone. Relay to the domain
               await this.mqtt.publish(
-                this.operationsTopic.address, JSON.stringify(msg), { qos: 1 });
+                this.operationsTopic.address, JSON.stringify({
+                  ...msg.toJson(),
+                  [CHANNEL_ID_HEADER]: this.id
+                }), { qos: 1 });
               // When done, mark the message as delivered
               msg.delivered();
             } catch (err) {
@@ -177,14 +182,14 @@ export class MqttRemotes extends AbstractMeld<DeltaMessage> implements MeldRemot
     return snapshot;
   }
 
-  revupFrom(lastHash: Hash): Promise<Observable<DeltaMessage> | undefined> {
-    return this.revupFromNext(lastHash, new Set);
+  revupFrom(time: TreeClock): Promise<Observable<DeltaMessage> | undefined> {
+    return this.revupFromNext(time, new Set);
   }
 
-  private async revupFromNext(lastHash: Hash, tried: Set<string>): Promise<Observable<DeltaMessage> | undefined> {
+  private async revupFromNext(time: TreeClock, tried: Set<string>): Promise<Observable<DeltaMessage> | undefined> {
     const ack = new Future<null>();
-    const res = await this.send<Response.Revup>(new Request.Revup(lastHash).toJson(), ack);
-    if (res.hashFound) {
+    const res = await this.send<Response.Revup>(new Request.Revup(time).toJson(), ack);
+    if (res.canRevup) {
       const updates = (await this.consume(res.updatesAddress)).pipe(map(deltaFromJson));
       // Ack the response to start the streams
       ack.resolve(null);
@@ -192,7 +197,7 @@ export class MqttRemotes extends AbstractMeld<DeltaMessage> implements MeldRemot
     } else if (!tried.has(res.updatesAddress)) {
       tried.add(res.updatesAddress);
       // Not expecting an ack if hash not found
-      return this.revupFromNext(lastHash, tried);
+      return this.revupFromNext(time, tried);
     } // else return undefined
   }
 
@@ -228,12 +233,16 @@ export class MqttRemotes extends AbstractMeld<DeltaMessage> implements MeldRemot
   }
 
   private onRemoteUpdate(payload: Buffer) {
-    const update = DeltaMessage.fromJson(jsonFrom(payload));
-    if (update)
-      this.nextUpdate(update);
-    else
-      // This is extremely bad - may indicate a bad actor
-      this.close(new MeldError(BAD_UPDATE));
+    const json = jsonFrom(payload);
+    // Ignore echoed updates
+    if (!json[CHANNEL_ID_HEADER] || json[CHANNEL_ID_HEADER] !== this.id) {
+      const update = DeltaMessage.fromJson(json);
+      if (update)
+        this.nextUpdate(update);
+      else
+        // This is extremely bad - may indicate a bad actor
+        this.close(new MeldError(BAD_UPDATE));
+    }
   }
 
   private onHello(payload: Buffer) {
@@ -294,7 +303,7 @@ export class MqttRemotes extends AbstractMeld<DeltaMessage> implements MeldRemot
         } else if (req instanceof Request.Snapshot) {
           await this.replySnapshot(sentParams, this.clone.snapshot());
         } else if (req instanceof Request.Revup) {
-          await this.replyRevup(sentParams, this.clone.revupFrom(req.lastHash));
+          await this.replyRevup(sentParams, this.clone.revupFrom(req.time));
         }
       } catch (err) {
         this.log.warn(err);
@@ -400,13 +409,13 @@ export class MqttRemotes extends AbstractMeld<DeltaMessage> implements MeldRemot
 }
 
 function deltaFromJson(json: any): DeltaMessage {
-  const time = fromTimeString(json.time);
-  if (time)
-    return { time, data: json.data, toString: DeltaMessage.toString };
+  const delta = DeltaMessage.fromJson(json);
+  if (delta)
+    return delta;
   else
     throw new Error('No time in message');
 }
 
 async function jsonFromDelta(msg: DeltaMessage): Promise<any> {
-  return { time: toTimeString(msg.time), data: msg.data };
+  return msg.toJson();
 }

@@ -7,23 +7,37 @@ import { Message } from '../messages';
 import { Triple, Quad } from 'rdf-js';
 import { Hash } from '../hash';
 import { Pattern, Subject, Group, DeleteInsert } from './jsonrql';
+const inspect = Symbol.for('nodejs.util.inspect.custom');
 
-export type DeltaMessage = Message<TreeClock, JsonDelta> & Object;
-
-export namespace DeltaMessage {
-  export function toJson(msg: DeltaMessage): any {
-    return { time: msg.time.toJson(), data: msg.data };
+export class DeltaMessage implements Message<TreeClock, JsonDelta> {
+  constructor(
+    readonly time: TreeClock,
+    readonly data: JsonDelta) {
   }
 
-  export function fromJson(json: any): DeltaMessage | undefined {
+  toJson(): object {
+    return { time: this.time.toJson(), data: this.data };
+  }
+
+  static fromJson(json: any): DeltaMessage | undefined {
     const time = TreeClock.fromJson(json.time);
     if (time && json.data)
-      return { time, data: json.data, toString };
+      return new DeltaMessage(time, json.data);
   }
 
-  export function toString(this: DeltaMessage) {
+  toString() {
     return `${JSON.stringify(this.data)}
     @ ${this.time}`;
+  }
+
+  // v8(chrome/nodejs) console
+  [inspect] = () => this.toString();
+}
+
+export class MeldJournalEntry extends DeltaMessage {
+  constructor(time: TreeClock, data: JsonDelta,
+    readonly delivered: () => void) {
+    super(time, data);
   }
 }
 
@@ -49,7 +63,7 @@ export interface Meld {
 
   newClock(): Promise<TreeClock>;
   snapshot(): Promise<Snapshot>;
-  revupFrom(lastHash: Hash): Promise<Observable<DeltaMessage> | undefined>;
+  revupFrom(time: TreeClock): Promise<Observable<DeltaMessage> | undefined>;
 }
 
 export interface MeldDelta extends Object {
@@ -79,10 +93,6 @@ export interface Snapshot extends Message<TreeClock, Observable<Quad[]>> {
 
 export interface MeldRemotes extends Meld {
   setLocal(clone: MeldLocal): void;
-}
-
-export interface MeldJournalEntry extends DeltaMessage {
-  delivered(): void;
 }
 
 export interface MeldLocal extends Meld {

@@ -2,11 +2,14 @@ import { SuSetDataset } from '../src/dataset/SuSetDataset';
 import { memStore } from './testClones';
 import { TreeClock } from '../src/clocks';
 import { Hash } from '../src/hash';
-import { first, toArray } from 'rxjs/operators';
+import { first, toArray, isEmpty } from 'rxjs/operators';
 
 const fred = {
   '@id': 'http://test.m-ld.org/fred',
   'http://test.m-ld.org/#name': 'Fred'
+}, wilma = {
+  '@id': 'http://test.m-ld.org/wilma',
+  'http://test.m-ld.org/#name': 'Wilma'
 }, barney = {
   '@id': 'http://test.m-ld.org/barney',
   'http://test.m-ld.org/#name': 'Barney'
@@ -38,19 +41,19 @@ describe('SU-Set Dataset', () => {
       await expect(ds.undeliveredLocalOperations().toPromise()).resolves.toBeUndefined();
     });
 
-    test('does not answer operations since garbage', async () => {
-      await expect(ds.operationsSince(Hash.random())).resolves.toBeUndefined();
-    });
-
-    test('has no operations since genesis', async () => {
-      const ops = await ds.operationsSince(await ds.lastHash());
-      await expect(ops && ops.toPromise()).resolves.toBeUndefined();
-    });
-
     describe('with an initial time', () => {
       let { left: localTime, right: remoteTime } = TreeClock.GENESIS.forked();
 
       beforeEach(async () => ds.saveClock(localTime = localTime.ticked(), true));
+
+      test('does not answer operations since before start', async () => {
+        await expect(ds.operationsSince(remoteTime)).resolves.toBeUndefined();
+      });
+
+      test('has no operations since genesis', async () => {
+        const ops = await ds.operationsSince(TreeClock.GENESIS);
+        await expect(ops && ops.pipe(isEmpty()).toPromise()).resolves.toBe(true);
+      });
 
       test('answers the time', async () => {
         const savedTime = await ds.loadClock();
@@ -185,35 +188,48 @@ describe('SU-Set Dataset', () => {
         })
 
         test('answers local operation since first', async () => {
-          const lastHash = await ds.lastHash();
+          // Create a journal entry that the remote knows about
+          await ds.transact(async () => [
+            localTime = localTime.ticked(),
+            await ds.insert(wilma)
+          ]);
+          remoteTime = remoteTime.update(localTime);
+          // Create a new journal entry that the remote doesn't know
           await ds.transact(async () => [
             localTime = localTime.ticked(),
             await ds.insert(barney)
           ]);
-          const ops = await ds.operationsSince(lastHash);
-          expect(ops).not.toBeNull();
-          if (ops == null) return; // Compiler avoidance
-          const opArray = await ops.pipe(toArray()).toPromise();
+          const ops = await ds.operationsSince(remoteTime);
+          expect(ops).not.toBeUndefined();
+          const opArray = ops ? await ops.pipe(toArray()).toPromise() : [];
           expect(opArray.length).toBe(1);
           expect(localTime.equals(opArray[0].time)).toBe(true);
         })
 
         test('answers remote operation since first', async () => {
-          const lastHash = await ds.lastHash();
+          // Create a journal entry that the remote knows about
+          await ds.transact(async () => [
+            localTime = localTime.ticked(),
+            await ds.insert(wilma)
+          ]);
+          remoteTime = remoteTime.update(localTime);
+          // Create a remote entry from a third clone that the remote doesn't know
+          const forkLocal = localTime.forked();
+          localTime = forkLocal.left;
+          const thirdTime = forkLocal.right.ticked();
           await ds.apply({
             tid: 'uSX1mPGhuWAEH56RLwYmvG',
             insert: '{"@graph":{}}',
             delete: `{"@graph":{"@id":"b4vMkTurWFf6qjBuhkRvjX","@type":"rdf:Statement",
               "tid":"${firstTid}","o":"Fred","p":"http://test.m-ld.org/#name",
               "s":"http://test.m-ld.org/fred"}}`
-          }, remoteTime = remoteTime.ticked(), localTime = localTime.ticked());
+          }, thirdTime, localTime = localTime.ticked());
 
-          const ops = await ds.operationsSince(lastHash);
-          expect(ops).not.toBeNull();
-          if (ops == null) return; // Compiler avoidance
-          const opArray = await ops.pipe(toArray()).toPromise();
+          const ops = await ds.operationsSince(remoteTime);
+          expect(ops).not.toBeUndefined();
+          const opArray = ops ? await ops.pipe(toArray()).toPromise() : [];
           expect(opArray.length).toBe(1);
-          expect(remoteTime.equals(opArray[0].time)).toBe(true);
+          expect(thirdTime.equals(opArray[0].time)).toBe(true);
         })
       });
     });

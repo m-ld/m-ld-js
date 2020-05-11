@@ -114,11 +114,10 @@ describe('New MQTT remotes', () => {
       await comesOnline(remotes);
       const delivered = new Future<boolean>();
 
-      const entry = {
-        time: TreeClock.GENESIS.forked().left,
-        data: { tid: 't1', insert: '{}', delete: '{}' },
-        delivered: () => delivered.resolve(true)
-      };
+      const entry = new MeldJournalEntry(
+        TreeClock.GENESIS.forked().left,
+        { tid: 't1', insert: '{}', delete: '{}' },
+        () => delivered.resolve(true));
       const updates = new Source<MeldJournalEntry>();
       remotes.setLocal(mockLocal(updates));
       // Setting retained presence on the channel

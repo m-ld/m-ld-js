@@ -18,10 +18,10 @@ export namespace Request {
   }
 
   export class Revup {
-    constructor(readonly lastHash: Hash) { };
+    constructor(readonly time: TreeClock) { };
     readonly toJson = () => ({
       '@type': 'http://control.m-ld.org/request/revup',
-      lastHash: this.lastHash.encode()
+      time: this.time.toJson()
     });
   }
 
@@ -34,7 +34,9 @@ export namespace Request {
         case 'http://control.m-ld.org/request/snapshot':
           return new Snapshot;
         case 'http://control.m-ld.org/request/revup':
-          return new Revup(Hash.decode(json.lastHash));
+          const time = TreeClock.fromJson(json.time);
+          if (time)
+            return new Revup(time);
       }
     }
     throw new Error('Bad request JSON');
@@ -73,9 +75,9 @@ export namespace Response {
 
   export class Revup {
     constructor(
-      readonly hashFound: boolean,
+      readonly canRevup: boolean,
       /**
-       * If !hashFound this should be a stable identifier of the answering clone,
+       * If !canRevup this should be a stable identifier of the answering clone,
        * to allow detection of a re-send.
        */
       readonly updatesAddress: string) {
@@ -83,7 +85,7 @@ export namespace Response {
     
     readonly toJson = () => ({
       '@type': 'http://control.m-ld.org/response/revup',
-      hashFound: this.hashFound,
+      canRevup: this.canRevup,
       updatesAddress: this.updatesAddress
     })
   }
@@ -100,7 +102,7 @@ export namespace Response {
           if (time)
             return new Snapshot(time, json.dataAddress, Hash.decode(json.lastHash), json.updatesAddress);
         case 'http://control.m-ld.org/response/revup':
-          return new Revup(json.hashFound, json.updatesAddress);
+          return new Revup(json.canRevup, json.updatesAddress);
       }
     }
     throw new Error('Bad response JSON');
