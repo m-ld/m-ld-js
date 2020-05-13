@@ -50,7 +50,7 @@ export class DatasetClone extends AbstractMeld<MeldJournalEntry> implements Meld
         this.log.debug('Receiving', logBody, '@', this.localTime);
         this.messageService.receive(delta, this.orderingBuffer, msg => {
           this.log.debug('Accepting', logBody);
-          this.dataset.apply(msg.data, msg.time, this.localTime);
+          this.dataset.apply(msg.data, msg.time, () => this.localTime);
         });
       },
       error: err => this.close(err),
@@ -141,7 +141,7 @@ export class DatasetClone extends AbstractMeld<MeldJournalEntry> implements Meld
   private flushUndeliveredOperations() {
     return new Promise<void>((resolve, reject) => {
       const counted = new Future<number>();
-      counted.then(n => n && this.log.info(`Emitting ${n} unsent operations`));
+      counted.then(n => n && this.log.info(`Emitted ${n} undelivered operations`));
       this.dataset.undeliveredLocalOperations().pipe(tapCount(counted))
         .subscribe(this.nextUpdate, reject, resolve);
     });
@@ -212,7 +212,7 @@ export class DatasetClone extends AbstractMeld<MeldJournalEntry> implements Meld
       // #2 Anything that arrives stamped prior to now
       // FIXME: but only if we accept it! It could be a duplicate.
       this.remotes.updates.pipe(
-        filter(message => message.time.anyLt(now)),
+        filter(message => message.time.anyLt(now, 'includeIds')),
         takeUntil(from(until)))).pipe(tap(msg =>
           this.log.debug('Sending update', msg)));
   }
@@ -247,7 +247,11 @@ export class DatasetClone extends AbstractMeld<MeldJournalEntry> implements Meld
   }
 
   close(err?: any) {
-    this.log.info('Shutting down clone', err ? 'due to ' + err : 'normally');
+    if (err)
+      this.log.warn('Shutting down due to', err);
+    else
+      this.log.info('Shutting down normally');
+
     if (this.orderingBuffer.length) {
       this.log.warn(`closed with ${this.orderingBuffer.length} items in ordering buffer
       first: ${this.orderingBuffer[0]}

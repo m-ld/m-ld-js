@@ -1,5 +1,6 @@
 import { Hash } from '../hash';
 import { TreeClock } from '../clocks';
+const inspect = Symbol.for('nodejs.util.inspect.custom');
 
 ////////////////////////////////////////////////////////////////////////////////
 // TODO: Protect all of this with json-schema
@@ -8,17 +9,29 @@ export interface Hello {
   id: string;
 }
 
+export interface Request {
+  toJson(): object;
+}
+
 export namespace Request {
-  export class NewClock {
+  export class NewClock implements Request {
+    toJson = () => NewClock.JSON;
+    toString = () => 'New Clock';
+    [inspect] = () => this.toString();
     static readonly JSON = { '@type': 'http://control.m-ld.org/request/clock' };
   }
 
-  export class Snapshot {
+  export class Snapshot implements Request {
+    toJson = () => Snapshot.JSON;
+    toString = () => 'Snapshot';
+    [inspect] = () => this.toString();
     static readonly JSON = { '@type': 'http://control.m-ld.org/request/snapshot' };
   }
 
-  export class Revup {
+  export class Revup implements Request {
     constructor(readonly time: TreeClock) { };
+    toString = () => `Revup from ${this.time}`;
+    [inspect] = () => this.toString();
     readonly toJson = () => ({
       '@type': 'http://control.m-ld.org/request/revup',
       time: this.time.toJson()
@@ -42,28 +55,34 @@ export namespace Request {
     throw new Error('Bad request JSON');
   }
 }
-export type Request = Request.NewClock | Request.Snapshot | Request.Revup;
+
+export interface Response {
+  toJson(): object;
+};
 
 export namespace Response {
-  export class NewClock {
+  export class NewClock implements Response {
     constructor(
       readonly clock: TreeClock) {
     };
-    
+
     readonly toJson = () => ({
       '@type': 'http://control.m-ld.org/response/clock',
       clock: this.clock.toJson()
     });
+
+    toString = () => `New Clock ${this.clock}`;
+    [inspect] = () => this.toString();
   }
 
-  export class Snapshot {
+  export class Snapshot implements Response {
     constructor(
       readonly time: TreeClock,
       readonly dataAddress: string,
       readonly lastHash: Hash,
       readonly updatesAddress: string) {
     }
-    
+
     readonly toJson = () => ({
       '@type': 'http://control.m-ld.org/response/snapshot',
       time: this.time.toJson(),
@@ -71,9 +90,12 @@ export namespace Response {
       lastHash: this.lastHash.encode(),
       updatesAddress: this.updatesAddress
     });
+
+    toString = () => `Snapshot at ${this.time} with hash ${this.lastHash}`;
+    [inspect] = () => this.toString();
   }
 
-  export class Revup {
+  export class Revup implements Response {
     constructor(
       readonly canRevup: boolean,
       /**
@@ -82,12 +104,17 @@ export namespace Response {
        */
       readonly updatesAddress: string) {
     }
-    
+
     readonly toJson = () => ({
       '@type': 'http://control.m-ld.org/response/revup',
       canRevup: this.canRevup,
       updatesAddress: this.updatesAddress
     })
+
+    toString = () => this.canRevup ?
+      `Can revup from ${this.updatesAddress}` :
+      `${this.updatesAddress} can't provide revup`;
+    [inspect] = () => this.toString();
   }
 
   export function fromJson(json: any): Response {
@@ -108,4 +135,3 @@ export namespace Response {
     throw new Error('Bad response JSON');
   }
 }
-export type Response = Response.NewClock | Response.Revup | Response.Snapshot;

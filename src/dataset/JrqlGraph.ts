@@ -85,6 +85,13 @@ export class JrqlGraph {
     return new Set(quads.map(quad => quad.subject.value));
   }
 
+  async find1(jrqlPattern: Subject | Group,
+    context: Context = jrqlPattern['@context'] || this.defaultContext): Promise<Iri | ''> {
+    const quads = await this.findQuads(jrqlPattern, context);
+    return quads.length ? quads.map(quad => quad.subject.value)
+      .reduce((rtn, id) => rtn === id ? rtn : '') : '';
+  }
+
   async findQuads(jrqlPattern: Subject | Group,
     context: Context = jrqlPattern['@context'] || this.defaultContext): Promise<Quad[]> {
     return this.matchQuads(await this.quads(jrqlPattern, context));
