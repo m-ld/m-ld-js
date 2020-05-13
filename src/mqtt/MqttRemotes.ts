@@ -76,8 +76,8 @@ export class MqttRemotes extends AbstractMeld<DeltaMessage> implements MeldRemot
     this.mqtt.on('message', (topic, payload) => this.onMessage(topic, payload));
 
     // When MQTT.js receives an error just log - it will try to reconnect
-    this.mqtt.on('error', err => this.log.warn(err));
-    this.presence.on('error', err => this.log.warn(err));
+    this.mqtt.on('error', this.warnError);
+    this.presence.on('error', this.warnError);
 
     // MQTT.js 'close' event signals a disconnect - definitely offline.
     this.mqtt.on('close', () => this.setOnline(null));
@@ -99,7 +99,7 @@ export class MqttRemotes extends AbstractMeld<DeltaMessage> implements MeldRemot
         await this.mqtt.publish(this.registryTopic.address,
           JSON.stringify({ id: this.id } as Hello), { qos: 1, retain: true });
         if (this.clone != null && await isOnline(this.clone) === true)
-          this.clonePresent(true).catch(err => this.log.warn(err));
+          this.clonePresent(true).catch(this.warnError);
       } catch (err) {
         if (this.mqtt.connected)
           this.close(err); // This is a catastrophe, can't bootstrap
@@ -144,7 +144,7 @@ export class MqttRemotes extends AbstractMeld<DeltaMessage> implements MeldRemot
       // When the clone comes online, join the presence on this domain if we can
       clone.online.subscribe(online => {
         if (online != null)
-          this.clonePresent(online).catch(err => this.log.warn(err));
+          this.clonePresent(online).catch(this.warnError);
       });
     } else if (clone != this.clone) {
       throw new Error(`${this.id}: Local clone cannot change`);

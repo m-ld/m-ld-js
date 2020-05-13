@@ -31,6 +31,8 @@ export abstract class AbstractMeld<M extends DeltaMessage> implements Meld {
   protected setOnline = (online: boolean | null) => this.onlineSource.next(online);
   protected isOnline = (): Promise<boolean | null> => isOnline(this);
 
+  protected warnError = (err: any) => this.log.warn(err);
+
   abstract newClock(): Promise<TreeClock>;
   abstract snapshot(): Promise<Snapshot>;
   abstract revupFrom(time: TreeClock): Promise<Observable<DeltaMessage> | undefined>;
