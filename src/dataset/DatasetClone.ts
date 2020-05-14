@@ -5,8 +5,7 @@ import { TreeClock } from '../clocks';
 import { SuSetDataset } from './SuSetDataset';
 import { TreeClockMessageService } from '../messages';
 import { Dataset } from '.';
-import { publishReplay, refCount, filter, ignoreElements, takeUntil, tap, isEmpty, finalize, first, flatMap, switchAll, toArray, catchError } from 'rxjs/operators';
-import { Hash } from '../hash';
+import { publishReplay, refCount, filter, ignoreElements, takeUntil, tap, isEmpty, finalize, flatMap, switchAll, toArray, catchError } from 'rxjs/operators';
 import { delayUntil, Future, tapComplete, tapCount, ReentrantLock, tapLast } from '../util';
 import { LogLevelDesc, levels } from 'loglevel';
 import { MeldError, HAS_UNSENT } from '../m-ld/MeldError';
@@ -258,7 +257,9 @@ export class DatasetClone extends AbstractMeld<MeldJournalEntry> implements Meld
       this.log.warn('Shutting down due to', err);
     else
       this.log.info('Shutting down normally');
-
+    
+    // Make sure we never receive another remote update
+    this.remoteUpdates.next(EMPTY);
     if (this.orderingBuffer.length) {
       this.log.warn(`closed with ${this.orderingBuffer.length} items in ordering buffer
       first: ${this.orderingBuffer[0]}

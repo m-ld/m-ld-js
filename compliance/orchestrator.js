@@ -6,7 +6,7 @@ const { createServer } = require('net');
 const LOG = require('loglevel');
 const inspector = require('inspector');
 const aedes = require('aedes')();
-const clones = {/* cloneId: { process, tmpDir, mqtt: { client, server } } */ };
+const clones = {/* cloneId: { process, tmpDir, mqtt: { client, server, port } } */ };
 const requests = {/* requestId: [res, next] */ };
 
 exports.routes = { start, transact, stop, kill, destroy, partition };
@@ -49,16 +49,17 @@ function start(req, res, next) {
 
   const mqttServer = createServer(aedes.handle);
   mqttServer.listen(err => {
-    LOG.debug(`${cloneId}: Clone MQTT port is ${mqttServer.address().port}`);
     if (err)
       return next(new InternalServerError(err));
 
+    const mqttPort = mqttServer.address().port;
+    LOG.debug(`${cloneId}: Clone MQTT port is ${mqttPort}`);
     clones[cloneId] = {
       process: fork(join(__dirname, 'clone.js'),
-        [cloneId, domain, tmpDir.name, req.id(), mqttServer.address().port, LOG.getLevel()],
+        [cloneId, domain, tmpDir.name, req.id(), mqttPort, LOG.getLevel()],
         { execArgv: inspector.url() ? [`--inspect-brk=${global.nextDebugPort++}`] : [] }),
       tmpDir,
-      mqtt: { server: mqttServer }
+      mqtt: { server: mqttServer, port: mqttPort }
     };
 
     const handlers = {
@@ -156,20 +157,34 @@ function destroy(req, res, next) {
 }
 
 function partition(req, res, next) {
-  const { cloneId } = req.query;
+  const { cloneId, state: stateString } = req.query;
   withClone(cloneId, ({ mqtt }) => {
-    LOG.debug(`${cloneId}: Partitioning clone`);
-    if (mqtt.server.listening) {
+    LOG.debug(`${cloneId}: Partitioning clone (${stateString})`);
+    const state = stateString !== 'false';
+    if (state && mqtt.server.listening) {
       if (mqtt.client)
         mqtt.client.conn.destroy();
       mqtt.server.close(err => {
         if (err) {
           next(new InternalServerError(err));
         } else {
-          res.send({ '@type': 'partitioned' });
+          LOG.debug(`${cloneId}: MQTT stopped`);
+          res.send({ '@type': 'partitioned', state });
           next();
         }
       });
+    } else if (!state && !mqtt.server.listening) {
+      mqtt.server.listen(mqtt.port, err => {
+        if (err) {
+          return next(new InternalServerError(err));
+        } else {
+          LOG.debug(`${cloneId}: MQTT re-started`);
+          res.send({ '@type': 'partitioned', state });
+          next();
+        }
+      });
+    } else {
+      next(new BadRequestError('Partition request does not match MQTT state'));
     }
   });
 }

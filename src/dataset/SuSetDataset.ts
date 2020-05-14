@@ -13,6 +13,7 @@ import { toArray, bufferCount, flatMap, reduce, observeOn } from 'rxjs/operators
 import { flatten, Future, tapComplete, getIdLogger } from '../util';
 import { generate as uuid } from 'short-uuid';
 import { LogLevelDesc, Logger } from 'loglevel';
+import { notClosed } from '../m-ld/MeldError';
 
 const TIDS_CONTEXT: Context = {
   qs: 'http://qs.m-ld.org/',
@@ -67,6 +68,8 @@ function safeTime(je: Journal | JournalEntry) {
  * Journals every transaction and creates m-ld compliant deltas.
  */
 export class SuSetDataset extends JrqlGraph {
+  private static notClosed = notClosed((d: SuSetDataset) => d.dataset.closed);
+  
   private readonly controlGraph: JrqlGraph;
   private readonly tidsGraph: JrqlGraph;
   private readonly updateSource: Source<DeleteInsert<Group>> = new Source;
@@ -90,12 +93,14 @@ export class SuSetDataset extends JrqlGraph {
     return this.dataset.id;
   }
 
+  @SuSetDataset.notClosed.async
   async initialise() {
     if (!await this.controlGraph.describe1('qs:journal'))
       return this.dataset.transact(() => this.reset(Hash.random()));
   }
 
-  async close(err?: any): Promise<void> {
+  @SuSetDataset.notClosed.async
+  async close(err?: any) {
     if (err) {
       this.log.warn('Shutting down due to', err);
       this.updateSource.error(err);
@@ -125,11 +130,13 @@ export class SuSetDataset extends JrqlGraph {
     return { oldQuads: {}, newQuads: insert.newQuads };
   }
 
+  @SuSetDataset.notClosed.async
   async loadClock(): Promise<TreeClock | null> {
     const journal = await this.loadJournal();
     return fromTimeString(journal.time);
   }
 
+  @SuSetDataset.notClosed.async
   async saveClock(localTime: TreeClock, newClone?: boolean): Promise<void> {
     return this.dataset.transact(async () =>
       this.patchClock(await this.loadJournal(), localTime, newClone));
@@ -138,6 +145,7 @@ export class SuSetDataset extends JrqlGraph {
   /**
    * @return the last hash seen in the journal.
    */
+  @SuSetDataset.notClosed.async
   async lastHash(): Promise<Hash> {
     const [, tail] = await this.journalTail();
     return Hash.decode(tail.hash);
@@ -150,6 +158,7 @@ export class SuSetDataset extends JrqlGraph {
     return [journal, await this.controlGraph.describe1(journal.tail) as JournalEntry];
   }
 
+  @SuSetDataset.notClosed.rx
   undeliveredLocalOperations(): Observable<MeldJournalEntry> {
     return new Observable(subs => {
       this.loadJournal().then(async (journal) => {
@@ -159,17 +168,20 @@ export class SuSetDataset extends JrqlGraph {
     });
   }
 
+  @SuSetDataset.notClosed.async // Used here for private method to end the recursion
   private async emitJournalFrom(entryId: JournalEntry['@id'] | undefined,
     subs: Observer<MeldJournalEntry>, filter: (entry: JournalEntry) => boolean) {
-    if (entryId != null) {
-      const entry = await this.controlGraph.describe1(entryId) as JournalEntry;
-      if (filter(entry)) {
-        subs.next(new MeldJournalEntry(
-          safeTime(entry), JSON.parse(entry.delta), () => this.markDelivered(entry['@id'])));
+    if (subs.closed == null || !subs.closed) {
+      if (entryId != null) {
+        const entry = await this.controlGraph.describe1(entryId) as JournalEntry;
+        if (filter(entry)) {
+          subs.next(new MeldJournalEntry(
+            safeTime(entry), JSON.parse(entry.delta), () => this.markDelivered(entry['@id'])));
+        }
+        await this.emitJournalFrom(entry.next, subs, filter);
+      } else {
+        subs.complete();
       }
-      await this.emitJournalFrom(entry.next, subs, filter);
-    } else {
-      subs.complete();
     }
   }
 
@@ -178,7 +190,8 @@ export class SuSetDataset extends JrqlGraph {
    * To ensure we have processed those (relying on the message layer ordering)
    * we always process a revup request in a transaction lock.
    */
-  operationsSince(time: TreeClock): Promise<Observable<MeldJournalEntry> | undefined> {
+  @SuSetDataset.notClosed.async
+  async operationsSince(time: TreeClock): Promise<Observable<MeldJournalEntry> | undefined> {
     return new Promise(async (resolve, reject) => {
       this.dataset.transact(async () => {
         const journal = await this.loadJournal();
@@ -219,6 +232,7 @@ export class SuSetDataset extends JrqlGraph {
     return await this.controlGraph.describe1('qs:journal') as Journal;
   }
 
+  @SuSetDataset.notClosed.async
   async transact(prepare: () => Promise<[TreeClock, PatchQuads]>): Promise<MeldJournalEntry> {
     return this.dataset.transact<MeldJournalEntry>(async () => {
       const [time, patch] = await prepare();
@@ -239,6 +253,7 @@ export class SuSetDataset extends JrqlGraph {
     });
   }
 
+  @SuSetDataset.notClosed.async
   async apply(msgData: JsonDelta, msgTime: TreeClock, localTime: () => TreeClock): Promise<void> {
     return this.dataset.transact(async () => {
       // Check we haven't seen this transaction before in the journal
@@ -311,6 +326,7 @@ export class SuSetDataset extends JrqlGraph {
    * @param lastTime the last time of the snapshot dataset (not the local time of the provider)
    * @param localTime the time of the local process, to be saved
    */
+  @SuSetDataset.notClosed.async
   async applySnapshot(data: Observable<Quad[]>,
     lastHash: Hash, lastTime: TreeClock, localTime: TreeClock) {
     // First reset the dataset with the given parameters
@@ -333,6 +349,7 @@ export class SuSetDataset extends JrqlGraph {
    * This requires a consistent view, so a transaction lock is taken until all data has been emitted.
    * To avoid holding up the world, buffer the data.
    */
+  @SuSetDataset.notClosed.async
   async takeSnapshot(): Promise<Omit<Snapshot, 'updates'>> {
     return new Promise((resolve, reject) => {
       this.dataset.transact(async () => {

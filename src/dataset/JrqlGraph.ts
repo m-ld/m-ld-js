@@ -1,7 +1,9 @@
 import { Iri } from 'jsonld/jsonld-spec';
 import {
   Context, Read, Subject, GroupLike, Update,
-  isDescribe, isGroup, isSubject, isUpdate, asGroup, Group, isSelect, isGroupLike, Result, Variable, JrqlValue, isValueObject, isReference
+  isDescribe, isGroup, isSubject, isUpdate,
+  asGroup, Group, isSelect, isGroupLike, Result,
+  Variable, JrqlValue, isValueObject, isReference
 } from '../m-ld/jsonrql';
 import { NamedNode, Quad, Term, Variable as VariableNode, Quad_Subject, Quad_Predicate, Quad_Object } from 'rdf-js';
 import { compact, flatten as flatJsonLd, toRDF } from 'jsonld';

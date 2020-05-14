@@ -19,7 +19,7 @@ export abstract class AbstractMeld<M extends DeltaMessage> implements Meld {
 
     // Update notifications are delayed to ensure internal processing has priority
     this.updates = this.updateSource.pipe(observeOn(asapScheduler),
-      tap(msg => this.log.debug('sending', msg)));
+      tap(msg => this.log.debug('has update', msg)));
 
     // Online notifications are distinct, so only transitions are notified
     this.online = this.onlineSource.pipe(distinctUntilChanged());
@@ -30,7 +30,6 @@ export abstract class AbstractMeld<M extends DeltaMessage> implements Meld {
   protected nextUpdate = (update: M) => this.updateSource.next(update);
   protected setOnline = (online: boolean | null) => this.onlineSource.next(online);
   protected isOnline = (): Promise<boolean | null> => isOnline(this);
-
   protected warnError = (err: any) => this.log.warn(err);
 
   abstract newClock(): Promise<TreeClock>;

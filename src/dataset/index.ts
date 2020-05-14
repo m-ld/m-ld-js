@@ -3,7 +3,7 @@ import { defaultGraph } from '@rdfjs/data-model';
 import { RdfStore, MatchTerms } from 'quadstore';
 import AsyncLock = require('async-lock');
 import { AbstractLevelDOWN, AbstractOpenOptions } from 'abstract-leveldown';
-import { Observable } from 'rxjs';
+import { Observable, throwError } from 'rxjs';
 
 /**
  * Atomically-applied patch to a quad-store.
@@ -49,6 +49,7 @@ export interface Dataset {
   transact<T>(prepare: () => Promise<[Patch | undefined, T]>): Promise<T>;
 
   close(): Promise<void>;
+  readonly closed: boolean;
 }
 
 /**
@@ -68,10 +69,15 @@ export class QuadStoreDataset implements Dataset {
   readonly id: string;
   private readonly store: RdfStore;
   private readonly lock = new AsyncLock;
+  private isClosed: boolean = false;
 
   constructor(private readonly abstractLevelDown: AbstractLevelDOWN, opts: DatasetOptions) {
     this.id = opts.id;
     this.store = new RdfStore(abstractLevelDown, opts);
+  }
+
+  get closed(): boolean {
+    return this.isClosed;
   }
 
   graph(name?: GraphName): Graph {
@@ -90,7 +96,10 @@ export class QuadStoreDataset implements Dataset {
 
   close(): Promise<void> {
     // Make efforts to ensure no transactions are running
-    return this.lock.acquire(this.id, done => this.abstractLevelDown.close(done));
+    return this.lock.acquire(this.id, done => this.abstractLevelDown.close(err => {
+      this.isClosed = true;
+      return done(err);
+    }));
   }
 }
 
@@ -103,13 +112,13 @@ class QuadStoreGraph implements Graph {
   match(subject?: Quad_Subject, predicate?: Quad_Predicate, object?: Quad_Object): Observable<Quad> {
     return new Observable(subs => {
       try {
+        // match can throw! (Bug in quadstore)
         this.store.match(subject, predicate, object, this.name)
           .on('data', quad => subs.next(quad))
           .on('error', err => subs.error(err))
           .on('end', () => subs.complete());
-      } catch (error) {
-        // match can throw! (Bug in quadstore)
-        subs.error(error);
+      } catch (err) {
+        subs.error(err);
       }
     });
   }
