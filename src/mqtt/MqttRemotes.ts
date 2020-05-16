@@ -33,7 +33,7 @@ const CHANNEL_ID_HEADER = '__channel.id';
 export type MeldMqttOpts = Omit<IClientOptions, 'will' | 'clientId'> &
   ({ hostname: string } | { host: string, port: number }) & { sendTimeout?: number, logLevel?: LogLevelDesc }
 
-export class MqttRemotes extends AbstractMeld<DeltaMessage> implements MeldRemotes {
+export class MqttRemotes extends AbstractMeld implements MeldRemotes {
   private readonly mqtt: AsyncMqttClient;
   private clone?: MeldLocal;
   private readonly operationsTopic: MqttTopic<DomainParams>;
@@ -126,7 +126,7 @@ export class MqttRemotes extends AbstractMeld<DeltaMessage> implements MeldRemot
                   [CHANNEL_ID_HEADER]: this.id
                 }), { qos: 1 });
               // When done, mark the message as delivered
-              msg.delivered();
+              msg.delivered.resolve();
             } catch (err) {
               // Failed to send an update while (probably) connected
               this.log.warn(err);

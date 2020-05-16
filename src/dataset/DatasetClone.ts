@@ -1,11 +1,11 @@
-import { MeldClone, Snapshot, DeltaMessage, MeldRemotes, MeldJournalEntry } from '../m-ld';
-import { Pattern, Subject, isRead, Group, DeleteInsert } from '../m-ld/jsonrql';
-import { Observable, Subject as Source, merge, from, Observer, defer, NEVER, EMPTY, concat } from 'rxjs';
+import { MeldClone, Snapshot, DeltaMessage, MeldRemotes, MeldUpdate } from '../m-ld';
+import { Pattern, Subject, isRead } from '../m-ld/jsonrql';
+import { Observable, Subject as Source, merge, from, Observer, defer, NEVER, EMPTY, concat, BehaviorSubject } from 'rxjs';
 import { TreeClock } from '../clocks';
 import { SuSetDataset } from './SuSetDataset';
 import { TreeClockMessageService } from '../messages';
 import { Dataset } from '.';
-import { publishReplay, refCount, filter, ignoreElements, takeUntil, tap, isEmpty, finalize, flatMap, switchAll, toArray, catchError } from 'rxjs/operators';
+import { publishReplay, refCount, filter, ignoreElements, takeUntil, tap, isEmpty, finalize, flatMap, switchAll, toArray, catchError, first } from 'rxjs/operators';
 import { delayUntil, Future, tapComplete, tapCount, ReentrantLock, tapLast } from '../util';
 import { LogLevelDesc, levels } from 'loglevel';
 import { MeldError, HAS_UNSENT } from '../m-ld/MeldError';
@@ -16,22 +16,37 @@ export interface DatasetCloneOpts {
   reconnectDelayMillis?: number; // = 1000
 }
 
-export class DatasetClone extends AbstractMeld<MeldJournalEntry> implements MeldClone {
+export class DatasetClone extends AbstractMeld implements MeldClone {
   private readonly dataset: SuSetDataset;
   private messageService: TreeClockMessageService;
   private readonly orderingBuffer: DeltaMessage[] = [];
   private readonly remoteUpdates: Source<Observable<DeltaMessage>> = new Source;
-  private onlineLock = new ReentrantLock;
+  private readonly onlineLock = new ReentrantLock;
   private newClone: boolean = false;
+  private readonly latestTicks = new BehaviorSubject<number>(NaN);
+  private readonly revvingUp = new BehaviorSubject<boolean>(false);
 
   constructor(dataset: Dataset,
     private readonly remotes: MeldRemotes,
     logLevel: LogLevelDesc = 'info') {
     super(dataset.id, logLevel);
     this.dataset = new SuSetDataset(dataset, logLevel);
+    this.dataset.updates.subscribe(next => this.latestTicks.next(next['@ticks']));
     this.remotes.setLocal(this);
   }
 
+  /**
+   * Must be called prior to making transactions against this clone. The
+   * returned promise does not guarantee that the clone is online or up-to-date,
+   * because it may be disconnected or still receiving recent updates from a
+   * collaborator.
+   * 
+   * An application may choose to delay its own initialisation until the latest
+   * updates have either been received or the clone is confirmed to be offline,
+   * using the {@link #latest} method.
+   * 
+   * @return resolves when the clone can accept transactions
+   */
   async initialise(): Promise<void> {
     await this.dataset.initialise();
     // Establish a clock for this clone
@@ -43,72 +58,62 @@ export class DatasetClone extends AbstractMeld<MeldJournalEntry> implements Meld
     }
     this.log.info(`has time ${time}`);
     this.messageService = new TreeClockMessageService(time);
+    this.latestTicks.next(time.getTicks());
+
     this.remoteUpdates.pipe(switchAll()).subscribe({
       next: delta => {
         const logBody = this.log.getLevel() < levels.DEBUG ? delta : `tid: ${delta.data.tid}`;
         this.log.debug('Receiving', logBody, '@', this.localTime);
         this.messageService.receive(delta, this.orderingBuffer, msg => {
           this.log.debug('Accepting', logBody);
-          this.dataset.apply(msg.data, msg.time, () => this.localTime);
+          this.dataset.apply(msg.data, msg.time, () => this.localTime)
+            .then(msg.delivered.resolve)
+            .catch(err => this.close(err)); // Catastrophe
         });
       },
       error: err => this.close(err),
       complete: () => this.close()
     });
-    return new Promise((resolve, reject) => {
+
+    await new Promise((resolve, reject) => {
       this.remotes.online.subscribe(remotesOnline => {
         // Block transactions, revups and other connect attempts while handling online change
-        this.onlineLock.acquire(this.id, () => {
-          if (remotesOnline == null) {
+        this.onlineLock.acquire(this.id, async () => {
+          if (remotesOnline === false && this.newClone) {
+            throw new Error('New clone is siloed.');
+          } else if (remotesOnline === true) {
+            // Connect in the online lock
+            return this.connect();
+          } else if (remotesOnline === null) {
             // We are partitioned from the domain.
             this.remoteUpdates.next(NEVER);
             this.setOnline(false);
-          } else if (remotesOnline) {
-            return this.connect();
-          } else if (!this.newClone) {
+          } else if (remotesOnline === false) {
             // We are a silo, the last survivor. Stay online for any newcomers.
             this.remoteUpdates.next(this.remotes.updates);
             this.setOnline(true);
-          } else {
-            reject(new Error('New clone is siloed.'));
           }
-        }).catch(this.warnError); // Could not acquire lock
+        }).then(resolve, reject);
       });
-      // For a new non-genesis clone, the first connect is essential
-      if (this.newClone)
-        comesOnline(this).then(resolve);
-      else
-        resolve();
     });
+    // For a new non-genesis clone, the first connect is essential
+    if (this.newClone)
+      await comesOnline(this);
   }
 
   private async connect(): Promise<void> {
     this.log.info('Connecting to remotes');
     try {
+      // At this point we are uncertain what the 'latest' delta will be
+      this.revvingUp.next(true);
       await this.flushUndeliveredOperations();
       const silo = await this.isOnline();
       // If top-level is Id, never been forked, no rev-up to do
       if (silo || this.localTime.isId) {
         this.remoteUpdates.next(this.remotes.updates);
+        this.revvingUp.next(false);
       } else {
-        // TODO: Change this source to a new Observable(subs)
-        const revups = new Source<DeltaMessage>();
-        // Updates must be paused during revups because the collaborator might
-        // send an update while also sending revups of its own prior updates.
-        // That would break the ordering guarantee.
-        const revvedUp = new Future;
-        this.remoteUpdates.next(merge(
-          revups.pipe(tapComplete(revvedUp), catchError(() => NEVER)),
-          this.remotes.updates.pipe(delayUntil(from(revvedUp)))));
-
-        // If rev-ups fail later (for example, if the collaborator goes offline)
-        // it's not a catastrophe but we do need to enqueue a retry
-        revvedUp.then(null, async err => {
-          this.log.warn('Rev-up did not complete due to', err);
-          if (await isOnline(this.remotes))
-            this.connect();
-        }).catch(this.warnError);
-
+        const revups = this.setupRevups();
         if (this.newClone) {
           this.log.info('New clone requesting snapshot');
           await this.requestSnapshot(revups);
@@ -124,6 +129,34 @@ export class DatasetClone extends AbstractMeld<MeldJournalEntry> implements Meld
       // will have already been queued on the connect lock.
       this.log.info('Cannot connect to remotes due to', err);
     }
+  }
+
+  private setupRevups(): Observer<DeltaMessage> {
+    // TODO: Change this source to a new Observable(subs)
+    const revups = new Source<DeltaMessage>();
+    const lastRevup = new Future<DeltaMessage | undefined>();
+    lastRevup.then(async last => {
+      // Here, we are definitely before the first post-revup update, but
+      // the actual last revup might not yet have been applied to the dataset.
+      if (last != null)
+        await last.delivered;
+      this.revvingUp.next(false);
+    }, err => {
+      // If rev-ups fail (for example, if the collaborator goes offline)
+      // it's not a catastrophe but we do need to enqueue a retry
+      this.log.warn('Rev-up did not complete due to', err);
+      return this.onlineLock.acquire(this.id, () => isOnline(this.remotes).then(remotesOnline => {
+        if (remotesOnline)
+          return this.connect();
+      }));
+    }).catch(this.warnError); // TODO: Check data integrity
+    // Updates must be paused during revups because the collaborator might
+    // send an update while also sending revups of its own prior updates.
+    // That would break the ordering guarantee.
+    this.remoteUpdates.next(merge(
+      revups.pipe(tapLast(lastRevup), catchError(() => NEVER)),
+      this.remotes.updates.pipe(delayUntil(from(lastRevup)))));
+    return revups;
   }
 
   private async tryRevup(consumeRevups: Observer<DeltaMessage>) {
@@ -241,14 +274,20 @@ export class DatasetClone extends AbstractMeld<MeldJournalEntry> implements Meld
           const patch = await this.dataset.write(request);
           return [this.messageService.send(), patch];
         }))
-        // Publish the MeldJournalEntry
+        // Publish the delta
         .then(this.nextUpdate)
         .finally(() => this.onlineLock.leave(this.id)))
         .pipe(ignoreElements()); // Ignores the void promise result
     }
   }
 
-  follow(): Observable<DeleteInsert<Group>> {
+  async latest(): Promise<number> {
+    // If we're revving up, wait until we aren't
+    return this.revvingUp.pipe(first(ru => !ru)).toPromise()
+      .then(() => this.latestTicks.pipe(first()).toPromise());
+  }
+
+  follow(): Observable<MeldUpdate> {
     return this.dataset.updates;
   }
 
@@ -257,7 +296,7 @@ export class DatasetClone extends AbstractMeld<MeldJournalEntry> implements Meld
       this.log.warn('Shutting down due to', err);
     else
       this.log.info('Shutting down normally');
-    
+
     // Make sure we never receive another remote update
     this.remoteUpdates.next(EMPTY);
     if (this.orderingBuffer.length) {

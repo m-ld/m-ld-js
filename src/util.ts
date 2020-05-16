@@ -3,7 +3,7 @@ import { fromRDF } from 'jsonld';
 import { concat, Observable, OperatorFunction, Subscription } from "rxjs";
 import { publish, tap } from "rxjs/operators";
 import AsyncLock = require('async-lock');
-import { LogLevelDesc, Logger, getLogger, getLoggers } from 'loglevel';
+import { LogLevelDesc, getLogger, getLoggers } from 'loglevel';
 
 export function flatten<T>(bumpy: T[][]): T[] {
   return ([] as T[]).concat(...bumpy);
@@ -28,21 +28,28 @@ export class Future<T = void> implements PromiseLike<T> {
   private finalised: boolean = false;
   readonly promise: Promise<T>;
 
-  constructor() {
-    this.promise = new Promise<T>((resolve, reject) => {
-      this.resolver = (value?: T | PromiseLike<T> | undefined) => {
-        if (!this.finalised) {
-          this.finalised = true;
-          resolve(value);
-        }
-      };
-      this.rejecter = reason => {
-        if (!this.finalised) {
-          this.finalised = true;
-          reject(reason);
-        }
-      };
-    });
+  constructor(value?: T) {
+    if (value !== undefined) {
+      this.finalised = true;
+      this.promise = Promise.resolve(value);
+      this.resolver = () => { };
+      this.rejecter = () => { };
+    } else {
+      this.promise = new Promise<T>((resolve, reject) => {
+        this.resolver = (value?: T | PromiseLike<T> | undefined) => {
+          if (!this.finalised) {
+            this.finalised = true;
+            resolve(value);
+          }
+        };
+        this.rejecter = reason => {
+          if (!this.finalised) {
+            this.finalised = true;
+            reject(reason);
+          }
+        };
+      });
+    }
   }
 
   get resolve() {

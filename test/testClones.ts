@@ -1,11 +1,11 @@
 import { DatasetClone } from '../src/dataset/DatasetClone';
-import { MeldRemotes, DeltaMessage, MeldJournalEntry, MeldLocal } from '../src/m-ld';
+import { MeldRemotes, DeltaMessage, MeldLocal } from '../src/m-ld';
 import { mock, MockProxy } from 'jest-mock-extended';
 import { Observable, of, NEVER } from 'rxjs';
 import { Dataset, QuadStoreDataset } from '../src/dataset';
 import MemDown from 'memdown';
 import { TreeClock } from '../src/clocks';
-import { AsyncMqttClient, IPublishPacket, ISubscriptionGrant } from 'async-mqtt';
+import { AsyncMqttClient, IPublishPacket } from 'async-mqtt';
 import { EventEmitter } from 'events';
 
 export async function genesisClone(remotes?: MeldRemotes) {
@@ -15,7 +15,7 @@ export async function genesisClone(remotes?: MeldRemotes) {
 }
 
 export function mockRemotes(
-  updates: Observable<MeldJournalEntry> = NEVER,
+  updates: Observable<DeltaMessage> = NEVER,
   online: Observable<boolean | null> = of(true),
   newClock: TreeClock = TreeClock.GENESIS): MeldRemotes {
   return {
@@ -31,7 +31,7 @@ export function memStore(): Dataset {
 }
 
 export function mockLocal(
-  updates: Observable<MeldJournalEntry> = NEVER,
+  updates: Observable<DeltaMessage> = NEVER,
   online: Observable<boolean | null> = of(true)): MeldLocal {
   // This weirdness is due to jest-mock-extended trying to mock arrays
   return { ...mock<MeldLocal>(), updates, online };

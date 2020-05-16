@@ -1,7 +1,7 @@
 import { MqttRemotes } from '../src/mqtt/MqttRemotes';
 import { MockProxy } from 'jest-mock-extended';
 import { AsyncMqttClient } from 'async-mqtt';
-import { MeldJournalEntry } from '../src/m-ld';
+import { DeltaMessage } from '../src/m-ld';
 import { TreeClock } from '../src/clocks';
 import { Subject as Source, of } from 'rxjs';
 import { mockLocal, MockMqtt, mockMqtt } from './testClones';
@@ -112,13 +112,11 @@ describe('New MQTT remotes', () => {
         '__presence/test.m-ld.org/client2',
         '{"consumer2":"test.m-ld.org/control"}');
       await comesOnline(remotes);
-      const delivered = new Future<boolean>();
 
-      const entry = new MeldJournalEntry(
+      const entry = new DeltaMessage(
         TreeClock.GENESIS.forked().left,
-        { tid: 't1', insert: '{}', delete: '{}' },
-        () => delivered.resolve(true));
-      const updates = new Source<MeldJournalEntry>();
+        { tid: 't1', insert: '{}', delete: '{}' });
+      const updates = new Source<DeltaMessage>();
       remotes.setLocal(mockLocal(updates));
       // Setting retained presence on the channel
       expect(mqtt.publish).lastCalledWith(
@@ -128,7 +126,7 @@ describe('New MQTT remotes', () => {
       updates.next(entry);
       expect(mqtt.publish).toBeCalled();
       await mqtt.lastPublish();
-      await expect(delivered).resolves.toBe(true);
+      await expect(entry.delivered).resolves.toBeUndefined();
     });
 
     test('online goes unknown if mqtt closes', async () => {
@@ -137,7 +135,7 @@ describe('New MQTT remotes', () => {
     });
 
     test('closes with local clone', async () => {
-      const updates = new Source<MeldJournalEntry>();
+      const updates = new Source<DeltaMessage>();
       remotes.setLocal(mockLocal(updates));
       updates.complete();
 

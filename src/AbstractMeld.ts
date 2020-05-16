@@ -5,11 +5,11 @@ import { observeOn, tap, distinctUntilChanged, first, skip } from 'rxjs/operator
 import { LogLevelDesc, Logger } from 'loglevel';
 import { getIdLogger } from './util';
 
-export abstract class AbstractMeld<M extends DeltaMessage> implements Meld {
-  readonly updates: Observable<M>;
+export abstract class AbstractMeld implements Meld {
+  readonly updates: Observable<DeltaMessage>;
   readonly online: Observable<boolean | null>;
 
-  private readonly updateSource: Source<M> = new Source;
+  private readonly updateSource: Source<DeltaMessage> = new Source;
   private readonly onlineSource: Source<boolean | null> = new BehaviorSubject(null);
 
   protected readonly log: Logger;
@@ -27,7 +27,7 @@ export abstract class AbstractMeld<M extends DeltaMessage> implements Meld {
       this.log.debug('is', online ? 'online' : 'offline'));
   }
 
-  protected nextUpdate = (update: M) => this.updateSource.next(update);
+  protected nextUpdate = (update: DeltaMessage) => this.updateSource.next(update);
   protected setOnline = (online: boolean | null) => this.onlineSource.next(online);
   protected isOnline = (): Promise<boolean | null> => isOnline(this);
   protected warnError = (err: any) => this.log.warn(err);

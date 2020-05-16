@@ -14,6 +14,7 @@ describe('Meld API', () => {
     const captureUpdate = api.follow().pipe(first()).toPromise();
     await api.transact({ '@id': 'fred', name: 'Fred' } as Subject).toPromise();
     await expect(captureUpdate).resolves.toEqual({
+      '@ticks': 1,
       '@insert': { '@graph': [{ '@id': 'fred', name: 'Fred' }] },
       '@delete': { '@graph': [] }
     });
@@ -27,6 +28,7 @@ describe('Meld API', () => {
     await api.delete('fred').toPromise();
     await expect(api.get('fred').toPromise()).resolves.toBeUndefined();
     await expect(captureUpdate).resolves.toEqual({
+      '@ticks': 2,
       '@delete': { '@graph': [{ '@id': 'fred', name: 'Fred' }] },
       '@insert': { '@graph': [] }
     });

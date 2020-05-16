@@ -7,9 +7,12 @@ import { Message } from '../messages';
 import { Triple, Quad } from 'rdf-js';
 import { Hash } from '../hash';
 import { Pattern, Subject, Group, DeleteInsert } from './jsonrql';
+import { Future } from '../util';
 const inspect = Symbol.for('nodejs.util.inspect.custom');
 
 export class DeltaMessage implements Message<TreeClock, JsonDelta> {
+  readonly delivered = new Future;
+
   constructor(
     readonly time: TreeClock,
     readonly data: JsonDelta) {
@@ -32,13 +35,6 @@ export class DeltaMessage implements Message<TreeClock, JsonDelta> {
 
   // v8(chrome/nodejs) console
   [inspect] = () => this.toString();
-}
-
-export class MeldJournalEntry extends DeltaMessage {
-  constructor(time: TreeClock, data: JsonDelta,
-    readonly delivered: () => void) {
-    super(time, data);
-  }
 }
 
 export type UUID = string;
@@ -97,12 +93,16 @@ export interface MeldRemotes extends Meld {
 
 export interface MeldLocal extends Meld {
   readonly id: string;
-  readonly updates: Observable<MeldJournalEntry>;
+}
+
+export interface MeldUpdate extends DeleteInsert<Group> {
+  '@ticks': number;
 }
 
 export interface MeldStore {
   transact(request: Pattern): Observable<Subject>;
-  follow(after?: number): Observable<DeleteInsert<Group>>;
+  latest(): Promise<number>;
+  follow(after?: number): Observable<MeldUpdate>;
   close(err?: any): Promise<void>;
 }
 

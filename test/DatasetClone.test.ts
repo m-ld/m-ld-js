@@ -4,7 +4,7 @@ import { genesisClone, mockRemotes } from './testClones';
 import { NEVER, of, Subject as Source } from 'rxjs';
 import { isOnline, comesOnline } from '../src/AbstractMeld';
 import { MeldDelta } from '../src/m-ld';
-import { toArray, take, skip, timeout } from 'rxjs/operators';
+import { toArray, take, skip, timeout, first } from 'rxjs/operators';
 import { TreeClock } from '../src/clocks';
 
 describe('Dataset clone', () => {
@@ -26,8 +26,7 @@ describe('Dataset clone', () => {
 
     test('stays online without reconnect if siloed', async () => {
       const clone = await genesisClone(mockRemotes(NEVER, of(true, false)));
-      await expect(clone.online.pipe(take(2), toArray()).toPromise()).resolves.toEqual([null, true]);
-      await expect(clone.online.pipe(skip(2), timeout(50)).toPromise()).rejects.toThrow();
+      await expect(comesOnline(clone)).resolves.toBe(true);
     });
 
     test('non-genesis fails to initialise if siloed', async () => {
@@ -69,6 +68,19 @@ describe('Dataset clone', () => {
       } as Describe).toPromise();
       expect(fred['@id']).toBe('http://test.m-ld.org/fred');
       expect(fred['http://test.m-ld.org/#name']).toBe('Fred');
+    });
+
+    test('has no ticks from genesis', async () => {
+      await expect(store.latest()).resolves.toBe(0);
+    });
+
+    test('has ticks after update', async () => {
+      store.transact({
+        '@id': 'http://test.m-ld.org/fred',
+        'http://test.m-ld.org/#name': 'Fred'
+      } as Subject);
+      await store.follow().pipe(first()).toPromise();
+      await expect(store.latest()).resolves.toBe(1);
     });
   });
 });
