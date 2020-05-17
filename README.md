@@ -1,3 +1,6 @@
+[![npm](https://img.shields.io/badge/npm-private-red)](https://www.npmjs.com/package/@gsvarovsky/m-ld)
+![build](https://img.shields.io/badge/build-local-red)
+
 # m-ld-js
 m-ld Javascript native
 
