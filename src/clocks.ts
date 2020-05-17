@@ -1,5 +1,7 @@
+const inspect = Symbol.for('nodejs.util.inspect.custom');
+
 export interface CausalClock<T> {
-  anyLt(other: T): boolean;
+  anyLt(other: T, includeIds?: 'includeIds'): boolean;
 }
 
 export class TreeClockFork {
@@ -8,6 +10,13 @@ export class TreeClockFork {
     readonly right: TreeClock) {
     if (!left || !right)
       throw new Error('Fork cannot have missing tines');
+  }
+
+  getTicks(forId: TreeClockFork | false | null): number | null {
+    const leftResult = this.left.getTicks(forId ? forId.left : forId),
+      rightResult = this.right.getTicks(forId ? forId.right : forId);
+    return leftResult != null || rightResult != null ?
+      zeroIfNull(leftResult) + zeroIfNull(rightResult) : null;
   }
 
   equals(that: TreeClockFork): boolean {
@@ -45,20 +54,42 @@ export class TreeClock implements CausalClock<TreeClock> {
 
   static GENESIS = new TreeClock(true, 0, null);
   static HALLOWS = new TreeClock(false, 0, null);
+  private static HALLOWS_FORK = new TreeClockFork(TreeClock.HALLOWS, TreeClock.HALLOWS);
 
+  /**
+   * @returns the ticks for this clock. This includes only ticks for this clock's ID
+   * @see getTicks(forId)
+   */
   getTicks(): number;
-  getTicks(forId: boolean | null): number | null;
-  getTicks(forId?: boolean | null): number | null {
-    if (forId === undefined) {
-      return zeroIfNull(this.getTicks(true));
-    } else if (forId === null || forId === this.isId) {
-      return this.ticks + (this.fork === null ? 0 :
-        zeroIfNull(this.fork.left.getTicks(forId === null || forId ? null : false)) +
-        zeroIfNull(this.fork.right.getTicks(forId === null || forId ? null : false)));
-    } else if (this.fork) {
-      const leftResult = this.fork.left.getTicks(forId), rightResult = this.fork.right.getTicks(forId);
-      if (leftResult !== null || rightResult !== null)
-        return this.ticks + zeroIfNull(leftResult) + zeroIfNull(rightResult);
+  /**
+   * Argument variants to:
+   * - get the ticks for a different process ID in the same process group
+   * - get the ticks for the union of all other process identities (like an inverse)
+   * - get all ticks irrespective of ID
+   * @param forId another clock to be used as the ID, or
+   * `false` to invert the ID of the traversal, or
+   * `null` to gather all ticks
+   */
+  getTicks(forId: TreeClock | false | null): number | null;
+  getTicks(forId?: TreeClock | false | null): number | null {
+    if (arguments.length == 0) {
+      // No-args means ticks for this clock's embedded ID (should never return null)
+      return zeroIfNull(this.getTicks(this));
+    } else if (forId == null || (!forId && !this.isId) || (forId && forId.isId)) {
+      // If (want all ticks) || (want non-ID ticks) || (want ID ticks and this is an ID)
+      // Then always include the current ticks
+      return this.ticks + (this.fork == null ? 0 :
+        // and include all fork ticks unless we want non-ID ticks (both tines can't be ID)
+        zeroIfNull(this.fork.getTicks(forId == null || forId ? null : false)));
+    } else if (this.fork || (forId && forId.fork)) {
+      // If (we have a fork) || (the ID tree has a fork)
+      // Post-order traversal to discover if there are any IDs in the fork
+      // If we or ID tree don't have a matching fork, substitute hallows (no IDs)
+      const forkResult = (this.fork ?? TreeClock.HALLOWS_FORK)
+        .getTicks(forId ? forId.fork ?? TreeClock.HALLOWS_FORK : forId);
+      // Include our ticks if some matching ticks found in the fork
+      if (forkResult != null)
+        return this.ticks + forkResult;
     }
     return null;
   }
@@ -152,15 +183,17 @@ export class TreeClock implements CausalClock<TreeClock> {
     }
   }
 
-  anyLt(other: TreeClock): boolean {
-    if (this.fork === null || other.fork === null) {
-      if (!this.isId && !other.isId) {
-        return zeroIfNull(this.getTicks(false)) < zeroIfNull(other.getTicks(false));
+  anyLt(other: TreeClock, includeIds?: 'includeIds'): boolean {
+    if (this.fork == null || other.fork == null) {
+      if (includeIds || (!this.isId && !other.isId)) {
+        return zeroIfNull(this.getTicks(includeIds ? null : false)) <
+          zeroIfNull(other.getTicks(includeIds ? null : false));
       } else {
         return false; // Either is an ID but we don't want IDs, or both not IDs and we want IDs
       }
     } else {
-      return this.fork.left.anyLt(other.fork.left) || this.fork.right.anyLt(other.fork.right);
+      return this.fork.left.anyLt(other.fork.left, includeIds) ||
+        this.fork.right.anyLt(other.fork.right, includeIds);
     }
   }
 
@@ -179,6 +212,9 @@ export class TreeClock implements CausalClock<TreeClock> {
     ].filter(p => p);
     return (content.length == 1 ? content[0] || '' : content).toString();
   }
+
+  // v8(chrome/nodejs) console
+  [inspect] = () => this.toString();
 
   toJson(): any {
     return {

@@ -1,5 +1,6 @@
 import { Hash } from '../hash';
 import { TreeClock } from '../clocks';
+const inspect = Symbol.for('nodejs.util.inspect.custom');
 
 ////////////////////////////////////////////////////////////////////////////////
 // TODO: Protect all of this with json-schema
@@ -8,20 +9,32 @@ export interface Hello {
   id: string;
 }
 
+export interface Request {
+  toJson(): object;
+}
+
 export namespace Request {
-  export class NewClock {
+  export class NewClock implements Request {
+    toJson = () => NewClock.JSON;
+    toString = () => 'New Clock';
+    [inspect] = () => this.toString();
     static readonly JSON = { '@type': 'http://control.m-ld.org/request/clock' };
   }
 
-  export class Snapshot {
+  export class Snapshot implements Request {
+    toJson = () => Snapshot.JSON;
+    toString = () => 'Snapshot';
+    [inspect] = () => this.toString();
     static readonly JSON = { '@type': 'http://control.m-ld.org/request/snapshot' };
   }
 
-  export class Revup {
-    constructor(readonly lastHash: Hash) { };
+  export class Revup implements Request {
+    constructor(readonly time: TreeClock) { };
+    toString = () => `Revup from ${this.time}`;
+    [inspect] = () => this.toString();
     readonly toJson = () => ({
       '@type': 'http://control.m-ld.org/request/revup',
-      lastHash: this.lastHash.encode()
+      time: this.time.toJson()
     });
   }
 
@@ -34,34 +47,42 @@ export namespace Request {
         case 'http://control.m-ld.org/request/snapshot':
           return new Snapshot;
         case 'http://control.m-ld.org/request/revup':
-          return new Revup(Hash.decode(json.lastHash));
+          const time = TreeClock.fromJson(json.time);
+          if (time)
+            return new Revup(time);
       }
     }
     throw new Error('Bad request JSON');
   }
 }
-export type Request = Request.NewClock | Request.Snapshot | Request.Revup;
+
+export interface Response {
+  toJson(): object;
+};
 
 export namespace Response {
-  export class NewClock {
+  export class NewClock implements Response {
     constructor(
       readonly clock: TreeClock) {
     };
-    
+
     readonly toJson = () => ({
       '@type': 'http://control.m-ld.org/response/clock',
       clock: this.clock.toJson()
     });
+
+    toString = () => `New Clock ${this.clock}`;
+    [inspect] = () => this.toString();
   }
 
-  export class Snapshot {
+  export class Snapshot implements Response {
     constructor(
       readonly time: TreeClock,
       readonly dataAddress: string,
       readonly lastHash: Hash,
       readonly updatesAddress: string) {
     }
-    
+
     readonly toJson = () => ({
       '@type': 'http://control.m-ld.org/response/snapshot',
       time: this.time.toJson(),
@@ -69,23 +90,31 @@ export namespace Response {
       lastHash: this.lastHash.encode(),
       updatesAddress: this.updatesAddress
     });
+
+    toString = () => `Snapshot at ${this.time} with hash ${this.lastHash}`;
+    [inspect] = () => this.toString();
   }
 
-  export class Revup {
+  export class Revup implements Response {
     constructor(
-      readonly hashFound: boolean,
+      readonly canRevup: boolean,
       /**
-       * If !hashFound this should be a stable identifier of the answering clone,
+       * If !canRevup this should be a stable identifier of the answering clone,
        * to allow detection of a re-send.
        */
       readonly updatesAddress: string) {
     }
-    
+
     readonly toJson = () => ({
       '@type': 'http://control.m-ld.org/response/revup',
-      hashFound: this.hashFound,
+      canRevup: this.canRevup,
       updatesAddress: this.updatesAddress
     })
+
+    toString = () => this.canRevup ?
+      `Can revup from ${this.updatesAddress}` :
+      `${this.updatesAddress} can't provide revup`;
+    [inspect] = () => this.toString();
   }
 
   export function fromJson(json: any): Response {
@@ -100,10 +129,9 @@ export namespace Response {
           if (time)
             return new Snapshot(time, json.dataAddress, Hash.decode(json.lastHash), json.updatesAddress);
         case 'http://control.m-ld.org/response/revup':
-          return new Revup(json.hashFound, json.updatesAddress);
+          return new Revup(json.canRevup, json.updatesAddress);
       }
     }
     throw new Error('Bad response JSON');
   }
 }
-export type Response = Response.NewClock | Response.Revup | Response.Snapshot;

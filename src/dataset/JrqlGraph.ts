@@ -1,7 +1,9 @@
 import { Iri } from 'jsonld/jsonld-spec';
 import {
   Context, Read, Subject, GroupLike, Update,
-  isDescribe, isGroup, isSubject, isUpdate, asGroup, Group, isSelect, isGroupLike, Result, Variable, JrqlValue, isValueObject, isReference
+  isDescribe, isGroup, isSubject, isUpdate,
+  asGroup, Group, isSelect, isGroupLike, Result,
+  Variable, JrqlValue, isValueObject, isReference
 } from '../m-ld/jsonrql';
 import { NamedNode, Quad, Term, Variable as VariableNode, Quad_Subject, Quad_Predicate, Quad_Object } from 'rdf-js';
 import { compact, flatten as flatJsonLd, toRDF } from 'jsonld';
@@ -83,6 +85,13 @@ export class JrqlGraph {
     context: Context = jrqlPattern['@context'] || this.defaultContext): Promise<Set<Iri>> {
     const quads = await this.findQuads(jrqlPattern, context);
     return new Set(quads.map(quad => quad.subject.value));
+  }
+
+  async find1(jrqlPattern: Subject | Group,
+    context: Context = jrqlPattern['@context'] || this.defaultContext): Promise<Iri | ''> {
+    const quads = await this.findQuads(jrqlPattern, context);
+    return quads.length ? quads.map(quad => quad.subject.value)
+      .reduce((rtn, id) => rtn === id ? rtn : '') : '';
   }
 
   async findQuads(jrqlPattern: Subject | Group,
@@ -196,7 +205,9 @@ function hideVars(values: JrqlValue | JrqlValue[], top: boolean = true) {
           if (typeof value === 'object') {
             hideVars(value as JrqlValue | JrqlValue[], false);
           } else if (typeof value === 'string') {
-            value = hideVar(value);
+            const varVal = hideVar(value);
+            if (varVal !== value)
+              value = !key.startsWith('@') ? { '@id': varVal } : varVal;
           }
           subject[varKey] = value;
           if (varKey !== key)

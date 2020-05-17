@@ -8,11 +8,13 @@ import { TopicParams } from 'mqtt-pattern';
 import { MqttPresence } from './MqttPresence';
 import { Response, Request, Hello } from '../m-ld/ControlMessage';
 import { Future, jsonFrom } from '../util';
-import { map, finalize, flatMap } from 'rxjs/operators';
+import { map, finalize, flatMap, reduce, toArray } from 'rxjs/operators';
 import { fromTimeString, toTimeString, toMeldJson, fromMeldJson } from '../m-ld/MeldJson';
 import { Hash } from '../hash';
 import AsyncLock = require('async-lock');
-import { LogLevelDesc, getLogger, Logger } from 'loglevel';
+import { LogLevelDesc } from 'loglevel';
+import { MeldError, BAD_UPDATE, NONE_VISIBLE } from '../m-ld/MeldError';
+import { AbstractMeld, isOnline } from '../AbstractMeld';
 
 interface DomainParams extends TopicParams { domain: string; }
 const OPERATIONS_TOPIC = new MqttTopic<DomainParams>([{ '+': 'domain' }, 'operations']);
@@ -26,14 +28,14 @@ interface JsonNotification {
   error?: any;
 }
 
+const CHANNEL_ID_HEADER = '__channel.id';
+
 export type MeldMqttOpts = Omit<IClientOptions, 'will' | 'clientId'> &
   ({ hostname: string } | { host: string, port: number }) & { sendTimeout?: number, logLevel?: LogLevelDesc }
 
-export class MqttRemotes implements MeldRemotes {
+export class MqttRemotes extends AbstractMeld implements MeldRemotes {
   private readonly mqtt: AsyncMqttClient;
-  private readonly initialised: Future<void>;
   private clone?: MeldLocal;
-  private readonly remoteUpdates: Source<DeltaMessage> = new Source;
   private readonly operationsTopic: MqttTopic<DomainParams>;
   private readonly controlTopic: MqttTopic<DomainParams>;
   private readonly registryTopic: MqttTopic<DomainParams>;
@@ -45,16 +47,14 @@ export class MqttRemotes implements MeldRemotes {
   } = {};
   private readonly recentlySentTo: Set<string> = new Set;
   private readonly consuming: { [address: string]: Source<any> } = {};
-  private isGenesis: boolean = true;
+  isGenesis: Future<boolean> = new Future;
   private readonly notifyLock = new AsyncLock;
   private readonly sendTimeout: number;
-  private readonly log: Logger;
 
-  constructor(domain: string, private readonly id: string, opts: MeldMqttOpts,
+  constructor(domain: string, id: string, opts: MeldMqttOpts,
     connect: (opts: IClientOptions) => AsyncMqttClient = defaultConnect) {
+    super(id, opts.logLevel ?? 'info');
 
-    this.initialised = new Future;
-    this.presence = new MqttPresence(domain, id);
     this.sendTimeout = opts.sendTimeout || 2000;
     this.operationsTopic = OPERATIONS_TOPIC.with({ domain });
     this.controlTopic = CONTROL_TOPIC.with({ domain });
@@ -62,90 +62,119 @@ export class MqttRemotes implements MeldRemotes {
     // We only listen for control requests
     this.sentTopic = SEND_TOPIC.with({ toId: this.id, address: this.controlTopic.path });
     this.replyTopic = REPLY_TOPIC.with({ toId: this.id });
-    this.mqtt = connect({ ...opts, clientId: id, will: this.presence.will });
-    this.log = getLogger(this.id);
-    this.log.setLevel(opts.logLevel ?? 'info');
+    this.mqtt = connect({ ...opts, clientId: id, will: MqttPresence.will(domain, id) });
+    this.presence = new MqttPresence(this.mqtt, domain, id);
 
     // Set up listeners
-    this.mqtt.on('message', (topic, payload) => {
-      this.presence.onMessage(topic, payload);
-      this.onMessage(topic, payload);
+    this.presence.on('change', () => {
+      // If there is more than just me present, we are online
+      this.presence.present(this.controlTopic.address)
+        .pipe(reduce((online, id) => online || id !== this.id, false))
+        .subscribe(online => this.setOnline(online));
     });
 
-    // When MQTT dies irrecoverably or closes, tell the clone (it will shut down)
-    this.mqtt.on('error', err => this.remoteUpdates.error(err));
-    this.mqtt.on('close', () => this.remoteUpdates.complete());
+    this.mqtt.on('message', (topic, payload) => this.onMessage(topic, payload));
+
+    // When MQTT.js receives an error just log - it will try to reconnect
+    this.mqtt.on('error', this.warnError);
+    this.presence.on('error', this.warnError);
+
+    // MQTT.js 'close' event signals a disconnect - definitely offline.
+    this.mqtt.on('close', () => this.setOnline(null));
 
     this.mqtt.on('connect', async () => {
       try {
         // Subscribe as required
-        const subscriptions: ISubscriptionMap = { ...this.presence.subscriptions };
-        subscriptions[this.operationsTopic.address] = 1;
-        subscriptions[this.controlTopic.address] = 1;
-        subscriptions[this.registryTopic.address] = 1;
-        subscriptions[this.sentTopic.address] = 0;
-        subscriptions[this.replyTopic.address] = 0;
+        const subscriptions: ISubscriptionMap = {
+          [this.operationsTopic.address]: 1,
+          [this.controlTopic.address]: 1,
+          [this.registryTopic.address]: 1,
+          [this.sentTopic.address]: 0,
+          [this.replyTopic.address]: 0
+        };
         const grants = await this.mqtt.subscribe(subscriptions);
         if (!grants.every(grant => subscriptions[grant.topic] == grant.qos))
           throw new Error('Requested QoS was not granted');
-
         // Tell the world that we will be a clone on this domain
-        this.mqtt.publish(this.registryTopic.address,
+        await this.mqtt.publish(this.registryTopic.address,
           JSON.stringify({ id: this.id } as Hello), { qos: 1, retain: true });
+        if (this.clone != null && await isOnline(this.clone) === true)
+          this.clonePresent(true).catch(this.warnError);
       } catch (err) {
-        this.initialised.reject(err);
+        if (this.mqtt.connected)
+          this.close(err); // This is a catastrophe, can't bootstrap
+        else
+          this.log.debug(err); // We disconnected during bootstrap
       }
     });
   }
 
-  async initialise(): Promise<void> {
-    await this.initialised;
+  setLocal(clone: MeldLocal): void {
+    if (this.clone == null) {
+      this.clone = clone;
+      // Start sending updates from the local clone to the remotes
+      clone.updates.subscribe({
+        next: async msg => {
+          // If we are not online, we just ignore updates.
+          // They will be replayed from the clone's journal on re-connection.
+          if (await this.isOnline()) {
+            try {
+              // Delta received from the local clone. Relay to the domain
+              await this.mqtt.publish(
+                this.operationsTopic.address, JSON.stringify({
+                  ...msg.toJson(),
+                  [CHANNEL_ID_HEADER]: this.id
+                }), { qos: 1 });
+              // When done, mark the message as delivered
+              msg.delivered.resolve();
+            } catch (err) {
+              // Failed to send an update while (probably) connected
+              this.log.warn(err);
+              // We can't allow gaps, so ensure a reconnect
+              this.mqtt.reconnect();
+            }
+          }
+        },
+        // Local m-ld clone has stopped. It will no longer accept messages.
+        complete: () => this.close(),
+        // Local m-ld clone has stopped unexpectedly.
+        // The application will already know, so just shut down gracefully.
+        error: err => this.close(err)
+      });
+      // When the clone comes online, join the presence on this domain if we can
+      clone.online.subscribe(online => {
+        if (online != null)
+          this.clonePresent(online).catch(this.warnError);
+      });
+    } else if (clone != this.clone) {
+      throw new Error(`${this.id}: Local clone cannot change`);
+    }
   }
 
-  get updates(): Observable<DeltaMessage> {
-    return this.remoteUpdates;
-  }
+  async close(err?: any) {
+    if (err)
+      this.log.info('Shutting down due to', err);
+    else
+      this.log.info('Shutting down normally');
 
-  connect(clone: MeldLocal): void {
-    this.clone = clone;
-    // Join the presence on this domain
-    this.presence.join(this.mqtt, this.id, this.controlTopic.address);
-    // Start sending updates from the local clone to the remotes
-    clone.updates.subscribe({
-      next: async msg => {
-        try {
-          // Delta received from the local clone. Relay to the domain
-          await this.mqtt.publish(
-            this.operationsTopic.address, JSON.stringify(msg), { qos: 1 });
-          // When done, mark the message as delivered
-          msg.delivered();
-        } catch (err) {
-          // Failure to send an update is catastrophic - signal death to the clone
-          this.remoteUpdates.error(err);
-        }
-      },
-      // Local m-ld clone has stopped normally. It will no longer accept messages
-      complete: () => this.close(),
-      // Local m-ld clone has stopped unexpectedly.
-      // The application will already know, so just shut down gracefully.
-      error: err => this.close(err)
-    });
-  }
-
-  private close(err?: any) {
-    this.log.info(`${this.id}: Shutting down MQTT remotes ${err ? 'due to ' + err : 'normally'}`);
-    this.presence.leave(this.mqtt, this.id);
-    this.mqtt.end();
+    super.close(err);
+    try {
+      await this.clonePresent(false);
+      await this.mqtt.end();
+    } catch (err) {
+      this.log.warn(err);
+    }
   }
 
   async newClock(): Promise<TreeClock> {
-    return this.isGenesis ? Promise.resolve(TreeClock.GENESIS) :
-      (await this.send<Response.NewClock>(Request.NewClock.JSON)).clock;
+    const isGenesis = await this.isGenesis;
+    return isGenesis ? Promise.resolve(TreeClock.GENESIS) :
+      (await this.send<Response.NewClock>(new Request.NewClock)).clock;
   }
 
   async snapshot(): Promise<Snapshot> {
     const ack = new Future<null>();
-    const res = await this.send<Response.Snapshot>(Request.Snapshot.JSON, ack);
+    const res = await this.send<Response.Snapshot>(new Request.Snapshot, ack);
     const snapshot: Snapshot = {
       time: res.time,
       data: (await this.consume(res.dataAddress)).pipe(flatMap(fromMeldJson)),
@@ -157,14 +186,14 @@ export class MqttRemotes implements MeldRemotes {
     return snapshot;
   }
 
-  revupFrom(lastHash: Hash): Promise<Observable<DeltaMessage> | undefined> {
-    return this.revupFromNext(lastHash, new Set);
+  revupFrom(time: TreeClock): Promise<Observable<DeltaMessage> | undefined> {
+    return this.revupFromNext(time, new Set);
   }
 
-  private async revupFromNext(lastHash: Hash, tried: Set<string>): Promise<Observable<DeltaMessage> | undefined> {
+  private async revupFromNext(time: TreeClock, tried: Set<string>): Promise<Observable<DeltaMessage> | undefined> {
     const ack = new Future<null>();
-    const res = await this.send<Response.Revup>(new Request.Revup(lastHash).toJson(), ack);
-    if (res.hashFound) {
+    const res = await this.send<Response.Revup>(new Request.Revup(time), ack);
+    if (res.canRevup) {
       const updates = (await this.consume(res.updatesAddress)).pipe(map(deltaFromJson));
       // Ack the response to start the streams
       ack.resolve(null);
@@ -172,11 +201,20 @@ export class MqttRemotes implements MeldRemotes {
     } else if (!tried.has(res.updatesAddress)) {
       tried.add(res.updatesAddress);
       // Not expecting an ack if hash not found
-      return this.revupFromNext(lastHash, tried);
+      return this.revupFromNext(time, tried);
     } // else return undefined
   }
 
-  private async consume<T>(subAddress: string): Promise<Observable<any>> {
+  private async clonePresent(online: boolean) {
+    if (this.mqtt.connected) {
+      if (online)
+        return this.presence.join(this.id, this.controlTopic.address);
+      else
+        return this.presence.leave(this.id);
+    }
+  }
+
+  private async consume(subAddress: string): Promise<Observable<any>> {
     const address = this.controlSubAddress(subAddress);
     const src = this.consuming[address] = new Source;
     await this.mqtt.subscribe(address, { qos: 1 });
@@ -191,22 +229,33 @@ export class MqttRemotes implements MeldRemotes {
   }
 
   private onMessage(topic: string, payload: Buffer) {
-    this.operationsTopic.match(topic, () =>
-      this.remoteUpdates.next(DeltaMessage.fromJson(jsonFrom(payload))));
+    this.operationsTopic.match(topic, () => this.onRemoteUpdate(payload));
     this.registryTopic.match(topic, () => this.onHello(payload));
-    this.sentTopic.match(topic, sent =>
-      this.onSent(jsonFrom(payload), sent));
-    this.replyTopic.match(topic, replied =>
-      this.onReply(jsonFrom(payload), replied));
+    this.sentTopic.match(topic, sent => this.onSent(jsonFrom(payload), sent));
+    this.replyTopic.match(topic, replied => this.onReply(jsonFrom(payload), replied));
     this.matchConsuming(topic, payload);
+  }
+
+  private onRemoteUpdate(payload: Buffer) {
+    const json = jsonFrom(payload);
+    // Ignore echoed updates
+    if (!json[CHANNEL_ID_HEADER] || json[CHANNEL_ID_HEADER] !== this.id) {
+      const update = DeltaMessage.fromJson(json);
+      if (update)
+        this.nextUpdate(update);
+      else
+        // This is extremely bad - may indicate a bad actor
+        this.close(new MeldError(BAD_UPDATE));
+    }
   }
 
   private onHello(payload: Buffer) {
     const hello = jsonFrom(payload);
+    // This is a race, since a Future will ignore a re-resolve
     if (this.id === hello.id)
-      this.initialised.resolve();
+      this.isGenesis.resolve(true);
     else
-      this.isGenesis = false;
+      this.isGenesis.resolve(false);
   }
 
   private matchConsuming(topic: string, payload: Buffer) {
@@ -221,40 +270,53 @@ export class MqttRemotes implements MeldRemotes {
     }
   }
 
-  private async send<T extends Response>(json: any, ack: PromiseLike<null> | null = null): Promise<T> {
+  private async send<T extends Response>(request: Request, ack: PromiseLike<null> | null = null): Promise<T> {
     const messageId = uuid();
-    await this.mqtt.publish(
-      this.nextSendAddress(messageId),
-      JSON.stringify(json));
+    const address = await this.nextSendAddress(messageId);
+    if (!address)
+      throw new MeldError(NONE_VISIBLE,
+        `No-one present on ${this.controlTopic.address} to send message to`);
+
+    this.log.debug('Sending request', messageId, request, address);
+    await this.mqtt.publish(address, JSON.stringify(request.toJson()));
     return this.getResponse<T>(messageId, ack);
   }
 
   private getResponse<T extends Response | null>(messageId: string, ack: PromiseLike<null> | null) {
     const response = new Future<T>();
-    this.replyResolvers[messageId] = [response.resolve, ack];
-    setTimeout(() => {
-      response.reject(new Error('Send timeout exceeded.'));
+    const timer = setTimeout(() => {
       delete this.replyResolvers[messageId];
+      this.log.debug(`Message ${messageId} timed out.`)
+      response.reject(new Error('Send timeout exceeded.'));
     }, this.sendTimeout);
+    this.replyResolvers[messageId] = [res => {
+      delete this.replyResolvers[messageId];
+      clearTimeout(timer);
+      response.resolve(res as T);
+    }, ack];
     return response;
   }
 
-  private onSent(json: any, sentParams: SendParams) {
+  private async onSent(json: any, sentParams: SendParams) {
     // Ignore control messages before we have a clone
     if (this.clone) {
-      const req = Request.fromJson(json);
-      if (req instanceof Request.NewClock) {
-        this.replyClock(sentParams, this.clone.newClock());
-      } else if (req instanceof Request.Snapshot) {
-        this.replySnapshot(sentParams, this.clone.snapshot());
-      } else if (req instanceof Request.Revup) {
-        this.replyRevup(sentParams, this.clone.revupFrom(req.lastHash));
+      try {
+        const req = Request.fromJson(json);
+        if (req instanceof Request.NewClock) {
+          await this.replyClock(sentParams, this.clone.newClock());
+        } else if (req instanceof Request.Snapshot) {
+          await this.replySnapshot(sentParams, this.clone.snapshot());
+        } else if (req instanceof Request.Revup) {
+          await this.replyRevup(sentParams, this.clone.revupFrom(req.time));
+        }
+      } catch (err) {
+        this.log.warn(err);
       }
     }
   }
 
   private async replyClock(sentParams: SendParams, clock: Promise<TreeClock>) {
-    this.reply(sentParams, new Response.NewClock(await clock).toJson());
+    this.reply(sentParams, new Response.NewClock(await clock));
   }
 
   private async replySnapshot(sentParams: SendParams, snapshot: Promise<Snapshot>) {
@@ -262,7 +324,7 @@ export class MqttRemotes implements MeldRemotes {
     const dataAddress = uuid(), updatesAddress = uuid();
     await this.reply(sentParams, new Response.Snapshot(
       time, dataAddress, lastHash, updatesAddress
-    ).toJson(), true);
+    ), true);
     // Ack has been sent, start streaming the data and updates
     this.produce(data, dataAddress, toMeldJson, 'snapshot');
     this.produce(updates, updatesAddress, jsonFromDelta, 'updates');
@@ -273,21 +335,21 @@ export class MqttRemotes implements MeldRemotes {
     const revup = await willRevup;
     if (revup) {
       const updatesAddress = uuid();
-      await this.reply(sentParams, new Response.Revup(true, updatesAddress).toJson(), true);
+      await this.reply(sentParams, new Response.Revup(true, updatesAddress), true);
       // Ack has been sent, start streaming the updates
       this.produce(revup, updatesAddress, jsonFromDelta, 'updates');
     } else if (this.clone) {
-      this.reply(sentParams, new Response.Revup(false, this.clone.id).toJson());
+      this.reply(sentParams, new Response.Revup(false, this.clone.id));
     }
   }
 
   private produce<T>(data: Observable<T>, subAddress: string,
     toJson: (datum: T) => Promise<any>, type: 'snapshot' | 'updates') {
-    
+
     const address = this.controlSubAddress(subAddress);
     // If notifications fail due to MQTT death, the recipient will find out from the broker
     // so here we make best efforts to notify an error and then give up.
-    const logError = (err: any) => this.log.warn(`${this.id}: ${err}`);
+    const logError = (err: any) => this.log.warn(err);
     const subs = data.subscribe({
       next: datum => this.notify(address, toJson(datum).then(json => ({ next: json })))
         .catch(error => {
@@ -296,10 +358,12 @@ export class MqttRemotes implements MeldRemotes {
           subs.unsubscribe();
         }),
       complete: () => this.notify(address, Promise.resolve({ complete: true }))
-        .then(() => this.log.debug(`${this.id}: Completed production of ${type}`))
+        .then(() => this.log.debug('Completed production of', type))
         .catch(logError),
-      error: error => this.notify(address, Promise.resolve({ error }))
-        .catch(logError)
+      error: error => {
+        this.log.warn('Notifying error on', subAddress, error);
+        this.notify(address, Promise.resolve({ error })).catch(logError);
+      }
     });
   }
 
@@ -309,50 +373,57 @@ export class MqttRemotes implements MeldRemotes {
       this.mqtt.publish(address, JSON.stringify(await notification)));
   }
 
-  private async reply({ fromId: toId, messageId: sentMessageId }: DirectParams, json: any, expectAck?: boolean) {
+  private async reply({ fromId: toId, messageId: sentMessageId }: DirectParams, res: Response | null, expectAck?: boolean) {
     const messageId = uuid();
-    await this.mqtt.publish(REPLY_TOPIC.with({
+    const address = REPLY_TOPIC.with({
       messageId, fromId: this.id, toId, sentMessageId
-    }).address, JSON.stringify(json));
+    }).address;
+    this.log.debug('Replying response', messageId, res, address);
+    await this.mqtt.publish(address, JSON.stringify(res != null ? res.toJson() : null));
     if (expectAck)
       return this.getResponse<null>(messageId, null);
   }
 
-  private onReply(json: any, replyParams: ReplyParams) {
+  private async onReply(json: any, replyParams: ReplyParams) {
     if (replyParams.sentMessageId in this.replyResolvers) {
-      const [resolve, ack] = this.replyResolvers[replyParams.sentMessageId];
-      resolve(json != null ? Response.fromJson(json) : null);
-      if (ack) // A m-ld ack is a reply to a reply with a null body
-        ack.then(() => this.reply(replyParams, null));
+      try {
+        const [resolve, ack] = this.replyResolvers[replyParams.sentMessageId];
+        resolve(json != null ? Response.fromJson(json) : null);
+        if (ack) { // A m-ld ack is a reply to a reply with a null body
+          await ack;
+          await this.reply(replyParams, null);
+        }
+      } catch (err) {
+        this.log.warn(err);
+      }
     }
   }
 
-  private nextSendAddress(messageId: string): string {
-    const present = Array.from(this.presence.present(this.controlTopic.address));
+  private async nextSendAddress(messageId: string): Promise<string | null> {
+    const present = await this.presence.present(this.controlTopic.address).pipe(toArray()).toPromise();
     if (present.every(id => this.recentlySentTo.has(id)))
       this.recentlySentTo.clear();
 
     this.recentlySentTo.add(this.id);
     const toId = present.filter(id => !this.recentlySentTo.has(id))[0];
-    if (toId) {
+    if (toId != null) {
       this.recentlySentTo.add(toId);
       return SEND_TOPIC.with({
         toId, fromId: this.id, messageId, address: this.controlTopic.path
       }).address;
-    } else {
-      throw new Error(`No-one present on ${this.controlTopic.address} to send message to`);
     }
+    return null;
   }
 }
 
 function deltaFromJson(json: any): DeltaMessage {
-  const time = fromTimeString(json.time);
-  if (time)
-    return { time, data: json.data, toString: DeltaMessage.toString };
+  const delta = DeltaMessage.fromJson(json);
+  if (delta)
+    return delta;
   else
     throw new Error('No time in message');
 }
 
 async function jsonFromDelta(msg: DeltaMessage): Promise<any> {
-  return { time: toTimeString(msg.time), data: msg.data };
+  return msg.toJson();
 }

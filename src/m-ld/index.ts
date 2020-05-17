@@ -7,33 +7,59 @@ import { Message } from '../messages';
 import { Triple, Quad } from 'rdf-js';
 import { Hash } from '../hash';
 import { Pattern, Subject, Group, DeleteInsert } from './jsonrql';
+import { Future } from '../util';
+const inspect = Symbol.for('nodejs.util.inspect.custom');
 
-export type DeltaMessage = Message<TreeClock, JsonDelta> & Object;
+export class DeltaMessage implements Message<TreeClock, JsonDelta> {
+  readonly delivered = new Future;
 
-export namespace DeltaMessage {
-  export function toJson(msg: DeltaMessage): any {
-    return { time: msg.time.toJson(), data: msg.data };
+  constructor(
+    readonly time: TreeClock,
+    readonly data: JsonDelta) {
   }
 
-  export function fromJson(json: any): DeltaMessage | undefined {
+  toJson(): object {
+    return { time: this.time.toJson(), data: this.data };
+  }
+
+  static fromJson(json: any): DeltaMessage | undefined {
     const time = TreeClock.fromJson(json.time);
     if (time && json.data)
-      return { time, data: json.data, toString };
+      return new DeltaMessage(time, json.data);
   }
 
-  export function toString(this: DeltaMessage) {
+  toString() {
     return `${JSON.stringify(this.data)}
     @ ${this.time}`;
   }
+
+  // v8(chrome/nodejs) console
+  [inspect] = () => this.toString();
 }
 
 export type UUID = string;
 
 export interface Meld {
+  /**
+   * Updates from this Meld. The stream is hot, continuous and multicast.
+   * Completion or an error means that this Meld has closed.
+   * @see online
+   */
   readonly updates: Observable<DeltaMessage>;
+  /**
+   * Online-ness of this Meld. To be 'online' means that it is able
+   * to collaborate with newly starting clones via snapshot & rev-up.
+   * A value of null indicates unknown (e.g. starting or disconnected).
+   * The stream is hot, continuous and multicast, but will also always emit
+   * the current state to new subscribers (Rx BehaviourSubject).
+   * Completion or an error means that this Meld has closed.
+   * @see updates
+   */
+  readonly online: Observable<boolean | null>;
+
   newClock(): Promise<TreeClock>;
   snapshot(): Promise<Snapshot>;
-  revupFrom(lastHash: Hash): Promise<Observable<DeltaMessage> | undefined>;
+  revupFrom(time: TreeClock): Promise<Observable<DeltaMessage> | undefined>;
 }
 
 export interface MeldDelta extends Object {
@@ -62,21 +88,21 @@ export interface Snapshot extends Message<TreeClock, Observable<Quad[]>> {
 }
 
 export interface MeldRemotes extends Meld {
-  connect(clone: MeldLocal): void;
-}
-
-export interface MeldJournalEntry extends DeltaMessage {
-  delivered(): void;
+  setLocal(clone: MeldLocal): void;
 }
 
 export interface MeldLocal extends Meld {
   readonly id: string;
-  readonly updates: Observable<MeldJournalEntry>;
+}
+
+export interface MeldUpdate extends DeleteInsert<Group> {
+  '@ticks': number;
 }
 
 export interface MeldStore {
   transact(request: Pattern): Observable<Subject>;
-  follow(after?: number): Observable<DeleteInsert<Group>>;
+  latest(): Promise<number>;
+  follow(after?: number): Observable<MeldUpdate>;
   close(err?: any): Promise<void>;
 }
 

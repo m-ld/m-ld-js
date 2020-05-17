@@ -2,11 +2,17 @@ import { SuSetDataset } from '../src/dataset/SuSetDataset';
 import { memStore } from './testClones';
 import { TreeClock } from '../src/clocks';
 import { Hash } from '../src/hash';
-import { first, toArray } from 'rxjs/operators';
+import { first, toArray, isEmpty } from 'rxjs/operators';
+import { uuid } from 'short-uuid';
+import { Subject } from '../src/m-ld/jsonrql';
+import { JsonDelta } from '../src/m-ld';
 
 const fred = {
   '@id': 'http://test.m-ld.org/fred',
   'http://test.m-ld.org/#name': 'Fred'
+}, wilma = {
+  '@id': 'http://test.m-ld.org/wilma',
+  'http://test.m-ld.org/#name': 'Wilma'
 }, barney = {
   '@id': 'http://test.m-ld.org/barney',
   'http://test.m-ld.org/#name': 'Barney'
@@ -35,22 +41,22 @@ describe('SU-Set Dataset', () => {
     });
 
     test('has no unsent operations', async () => {
-      await expect(ds.unsentLocalOperations().toPromise()).resolves.toBeUndefined();
-    });
-
-    test('does not answer operations since garbage', async () => {
-      await expect(ds.operationsSince(Hash.random())).resolves.toBeUndefined();
-    });
-
-    test('has no operations since genesis', async () => {
-      const ops = await ds.operationsSince(await ds.lastHash());
-      await expect(ops && ops.toPromise()).resolves.toBeUndefined();
+      await expect(ds.undeliveredLocalOperations().toPromise()).resolves.toBeUndefined();
     });
 
     describe('with an initial time', () => {
       let { left: localTime, right: remoteTime } = TreeClock.GENESIS.forked();
 
       beforeEach(async () => ds.saveClock(localTime = localTime.ticked(), true));
+
+      test('does not answer operations since before start', async () => {
+        await expect(ds.operationsSince(remoteTime)).resolves.toBeUndefined();
+      });
+
+      test('has no operations since first time', async () => {
+        const ops = await ds.operationsSince(localTime);
+        await expect(ops && ops.pipe(isEmpty()).toPromise()).resolves.toBe(true);
+      });
 
       test('answers the time', async () => {
         const savedTime = await ds.loadClock();
@@ -91,7 +97,7 @@ describe('SU-Set Dataset', () => {
           tid: 'B6FVbHGtFxXhdLKEVmkcd',
           insert: '{"@graph":{"@id":"http://test.m-ld.org/fred","http://test.m-ld.org/#name":"Fred"}}',
           delete: '{"@graph":{}}'
-        }, remoteTime = remoteTime.ticked(), localTime = localTime.ticked());
+        }, remoteTime = remoteTime.ticked(), () => localTime = localTime.update(remoteTime).ticked());
 
         await expect(ds.find({ '@id': 'http://test.m-ld.org/fred' }))
           .resolves.toEqual(new Set(['http://test.m-ld.org/fred']));
@@ -123,7 +129,7 @@ describe('SU-Set Dataset', () => {
         });
 
         test('has an unsent operation', async () => {
-          await expect(ds.unsentLocalOperations().toPromise()).resolves.toBeDefined();
+          await expect(ds.undeliveredLocalOperations().toPromise()).resolves.toBeDefined();
         });
 
         test('answers a snapshot', async () => {
@@ -166,7 +172,7 @@ describe('SU-Set Dataset', () => {
             delete: `{"@graph":{"@id":"b4vMkTurWFf6qjBuhkRvjX","@type":"rdf:Statement",
               "tid":"${firstTid}","o":"Fred","p":"http://test.m-ld.org/#name",
               "s":"http://test.m-ld.org/fred"}}`
-          }, remoteTime = remoteTime.ticked(), localTime = localTime.ticked());
+          }, remoteTime = remoteTime.ticked(), () => localTime = localTime.update(remoteTime).ticked());
 
           await expect(ds.find({ '@id': 'http://test.m-ld.org/fred' }))
             .resolves.toEqual(new Set());
@@ -182,40 +188,94 @@ describe('SU-Set Dataset', () => {
           expect(msg.time.equals(localTime)).toBe(true);
 
           await expect(ds.describe1('http://test.m-ld.org/barney')).resolves.toEqual(barney);
-        })
+        });
 
-        test('answers local operation since first', async () => {
-          const lastHash = await ds.lastHash();
+        test('answers local op since first', async () => {
+          // Remote knows about first entry
+          remoteTime = remoteTime.update(localTime);
+          // Create a new journal entry that the remote doesn't know
           await ds.transact(async () => [
             localTime = localTime.ticked(),
             await ds.insert(barney)
           ]);
-          const ops = await ds.operationsSince(lastHash);
-          expect(ops).not.toBeNull();
-          if (ops == null) return; // Compiler avoidance
-          const opArray = await ops.pipe(toArray()).toPromise();
+          const ops = await ds.operationsSince(remoteTime);
+          expect(ops).not.toBeUndefined();
+          const opArray = ops ? await ops.pipe(toArray()).toPromise() : [];
           expect(opArray.length).toBe(1);
           expect(localTime.equals(opArray[0].time)).toBe(true);
-        })
+        });
 
-        test('answers remote operation since first', async () => {
-          const lastHash = await ds.lastHash();
+        test('answers remote op since first', async () => {
+          // Remote knows about first entry
+          remoteTime = remoteTime.update(localTime);
+          // Create a remote entry from a third clone that the remote doesn't know
+          const forkLocal = localTime.forked();
+          localTime = forkLocal.left;
+          const thirdTime = forkLocal.right.ticked();
           await ds.apply({
             tid: 'uSX1mPGhuWAEH56RLwYmvG',
             insert: '{"@graph":{}}',
             delete: `{"@graph":{"@id":"b4vMkTurWFf6qjBuhkRvjX","@type":"rdf:Statement",
               "tid":"${firstTid}","o":"Fred","p":"http://test.m-ld.org/#name",
               "s":"http://test.m-ld.org/fred"}}`
-          }, remoteTime = remoteTime.ticked(), localTime = localTime.ticked());
+          }, thirdTime, () => localTime = localTime.update(thirdTime).ticked());
 
-          const ops = await ds.operationsSince(lastHash);
-          expect(ops).not.toBeNull();
-          if (ops == null) return; // Compiler avoidance
-          const opArray = await ops.pipe(toArray()).toPromise();
+          const ops = await ds.operationsSince(remoteTime);
+          expect(ops).not.toBeUndefined();
+          const opArray = ops ? await ops.pipe(toArray()).toPromise() : [];
           expect(opArray.length).toBe(1);
-          expect(remoteTime.equals(opArray[0].time)).toBe(true);
-        })
+          expect(thirdTime.equals(opArray[0].time)).toBe(true);
+          expect(opArray[0].data.tid).toBe('uSX1mPGhuWAEH56RLwYmvG');
+        });
+
+        test('answers missed local op', async () => {
+          remoteTime = remoteTime.update(localTime);
+          // New entry that the remote hasn't seen
+          const localOp = await ds.transact(async () => [
+            localTime = localTime.ticked(),
+            await ds.insert(barney)
+          ]);
+          // Don't update remote time from local
+          await ds.apply(remoteInsert(wilma),
+            remoteTime = remoteTime.ticked(),
+            () => localTime = localTime.update(remoteTime).ticked());
+
+          const ops = await ds.operationsSince(remoteTime);
+          expect(ops).not.toBeUndefined();
+          const opArray = ops ? await ops.pipe(toArray()).toPromise() : [];
+          // We expect only the missed local op
+          expect(opArray.length).toBe(1);
+          expect(opArray[0].data.tid).toBe(localOp.data.tid);
+        });
+
+        test('answers missed third party op', async () => {
+          remoteTime = remoteTime.update(localTime);
+          let { left, right } = remoteTime.forked();
+          remoteTime = left;
+          let { left: thirdTime, right: fourthTime } = right.forked();
+          // Remote doesn't see third party op
+          const thirdOp = remoteInsert(wilma);
+          await ds.apply(thirdOp,
+            thirdTime = thirdTime.ticked(),
+            () => localTime = localTime.update(thirdTime).ticked());
+          // Remote does see fourth party op
+          await ds.apply(remoteInsert(barney),
+            fourthTime = fourthTime.ticked(),
+            () => localTime = localTime.update(fourthTime).ticked());
+          remoteTime = remoteTime.update(fourthTime).ticked();
+
+          const ops = await ds.operationsSince(remoteTime);
+          expect(ops).not.toBeUndefined();
+          const opArray = ops ? await ops.pipe(toArray()).toPromise() : [];
+          // We expect only the missed remote op
+          expect(opArray.length).toBe(1);
+          expect(opArray[0].data.tid).toBe(thirdOp.tid);
+        });
       });
     });
   });
 });
+
+function remoteInsert(subject: Subject): JsonDelta {
+  return { tid: uuid(), insert: JSON.stringify({ '@graph': subject }), delete: '{"@graph":{}}' };
+}

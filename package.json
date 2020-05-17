@@ -1,6 +1,6 @@
 {
   "name": "@gsvarovsky/m-ld",
-  "version": "0.0.6",
+  "version": "0.1.0",
   "description": "m-ld native Javascript",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -8,11 +8,10 @@
     "link-local-m-ld-spec": "sudo npm link ../m-ld-spec",
     "clean": "rm -rf dist",
     "build-quick": "tsc",
-    "build": "npm run clean && npm run test && tsc",
+    "build": "npm run clean && jest --silent && tsc",
     "dev": "jest --watch --silent",
-    "test": "jest --silent",
     "compliance": "node compliance/test.js",
-    "publish-patch": "npm run build && npm version patch -m \"Patch version\" && git push && npm publish"
+    "publish-patch": "npm run build && npm version patch && git push && npm publish"
   },
   "repository": {
     "type": "git",
@@ -25,7 +24,7 @@
   },
   "homepage": "https://github.com/gsvarovsky/m-ld-js#readme",
   "devDependencies": {
-    "@gsvarovsky/m-ld-spec": "^0.1.3",
+    "@gsvarovsky/m-ld-spec": "^0.2.0",
     "@types/jest": "^24.9.1",
     "@types/memdown": "^3.0.0",
     "aedes": "^0.41.0",

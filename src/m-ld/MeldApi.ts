@@ -1,5 +1,5 @@
-import { MeldStore } from '.';
-import { Context, Subject, Describe, Pattern, Update, Group, DeleteInsert, JrqlValue, isValueObject, Reference } from './jsonrql';
+import { MeldStore, MeldUpdate } from '.';
+import { Context, Subject, Describe, Pattern, Update, Group, JrqlValue, isValueObject, Reference, DeleteInsert } from './jsonrql';
 import { Observable } from 'rxjs';
 import { map, flatMap } from 'rxjs/operators';
 import { flatten } from 'jsonld';
@@ -31,6 +31,7 @@ export class MeldApi implements MeldStore {
         { '@id': path },
         // BUG: This is wrong, multiple patterns INTERSECT in BGP (not UNION)
         // https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#BGPsparql
+        // Requires UNION, see m-ld-core/src/main/java/org/m_ld/MeldApi.java
         { '?': { '@id': path } }
       ]
     } as Update);
@@ -49,8 +50,13 @@ export class MeldApi implements MeldStore {
     }));
   }
 
-  follow(after?: number): Observable<DeleteInsert<Group>> {
+  latest(): Promise<number> {
+    return this.store.latest();
+  }
+
+  follow(after?: number): Observable<MeldUpdate> {
     return this.store.follow(after).pipe(flatMap(async update => ({
+      '@ticks': update['@ticks'],
       '@delete': this.stripImplicitContext(await this.regroup(update['@delete']), this.context),
       '@insert': this.stripImplicitContext(await this.regroup(update['@insert']), this.context)
     })));
