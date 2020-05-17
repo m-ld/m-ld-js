@@ -11,7 +11,7 @@
     "build": "npm run clean && jest --silent && tsc",
     "dev": "jest --watch --silent",
     "compliance": "node compliance/test.js",
-    "publish-patch": "npm run build && npm version patch -m \"Patch version\" && git push && npm publish"
+    "publish-patch": "npm run build && npm version patch && git push && npm publish"
   },
   "repository": {
     "type": "git",
@@ -24,7 +24,7 @@
   },
   "homepage": "https://github.com/gsvarovsky/m-ld-js#readme",
   "devDependencies": {
-    "@gsvarovsky/m-ld-spec": "^0.1.3",
+    "@gsvarovsky/m-ld-spec": "^0.2.0",
     "@types/jest": "^24.9.1",
     "@types/memdown": "^3.0.0",
     "aedes": "^0.41.0",
