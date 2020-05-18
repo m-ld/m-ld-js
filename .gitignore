@@ -46,4 +46,4 @@ dist/
 .DS_Store
 
 # VSCode config
-.vscode
+.vscode/
