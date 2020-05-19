@@ -6,7 +6,7 @@ import { SuSetDataset } from './SuSetDataset';
 import { TreeClockMessageService } from '../messages';
 import { Dataset } from '.';
 import { publishReplay, refCount, filter, ignoreElements, takeUntil, tap, isEmpty, finalize, flatMap, switchAll, toArray, catchError, first } from 'rxjs/operators';
-import { delayUntil, Future, tapComplete, tapCount, ReentrantLock, tapLast } from '../util';
+import { delayUntil, Future, tapComplete, tapCount, SharableLock, tapLast } from '../util';
 import { LogLevelDesc, levels } from 'loglevel';
 import { MeldError, HAS_UNSENT } from '../m-ld/MeldError';
 import { AbstractMeld, isOnline, comesOnline } from '../AbstractMeld';
@@ -21,16 +21,18 @@ export class DatasetClone extends AbstractMeld implements MeldClone {
   private messageService: TreeClockMessageService;
   private readonly orderingBuffer: DeltaMessage[] = [];
   private readonly remoteUpdates: Source<Observable<DeltaMessage>> = new Source;
-  private readonly onlineLock = new ReentrantLock;
+  private readonly onlineLock = new SharableLock;
   private newClone: boolean = false;
   private readonly latestTicks = new BehaviorSubject<number>(NaN);
   private readonly revvingUp = new BehaviorSubject<boolean>(false);
 
-  constructor(dataset: Dataset,
+  constructor(
+    id: string,
+    dataset: Dataset,
     private readonly remotes: MeldRemotes,
     logLevel: LogLevelDesc = 'info') {
-    super(dataset.id, logLevel);
-    this.dataset = new SuSetDataset(dataset, logLevel);
+    super(id, logLevel);
+    this.dataset = new SuSetDataset(id, dataset, logLevel);
     this.dataset.updates.subscribe(next => this.latestTicks.next(next['@ticks']));
     this.remotes.setLocal(this);
   }

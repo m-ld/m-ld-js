@@ -9,7 +9,7 @@ import { AsyncMqttClient, IPublishPacket } from 'async-mqtt';
 import { EventEmitter } from 'events';
 
 export async function genesisClone(remotes?: MeldRemotes) {
-  const clone = new DatasetClone(memStore(), remotes ?? mockRemotes());
+  const clone = new DatasetClone('test', memStore(), remotes ?? mockRemotes());
   await clone.initialise();
   return clone;
 }
@@ -27,7 +27,7 @@ export function mockRemotes(
 }
 
 export function memStore(): Dataset {
-  return new QuadStoreDataset(new MemDown, { id: 'test' });
+  return new QuadStoreDataset(new MemDown);
 }
 
 export function mockLocal(

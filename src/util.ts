@@ -138,7 +138,7 @@ export function delayUntil<T>(notifier: Observable<any>): OperatorFunction<T, T>
     );
 }
 
-export class ReentrantLock extends AsyncLock {
+export class SharableLock extends AsyncLock {
   private readonly refs: { [key: string]: { count: number, unref: Future } } = {};
 
   enter(key: string): Promise<void> {

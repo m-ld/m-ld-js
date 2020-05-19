@@ -13,7 +13,8 @@ import { toArray, bufferCount, flatMap, reduce, observeOn } from 'rxjs/operators
 import { flatten, Future, tapComplete, getIdLogger } from '../util';
 import { generate as uuid } from 'short-uuid';
 import { LogLevelDesc, Logger } from 'loglevel';
-import { notClosed } from '../m-ld/MeldError';
+import { notClosed, MeldError, DATA_LOCKED } from '../m-ld/MeldError';
+import { LocalLock } from '../local';
 
 const TIDS_CONTEXT: Context = {
   qs: 'http://qs.m-ld.org/',
@@ -69,14 +70,15 @@ function safeTime(je: Journal | JournalEntry) {
  */
 export class SuSetDataset extends JrqlGraph {
   private static notClosed = notClosed((d: SuSetDataset) => d.dataset.closed);
-  
+
   private readonly controlGraph: JrqlGraph;
   private readonly tidsGraph: JrqlGraph;
   private readonly updateSource: Source<MeldUpdate> = new Source;
   readonly updates: Observable<MeldUpdate>
+  private readonly datasetLock: LocalLock;
   private readonly log: Logger;
 
-  constructor(
+  constructor(id: string,
     private readonly dataset: Dataset, logLevel: LogLevelDesc = 'info') {
     super(dataset.graph());
     // Named graph for control quads e.g. Journal
@@ -86,15 +88,19 @@ export class SuSetDataset extends JrqlGraph {
       dataset.graph(namedNode(CONTROL_CONTEXT.qs + 'tids')), TIDS_CONTEXT);
     // Update notifications are strictly ordered but don't hold up transactions
     this.updates = this.updateSource.pipe(observeOn(asapScheduler));
-    this.log = getIdLogger(this.constructor, this.id, logLevel);
-  }
-
-  get id(): string {
-    return this.dataset.id;
+    this.datasetLock = new LocalLock(id, dataset.location);
+    this.log = getIdLogger(this.constructor, id, logLevel);
   }
 
   @SuSetDataset.notClosed.async
   async initialise() {
+    // Check for exclusive access to the dataset location
+    try {
+      await this.datasetLock.acquire();
+    } catch (err) {
+      throw new MeldError(DATA_LOCKED, err);
+    }
+    // Create the Journal if not exists
     if (!await this.controlGraph.describe1('qs:journal'))
       return this.dataset.transact(() => this.reset(Hash.random()));
   }
@@ -108,6 +114,7 @@ export class SuSetDataset extends JrqlGraph {
       this.log.info('Shutting down normally');
       this.updateSource.complete();
     }
+    this.datasetLock.release();
     return this.dataset.close();
   }
 

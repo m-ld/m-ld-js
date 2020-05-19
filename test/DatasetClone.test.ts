@@ -1,10 +1,9 @@
 import { DatasetClone } from '../src/dataset/DatasetClone';
 import { Subject, Describe } from '../src/m-ld/jsonrql';
 import { genesisClone, mockRemotes } from './testClones';
-import { NEVER, of, Subject as Source } from 'rxjs';
+import { NEVER, of } from 'rxjs';
 import { isOnline, comesOnline } from '../src/AbstractMeld';
-import { MeldDelta } from '../src/m-ld';
-import { toArray, take, skip, timeout, first } from 'rxjs/operators';
+import {  first } from 'rxjs/operators';
 import { TreeClock } from '../src/clocks';
 
 describe('Dataset clone', () => {

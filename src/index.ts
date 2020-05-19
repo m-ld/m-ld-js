@@ -28,8 +28,8 @@ export async function clone(ldb: AbstractLevelDOWN, config: MeldConfig): Promise
 
 async function initLocal(ldb: AbstractLevelDOWN,
   config: Resource<MeldConfig>, remotes: MeldRemotes): Promise<MeldStore> {
-  const dataset = new QuadStoreDataset(ldb, { ...config.ldbOpts, id: config['@id'] });
-  const clone = new DatasetClone(dataset, remotes, config.logLevel);
+  const dataset = new QuadStoreDataset(ldb, config.ldbOpts);
+  const clone = new DatasetClone(config['@id'], dataset, remotes, config.logLevel);
   await clone.initialise();
   return clone;
 }

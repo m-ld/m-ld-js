@@ -3,7 +3,8 @@ import { defaultGraph } from '@rdfjs/data-model';
 import { RdfStore, MatchTerms } from 'quadstore';
 import AsyncLock = require('async-lock');
 import { AbstractLevelDOWN, AbstractOpenOptions } from 'abstract-leveldown';
-import { Observable, throwError } from 'rxjs';
+import { Observable } from 'rxjs';
+import { generate as uuid } from 'short-uuid';
 
 /**
  * Atomically-applied patch to a quad-store.
@@ -38,7 +39,8 @@ export type GraphName = DefaultGraph | NamedNode;
  * Quad in the patch will have a graph property.
  */
 export interface Dataset {
-  readonly id: string;
+  readonly location: string;
+
   graph(name?: GraphName): Graph;
 
   /**
@@ -61,23 +63,16 @@ export interface Graph {
   match(subject?: Quad_Subject, predicate?: Quad_Predicate, object?: Quad_Object): Observable<Quad>;
 }
 
-export interface DatasetOptions extends AbstractOpenOptions {
-  id: string;
-}
-
 export class QuadStoreDataset implements Dataset {
-  readonly id: string;
+  readonly location: string;
   private readonly store: RdfStore;
   private readonly lock = new AsyncLock;
   private isClosed: boolean = false;
 
-  constructor(private readonly abstractLevelDown: AbstractLevelDOWN, opts: DatasetOptions) {
-    this.id = opts.id;
-    this.store = new RdfStore(abstractLevelDown, opts);
-  }
-
-  get closed(): boolean {
-    return this.isClosed;
+  constructor(private readonly leveldown: AbstractLevelDOWN, opts?: AbstractOpenOptions) {
+    this.store = new RdfStore(leveldown, opts);
+    // Internal of level-js and leveldown
+    this.location = (<any>leveldown).location ?? uuid();
   }
 
   graph(name?: GraphName): Graph {
@@ -85,7 +80,7 @@ export class QuadStoreDataset implements Dataset {
   }
 
   transact<T>(prepare: () => Promise<Patch | [Patch | undefined, T] | undefined | void>): Promise<T | void> {
-    return this.lock.acquire(this.id, async () => {
+    return this.lock.acquire('txn', async () => {
       const prep = await prepare();
       const [patch, rtn] = Array.isArray(prep) ? prep : [prep, undefined];
       if (patch)
@@ -96,10 +91,14 @@ export class QuadStoreDataset implements Dataset {
 
   close(): Promise<void> {
     // Make efforts to ensure no transactions are running
-    return this.lock.acquire(this.id, done => this.abstractLevelDown.close(err => {
+    return this.lock.acquire('txn', done => this.leveldown.close(err => {
       this.isClosed = true;
       return done(err);
     }));
+  }
+
+  get closed(): boolean {
+    return this.isClosed;
   }
 }
 
