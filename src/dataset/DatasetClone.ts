@@ -49,6 +49,7 @@ export class DatasetClone extends AbstractMeld implements MeldClone {
    * 
    * @return resolves when the clone can accept transactions
    */
+  @AbstractMeld.checkNotClosed.async
   async initialise(): Promise<void> {
     await this.dataset.initialise();
     // Establish a clock for this clone
@@ -109,9 +110,8 @@ export class DatasetClone extends AbstractMeld implements MeldClone {
       // At this point we are uncertain what the 'latest' delta will be
       this.revvingUp.next(true);
       await this.flushUndeliveredOperations();
-      const silo = await this.isOnline();
-      // If top-level is Id, never been forked, no rev-up to do
-      if (silo || this.localTime.isId) {
+      // If silo (already online), or top-level is Id (never been forked), no rev-up to do
+      if (this.isOnline() || this.localTime.isId) {
         this.remoteUpdates.next(this.remotes.updates);
         this.revvingUp.next(false);
       } else {
@@ -209,6 +209,7 @@ export class DatasetClone extends AbstractMeld implements MeldClone {
     return delivered; // We can go online as soon as the snapshot is delivered
   }
 
+  @AbstractMeld.checkNotClosed.async
   async newClock(): Promise<TreeClock> {
     const newClock = this.messageService.fork();
     // Forking is a mutation operation, need to save the new clock state
@@ -216,6 +217,7 @@ export class DatasetClone extends AbstractMeld implements MeldClone {
     return newClock;
   }
 
+  @AbstractMeld.checkOnline.async
   async snapshot(): Promise<Snapshot> {
     return this.onlineLock.acquire(this.id, async () => {
       this.log.info('Compiling snapshot');
@@ -230,6 +232,7 @@ export class DatasetClone extends AbstractMeld implements MeldClone {
     });
   }
 
+  @AbstractMeld.checkOnline.async
   async revupFrom(time: TreeClock): Promise<Observable<DeltaMessage> | undefined> {
     return this.onlineLock.acquire(this.id, async () => {
       const sentOperations = new Future;
@@ -262,6 +265,7 @@ export class DatasetClone extends AbstractMeld implements MeldClone {
     return this.messageService.peek();
   }
 
+  @AbstractMeld.checkNotClosed.rx
   transact(request: Pattern): Observable<Subject> {
     if (isRead(request)) {
       // For a read, every subscriber re-runs the query
@@ -293,6 +297,7 @@ export class DatasetClone extends AbstractMeld implements MeldClone {
     return this.dataset.updates;
   }
 
+  @AbstractMeld.checkNotClosed.async
   close(err?: any) {
     if (err)
       this.log.warn('Shutting down due to', err);

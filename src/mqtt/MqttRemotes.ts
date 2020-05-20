@@ -117,7 +117,7 @@ export class MqttRemotes extends AbstractMeld implements MeldRemotes {
         next: async msg => {
           // If we are not online, we just ignore updates.
           // They will be replayed from the clone's journal on re-connection.
-          if (await this.isOnline()) {
+          if (this.isOnline()) {
             try {
               // Delta received from the local clone. Relay to the domain
               await this.mqtt.publish(

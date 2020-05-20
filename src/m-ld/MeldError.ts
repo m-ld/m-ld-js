@@ -1,5 +1,3 @@
-import { throwError } from 'rxjs';
-
 class MeldErrorStatus {
   constructor(readonly code: number, readonly message: string) { }
 
@@ -12,29 +10,11 @@ export const NONE_VISIBLE = new MeldErrorStatus(1, 'No visible clones');
 export const BAD_UPDATE = new MeldErrorStatus(2, 'Bad Update');
 export const HAS_UNSENT = new MeldErrorStatus(3, 'Unsent updates');
 export const IS_CLOSED = new MeldErrorStatus(4, 'Clone has closed');
+export const IS_OFFLINE = new MeldErrorStatus(4, 'Meld is offline');
 export const DATA_LOCKED = new MeldErrorStatus(5, 'Clone data is locked');
 
 export class MeldError extends Error {
   constructor(readonly status: MeldErrorStatus, detail?: any) {
-    super(`${status.message}: ${detail}`);
-  }
-}
-
-export function notClosed<T>(isClosed: (t: T) => boolean) {
-  return {
-    async: checkNotClosed(isClosed, Promise.reject),
-    rx: checkNotClosed(isClosed, throwError)
-  };
-}
-
-export function checkNotClosed<T>(isClosed: (t: T) => boolean, reject: (err: any) => any) {
-  return function (_t: any, _p: string, descriptor: PropertyDescriptor) {
-    const method = descriptor.value;
-    descriptor.value = function (this: T, ...args: any[]) {
-      if (isClosed(this))
-        return reject(new MeldError(IS_CLOSED));
-      else
-        return method.apply(this, args);
-    }
+    super(status.message + (detail != null ? `: ${detail}` : ''));
   }
 }

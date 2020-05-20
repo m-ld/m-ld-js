@@ -5,6 +5,7 @@ import AsyncLock = require('async-lock');
 import { AbstractLevelDOWN, AbstractOpenOptions } from 'abstract-leveldown';
 import { Observable } from 'rxjs';
 import { generate as uuid } from 'short-uuid';
+import { check } from '../util';
 
 /**
  * Atomically-applied patch to a quad-store.
@@ -54,6 +55,8 @@ export interface Dataset {
   readonly closed: boolean;
 }
 
+const notClosed = check((d: Dataset) => !d.closed, () => new Error('Dataset closed'));
+
 /**
  * Read-only utility interface for reading Quads from a Dataset.
  */
@@ -79,6 +82,7 @@ export class QuadStoreDataset implements Dataset {
     return new QuadStoreGraph(this.store, name || defaultGraph());
   }
 
+  @notClosed.async
   transact<T>(prepare: () => Promise<Patch | [Patch | undefined, T] | undefined | void>): Promise<T | void> {
     return this.lock.acquire('txn', async () => {
       const prep = await prepare();
@@ -89,6 +93,7 @@ export class QuadStoreDataset implements Dataset {
     });
   }
 
+  @notClosed.async
   close(): Promise<void> {
     // Make efforts to ensure no transactions are running
     return this.lock.acquire('txn', done => this.leveldown.close(err => {

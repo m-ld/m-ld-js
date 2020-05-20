@@ -3,14 +3,21 @@ import { TreeClock } from './clocks';
 import { Observable, Subject as Source, BehaviorSubject, asapScheduler } from 'rxjs';
 import { observeOn, tap, distinctUntilChanged, first, skip } from 'rxjs/operators';
 import { LogLevelDesc, Logger } from 'loglevel';
-import { getIdLogger } from './util';
+import { getIdLogger, check } from './util';
+import { MeldError, IS_OFFLINE, IS_CLOSED } from './m-ld/MeldError';
 
 export abstract class AbstractMeld implements Meld {
+  protected static checkOnline =
+    check((m: AbstractMeld) => m.isOnline() === true, () => new MeldError(IS_OFFLINE));
+  protected static checkNotClosed =
+    check((m: AbstractMeld) => !m.closed, () => new MeldError(IS_CLOSED));
+
   readonly updates: Observable<DeltaMessage>;
   readonly online: Observable<boolean | null>;
 
   private readonly updateSource: Source<DeltaMessage> = new Source;
-  private readonly onlineSource: Source<boolean | null> = new BehaviorSubject(null);
+  private readonly onlineSource: BehaviorSubject<boolean | null> = new BehaviorSubject(null);
+  private closed = false;
 
   protected readonly log: Logger;
 
@@ -29,7 +36,7 @@ export abstract class AbstractMeld implements Meld {
 
   protected nextUpdate = (update: DeltaMessage) => this.updateSource.next(update);
   protected setOnline = (online: boolean | null) => this.onlineSource.next(online);
-  protected isOnline = (): Promise<boolean | null> => isOnline(this);
+  protected isOnline = (): boolean | null => this.onlineSource.value;
   protected warnError = (err: any) => this.log.warn(err);
 
   abstract newClock(): Promise<TreeClock>;
@@ -44,6 +51,7 @@ export abstract class AbstractMeld implements Meld {
       this.updateSource.complete();
       this.onlineSource.complete();
     }
+    this.closed = true;
   }
 }
 

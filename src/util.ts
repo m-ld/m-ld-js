@@ -1,6 +1,6 @@
 import { Quad } from 'rdf-js';
 import { fromRDF } from 'jsonld';
-import { concat, Observable, OperatorFunction, Subscription } from "rxjs";
+import { concat, Observable, OperatorFunction, Subscription, throwError } from "rxjs";
 import { publish, tap } from "rxjs/operators";
 import AsyncLock = require('async-lock');
 import { LogLevelDesc, getLogger, getLoggers } from 'loglevel';
@@ -179,4 +179,27 @@ export function getIdLogger(ctor: Function, id: string, logLevel: LogLevelDesc =
   }
   log.setLevel(logLevel);
   return log;
+}
+
+type AsyncMethod<T> = (this: T, ...args: any[]) => Promise<any>;
+type RxMethod<T> = (this: T, ...args: any[]) => Observable<any>;
+
+export function check<T>(assertion: (t: T) => boolean, otherwise: () => Error) {
+  return {
+    async: checkWith<T, AsyncMethod<T>>(assertion, otherwise, Promise.reject.bind(Promise)),
+    rx: checkWith<T, RxMethod<T>>(assertion, otherwise, throwError)
+  };
+}
+
+export function checkWith<T, M extends (this: T, ...args: any[]) => any>(
+  assertion: (t: T) => boolean, otherwise: () => Error, reject: (err: any) => any) {
+  return function (_t: any, _p: string, descriptor: TypedPropertyDescriptor<M>) {
+    const method = <M>descriptor.value;
+    descriptor.value = <M>function (this: T, ...args: any[]) {
+      if (assertion(this))
+        return method.apply(this, args);
+      else
+        return reject(otherwise());
+    };
+  }
 }
