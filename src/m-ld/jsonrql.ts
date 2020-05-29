@@ -37,7 +37,7 @@ export function isValueObject(value: JrqlValue): value is ValueObject {
 
 export type Reference = { '@id': Iri; };
 
-export type Resource<T> = Reference & Subject & {
+export type Resource<T> = Subject & {
   [P in keyof T]: T extends '@id' ? Iri : T[P] extends Array<unknown> ? T[P] : T[P] | T[P][];
 };
 
