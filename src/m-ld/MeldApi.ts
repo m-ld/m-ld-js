@@ -107,9 +107,9 @@ export namespace MeldApi {
   }
 
   function updateProperty(value: any, insertVal: any, deleteVal: any): any {
-    const values = toArray(value), deletes = toArray(deleteVal),
-      inserts = toArray(insertVal).filter(v => !includesValue(values, v));
-    let rtn = ([] as any[]).concat(values, inserts).filter(v => !includesValue(deletes, v));
+    let rtn = toArray(value)
+      .filter(v => !includesValue(toArray(deleteVal), v))
+      .concat(toArray(insertVal));
     return rtn.length == 1 && !Array.isArray(value) ? rtn[0] : rtn;
   }
 

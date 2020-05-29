@@ -1,4 +1,4 @@
-import { Future, toArray } from '../src/util';
+import { Future, toArray, shortId } from '../src/util';
 
 test('Future can be resolved', async () => {
   const f = new Future<string>();
@@ -26,4 +26,29 @@ test('graphy to array', () => {
   expect(toArray([0, 1])).toEqual([0, 1]);
   expect(toArray([0, null])).toEqual([0]);
   expect(toArray([0, undefined])).toEqual([0]);
+});
+
+test('short id is valid XML local name', () => {
+  for (let i = 0; i < 10; i++)
+    expect(shortId()).toMatch(/[a-zA-Z_]([a-zA-Z0-9_])*/g);
+});
+
+test('short id for a string is valid XML local name', () => {
+  expect(shortId('_*.')).toMatch(/[a-zA-Z_]([a-zA-Z0-9_])*/g);
+});
+
+test('short Id is always different', () => {
+  expect(shortId()).not.toEqual(shortId());
+});
+
+test('short Id is the right length', () => {
+  expect(shortId(10).length).toBe(10);
+});
+
+test('short Id for a string is always the same', () => {
+  expect(shortId('foobar')).toEqual(shortId('foobar'));
+});
+
+test('short Id for strings are different', () => {
+  expect(shortId('foobar')).not.toEqual(shortId('snafu'));
 });

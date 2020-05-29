@@ -68,10 +68,20 @@ export class Future<T = void> implements PromiseLike<T> {
   }
 }
 
-export function shortId(len: number = 8) {
-  var d = new Date().getTime();
+export function shortId(based: number | string = 8) {
+  let genChar: () => number, len: number;
+  if (typeof based == 'number') {
+    let d = new Date().getTime();
+    genChar = () => (d + Math.random() * 16);
+    len = based;
+  } else {
+    let i = 0;
+    genChar = () => based.charCodeAt(i++);
+    len = based.length;
+  }
+
   return ('a' + 'x'.repeat(len - 1)).replace(/[ax]/g, function (c) {
-    return ((d + Math.random() * 16) % (c == 'a' ? 6 : 16) + (c == 'a' ? 10 : 0) | 0).toString(16);
+    return (genChar() % (c == 'a' ? 6 : 16) + (c == 'a' ? 10 : 0) | 0).toString(16);
   });
 }
 
