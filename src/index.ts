@@ -3,7 +3,7 @@ import { DatasetClone } from './dataset/DatasetClone';
 import { generate } from 'short-uuid';
 import { AbstractLevelDOWN, AbstractOpenOptions } from 'abstract-leveldown';
 import { MeldApi } from './m-ld/MeldApi';
-import { Context, Resource } from './m-ld/jsonrql';
+import { Context, Reference } from './m-ld/jsonrql';
 import { MqttRemotes, MeldMqttOpts } from './mqtt/MqttRemotes';
 import { MeldRemotes, MeldStore } from './m-ld';
 import { LogLevelDesc } from 'loglevel';
@@ -27,14 +27,14 @@ export async function clone(ldb: AbstractLevelDOWN, config: MeldConfig): Promise
 }
 
 async function initLocal(ldb: AbstractLevelDOWN,
-  config: Resource<MeldConfig>, remotes: MeldRemotes): Promise<MeldStore> {
+  config: Reference & MeldConfig, remotes: MeldRemotes): Promise<MeldStore> {
   const dataset = new QuadStoreDataset(ldb, config.ldbOpts);
   const clone = new DatasetClone(config['@id'], dataset, remotes, config.logLevel);
   await clone.initialise();
   return clone;
 }
 
-function initRemotes(config: Resource<MeldConfig>): MeldRemotes {
+function initRemotes(config: Reference & MeldConfig): MeldRemotes {
   return new MqttRemotes(config['@domain'], config['@id'], {
     ...config.mqttOpts, logLevel: config.mqttOpts.logLevel ?? config.logLevel
   });

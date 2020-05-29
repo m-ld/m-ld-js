@@ -148,6 +148,12 @@ describe('Node utility', () => {
     expect(box).toEqual({ '@id': 'foo', size: [10, 20], label: 'My box' });
   });
 
+  test('does not insert a duplicate value', () => {
+    const box: MeldApi.Node<Box> = { '@id': 'foo', size: 10, label: 'My box' };
+    MeldApi.update(box, { '@insert': { '@id': 'foo', size: 10 }, '@delete': {} });
+    expect(box).toEqual({ '@id': 'foo', size: 10, label: 'My box' });
+  });
+
   test('removes a deleted value', () => {
     const box: MeldApi.Node<Box> = { '@id': 'foo', size: 10, label: 'My box' };
     MeldApi.update(box, { '@delete': { '@id': 'foo', size: 10 }, '@insert': {} });

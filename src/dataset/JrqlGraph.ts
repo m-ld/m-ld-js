@@ -216,7 +216,7 @@ function hideVars(values: JrqlValue | JrqlValue[], top: boolean = true) {
       });
       // References at top level => implicit wildcard p-o
       if (top && isReference(subject))
-        subject[genVar()] = { '@id': genVar() };
+        (<any>subject)[genVar()] = { '@id': genVar() };
       // Anonymous subjects => wildcard subject
       if (!subject['@id'])
         subject['@id'] = genVar();

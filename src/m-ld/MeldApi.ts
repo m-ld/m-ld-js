@@ -1,9 +1,8 @@
 import { MeldStore, MeldUpdate } from '.';
-import { Context, Subject, Describe, Pattern, Update, Group, JrqlValue, isValueObject, Reference, DeleteInsert } from './jsonrql';
+import { Context, Subject, Describe, Pattern, Update, Group, JrqlValue, isValueObject, Reference, DeleteInsert, Resource } from './jsonrql';
 import { Observable } from 'rxjs';
 import { map, flatMap } from 'rxjs/operators';
 import { flatten } from 'jsonld';
-import { Iri } from 'jsonld/jsonld-spec';
 import { toArray } from '../util';
 
 export class MeldApi implements MeldStore {
@@ -77,9 +76,10 @@ export class MeldApi implements MeldStore {
 }
 
 export namespace MeldApi {
-  export type Node<T> = Subject & {
-    [P in keyof T]: T extends '@id' ? Iri : T[P] extends Array<unknown> ? T[P] : T[P] | T[P][];
-  }
+  /**
+   * @deprecated use Resource
+   */
+  export type Node<T> = Resource<T>;
 
   export function asSubjectUpdates(update: DeleteInsert<Group>): SubjectUpdates {
     return bySubject(update, '@insert', bySubject(update, '@delete', {}));
@@ -93,23 +93,22 @@ export namespace MeldApi {
       ({ ...byId, [subject['@id'] ?? '*']: { ...byId[subject['@id'] ?? '*'], [key]: subject } }), bySubject);
   }
 
-  export function update<T>(msg: Node<T>, update: DeleteInsert<Subject>): void {
+  export function update<T>(msg: Resource<T>, update: DeleteInsert<Subject>): void {
     // Allow for undefined/null ids
     const inserts = update['@insert'] && msg['@id'] == update['@insert']['@id'] ? update['@insert'] : {};
     const deletes = update['@delete'] && msg['@id'] == update['@delete']['@id'] ? update['@delete'] : {};
     new Set(Object.keys(msg).concat(Object.keys(inserts))).forEach(key => {
       switch (key) {
         case '@id': break;
-        default: msg[key as keyof Node<T>] =
+        default: msg[key as keyof Resource<T>] =
           updateProperty(msg[key], inserts[key], deletes[key]);
       }
     });
   }
 
   function updateProperty(value: any, insertVal: any, deleteVal: any): any {
-    let rtn = toArray(value)
-      .filter(v => !includesValue(toArray(deleteVal), v))
-      .concat(toArray(insertVal));
+    let rtn = toArray(value).filter(v => !includesValue(toArray(deleteVal), v));
+    rtn = rtn.concat(toArray(insertVal).filter(v => !includesValue(rtn, v)));
     return rtn.length == 1 && !Array.isArray(value) ? rtn[0] : rtn;
   }
 

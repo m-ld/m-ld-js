@@ -35,10 +35,11 @@ export function isValueObject(value: JrqlValue): value is ValueObject {
   return typeof value == 'object' && '@value' in value;
 }
 
-export type Resource<T> = { '@id': Iri; } & T;
+export type Reference = { '@id': Iri; };
 
-export interface Reference extends Resource<object> {
-}
+export type Resource<T> = Reference & Subject & {
+  [P in keyof T]: T extends '@id' ? Iri : T[P] extends Array<unknown> ? T[P] : T[P] | T[P][];
+};
 
 export function isReference(value: JrqlValue): value is Reference {
   return typeof value == 'object' && Object.keys(value).every(k => k === '@id');
