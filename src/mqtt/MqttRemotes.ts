@@ -8,10 +8,8 @@ import { TopicParams } from 'mqtt-pattern';
 import { MqttPresence } from './MqttPresence';
 import { Response, Request, Hello } from '../m-ld/ControlMessage';
 import { Future, jsonFrom } from '../util';
-import { map, finalize, flatMap, reduce, toArray, first } from 'rxjs/operators';
-import { fromTimeString, toTimeString, toMeldJson, fromMeldJson } from '../m-ld/MeldJson';
-import { Hash } from '../hash';
-import AsyncLock = require('async-lock');
+import { map, finalize, flatMap, reduce, toArray, first, concatMap, materialize } from 'rxjs/operators';
+import { toMeldJson, fromMeldJson } from '../m-ld/MeldJson';
 import { LogLevelDesc } from 'loglevel';
 import { MeldError, BAD_UPDATE, NONE_VISIBLE } from '../m-ld/MeldError';
 import { AbstractMeld, isOnline } from '../AbstractMeld';
@@ -48,8 +46,8 @@ export class MqttRemotes extends AbstractMeld implements MeldRemotes {
   private readonly recentlySentTo: Set<string> = new Set;
   private readonly consuming: { [address: string]: Source<any> } = {};
   isGenesis: Future<boolean> = new Future;
-  private readonly notifyLock = new AsyncLock;
   private readonly sendTimeout: number;
+  private readonly productions: Set<Promise<void>> = new Set;
 
   constructor(domain: string, id: string, opts: MeldMqttOpts,
     connect: (opts: IClientOptions) => AsyncMqttClient = defaultConnect) {
@@ -169,6 +167,8 @@ export class MqttRemotes extends AbstractMeld implements MeldRemotes {
     try {
       // Wait until the clone has closed
       await this.localClone.pipe(first(null)).toPromise();
+      // Wait until all productions have finalised
+      await Promise.all(this.productions); // TODO unit test this
       await this.mqtt.end();
     } catch (err) {
       this.log.warn(err);
@@ -362,32 +362,30 @@ export class MqttRemotes extends AbstractMeld implements MeldRemotes {
 
   private produce<T>(data: Observable<T>, subAddress: string,
     toJson: (datum: T) => Promise<any>, type: 'snapshot' | 'updates') {
-
     const address = this.controlSubAddress(subAddress);
-    // If notifications fail due to MQTT death, the recipient will find out from the broker
-    // so here we make best efforts to notify an error and then give up.
-    const logError = (err: any) => this.log.warn(err);
-    const subs = data.subscribe({
-      next: datum => this.notify(address, toJson(datum).then(json => ({ next: json })))
-        .catch(error => {
-          // All our productions are guaranteed delivery
-          this.notify(address, { error }).catch(logError);
-          subs.unsubscribe();
-        }),
-      complete: () => this.notify(address, { complete: true })
-        .then(() => this.log.debug('Completed production of', type))
-        .catch(logError),
-      error: error => {
-        this.log.warn('Notifying error on', subAddress, error);
-        this.notify(address, { error }).catch(logError);
-      }
-    });
-  }
-
-  private async notify(address: string, notification: JsonNotification | Promise<JsonNotification>): Promise<unknown> {
-    // Use of a lock guarantees delivery ordering despite promise ordering
-    return this.notifyLock.acquire(address, async () =>
-      this.mqtt.publish(address, JSON.stringify(await notification)));
+    const notify = async (notification: JsonNotification) => {
+      if (notification.error)
+        this.log.warn('Notifying error on', subAddress, notification.error);
+      else if (notification.complete)
+        this.log.debug('Completed production of', type);
+      await this.mqtt.publish(address, JSON.stringify(notification))
+        // If notifications fail due to MQTT death, the recipient will find out
+        // from the broker so here we make best efforts to notify an error and
+        // then give up.
+        .catch((error: any) => this.mqtt.publish(address, JSON.stringify({ error })))
+        .catch(this.warnError);
+    }
+    // Keep track of all productions so that we can shut down cleanly
+    const done: Promise<void> = data.pipe(
+      // concatMap guarantees delivery ordering despite toJson promise ordering
+      concatMap(datum => toJson(datum)),
+      materialize(),
+      flatMap(notification => notification.do(
+        next => notify({ next }),
+        error => notify({ error }),
+        () => notify({ complete: true }))))
+      .toPromise().then(() => { this.productions.delete(done); });
+    this.productions.add(done);
   }
 
   private async reply({ fromId: toId, messageId: sentMessageId }: DirectParams, res: Response | null, expectAck?: boolean) {
