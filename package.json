@@ -25,17 +25,18 @@
   "homepage": "https://github.com/gsvarovsky/m-ld-js#readme",
   "devDependencies": {
     "@gsvarovsky/m-ld-spec": "^0.2.0",
-    "@types/jest": "^24.9.1",
+    "@types/jest": "^25.2.3",
     "@types/memdown": "^3.0.0",
-    "aedes": "^0.41.0",
-    "jest": "^24.9.0",
+    "@types/readable-stream": "2.3.5",
+    "aedes": "^0.42.0",
+    "jest": "^26.0.1",
     "jest-mock-extended": "^1.0.8",
     "leveldown": "^5.6.0",
     "memdown": "^5.1.0",
     "restify": "^8.5.1",
-    "tmp": "^0.1.0",
-    "ts-jest": "^24.3.0",
-    "typescript": "^3.8.3"
+    "tmp": "^0.2.1",
+    "ts-jest": "^26.0.0",
+    "typescript": "^3.9.3"
   },
   "jest": {
     "roots": [
@@ -56,10 +57,9 @@
     "@types/detect-node": "^2.0.0",
     "@types/jsonld": "^1.5.1",
     "@types/rdf-js": "^2.0.12",
-    "@types/readable-stream": "^2.3.5",
     "async-lock": "^1.2.4",
-    "async-mqtt": "^2.5.0",
-    "bn.js": "^5.1.1",
+    "async-mqtt": "^2.6.0",
+    "bn.js": "^5.1.2",
     "detect-node": "^2.0.4",
     "jsonld": "^2.0.2",
     "local-storage": "^2.0.0",

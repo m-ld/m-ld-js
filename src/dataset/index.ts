@@ -96,10 +96,10 @@ export class QuadStoreDataset implements Dataset {
   @notClosed.async
   close(): Promise<void> {
     // Make efforts to ensure no transactions are running
-    return this.lock.acquire('txn', done => this.leveldown.close(err => {
+    return this.lock.acquire('txn', done => {
       this.isClosed = true;
-      return done(err);
-    }));
+      this.leveldown.close(done);
+    });
   }
 
   get closed(): boolean {

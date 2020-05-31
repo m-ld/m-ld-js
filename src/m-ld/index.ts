@@ -88,7 +88,7 @@ export interface Snapshot extends Message<TreeClock, Observable<Quad[]>> {
 }
 
 export interface MeldRemotes extends Meld {
-  setLocal(clone: MeldLocal): void;
+  setLocal(clone: MeldLocal | null): void;
 }
 
 export interface MeldLocal extends Meld {

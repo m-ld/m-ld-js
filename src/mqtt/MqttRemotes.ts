@@ -1,5 +1,5 @@
 import { Snapshot, DeltaMessage, MeldRemotes, MeldLocal } from '../m-ld';
-import { Observable, Subject as Source } from 'rxjs';
+import { Observable, Subject as Source, BehaviorSubject } from 'rxjs';
 import { TreeClock } from '../clocks';
 import { AsyncMqttClient, IClientOptions, ISubscriptionMap, connect as defaultConnect } from 'async-mqtt';
 import { generate as uuid } from 'short-uuid';
@@ -8,7 +8,7 @@ import { TopicParams } from 'mqtt-pattern';
 import { MqttPresence } from './MqttPresence';
 import { Response, Request, Hello } from '../m-ld/ControlMessage';
 import { Future, jsonFrom } from '../util';
-import { map, finalize, flatMap, reduce, toArray } from 'rxjs/operators';
+import { map, finalize, flatMap, reduce, toArray, first } from 'rxjs/operators';
 import { fromTimeString, toTimeString, toMeldJson, fromMeldJson } from '../m-ld/MeldJson';
 import { Hash } from '../hash';
 import AsyncLock = require('async-lock');
@@ -35,7 +35,7 @@ export type MeldMqttOpts = Omit<IClientOptions, 'will' | 'clientId'> &
 
 export class MqttRemotes extends AbstractMeld implements MeldRemotes {
   private readonly mqtt: AsyncMqttClient;
-  private clone?: MeldLocal;
+  private readonly localClone = new BehaviorSubject<MeldLocal | null>(null);
   private readonly operationsTopic: MqttTopic<DomainParams>;
   private readonly controlTopic: MqttTopic<DomainParams>;
   private readonly registryTopic: MqttTopic<DomainParams>;
@@ -86,15 +86,18 @@ export class MqttRemotes extends AbstractMeld implements MeldRemotes {
       try {
         // Subscribe as required
         const subscriptions: ISubscriptionMap = {
-          [this.operationsTopic.address]: 1,
-          [this.controlTopic.address]: 1,
-          [this.registryTopic.address]: 1,
-          [this.sentTopic.address]: 0,
-          [this.replyTopic.address]: 0
+          ...this.presence.subscriptions,
+          [this.operationsTopic.address]: { qos: 1 },
+          [this.controlTopic.address]: { qos: 1 },
+          [this.registryTopic.address]: { qos: 1 },
+          [this.sentTopic.address]: { qos: 0 },
+          [this.replyTopic.address]: { qos: 0 }
         };
         const grants = await this.mqtt.subscribe(subscriptions);
-        if (!grants.every(grant => subscriptions[grant.topic] == grant.qos))
+        if (!grants.every(grant => subscriptions[grant.topic].qos == grant.qos))
           throw new Error('Requested QoS was not granted');
+        // We don't have to wait for the presence to initialise
+        this.presence.initialise().catch(this.warnError);
         // Tell the world that we will be a clone on this domain
         await this.mqtt.publish(this.registryTopic.address,
           JSON.stringify({ id: this.id } as Hello), { qos: 1, retain: true });
@@ -109,8 +112,13 @@ export class MqttRemotes extends AbstractMeld implements MeldRemotes {
     });
   }
 
-  setLocal(clone: MeldLocal): void {
-    if (this.clone == null) {
+  setLocal(clone: MeldLocal | null): void {
+    if (clone == null) {
+      if (this.clone != null)
+        this.clonePresent(false)
+          .then(() => this.clone = null)
+          .catch(this.warnError);
+    } else if (this.clone == null) {
       this.clone = clone;
       // Start sending updates from the local clone to the remotes
       clone.updates.subscribe({
@@ -156,10 +164,11 @@ export class MqttRemotes extends AbstractMeld implements MeldRemotes {
       this.log.info('Shutting down due to', err);
     else
       this.log.info('Shutting down normally');
-
+    // This finalises the #updates, thereby notifying the clone
     super.close(err);
     try {
-      await this.clonePresent(false);
+      // Wait until the clone has closed
+      await this.localClone.pipe(first(null)).toPromise();
       await this.mqtt.end();
     } catch (err) {
       this.log.warn(err);
@@ -188,6 +197,14 @@ export class MqttRemotes extends AbstractMeld implements MeldRemotes {
 
   revupFrom(time: TreeClock): Promise<Observable<DeltaMessage> | undefined> {
     return this.revupFromNext(time, new Set);
+  }
+
+  private get clone() {
+    return this.localClone.value;
+  }
+
+  private set clone(clone: MeldLocal | null) {
+    this.localClone.next(clone);
   }
 
   private async revupFromNext(time: TreeClock, tried: Set<string>): Promise<Observable<DeltaMessage> | undefined> {
@@ -354,20 +371,20 @@ export class MqttRemotes extends AbstractMeld implements MeldRemotes {
       next: datum => this.notify(address, toJson(datum).then(json => ({ next: json })))
         .catch(error => {
           // All our productions are guaranteed delivery
-          this.notify(address, Promise.resolve({ error })).catch(logError);
+          this.notify(address, { error }).catch(logError);
           subs.unsubscribe();
         }),
-      complete: () => this.notify(address, Promise.resolve({ complete: true }))
+      complete: () => this.notify(address, { complete: true })
         .then(() => this.log.debug('Completed production of', type))
         .catch(logError),
       error: error => {
         this.log.warn('Notifying error on', subAddress, error);
-        this.notify(address, Promise.resolve({ error })).catch(logError);
+        this.notify(address, { error }).catch(logError);
       }
     });
   }
 
-  private async notify(address: string, notification: Promise<JsonNotification>): Promise<unknown> {
+  private async notify(address: string, notification: JsonNotification | Promise<JsonNotification>): Promise<unknown> {
     // Use of a lock guarantees delivery ordering despite promise ordering
     return this.notifyLock.acquire(address, async () =>
       this.mqtt.publish(address, JSON.stringify(await notification)));
