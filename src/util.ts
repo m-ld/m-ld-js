@@ -1,6 +1,6 @@
 import { Quad } from 'rdf-js';
 import { fromRDF } from 'jsonld';
-import { concat, Observable, OperatorFunction, Subscription, throwError } from "rxjs";
+import { concat, Observable, OperatorFunction, Subscription, throwError, AsyncSubject } from "rxjs";
 import { publish, tap } from "rxjs/operators";
 import AsyncLock = require('async-lock');
 import { LogLevelDesc, getLogger, getLoggers } from 'loglevel';
@@ -23,48 +23,29 @@ export function rdfToJson(quads: Quad[]): Promise<any> {
 }
 
 export class Future<T = void> implements PromiseLike<T> {
-  private resolver: (t: T) => void;
-  private rejecter: (err?: any) => void;
-  private finalised: boolean = false;
-  readonly promise: Promise<T>;
+  private readonly subject = new AsyncSubject<T>();
 
   constructor(value?: T) {
     if (value !== undefined) {
-      this.finalised = true;
-      this.promise = Promise.resolve(value);
-      this.resolver = () => { };
-      this.rejecter = () => { };
-    } else {
-      this.promise = new Promise<T>((resolve, reject) => {
-        this.resolver = (value?: T | PromiseLike<T> | undefined) => {
-          if (!this.finalised) {
-            this.finalised = true;
-            resolve(value);
-          }
-        };
-        this.rejecter = reason => {
-          if (!this.finalised) {
-            this.finalised = true;
-            reject(reason);
-          }
-        };
-      });
+      this.subject.next(value);
+      this.subject.complete();
     }
   }
 
-  get resolve() {
-    return this.resolver;
+  resolve = (value: T) => {
+    this.subject.next(value);
+    this.subject.complete();
   }
 
-  get reject() {
-    return this.rejecter;
+  reject = (err: any) => {
+    this.subject.error(err);
   }
 
   then<TResult1 = T, TResult2 = never>(
     onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | null | undefined,
     onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | null | undefined):
     Promise<TResult1 | TResult2> {
-    return this.promise.then(onfulfilled, onrejected);
+    return this.subject.toPromise().then(onfulfilled, onrejected);
   }
 }
 
