@@ -16,6 +16,35 @@ test('Future can be rejected', async () => {
   }
 });
 
+test('Future ignores multiple resolutions', async () => {
+  const f = new Future<string>();
+  f.resolve('this');
+  f.resolve('that');
+  expect(await f).toBe('this');
+});
+
+test('Future ignores reject after resolve', async () => {
+  const f = new Future<string>();
+  f.resolve('this');
+  f.reject('AARGH');
+  expect(await f).toBe('this');
+});
+
+test('Future ignores resolve after reject', async () => {
+  const f = new Future<string>();
+  f.reject('AARGH');
+  f.resolve('this');
+  try {
+    await f;
+  } catch (e) {
+    expect(e).toBe('AARGH');
+  }
+});
+
+test('Unhandled future does not cause UnhandledPromiseRejectionWarning', () => {
+  new Future().reject('oops');
+});
+
 test('graphy to array', () => {
   expect(toArray()).toEqual([]);
   expect(toArray(null)).toEqual([]);

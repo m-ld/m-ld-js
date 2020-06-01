@@ -9,7 +9,7 @@ import { NamedNode, Quad, Term, Variable as VariableNode, Quad_Subject, Quad_Pre
 import { compact, flatten as flatJsonLd, toRDF } from 'jsonld';
 import { namedNode, defaultGraph, variable, quad as createQuad, blankNode } from '@rdfjs/data-model';
 import { Graph, PatchQuads } from '.';
-import { toArray, flatMap, defaultIfEmpty, map, filter, take, distinct } from 'rxjs/operators';
+import { toArray, flatMap, defaultIfEmpty, map, filter, distinct, first } from 'rxjs/operators';
 import { from, of, EMPTY, Observable, throwError } from 'rxjs';
 import { toArray as array, shortId, flatten, rdfToJson } from '../util';
 import { QuadSolution } from './QuadSolution';
@@ -77,8 +77,8 @@ export class JrqlGraph {
     }
   }
 
-  async describe1(describe: Iri, context: Context = this.defaultContext): Promise<Subject | undefined> {
-    return this.describe(describe, undefined, context).pipe(take(1)).toPromise();
+  async describe1<T extends Subject>(describe: Iri, context: Context = this.defaultContext): Promise<T> {
+    return this.describe(describe, undefined, context).pipe(first<T>()).toPromise();
   }
 
   async find(jrqlPattern: Subject | Group,

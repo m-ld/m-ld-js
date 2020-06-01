@@ -9,7 +9,7 @@ import { Iri } from 'jsonld/jsonld-spec';
 import { JrqlGraph, toGroup } from './JrqlGraph';
 import { JsonDeltaBagBlock, newDelta, asMeldDelta, toTimeString, fromTimeString, reify, unreify, hashTriple } from '../m-ld/MeldJson';
 import { Observable, from, Subject as Source, asapScheduler, Observer } from 'rxjs';
-import { toArray, bufferCount, flatMap, reduce, observeOn } from 'rxjs/operators';
+import { toArray, bufferCount, flatMap, reduce, observeOn, isEmpty } from 'rxjs/operators';
 import { flatten, Future, tapComplete, getIdLogger, check } from '../util';
 import { generate as uuid } from 'short-uuid';
 import { LogLevelDesc, Logger } from 'loglevel';
@@ -102,7 +102,7 @@ export class SuSetDataset extends JrqlGraph {
       throw new MeldError(DATA_LOCKED, err);
     }
     // Create the Journal if not exists
-    if (!await this.controlGraph.describe1('qs:journal'))
+    if (await this.controlGraph.describe('qs:journal').pipe(isEmpty()).toPromise())
       return this.dataset.transact(() => this.reset(Hash.random()));
   }
 
@@ -163,31 +163,35 @@ export class SuSetDataset extends JrqlGraph {
     const journal = await this.loadJournal();
     if (!journal?.tail)
       throw new Error('Journal has no tail');
-    return [journal, await this.controlGraph.describe1(journal.tail) as JournalEntry];
+    return [journal, await this.controlGraph.describe1<JournalEntry>(journal.tail)];
   }
 
   @SuSetDataset.checkNotClosed.rx
   undeliveredLocalOperations(): Observable<DeltaMessage> {
     return new Observable(subs => {
-      this.loadJournal().then(async (journal) => {
-        const last = await this.controlGraph.describe1(journal.lastDelivered) as JournalEntry;
-        await this.emitJournalFrom(last.next, subs, entry => !entry.remote);
-      }).catch(err => subs.error(err));
+      this.loadJournal()
+        .then(journal => this.controlGraph.describe1<JournalEntry>(journal.lastDelivered))
+        .then(last => this.emitJournalFrom(last.next, subs, entry => !entry.remote))
+        .catch(err => subs.error(err));
     });
   }
 
-  @SuSetDataset.checkNotClosed.async // Used here for private method to end the recursion
-  private async emitJournalFrom(entryId: JournalEntry['@id'] | undefined,
+  private emitJournalFrom(entryId: JournalEntry['@id'] | undefined,
     subs: Observer<DeltaMessage>, filter: (entry: JournalEntry) => boolean) {
     if (subs.closed == null || !subs.closed) {
       if (entryId != null) {
-        const entry = await this.controlGraph.describe1(entryId) as JournalEntry;
-        if (filter(entry)) {
-          const delta = new DeltaMessage(safeTime(entry), JSON.parse(entry.delta));
-          delta.delivered.then(() => this.markDelivered(entry['@id']));
-          subs.next(delta);
+        if (this.dataset.closed) {
+          subs.error(new MeldError(IS_CLOSED));
+        } else {
+          this.controlGraph.describe1<JournalEntry>(entryId).then(entry => {
+            if (filter(entry)) {
+              const delta = new DeltaMessage(safeTime(entry), JSON.parse(entry.delta));
+              delta.delivered.then(() => this.markDelivered(entry['@id']));
+              subs.next(delta);
+            }
+            this.emitJournalFrom(entry.next, subs, filter);
+          }).catch(err => subs.error(err));
         }
-        await this.emitJournalFrom(entry.next, subs, filter);
       } else {
         subs.complete();
       }
@@ -208,11 +212,9 @@ export class SuSetDataset extends JrqlGraph {
         const found = findTime != null ? await this.controlGraph.find1(
           <Partial<JournalEntry>>{ ticks: findTime }) : '';
         if (found) {
-          resolve(new Observable(subs => {
-            // Don't emit an entry if it's all less than the requested time (based on remote ID)
-            this.emitJournalFrom(found, subs, entry => time.anyLt(safeTime(entry), 'includeIds'))
-              .catch(err => subs.error(err));
-          }));
+          // Don't emit an entry if it's all less than the requested time (based on remote ID)
+          resolve(new Observable(subs =>
+            this.emitJournalFrom(found, subs, entry => time.anyLt(safeTime(entry), 'includeIds'))));
         } else {
           resolve(undefined);
         }
@@ -238,7 +240,7 @@ export class SuSetDataset extends JrqlGraph {
   }
 
   private async loadJournal(): Promise<Journal> {
-    return await this.controlGraph.describe1('qs:journal') as Journal;
+    return await this.controlGraph.describe1<Journal>('qs:journal');
   }
 
   @SuSetDataset.checkNotClosed.async

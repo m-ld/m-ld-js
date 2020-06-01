@@ -54,14 +54,12 @@ describe('New MQTT remotes', () => {
 
     test('subscribes to topics', () => {
       expect(mqtt.subscribe).toBeCalledWith({
-        '__presence/test.m-ld.org/+': 1
-      });
-      expect(mqtt.subscribe).toBeCalledWith({
-        'test.m-ld.org/operations': 1,
-        'test.m-ld.org/control': 1,
-        'test.m-ld.org/registry': 1,
-        '__send/client1/+/+/test.m-ld.org/control': 0,
-        '__reply/client1/+/+/+': 0
+        '__presence/test.m-ld.org/+': { qos:  1 },
+        'test.m-ld.org/operations': { qos: 1 },
+        'test.m-ld.org/control': { qos: 1 },
+        'test.m-ld.org/registry': { qos: 1 },
+        '__send/client1/+/+/test.m-ld.org/control': { qos: 0 },
+        '__reply/client1/+/+/+': { qos: 0 }
       });
       // Presence ghost message
       expect(mqtt.publish).toBeCalledWith(
@@ -138,6 +136,7 @@ describe('New MQTT remotes', () => {
       const updates = new Source<DeltaMessage>();
       remotes.setLocal(mockLocal(updates));
       updates.complete();
+      remotes.setLocal(null);
 
       expect(mqtt.publish).lastCalledWith(
         '__presence/test.m-ld.org/client1',

@@ -1,5 +1,5 @@
 import { Snapshot, DeltaMessage, MeldRemotes, MeldLocal } from '../m-ld';
-import { Observable, Subject as Source } from 'rxjs';
+import { Observable, Subject as Source, BehaviorSubject } from 'rxjs';
 import { TreeClock } from '../clocks';
 import { AsyncMqttClient, IClientOptions, ISubscriptionMap, connect as defaultConnect } from 'async-mqtt';
 import { generate as uuid } from 'short-uuid';
@@ -8,10 +8,8 @@ import { TopicParams } from 'mqtt-pattern';
 import { MqttPresence } from './MqttPresence';
 import { Response, Request, Hello } from '../m-ld/ControlMessage';
 import { Future, jsonFrom } from '../util';
-import { map, finalize, flatMap, reduce, toArray } from 'rxjs/operators';
-import { fromTimeString, toTimeString, toMeldJson, fromMeldJson } from '../m-ld/MeldJson';
-import { Hash } from '../hash';
-import AsyncLock = require('async-lock');
+import { map, finalize, flatMap, reduce, toArray, first, concatMap, materialize, timeout } from 'rxjs/operators';
+import { toMeldJson, fromMeldJson } from '../m-ld/MeldJson';
 import { LogLevelDesc } from 'loglevel';
 import { MeldError, BAD_UPDATE, NONE_VISIBLE } from '../m-ld/MeldError';
 import { AbstractMeld, isOnline } from '../AbstractMeld';
@@ -35,7 +33,7 @@ export type MeldMqttOpts = Omit<IClientOptions, 'will' | 'clientId'> &
 
 export class MqttRemotes extends AbstractMeld implements MeldRemotes {
   private readonly mqtt: AsyncMqttClient;
-  private clone?: MeldLocal;
+  private readonly localClone = new BehaviorSubject<MeldLocal | null>(null);
   private readonly operationsTopic: MqttTopic<DomainParams>;
   private readonly controlTopic: MqttTopic<DomainParams>;
   private readonly registryTopic: MqttTopic<DomainParams>;
@@ -48,8 +46,8 @@ export class MqttRemotes extends AbstractMeld implements MeldRemotes {
   private readonly recentlySentTo: Set<string> = new Set;
   private readonly consuming: { [address: string]: Source<any> } = {};
   isGenesis: Future<boolean> = new Future;
-  private readonly notifyLock = new AsyncLock;
   private readonly sendTimeout: number;
+  private readonly activity: Set<Promise<void>> = new Set;
 
   constructor(domain: string, id: string, opts: MeldMqttOpts,
     connect: (opts: IClientOptions) => AsyncMqttClient = defaultConnect) {
@@ -86,15 +84,18 @@ export class MqttRemotes extends AbstractMeld implements MeldRemotes {
       try {
         // Subscribe as required
         const subscriptions: ISubscriptionMap = {
-          [this.operationsTopic.address]: 1,
-          [this.controlTopic.address]: 1,
-          [this.registryTopic.address]: 1,
-          [this.sentTopic.address]: 0,
-          [this.replyTopic.address]: 0
+          ...this.presence.subscriptions,
+          [this.operationsTopic.address]: { qos: 1 },
+          [this.controlTopic.address]: { qos: 1 },
+          [this.registryTopic.address]: { qos: 1 },
+          [this.sentTopic.address]: { qos: 0 },
+          [this.replyTopic.address]: { qos: 0 }
         };
         const grants = await this.mqtt.subscribe(subscriptions);
-        if (!grants.every(grant => subscriptions[grant.topic] == grant.qos))
+        if (!grants.every(grant => subscriptions[grant.topic].qos == grant.qos))
           throw new Error('Requested QoS was not granted');
+        // We don't have to wait for the presence to initialise
+        this.presence.initialise().catch(this.warnError);
         // Tell the world that we will be a clone on this domain
         await this.mqtt.publish(this.registryTopic.address,
           JSON.stringify({ id: this.id } as Hello), { qos: 1, retain: true });
@@ -109,8 +110,13 @@ export class MqttRemotes extends AbstractMeld implements MeldRemotes {
     });
   }
 
-  setLocal(clone: MeldLocal): void {
-    if (this.clone == null) {
+  setLocal(clone: MeldLocal | null): void {
+    if (clone == null) {
+      if (this.clone != null)
+        this.clonePresent(false)
+          .then(() => this.clone = null)
+          .catch(this.warnError);
+    } else if (this.clone == null) {
       this.clone = clone;
       // Start sending updates from the local clone to the remotes
       clone.updates.subscribe({
@@ -156,10 +162,13 @@ export class MqttRemotes extends AbstractMeld implements MeldRemotes {
       this.log.info('Shutting down due to', err);
     else
       this.log.info('Shutting down normally');
-
+    // This finalises the #updates, thereby notifying the clone
     super.close(err);
     try {
-      await this.clonePresent(false);
+      // Wait until the clone has closed
+      await this.localClone.pipe(first(null)).toPromise();
+      // Wait until all activity have finalised
+      await Promise.all(this.activity); // TODO unit test this
       await this.mqtt.end();
     } catch (err) {
       this.log.warn(err);
@@ -177,9 +186,9 @@ export class MqttRemotes extends AbstractMeld implements MeldRemotes {
     const res = await this.send<Response.Snapshot>(new Request.Snapshot, ack);
     const snapshot: Snapshot = {
       time: res.time,
-      data: (await this.consume(res.dataAddress)).pipe(flatMap(fromMeldJson)),
+      data: await this.consume(res.dataAddress, fromMeldJson, 'failIfSlow'),
       lastHash: res.lastHash,
-      updates: (await this.consume(res.updatesAddress)).pipe(map(deltaFromJson))
+      updates: await this.consume(res.updatesAddress, deltaFromJson)
     };
     // Ack the response to start the streams
     ack.resolve(null);
@@ -190,11 +199,20 @@ export class MqttRemotes extends AbstractMeld implements MeldRemotes {
     return this.revupFromNext(time, new Set);
   }
 
+  private get clone() {
+    return this.localClone.value;
+  }
+
+  private set clone(clone: MeldLocal | null) {
+    this.localClone.next(clone);
+  }
+
   private async revupFromNext(time: TreeClock, tried: Set<string>): Promise<Observable<DeltaMessage> | undefined> {
     const ack = new Future<null>();
     const res = await this.send<Response.Revup>(new Request.Revup(time), ack);
     if (res.canRevup) {
-      const updates = (await this.consume(res.updatesAddress)).pipe(map(deltaFromJson));
+      const updates = await this.consume(
+        res.updatesAddress, deltaFromJson, 'failIfSlow');
       // Ack the response to start the streams
       ack.resolve(null);
       return updates;
@@ -214,14 +232,22 @@ export class MqttRemotes extends AbstractMeld implements MeldRemotes {
     }
   }
 
-  private async consume(subAddress: string): Promise<Observable<any>> {
+  private async consume<T>(subAddress: string, map: (json: any) => T | Promise<T>, failIfSlow?: 'failIfSlow'): Promise<Observable<T>> {
     const address = this.controlSubAddress(subAddress);
     const src = this.consuming[address] = new Source;
     await this.mqtt.subscribe(address, { qos: 1 });
-    return src.pipe(finalize(async () => {
-      this.mqtt.unsubscribe(address);
-      delete this.consuming[address];
-    }));
+    const consumed = src.pipe(
+      // Unsubscribe from the sub-channel when a complete or error arrives
+      finalize(() => {
+        this.mqtt.unsubscribe(address);
+        delete this.consuming[address];
+      }),
+      flatMap(async json => map(json)));
+    // Rev-up and snapshot update channels are expected to be very fast, as they
+    // are streamed directly from the dataset. So if there is a pause in the
+    // delivery this probably indicates a failure e.g. the collaborator is dead.
+    // TODO unit test this
+    return failIfSlow ? consumed.pipe(timeout(this.sendTimeout)) : consumed;
   }
 
   private controlSubAddress(address: string): string {
@@ -300,6 +326,8 @@ export class MqttRemotes extends AbstractMeld implements MeldRemotes {
   private async onSent(json: any, sentParams: SendParams) {
     // Ignore control messages before we have a clone
     if (this.clone) {
+      // Keep track of long-running activity so that we can shut down cleanly
+      const active = this.active();
       try {
         const req = Request.fromJson(json);
         if (req instanceof Request.NewClock) {
@@ -311,8 +339,17 @@ export class MqttRemotes extends AbstractMeld implements MeldRemotes {
         }
       } catch (err) {
         this.log.warn(err);
+      } finally {
+        active.resolve();
       }
     }
+  }
+
+  private active(): Future {
+    const active = new Future();
+    const done = active.then(() => { this.activity.delete(done); });
+    this.activity.add(done);
+    return active;
   }
 
   private async replyClock(sentParams: SendParams, clock: Promise<TreeClock>) {
@@ -320,14 +357,17 @@ export class MqttRemotes extends AbstractMeld implements MeldRemotes {
   }
 
   private async replySnapshot(sentParams: SendParams, snapshot: Promise<Snapshot>) {
+    const active = this.active();
     const { time, lastHash, data, updates } = await snapshot;
     const dataAddress = uuid(), updatesAddress = uuid();
     await this.reply(sentParams, new Response.Snapshot(
       time, dataAddress, lastHash, updatesAddress
     ), true);
-    // Ack has been sent, start streaming the data and updates
-    this.produce(data, dataAddress, toMeldJson, 'snapshot');
-    this.produce(updates, updatesAddress, jsonFromDelta, 'updates');
+    // Ack has been sent, start streaming the data and updates concurrently
+    await Promise.all([
+      this.produce(data, dataAddress, toMeldJson, 'snapshot'),
+      this.produce(updates, updatesAddress, jsonFromDelta, 'updates')
+    ]);
   }
 
   private async replyRevup(sentParams: SendParams,
@@ -337,40 +377,36 @@ export class MqttRemotes extends AbstractMeld implements MeldRemotes {
       const updatesAddress = uuid();
       await this.reply(sentParams, new Response.Revup(true, updatesAddress), true);
       // Ack has been sent, start streaming the updates
-      this.produce(revup, updatesAddress, jsonFromDelta, 'updates');
+      await this.produce(revup, updatesAddress, jsonFromDelta, 'updates');
     } else if (this.clone) {
-      this.reply(sentParams, new Response.Revup(false, this.clone.id));
+      await this.reply(sentParams, new Response.Revup(false, this.clone.id));
     }
   }
 
   private produce<T>(data: Observable<T>, subAddress: string,
     toJson: (datum: T) => Promise<any>, type: 'snapshot' | 'updates') {
-
     const address = this.controlSubAddress(subAddress);
-    // If notifications fail due to MQTT death, the recipient will find out from the broker
-    // so here we make best efforts to notify an error and then give up.
-    const logError = (err: any) => this.log.warn(err);
-    const subs = data.subscribe({
-      next: datum => this.notify(address, toJson(datum).then(json => ({ next: json })))
-        .catch(error => {
-          // All our productions are guaranteed delivery
-          this.notify(address, Promise.resolve({ error })).catch(logError);
-          subs.unsubscribe();
-        }),
-      complete: () => this.notify(address, Promise.resolve({ complete: true }))
-        .then(() => this.log.debug('Completed production of', type))
-        .catch(logError),
-      error: error => {
-        this.log.warn('Notifying error on', subAddress, error);
-        this.notify(address, Promise.resolve({ error })).catch(logError);
-      }
-    });
-  }
-
-  private async notify(address: string, notification: Promise<JsonNotification>): Promise<unknown> {
-    // Use of a lock guarantees delivery ordering despite promise ordering
-    return this.notifyLock.acquire(address, async () =>
-      this.mqtt.publish(address, JSON.stringify(await notification)));
+    const notify = async (notification: JsonNotification) => {
+      if (notification.error)
+        this.log.warn('Notifying error on', subAddress, notification.error);
+      else if (notification.complete)
+        this.log.debug('Completed production of', type);
+      await this.mqtt.publish(address, JSON.stringify(notification))
+        // If notifications fail due to MQTT death, the recipient will find out
+        // from the broker so here we make best efforts to notify an error and
+        // then give up.
+        .catch((error: any) => this.mqtt.publish(address, JSON.stringify({ error })))
+        .catch(this.warnError);
+    }
+    return data.pipe(
+      // concatMap guarantees delivery ordering despite toJson promise ordering
+      concatMap(datum => toJson(datum)),
+      materialize(),
+      flatMap(notification => notification.do(
+        next => notify({ next }),
+        error => notify({ error }),
+        () => notify({ complete: true }))))
+      .toPromise();
   }
 
   private async reply({ fromId: toId, messageId: sentMessageId }: DirectParams, res: Response | null, expectAck?: boolean) {

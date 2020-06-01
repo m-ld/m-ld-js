@@ -1,6 +1,6 @@
 import { TopicParams, matches } from 'mqtt-pattern';
 import { MqttTopic } from './MqttTopic';
-import { AsyncMqttClient, IClientOptions, IClientPublishOptions } from 'async-mqtt';
+import { AsyncMqttClient, IClientOptions, IClientPublishOptions, ISubscriptionMap } from 'async-mqtt';
 import { jsonFrom } from '../util';
 import { EventEmitter } from 'events';
 import { BehaviorSubject, identity, Observable } from 'rxjs';
@@ -23,6 +23,7 @@ const GHOST_PAYLOAD = '-';
 
 export class MqttPresence extends EventEmitter {
   private readonly clientTopic: MqttTopic<PresenceParams>;
+  private readonly domainTopic: MqttTopic<PresenceParams>;
   private readonly presence: { [clientId: string]: { [consumerId: string]: string } } = {};
   private readonly ready = new BehaviorSubject<boolean>(false);
   private ghosts = 0;
@@ -30,17 +31,8 @@ export class MqttPresence extends EventEmitter {
   constructor(private readonly mqtt: AsyncMqttClient, domain: string, private readonly clientId: string) {
     super();
 
-    const domainTopic = PRESENCE_TOPIC.with({ domain });
-    this.clientTopic = domainTopic.with({ client: clientId });
-
-    mqtt.on('connect', async () => {
-      try {
-        await mqtt.subscribe({ [domainTopic.address]: 1 });
-        await this.publishGhost();
-      } catch (err) {
-        this.errored(err);
-      }
-    });
+    this.domainTopic = PRESENCE_TOPIC.with({ domain });
+    this.clientTopic = this.domainTopic.with({ client: clientId });
 
     mqtt.on('close', () => {
       Object.keys(this.presence).forEach(clientId => delete this.presence[clientId]);
@@ -48,7 +40,7 @@ export class MqttPresence extends EventEmitter {
     });
 
     mqtt.on('message', (topic, payload) => {
-      domainTopic.match(topic, presence => {
+      this.domainTopic.match(topic, presence => {
         this.ready.pipe(first()).subscribe(ready => {
           if (payload.toString() === GHOST_PAYLOAD) {
             if (presence.client === this.clientId && --this.ghosts === 0) {
@@ -70,6 +62,15 @@ export class MqttPresence extends EventEmitter {
         });
       });
     });
+  }
+
+  // Do not subscribe; MQTT.js seems to allow only one concurrent subscription
+  get subscriptions(): ISubscriptionMap {
+    return { [this.domainTopic.address]: { qos: 1 } };
+  }
+
+  async initialise() {
+    this.publishGhost();
   }
 
   static will(domain: string, client: string): IClientOptions['will'] {
