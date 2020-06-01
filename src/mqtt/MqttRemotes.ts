@@ -8,7 +8,7 @@ import { TopicParams } from 'mqtt-pattern';
 import { MqttPresence } from './MqttPresence';
 import { Response, Request, Hello } from '../m-ld/ControlMessage';
 import { Future, jsonFrom } from '../util';
-import { map, finalize, flatMap, reduce, toArray, first, concatMap, materialize } from 'rxjs/operators';
+import { map, finalize, flatMap, reduce, toArray, first, concatMap, materialize, timeout } from 'rxjs/operators';
 import { toMeldJson, fromMeldJson } from '../m-ld/MeldJson';
 import { LogLevelDesc } from 'loglevel';
 import { MeldError, BAD_UPDATE, NONE_VISIBLE } from '../m-ld/MeldError';
@@ -47,7 +47,7 @@ export class MqttRemotes extends AbstractMeld implements MeldRemotes {
   private readonly consuming: { [address: string]: Source<any> } = {};
   isGenesis: Future<boolean> = new Future;
   private readonly sendTimeout: number;
-  private readonly productions: Set<Promise<void>> = new Set;
+  private readonly activity: Set<Promise<void>> = new Set;
 
   constructor(domain: string, id: string, opts: MeldMqttOpts,
     connect: (opts: IClientOptions) => AsyncMqttClient = defaultConnect) {
@@ -167,8 +167,8 @@ export class MqttRemotes extends AbstractMeld implements MeldRemotes {
     try {
       // Wait until the clone has closed
       await this.localClone.pipe(first(null)).toPromise();
-      // Wait until all productions have finalised
-      await Promise.all(this.productions); // TODO unit test this
+      // Wait until all activity have finalised
+      await Promise.all(this.activity); // TODO unit test this
       await this.mqtt.end();
     } catch (err) {
       this.log.warn(err);
@@ -186,9 +186,9 @@ export class MqttRemotes extends AbstractMeld implements MeldRemotes {
     const res = await this.send<Response.Snapshot>(new Request.Snapshot, ack);
     const snapshot: Snapshot = {
       time: res.time,
-      data: (await this.consume(res.dataAddress)).pipe(flatMap(fromMeldJson)),
+      data: await this.consume(res.dataAddress, fromMeldJson, 'failIfSlow'),
       lastHash: res.lastHash,
-      updates: (await this.consume(res.updatesAddress)).pipe(map(deltaFromJson))
+      updates: await this.consume(res.updatesAddress, deltaFromJson)
     };
     // Ack the response to start the streams
     ack.resolve(null);
@@ -211,7 +211,8 @@ export class MqttRemotes extends AbstractMeld implements MeldRemotes {
     const ack = new Future<null>();
     const res = await this.send<Response.Revup>(new Request.Revup(time), ack);
     if (res.canRevup) {
-      const updates = (await this.consume(res.updatesAddress)).pipe(map(deltaFromJson));
+      const updates = await this.consume(
+        res.updatesAddress, deltaFromJson, 'failIfSlow');
       // Ack the response to start the streams
       ack.resolve(null);
       return updates;
@@ -231,14 +232,22 @@ export class MqttRemotes extends AbstractMeld implements MeldRemotes {
     }
   }
 
-  private async consume(subAddress: string): Promise<Observable<any>> {
+  private async consume<T>(subAddress: string, map: (json: any) => T | Promise<T>, failIfSlow?: 'failIfSlow'): Promise<Observable<T>> {
     const address = this.controlSubAddress(subAddress);
     const src = this.consuming[address] = new Source;
     await this.mqtt.subscribe(address, { qos: 1 });
-    return src.pipe(finalize(async () => {
-      this.mqtt.unsubscribe(address);
-      delete this.consuming[address];
-    }));
+    const consumed = src.pipe(
+      // Unsubscribe from the sub-channel when a complete or error arrives
+      finalize(() => {
+        this.mqtt.unsubscribe(address);
+        delete this.consuming[address];
+      }),
+      flatMap(async json => map(json)));
+    // Rev-up and snapshot update channels are expected to be very fast, as they
+    // are streamed directly from the dataset. So if there is a pause in the
+    // delivery this probably indicates a failure e.g. the collaborator is dead.
+    // TODO unit test this
+    return failIfSlow ? consumed.pipe(timeout(this.sendTimeout)) : consumed;
   }
 
   private controlSubAddress(address: string): string {
@@ -317,6 +326,8 @@ export class MqttRemotes extends AbstractMeld implements MeldRemotes {
   private async onSent(json: any, sentParams: SendParams) {
     // Ignore control messages before we have a clone
     if (this.clone) {
+      // Keep track of long-running activity so that we can shut down cleanly
+      const active = this.active();
       try {
         const req = Request.fromJson(json);
         if (req instanceof Request.NewClock) {
@@ -328,8 +339,17 @@ export class MqttRemotes extends AbstractMeld implements MeldRemotes {
         }
       } catch (err) {
         this.log.warn(err);
+      } finally {
+        active.resolve();
       }
     }
+  }
+
+  private active(): Future {
+    const active = new Future();
+    const done = active.then(() => { this.activity.delete(done); });
+    this.activity.add(done);
+    return active;
   }
 
   private async replyClock(sentParams: SendParams, clock: Promise<TreeClock>) {
@@ -337,14 +357,17 @@ export class MqttRemotes extends AbstractMeld implements MeldRemotes {
   }
 
   private async replySnapshot(sentParams: SendParams, snapshot: Promise<Snapshot>) {
+    const active = this.active();
     const { time, lastHash, data, updates } = await snapshot;
     const dataAddress = uuid(), updatesAddress = uuid();
     await this.reply(sentParams, new Response.Snapshot(
       time, dataAddress, lastHash, updatesAddress
     ), true);
-    // Ack has been sent, start streaming the data and updates
-    this.produce(data, dataAddress, toMeldJson, 'snapshot');
-    this.produce(updates, updatesAddress, jsonFromDelta, 'updates');
+    // Ack has been sent, start streaming the data and updates concurrently
+    await Promise.all([
+      this.produce(data, dataAddress, toMeldJson, 'snapshot'),
+      this.produce(updates, updatesAddress, jsonFromDelta, 'updates')
+    ]);
   }
 
   private async replyRevup(sentParams: SendParams,
@@ -354,9 +377,9 @@ export class MqttRemotes extends AbstractMeld implements MeldRemotes {
       const updatesAddress = uuid();
       await this.reply(sentParams, new Response.Revup(true, updatesAddress), true);
       // Ack has been sent, start streaming the updates
-      this.produce(revup, updatesAddress, jsonFromDelta, 'updates');
+      await this.produce(revup, updatesAddress, jsonFromDelta, 'updates');
     } else if (this.clone) {
-      this.reply(sentParams, new Response.Revup(false, this.clone.id));
+      await this.reply(sentParams, new Response.Revup(false, this.clone.id));
     }
   }
 
@@ -375,8 +398,7 @@ export class MqttRemotes extends AbstractMeld implements MeldRemotes {
         .catch((error: any) => this.mqtt.publish(address, JSON.stringify({ error })))
         .catch(this.warnError);
     }
-    // Keep track of all productions so that we can shut down cleanly
-    const done: Promise<void> = data.pipe(
+    return data.pipe(
       // concatMap guarantees delivery ordering despite toJson promise ordering
       concatMap(datum => toJson(datum)),
       materialize(),
@@ -384,8 +406,7 @@ export class MqttRemotes extends AbstractMeld implements MeldRemotes {
         next => notify({ next }),
         error => notify({ error }),
         () => notify({ complete: true }))))
-      .toPromise().then(() => { this.productions.delete(done); });
-    this.productions.add(done);
+      .toPromise();
   }
 
   private async reply({ fromId: toId, messageId: sentMessageId }: DirectParams, res: Response | null, expectAck?: boolean) {
