@@ -1,6 +1,10 @@
 import { Iri } from "jsonld/jsonld-spec";
 import { toArray } from '../util';
 
+/**
+ * A query variable, prefixed with "?"
+ * @see https://www.w3.org/TR/sparql11-query/#QSynVariables
+ */
 export type Variable = string;
 
 export interface Pattern {
