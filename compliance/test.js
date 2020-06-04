@@ -19,7 +19,7 @@ http.on('after', orchestrator.afterRequest);
 http.listen(httpUrl.port, () => {
   LOG.info(`Orchestrator listening on ${httpUrl.port}`);
   const test = spawn('npm', ['run', 'test'], {
-    cwd: join(__dirname, '..', 'node_modules', '@gsvarovsky', 'm-ld-spec'),
+    cwd: join(__dirname, '..', 'node_modules', '@m-ld', 'm-ld-spec'),
     env: { ...process.env, MELD_ORCHESTRATOR_URL: httpUrl.toString(), LOG_LEVEL: `${LOG.getLevel()}` },
     stdio: LOG.getLevel() <= LOG.levels.DEBUG ? 'pipe' : 'inherit',
     execArgv: inspector.url() ? [`--inspect-brk=${global.nextDebugPort++}`] : []
