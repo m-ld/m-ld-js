@@ -1,9 +1,8 @@
 
-const path = require('path');
 module.exports = {
   mode: 'file',
   readme: 'doc/index.md',
-  out: path.join('_site', process.env.npm_package_version),
+  out: '_site',
   theme: 'minimal',
   includes: 'doc',
   ignoreCompilerErrors: true,
