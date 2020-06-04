@@ -6,12 +6,13 @@
   "types": "dist/index.d.ts",
   "scripts": {
     "link-local-m-ld-spec": "sudo npm link ../m-ld-spec",
-    "clean": "rm -rf dist",
+    "clean": "rm -rf dist _site",
     "build-quick": "tsc",
-    "build": "npm run clean && jest --silent && tsc",
+    "build": "npm run clean && jest --silent && tsc && npm run doc",
     "dev": "jest --watch --silent",
     "compliance": "node compliance/test.js",
-    "publish-patch": "npm run build && npm version patch && git push && npm publish"
+    "publish-patch": "npm run build && npm version patch && git push && npm publish",
+    "doc": "dts-bundle-generator -o tmp.d.ts dist/index.d.ts --no-check && typedoc --options typedoc.js tmp.d.ts && rm tmp.d.ts"
   },
   "repository": {
     "type": "git",
@@ -29,6 +30,7 @@
     "@types/memdown": "^3.0.0",
     "@types/readable-stream": "2.3.5",
     "aedes": "^0.42.0",
+    "dts-bundle-generator": "^4.3.0",
     "jest": "^26.0.1",
     "jest-mock-extended": "^1.0.8",
     "leveldown": "^5.6.0",
@@ -36,6 +38,7 @@
     "restify": "^8.5.1",
     "tmp": "^0.2.1",
     "ts-jest": "^26.0.0",
+    "typedoc": "^0.17.7",
     "typescript": "^3.9.3"
   },
   "jest": {

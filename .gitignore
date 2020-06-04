@@ -42,6 +42,10 @@ jspm_packages/
 # distribution folder
 dist/
 
+# site (documentation) folder & temporary file
+_site/
+tmp.d.ts
+
 # Mac
 .DS_Store
 
