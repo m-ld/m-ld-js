@@ -2,11 +2,11 @@
 The Javascript engine can be used in any modern browser or in [Node.js](https://nodejs.org/).
 
 ## install
-`npm install @gsvarovsky/m-ld -S`
+`npm install @m-ld/m-ld -S`
 
 ## basic usage
 ```js
-import { clone } from '@gsvarovsky/m-ld';
+import { clone } from '@m-ld/m-ld';
 ```
 The [clone](#clone) function initialises the m-ld engine with a leveldb
 back-end and the clone [configuration](interfaces/meldconfig.html).

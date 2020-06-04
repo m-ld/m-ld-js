@@ -16,14 +16,14 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/gsvarovsky/m-ld-js.git"
+    "url": "git+https://github.com/m-ld/m-ld-js.git"
   },
   "author": "gsvarovsky@gmail.com",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/gsvarovsky/m-ld-js/issues"
+    "url": "https://github.com/m-ld/m-ld-js/issues"
   },
-  "homepage": "https://github.com/gsvarovsky/m-ld-js#readme",
+  "homepage": "https://github.com/m-ld/m-ld-js#readme",
   "devDependencies": {
     "@m-ld/m-ld-spec": "^0.2.1",
     "@types/jest": "^25.2.3",
