@@ -7,6 +7,7 @@ import { uuid } from 'short-uuid';
 import { Subject } from '../src/m-ld/jsonrql';
 import { JsonDelta } from '../src/m-ld';
 import { Dataset } from '../src/dataset';
+import { from } from 'rxjs';
 
 const fred = {
   '@id': 'http://test.m-ld.org/fred',
@@ -73,9 +74,10 @@ describe('SU-Set Dataset', () => {
 
       test('answers an empty snapshot', async () => {
         const snapshot = await ssd.takeSnapshot();
-        expect(snapshot.time.equals(localTime)).toBe(true);
+        expect(snapshot.lastTime.equals(localTime)).toBe(true);
         expect(snapshot.lastHash).toBeTruthy();
-        await expect(snapshot.data.toPromise()).resolves.toBeUndefined();
+        await expect(snapshot.quads.toPromise()).resolves.toBeUndefined();
+        await expect(snapshot.tids.toPromise()).resolves.toBeUndefined();
       });
 
       test('transacts an insert', async () => {
@@ -107,8 +109,8 @@ describe('SU-Set Dataset', () => {
           delete: '{"@graph":{}}'
         }, remoteTime = remoteTime.ticked(), () => localTime = localTime.update(remoteTime).ticked());
 
-        await expect(ssd.find({ '@id': 'http://test.m-ld.org/fred' }))
-          .resolves.toEqual(new Set(['http://test.m-ld.org/fred']));
+        await expect(ssd.find1({ '@id': 'http://test.m-ld.org/fred' }))
+          .resolves.toEqual('http://test.m-ld.org/fred');
 
         await expect(willUpdate).resolves.toHaveProperty('@insert', { '@graph': [fred] });
       });
@@ -117,9 +119,8 @@ describe('SU-Set Dataset', () => {
         let firstHash: Hash;
         let firstTid: string;
 
-        beforeEach(async () => firstHash = await ssd.lastHash());
-
         beforeEach(async () => {
+          firstHash = await ssd.lastHash();
           firstTid = (await ssd.transact(async () => [
             localTime = localTime.ticked(),
             await ssd.insert(fred)
@@ -142,9 +143,24 @@ describe('SU-Set Dataset', () => {
 
         test('answers a snapshot', async () => {
           const snapshot = await ssd.takeSnapshot();
-          expect(snapshot.time.equals(localTime)).toBe(true);
+          expect(snapshot.lastTime.equals(localTime)).toBe(true);
           expect(snapshot.lastHash.equals(firstHash)).toBe(false);
-          await expect(snapshot.data.toPromise()).resolves.toBeDefined();
+          await expect(snapshot.quads.toPromise()).resolves.toBeDefined();
+          await expect(snapshot.tids.toPromise()).resolves.toBeDefined();
+        });
+
+        test('applies a snapshot', async () => {
+          const snapshot = await ssd.takeSnapshot();
+          const lastHash = Hash.random(); // Blatant lie, for the test
+          await ssd.applySnapshot({
+            lastTime: localTime,
+            lastHash,
+            quads: from(await snapshot.quads.pipe(toArray()).toPromise()),
+            tids: from(await snapshot.tids.pipe(toArray()).toPromise())
+          }, localTime = localTime.ticked());
+          expect((await ssd.lastHash()).equals(lastHash)).toBe(true);
+          await expect(ssd.find1({ '@id': 'http://test.m-ld.org/fred' }))
+            .resolves.toEqual('http://test.m-ld.org/fred');
         });
 
         test('transacts a delete', async () => {
@@ -182,9 +198,7 @@ describe('SU-Set Dataset', () => {
               "s":"http://test.m-ld.org/fred"}}`
           }, remoteTime = remoteTime.ticked(), () => localTime = localTime.update(remoteTime).ticked());
 
-          await expect(ssd.find({ '@id': 'http://test.m-ld.org/fred' }))
-            .resolves.toEqual(new Set());
-
+          await expect(ssd.find1({ '@id': 'http://test.m-ld.org/fred' })).resolves.toEqual('');
           await expect(willUpdate).resolves.toHaveProperty('@delete', { '@graph': [fred] });
         });
 
@@ -196,6 +210,41 @@ describe('SU-Set Dataset', () => {
           expect(msg.time.equals(localTime)).toBe(true);
 
           await expect(ssd.describe1('http://test.m-ld.org/barney')).resolves.toEqual(barney);
+        });
+
+        test('ignores a duplicate transaction', async () => {
+          await ssd.transact(async () => [
+            localTime = localTime.ticked(),
+            await ssd.delete({ '@id': 'http://test.m-ld.org/fred' })
+          ]);
+          await ssd.apply({
+            tid: firstTid,
+            insert: '{"@graph":{"@id":"http://test.m-ld.org/fred","http://test.m-ld.org/#name":"Fred"}}',
+            delete: '{"@graph":{}}'
+          }, remoteTime = remoteTime.ticked(), () => localTime = localTime.update(remoteTime).ticked());
+
+          await expect(ssd.find1({ '@id': 'http://test.m-ld.org/fred' })).resolves.toEqual('');
+        });
+
+        test('ignores a duplicate txn after snapshot', async () => {
+          await ssd.transact(async () => [
+            localTime = localTime.ticked(),
+            await ssd.delete({ '@id': 'http://test.m-ld.org/fred' })
+          ]);
+          const snapshot = await ssd.takeSnapshot();
+          await ssd.applySnapshot({
+            lastTime: localTime,
+            lastHash: await ssd.lastHash(),
+            quads: from(await snapshot.quads.pipe(toArray()).toPromise()),
+            tids: from(await snapshot.tids.pipe(toArray()).toPromise())
+          }, localTime = localTime.ticked());
+          await ssd.apply({
+            tid: firstTid,
+            insert: '{"@graph":{"@id":"http://test.m-ld.org/fred","http://test.m-ld.org/#name":"Fred"}}',
+            delete: '{"@graph":{}}'
+          }, remoteTime = remoteTime.ticked(), () => localTime = localTime.update(remoteTime).ticked());
+
+          await expect(ssd.find1({ '@id': 'http://test.m-ld.org/fred' })).resolves.toEqual('');
         });
 
         test('answers local op since first', async () => {

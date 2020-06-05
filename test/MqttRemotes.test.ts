@@ -3,10 +3,9 @@ import { MockProxy } from 'jest-mock-extended';
 import { AsyncMqttClient } from 'async-mqtt';
 import { DeltaMessage } from '../src/m-ld';
 import { TreeClock } from '../src/clocks';
-import { Subject as Source, of } from 'rxjs';
+import { Subject as Source } from 'rxjs';
 import { mockLocal, MockMqtt, mockMqtt } from './testClones';
-import { filter, first, take, toArray } from 'rxjs/operators';
-import { Future } from '../src/util';
+import { take, toArray } from 'rxjs/operators';
 import { comesOnline, isOnline } from '../src/AbstractMeld';
 
 describe('New MQTT remotes', () => {

@@ -77,21 +77,23 @@ export namespace Response {
 
   export class Snapshot implements Response {
     constructor(
-      readonly time: TreeClock,
-      readonly dataAddress: string,
+      readonly lastTime: TreeClock,
+      readonly quadsAddress: string,
+      readonly tidsAddress: string,
       readonly lastHash: Hash,
       readonly updatesAddress: string) {
     }
 
     readonly toJson = () => ({
       '@type': 'http://control.m-ld.org/response/snapshot',
-      time: this.time.toJson(),
-      dataAddress: this.dataAddress,
+      lastTime: this.lastTime.toJson(),
+      quadsAddress: this.quadsAddress,
+      tidsAddress: this.tidsAddress,
       lastHash: this.lastHash.encode(),
       updatesAddress: this.updatesAddress
     });
 
-    toString = () => `Snapshot at ${this.time} with hash ${this.lastHash}`;
+    toString = () => `Snapshot at ${this.lastTime} with hash ${this.lastHash}`;
     [inspect] = () => this.toString();
   }
 
@@ -125,9 +127,11 @@ export namespace Response {
           if (clock)
             return new NewClock(clock);
         case 'http://control.m-ld.org/response/snapshot':
-          const time = TreeClock.fromJson(json.time);
-          if (time)
-            return new Snapshot(time, json.dataAddress, Hash.decode(json.lastHash), json.updatesAddress);
+          const lastTime = TreeClock.fromJson(json.lastTime);
+          if (lastTime)
+            return new Snapshot(
+              lastTime, json.quadsAddress, json.tidsAddress,
+              Hash.decode(json.lastHash), json.updatesAddress);
         case 'http://control.m-ld.org/response/revup':
           return new Revup(json.canRevup, json.updatesAddress);
       }

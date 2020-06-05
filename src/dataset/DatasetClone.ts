@@ -196,14 +196,14 @@ export class DatasetClone extends AbstractMeld implements MeldClone {
       throw new MeldError(HAS_UNSENT);
 
     const snapshot = await this.remotes.snapshot();
-    this.messageService.join(snapshot.time);
+    this.messageService.join(snapshot.lastTime);
 
     // If we have any operations since the snapshot, re-emit them
-    const reEmits = this.dataset.operationsSince(snapshot.time)
+    const reEmits = this.dataset.operationsSince(snapshot.lastTime)
       .then(recent => (recent ?? EMPTY).pipe(tap(this.nextUpdate), toArray()).toPromise());
     // Start delivering the snapshot when we have done re-emitting
-    const delivered = reEmits.then(() => this.dataset.applySnapshot(
-      snapshot.data, snapshot.lastHash, snapshot.time, this.localTime));
+    const delivered = reEmits.then(() =>
+      this.dataset.applySnapshot(snapshot, this.localTime));
     // Delay all updates until the snapshot has been fully delivered
     // This is because a snapshot is applied in multiple transactions
     const updates = snapshot.updates.pipe(delayUntil(from(delivered)));
@@ -225,11 +225,11 @@ export class DatasetClone extends AbstractMeld implements MeldClone {
       this.log.info('Compiling snapshot');
       const sentSnapshot = new Future;
       const updates = this.remoteUpdatesBeforeNow(sentSnapshot);
-      const { time, data, lastHash } = await this.dataset.takeSnapshot();
+      const snapshot = await this.dataset.takeSnapshot();
       return {
-        time, lastHash, updates,
+        ...snapshot, updates,
         // Snapshotting holds open a transaction, so buffer/replay triples
-        data: data.pipe(publishReplay(), refCount(), tapComplete(sentSnapshot))
+        quads: snapshot.quads.pipe(publishReplay(), refCount(), tapComplete(sentSnapshot))
       };
     });
   }

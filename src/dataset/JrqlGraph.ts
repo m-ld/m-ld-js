@@ -81,14 +81,8 @@ export class JrqlGraph {
     return this.describe(describe, undefined, context).pipe(first<T>()).toPromise();
   }
 
-  async find(jrqlPattern: Subject | Group,
-    context: Context = jrqlPattern['@context'] || this.defaultContext): Promise<Set<Iri>> {
-    const quads = await this.findQuads(jrqlPattern, context);
-    return new Set(quads.map(quad => quad.subject.value));
-  }
-
-  async find1(jrqlPattern: Subject | Group,
-    context: Context = jrqlPattern['@context'] || this.defaultContext): Promise<Iri | ''> {
+  async find1<T extends Subject>(jrqlPattern: Partial<T>,
+    context: Context = jrqlPattern['@context'] ?? this.defaultContext): Promise<Iri | ''> {
     const quads = await this.findQuads(jrqlPattern, context);
     return quads.length ? quads.map(quad => quad.subject.value)
       .reduce((rtn, id) => rtn === id ? rtn : '') : '';

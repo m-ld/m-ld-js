@@ -1,5 +1,5 @@
-import { Snapshot, DeltaMessage, MeldRemotes, MeldLocal } from '../m-ld';
-import { Observable, Subject as Source, BehaviorSubject } from 'rxjs';
+import { Snapshot, DeltaMessage, MeldRemotes, MeldLocal, UUID } from '../m-ld';
+import { Observable, Subject as Source, BehaviorSubject, identity } from 'rxjs';
 import { TreeClock } from '../clocks';
 import { AsyncMqttClient, IClientOptions, ISubscriptionMap, connect as defaultConnect } from 'async-mqtt';
 import { generate as uuid } from 'short-uuid';
@@ -185,8 +185,9 @@ export class MqttRemotes extends AbstractMeld implements MeldRemotes {
     const ack = new Future<null>();
     const res = await this.send<Response.Snapshot>(new Request.Snapshot, ack);
     const snapshot: Snapshot = {
-      time: res.time,
-      data: await this.consume(res.dataAddress, fromMeldJson, 'failIfSlow'),
+      lastTime: res.lastTime,
+      quads: await this.consume(res.quadsAddress, fromMeldJson, 'failIfSlow'),
+      tids: await this.consume<UUID[]>(res.tidsAddress, identity, 'failIfSlow'),
       lastHash: res.lastHash,
       updates: await this.consume(res.updatesAddress, deltaFromJson)
     };
@@ -357,15 +358,15 @@ export class MqttRemotes extends AbstractMeld implements MeldRemotes {
   }
 
   private async replySnapshot(sentParams: SendParams, snapshot: Promise<Snapshot>) {
-    const active = this.active();
-    const { time, lastHash, data, updates } = await snapshot;
-    const dataAddress = uuid(), updatesAddress = uuid();
+    const { lastTime, lastHash, quads, tids, updates } = await snapshot;
+    const quadsAddress = uuid(), tidsAddress = uuid(), updatesAddress = uuid();
     await this.reply(sentParams, new Response.Snapshot(
-      time, dataAddress, lastHash, updatesAddress
+      lastTime, quadsAddress, tidsAddress, lastHash, updatesAddress
     ), true);
     // Ack has been sent, start streaming the data and updates concurrently
     await Promise.all([
-      this.produce(data, dataAddress, toMeldJson, 'snapshot'),
+      this.produce(quads, quadsAddress, toMeldJson, 'snapshot'),
+      this.produce(tids, tidsAddress, identity, 'tids'),
       this.produce(updates, updatesAddress, jsonFromDelta, 'updates')
     ]);
   }
@@ -384,7 +385,7 @@ export class MqttRemotes extends AbstractMeld implements MeldRemotes {
   }
 
   private produce<T>(data: Observable<T>, subAddress: string,
-    toJson: (datum: T) => Promise<any>, type: 'snapshot' | 'updates') {
+    toJson: (datum: T) => Promise<object> | T, type: string) {
     const address = this.controlSubAddress(subAddress);
     const notify = async (notification: JsonNotification) => {
       if (notification.error)
@@ -400,7 +401,7 @@ export class MqttRemotes extends AbstractMeld implements MeldRemotes {
     }
     return data.pipe(
       // concatMap guarantees delivery ordering despite toJson promise ordering
-      concatMap(datum => toJson(datum)),
+      concatMap(async datum => await toJson(datum)),
       materialize(),
       flatMap(notification => notification.do(
         next => notify({ next }),
