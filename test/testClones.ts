@@ -1,12 +1,13 @@
 import { DatasetClone } from '../src/dataset/DatasetClone';
 import { MeldRemotes, DeltaMessage, MeldLocal } from '../src/m-ld';
 import { mock, MockProxy } from 'jest-mock-extended';
-import { Observable, of, NEVER } from 'rxjs';
+import { Observable, of, NEVER, BehaviorSubject, from, asapScheduler } from 'rxjs';
 import { Dataset, QuadStoreDataset } from '../src/dataset';
 import MemDown from 'memdown';
 import { TreeClock } from '../src/clocks';
 import { AsyncMqttClient, IPublishPacket } from 'async-mqtt';
 import { EventEmitter } from 'events';
+import { observeOn } from 'rxjs/operators';
 
 export async function genesisClone(remotes?: MeldRemotes) {
   const clone = new DatasetClone('test', memStore(), remotes ?? mockRemotes());
@@ -16,8 +17,10 @@ export async function genesisClone(remotes?: MeldRemotes) {
 
 export function mockRemotes(
   updates: Observable<DeltaMessage> = NEVER,
-  online: Observable<boolean | null> = of(true),
+  onlines: Array<boolean | null> = [true],
   newClock: TreeClock = TreeClock.GENESIS): MeldRemotes {
+  const online = new BehaviorSubject(onlines[0]);
+  from(onlines.slice(1)).pipe(observeOn(asapScheduler)).forEach(v => online.next(v));
   return {
     ...mock<MeldRemotes>(),
     setLocal: () => { },

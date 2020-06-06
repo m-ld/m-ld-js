@@ -272,8 +272,9 @@ export class SuSetDataset extends JrqlGraph {
       const tidPatch = (await this.newTriplesTid(delta.insert, delta.tid))
         .concat({ oldQuads: flatten(deletedTriplesTids.map(tripleTids => tripleTids.tids)) });
       // Include journaling in final patch
+      const allTidsPatch = await this.newTid(delta.tid);
       const [journaling, entry] = await this.journal(delta, time);
-      return [await this.applyTransaction(delta.tid, time, patch, tidPatch, journaling), entry];
+      return [await this.transactionPatch(time, patch, allTidsPatch, tidPatch, journaling), entry];
     });
   }
 
@@ -297,9 +298,10 @@ export class SuSetDataset extends JrqlGraph {
             return (await tripleTidPatch).concat({ oldQuads: toRemove });
           }, this.newTriplesTid(delta.insert, delta.tid));
         // Include journaling in final patch
+        const allTidsPatch = await this.newTid(delta.tid);
         const time = localTime();
         const journaling = await this.journal(delta, time, msgTime);
-        return await this.applyTransaction(delta.tid, time, patch, tidPatch, journaling);
+        return await this.transactionPatch(time, patch, allTidsPatch, tidPatch, journaling);
       } else {
         this.log.debug(`Rejecting tid: ${msgData.tid} as duplicate`);
       }
@@ -308,23 +310,28 @@ export class SuSetDataset extends JrqlGraph {
 
   /**
    * Rolls up the given transaction details into a single patch and notifies
-   * data observers.
-   * @param tid the TID of the transaction
+   * data observers. Mostly this method is just a type convenience for ensuring
+   * everything needed for a transaction is present.
    * @param time the local time of the transaction
    * @param dataPatch the transaction data patch
+   * @param allTidsPatch insertion to qs:all TIDs in TID graph
    * @param tripleTidPatch triple TID patch (inserts and deletes)
    * @param journaling transaction journaling patch
    */
-  private async applyTransaction(
-    tid: UUID, time: TreeClock, dataPatch: PatchQuads, tripleTidPatch: PatchQuads, journaling: PatchQuads):
+  private async transactionPatch(
+    time: TreeClock, dataPatch: PatchQuads, allTidsPatch: PatchQuads, tripleTidPatch: PatchQuads, journaling: PatchQuads):
     Promise<Patch> {
-    // Notify the update
+    // Notify the update (we don't have to wait for this)
+    this.notifyUpdate(dataPatch, time);
+    return dataPatch.concat(allTidsPatch).concat(tripleTidPatch).concat(journaling);
+  }
+
+  private async notifyUpdate(patch: PatchQuads, time: TreeClock) {
     this.updateSource.next({
       '@ticks': time.getTicks(),
-      '@delete': await toGroup(dataPatch.oldQuads, this.defaultContext),
-      '@insert': await toGroup(dataPatch.newQuads, this.defaultContext)
+      '@delete': await toGroup(patch.oldQuads, this.defaultContext),
+      '@insert': await toGroup(patch.newQuads, this.defaultContext)
     });
-    return dataPatch.concat(await this.newTid(tid)).concat(tripleTidPatch).concat(journaling);
   }
 
   private newTid(tid: UUID | UUID[]): Promise<PatchQuads> {

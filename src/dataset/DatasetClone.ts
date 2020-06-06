@@ -80,29 +80,36 @@ export class DatasetClone extends AbstractMeld implements MeldClone {
     });
 
     await new Promise((resolve, reject) => {
-      this.remotes.online.subscribe(remotesOnline => {
-        // Block transactions, revups and other connect attempts while handling online change
-        this.onlineLock.acquire(this.id, async () => {
-          if (remotesOnline === false && this.newClone) {
-            throw new Error('New clone is siloed.');
-          } else if (remotesOnline === true) {
-            // Connect in the online lock
-            return this.connect();
-          } else if (remotesOnline === null) {
-            // We are partitioned from the domain.
-            this.remoteUpdates.next(NEVER);
-            this.setOnline(false);
-          } else if (remotesOnline === false) {
-            // We are a silo, the last survivor. Stay online for any newcomers.
-            this.remoteUpdates.next(this.remotes.updates);
-            this.setOnline(true);
-          }
-        }).then(resolve, reject);
-      });
+      // Subscribe will synchronously receive the current value, but we don't
+      // use it because the value might have changed when we get the lock.
+      this.remotes.online.subscribe(() =>
+        this.decideOnline().then(resolve, reject));
     });
-    // For a new non-genesis clone, the first connect is essential
+    // For a new non-genesis clone, the first connect is essential.
     if (this.newClone)
       await comesOnline(this);
+  }
+
+  private decideOnline(): Promise<void> {
+    // Block transactions, revups and other connect attempts while handling
+    // online change.
+    return this.onlineLock.acquire(this.id, async () => {
+      const remotesOnline = await isOnline(this.remotes);
+      if (remotesOnline === false && this.newClone) {
+        throw new Error('New clone is siloed.');
+      } else if (remotesOnline === true) {
+        // Connect in the online lock
+        return this.connect();
+      } else if (remotesOnline === null) {
+        // We are partitioned from the domain.
+        this.remoteUpdates.next(NEVER);
+        this.setOnline(false);
+      } else if (remotesOnline === false) {
+        // We are a silo, the last survivor. Stay online for any newcomers.
+        this.remoteUpdates.next(this.remotes.updates);
+        this.setOnline(true);
+      }
+    });
   }
 
   private async connect(): Promise<void> {
@@ -144,14 +151,13 @@ export class DatasetClone extends AbstractMeld implements MeldClone {
       if (last != null)
         await last.delivered;
       this.revvingUp.next(false);
-    }, async err => {
+    }, err => {
       // If rev-ups fail (for example, if the collaborator goes offline)
       // it's not a catastrophe but we do need to enqueue a retry
       this.log.warn('Rev-up did not complete due to', err);
-      await this.onlineLock.acquire(this.id, async () => {
-        if (await isOnline(this.remotes))
-          return this.connect();
-      });
+      // At this point we will be online if the connect was OK
+      this.setOnline(false);
+      return this.decideOnline();
     }).catch(this.warnError); // TODO: Check data integrity
     // Updates must be paused during revups because the collaborator might
     // send an update while also sending revups of its own prior updates.
