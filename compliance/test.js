@@ -1,39 +1,46 @@
-const { spawn } = require('child_process');
+const { fork, spawn } = require('child_process');
+const { createWriteStream } = require('fs');
 const { join } = require('path');
-const restify = require('restify');
-const orchestrator = require('./orchestrator');
-const httpUrl = new URL('http://localhost:3000');
 const inspector = require('inspector');
 const LOG = require('loglevel');
+const httpUrl = new URL('http://localhost:3000');
 
-LOG.setLevel(LOG.levels.WARN);
-LOG.getLogger('aedes').setLevel(LOG.levels.WARN);
-global.nextDebugPort = 40895;
+LOG.setLevel(LOG.levels.DEBUG);
+let testDebugPort, orchestratorDebugPort, firstCloneDebugPort;
+if (inspector.url() != null) {
+  let debugPort = Number(new URL(inspector.url()).port);
+  testDebugPort = ++debugPort;
+  orchestratorDebugPort = ++debugPort;
+  firstCloneDebugPort = ++debugPort;
+}
 
-const http = restify.createServer();
-http.use(restify.plugins.queryParser());
-http.use(restify.plugins.bodyParser());
-Object.entries(orchestrator.routes)
-  .forEach(([path, route]) => http.post('/' + path, route));
-http.on('after', orchestrator.afterRequest);
-http.listen(httpUrl.port, () => {
-  LOG.info(`Orchestrator listening on ${httpUrl.port}`);
-  const test = spawn('npm', ['run', 'test'], {
-    cwd: join(__dirname, '..', 'node_modules', '@m-ld', 'm-ld-spec'),
-    env: { ...process.env, MELD_ORCHESTRATOR_URL: httpUrl.toString(), LOG_LEVEL: `${LOG.getLevel()}` },
-    stdio: LOG.getLevel() <= LOG.levels.DEBUG ? 'pipe' : 'inherit',
-    execArgv: inspector.url() ? [`--inspect-brk=${global.nextDebugPort++}`] : []
-  });
+// Fork the orchestrator
+const orchestrator = fork(join(__dirname, 'orchestrator.js'),
+  [httpUrl, firstCloneDebugPort, LOG.getLevel()],
+  { execArgv: inspector.url() ? [`--inspect-brk=${orchestratorDebugPort}`] : [], silent: true });
+// Direct orchestrator output to file
+const logFile = createWriteStream(join(__dirname, '.log'));
+orchestrator.stdout.pipe(logFile);
+orchestrator.stderr.pipe(logFile);
 
-  if (LOG.getLevel() <= LOG.levels.DEBUG) {
-    test.stdout.pipe(process.stdout);
-    test.stderr.pipe(process.stderr);
+orchestrator.on('message', message => {
+  switch (message) {
+    case 'listening':
+      spawn('npm', ['run', 'test'], {
+        cwd: join(__dirname, '..', 'node_modules', '@m-ld', 'm-ld-spec'),
+        env: { ...process.env, MELD_ORCHESTRATOR_URL: httpUrl.toString(), LOG_LEVEL: `${LOG.getLevel()}` },
+        stdio: 'inherit',
+        execArgv: inspector.url() ? [`--inspect-brk=${testDebugPort}`] : []
+      }).on('exit', code => {
+        LOG.info(`Test process exited with code ${code}`);
+        orchestrator.kill(); // Try to shut down normally
+        process.exit(code);
+      });
   }
-
-  test.on('exit', (code) => {
-    LOG.info(`Test process exited with code ${code}`);
-    orchestrator.onExit();
-    http.close();
+});
+orchestrator.on('exit', code => {
+  if (code > 0) {
+    LOG.warn(`Orchestrator process died with code ${code}`);
     process.exit(code);
-  });
+  }
 });
