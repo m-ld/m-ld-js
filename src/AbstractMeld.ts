@@ -55,7 +55,7 @@ export abstract class AbstractMeld implements Meld {
   }
 }
 
-export function isOnline(meld: Meld): Promise<boolean | null> {
+export function isOnline(meld: Pick<Meld, 'online'>): Promise<boolean | null> {
   return meld.online.pipe(first()).toPromise();
 };
 
