@@ -17,6 +17,17 @@ export function jsonFrom(payload: Buffer): any {
   return JSON.parse(payload.toString());
 }
 
+export function toJson(thing: any): any {
+  if (thing == null)
+    return null;
+  else if (typeof thing.toJson == 'function')
+    return thing.toJson();
+  else if (thing instanceof Error)
+    return { ...thing, message: thing.message };
+  else
+    return thing;
+}
+
 export function rdfToJson(quads: Quad[]): Promise<any> {
   // Using native types to avoid unexpected value objects
   return fromRDF(quads, { useNativeTypes: true });
@@ -165,7 +176,7 @@ export function getIdLogger(ctor: Function, id: string, logLevel: LogLevelDesc =
     const originalFactory = log.methodFactory;
     log.methodFactory = (methodName, logLevel, loggerName) => {
       const method = originalFactory(methodName, logLevel, loggerName);
-      return (...msg: any[]) => method.apply(undefined, [id, ctor.name].concat(msg));
+      return (...msg: any[]) => method.apply(undefined, [new Date().toISOString(), id, ctor.name].concat(msg));
     };
   }
   log.setLevel(logLevel);

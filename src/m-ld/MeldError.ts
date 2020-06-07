@@ -1,20 +1,33 @@
-class MeldErrorStatus {
-  constructor(readonly code: number, readonly message: string) { }
-
-  equals(status: any) {
-    return status instanceof MeldErrorStatus && status.code === this.code;
-  }
+// TODO: Fix the constants in the spec
+export enum MeldErrorStatus {
+  'No error' = 1,
+  'Unknown error',
+  'No visible clones',
+  'Bad Update',
+  'Bad response',
+  'Request rejected',
+  'Unsent updates',
+  'Clone has closed',
+  'Meld is offline',
+  'Clone data is locked'
 }
 
-export const NONE_VISIBLE = new MeldErrorStatus(1, 'No visible clones');
-export const BAD_UPDATE = new MeldErrorStatus(2, 'Bad Update');
-export const HAS_UNSENT = new MeldErrorStatus(3, 'Unsent updates');
-export const IS_CLOSED = new MeldErrorStatus(4, 'Clone has closed');
-export const IS_OFFLINE = new MeldErrorStatus(4, 'Meld is offline');
-export const DATA_LOCKED = new MeldErrorStatus(5, 'Clone data is locked');
-
 export class MeldError extends Error {
-  constructor(readonly status: MeldErrorStatus, detail?: any) {
-    super(status.message + (detail != null ? `: ${detail}` : ''));
+  readonly status: MeldErrorStatus;
+
+  constructor(status: keyof typeof MeldErrorStatus | MeldErrorStatus, detail?: any) {
+    super((typeof status == 'string' ? status : MeldErrorStatus[status]) + (detail != null ? `: ${detail}` : ''));
+    this.status = typeof status == 'string' ? MeldErrorStatus[status] : status;
+  }
+
+  static from(err: any): MeldError {
+    if (err == null)
+      return new MeldError('No error');
+    else if (err instanceof MeldError)
+      return err;
+    else if (typeof err.status == 'number' && err.status in MeldErrorStatus)
+      return new MeldError(err.status, err.message);
+    else
+      return new MeldError('Unknown error', err.message);
   }
 }

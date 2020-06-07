@@ -1,5 +1,5 @@
-import { Snapshot, DeltaMessage, MeldRemotes, MeldLocal } from '../m-ld';
-import { Observable, Subject as Source, BehaviorSubject } from 'rxjs';
+import { Snapshot, DeltaMessage, MeldRemotes, MeldLocal, UUID } from '../m-ld';
+import { Observable, Subject as Source, BehaviorSubject, identity } from 'rxjs';
 import { TreeClock } from '../clocks';
 import { AsyncMqttClient, IClientOptions, ISubscriptionMap, connect as defaultConnect } from 'async-mqtt';
 import { generate as uuid } from 'short-uuid';
@@ -7,11 +7,11 @@ import { MqttTopic, SEND_TOPIC, REPLY_TOPIC, SendParams, ReplyParams, DirectPara
 import { TopicParams } from 'mqtt-pattern';
 import { MqttPresence } from './MqttPresence';
 import { Response, Request, Hello } from '../m-ld/ControlMessage';
-import { Future, jsonFrom } from '../util';
-import { map, finalize, flatMap, reduce, toArray, first, concatMap, materialize, timeout } from 'rxjs/operators';
+import { Future, jsonFrom, toJson } from '../util';
+import { finalize, flatMap, reduce, toArray, first, concatMap, materialize, timeout } from 'rxjs/operators';
 import { toMeldJson, fromMeldJson } from '../m-ld/MeldJson';
 import { LogLevelDesc } from 'loglevel';
-import { MeldError, BAD_UPDATE, NONE_VISIBLE } from '../m-ld/MeldError';
+import { MeldError, MeldErrorStatus } from '../m-ld/MeldError';
 import { AbstractMeld, isOnline } from '../AbstractMeld';
 
 interface DomainParams extends TopicParams { domain: string; }
@@ -41,7 +41,7 @@ export class MqttRemotes extends AbstractMeld implements MeldRemotes {
   private readonly replyTopic: MqttTopic<ReplyParams>;
   private readonly presence: MqttPresence;
   private readonly replyResolvers: {
-    [messageId: string]: [(res: Response | null) => void, PromiseLike<null> | null]
+    [messageId: string]: [(res: Response | null) => void, PromiseLike<void> | null]
   } = {};
   private readonly recentlySentTo: Set<string> = new Set;
   private readonly consuming: { [address: string]: Source<any> } = {};
@@ -182,21 +182,33 @@ export class MqttRemotes extends AbstractMeld implements MeldRemotes {
   }
 
   async snapshot(): Promise<Snapshot> {
-    const ack = new Future<null>();
-    const res = await this.send<Response.Snapshot>(new Request.Snapshot, ack);
+    const ack = new Future;
+    const res = await this.send<Response.Snapshot>(new Request.Snapshot, { ack });
     const snapshot: Snapshot = {
-      time: res.time,
-      data: await this.consume(res.dataAddress, fromMeldJson, 'failIfSlow'),
+      lastTime: res.lastTime,
+      quads: await this.consume(res.quadsAddress, fromMeldJson, 'failIfSlow'),
+      tids: await this.consume<UUID[]>(res.tidsAddress, identity, 'failIfSlow'),
       lastHash: res.lastHash,
       updates: await this.consume(res.updatesAddress, deltaFromJson)
     };
     // Ack the response to start the streams
-    ack.resolve(null);
+    ack.resolve();
     return snapshot;
   }
 
-  revupFrom(time: TreeClock): Promise<Observable<DeltaMessage> | undefined> {
-    return this.revupFromNext(time, new Set);
+  async revupFrom(time: TreeClock): Promise<Observable<DeltaMessage> | undefined> {
+    const ack = new Future;
+    const res = await this.send<Response.Revup>(new Request.Revup(time), {
+      // Try everyone until we find someone who can revup
+      ack, check: res => res.canRevup
+    });
+    if (res.canRevup) {
+      const updates = await this.consume(
+        res.updatesAddress, deltaFromJson, 'failIfSlow');
+      // Ack the response to start the streams
+      ack.resolve();
+      return updates;
+    } // else return undefined
   }
 
   private get clone() {
@@ -205,22 +217,6 @@ export class MqttRemotes extends AbstractMeld implements MeldRemotes {
 
   private set clone(clone: MeldLocal | null) {
     this.localClone.next(clone);
-  }
-
-  private async revupFromNext(time: TreeClock, tried: Set<string>): Promise<Observable<DeltaMessage> | undefined> {
-    const ack = new Future<null>();
-    const res = await this.send<Response.Revup>(new Request.Revup(time), ack);
-    if (res.canRevup) {
-      const updates = await this.consume(
-        res.updatesAddress, deltaFromJson, 'failIfSlow');
-      // Ack the response to start the streams
-      ack.resolve(null);
-      return updates;
-    } else if (!tried.has(res.updatesAddress)) {
-      tried.add(res.updatesAddress);
-      // Not expecting an ack if hash not found
-      return this.revupFromNext(time, tried);
-    } // else return undefined
   }
 
   private async clonePresent(online: boolean) {
@@ -271,7 +267,7 @@ export class MqttRemotes extends AbstractMeld implements MeldRemotes {
         this.nextUpdate(update);
       else
         // This is extremely bad - may indicate a bad actor
-        this.close(new MeldError(BAD_UPDATE));
+        this.close(new MeldError('Bad Update'));
     }
   }
 
@@ -292,23 +288,38 @@ export class MqttRemotes extends AbstractMeld implements MeldRemotes {
       else if (jsonNotification.complete)
         this.consuming[topic].complete();
       else if (jsonNotification.error)
-        this.consuming[topic].error(new Error(jsonNotification.error));
+        this.consuming[topic].error(MeldError.from(jsonNotification.error));
     }
   }
 
-  private async send<T extends Response>(request: Request, ack: PromiseLike<null> | null = null): Promise<T> {
-    const messageId = uuid();
+  private async send<T extends Response>(
+    request: Request,
+    { ack, check }: {
+      ack?: PromiseLike<void>;
+      check?: (res: T) => boolean;
+    } = {},
+    tried: { [address: string]: PromiseLike<T> } = {},
+    messageId: string = uuid()): Promise<T> {
     const address = await this.nextSendAddress(messageId);
-    if (!address)
-      throw new MeldError(NONE_VISIBLE,
+    if (!address) {
+      throw new MeldError('No visible clones',
         `No-one present on ${this.controlTopic.address} to send message to`);
-
+    } else if (address in tried) {
+      // If we have already tried this address, we've tried everyone
+      return tried[address];
+    }
     this.log.debug('Sending request', messageId, request, address);
+    // If the publish fails, don't keep trying other addresses
     await this.mqtt.publish(address, JSON.stringify(request.toJson()));
-    return this.getResponse<T>(messageId, ack);
+    tried[address] = this.getResponse<T>(messageId, ack ?? null);
+    // If the caller doesn't like this response, try again
+    return tried[address].then(res => check == null || check(res) ? res :
+      this.send(request, { ack, check }, tried, messageId),
+      () => this.send(request, { ack, check }, tried, messageId));
   }
 
-  private getResponse<T extends Response | null>(messageId: string, ack: PromiseLike<null> | null) {
+  private getResponse<T extends Response | null>(
+    messageId: string, ack: PromiseLike<void> | null): PromiseLike<T> {
     const response = new Future<T>();
     const timer = setTimeout(() => {
       delete this.replyResolvers[messageId];
@@ -318,26 +329,38 @@ export class MqttRemotes extends AbstractMeld implements MeldRemotes {
     this.replyResolvers[messageId] = [res => {
       delete this.replyResolvers[messageId];
       clearTimeout(timer);
-      response.resolve(res as T);
+      if (res instanceof Response.Rejected)
+        response.reject(new MeldError(res.status));
+      else
+        response.resolve(res as T);
     }, ack];
     return response;
   }
 
   private async onSent(json: any, sentParams: SendParams) {
     // Ignore control messages before we have a clone
+    const replyRejected = (err: any) => {
+      this.reply(sentParams, new Response.Rejected(asMeldErrorStatus(err)))
+        .catch(this.warnError);
+      throw err;
+    }
     if (this.clone) {
       // Keep track of long-running activity so that we can shut down cleanly
       const active = this.active();
       try {
         const req = Request.fromJson(json);
         if (req instanceof Request.NewClock) {
-          await this.replyClock(sentParams, this.clone.newClock());
+          const clock = await this.clone.newClock().catch(replyRejected);
+          await this.replyClock(sentParams, clock);
         } else if (req instanceof Request.Snapshot) {
-          await this.replySnapshot(sentParams, this.clone.snapshot());
+          const snapshot = await this.clone.snapshot().catch(replyRejected);
+          await this.replySnapshot(sentParams, snapshot);
         } else if (req instanceof Request.Revup) {
-          await this.replyRevup(sentParams, this.clone.revupFrom(req.time));
+          const revup = await this.clone.revupFrom(req.time).catch(replyRejected);
+          await this.replyRevup(sentParams, revup);
         }
       } catch (err) {
+        // Rejection will already have been caught with replyRejected
         this.log.warn(err);
       } finally {
         active.resolve();
@@ -352,30 +375,29 @@ export class MqttRemotes extends AbstractMeld implements MeldRemotes {
     return active;
   }
 
-  private async replyClock(sentParams: SendParams, clock: Promise<TreeClock>) {
-    this.reply(sentParams, new Response.NewClock(await clock));
+  private async replyClock(sentParams: SendParams, clock: TreeClock) {
+    await this.reply(sentParams, new Response.NewClock(clock));
   }
 
-  private async replySnapshot(sentParams: SendParams, snapshot: Promise<Snapshot>) {
-    const active = this.active();
-    const { time, lastHash, data, updates } = await snapshot;
-    const dataAddress = uuid(), updatesAddress = uuid();
+  private async replySnapshot(sentParams: SendParams, snapshot: Snapshot): Promise<void> {
+    const { lastTime, lastHash, quads, tids, updates } = snapshot;
+    const quadsAddress = uuid(), tidsAddress = uuid(), updatesAddress = uuid();
     await this.reply(sentParams, new Response.Snapshot(
-      time, dataAddress, lastHash, updatesAddress
-    ), true);
+      lastTime, quadsAddress, tidsAddress, lastHash, updatesAddress
+    ), 'expectAck');
     // Ack has been sent, start streaming the data and updates concurrently
     await Promise.all([
-      this.produce(data, dataAddress, toMeldJson, 'snapshot'),
+      this.produce(quads, quadsAddress, toMeldJson, 'snapshot'),
+      this.produce(tids, tidsAddress, identity, 'tids'),
       this.produce(updates, updatesAddress, jsonFromDelta, 'updates')
     ]);
   }
 
   private async replyRevup(sentParams: SendParams,
-    willRevup: Promise<Observable<DeltaMessage> | undefined>) {
-    const revup = await willRevup;
+    revup: Observable<DeltaMessage> | undefined) {
     if (revup) {
       const updatesAddress = uuid();
-      await this.reply(sentParams, new Response.Revup(true, updatesAddress), true);
+      await this.reply(sentParams, new Response.Revup(true, updatesAddress), 'expectAck');
       // Ack has been sent, start streaming the updates
       await this.produce(revup, updatesAddress, jsonFromDelta, 'updates');
     } else if (this.clone) {
@@ -384,7 +406,7 @@ export class MqttRemotes extends AbstractMeld implements MeldRemotes {
   }
 
   private produce<T>(data: Observable<T>, subAddress: string,
-    toJson: (datum: T) => Promise<any>, type: 'snapshot' | 'updates') {
+    datumToJson: (datum: T) => Promise<object> | T, type: string) {
     const address = this.controlSubAddress(subAddress);
     const notify = async (notification: JsonNotification) => {
       if (notification.error)
@@ -395,21 +417,22 @@ export class MqttRemotes extends AbstractMeld implements MeldRemotes {
         // If notifications fail due to MQTT death, the recipient will find out
         // from the broker so here we make best efforts to notify an error and
         // then give up.
-        .catch((error: any) => this.mqtt.publish(address, JSON.stringify({ error })))
+        .catch((error: any) => this.mqtt.publish(address, JSON.stringify({ error: toJson(error) })))
         .catch(this.warnError);
     }
     return data.pipe(
       // concatMap guarantees delivery ordering despite toJson promise ordering
-      concatMap(datum => toJson(datum)),
+      concatMap(async datum => await datumToJson(datum)),
       materialize(),
       flatMap(notification => notification.do(
         next => notify({ next }),
-        error => notify({ error }),
+        error => notify({ error: toJson(error) }),
         () => notify({ complete: true }))))
       .toPromise();
   }
 
-  private async reply({ fromId: toId, messageId: sentMessageId }: DirectParams, res: Response | null, expectAck?: boolean) {
+  private async reply(
+    { fromId: toId, messageId: sentMessageId }: DirectParams, res: Response | null, expectAck?: 'expectAck') {
     const messageId = uuid();
     const address = REPLY_TOPIC.with({
       messageId, fromId: this.id, toId, sentMessageId
@@ -450,6 +473,10 @@ export class MqttRemotes extends AbstractMeld implements MeldRemotes {
     }
     return null;
   }
+}
+
+function asMeldErrorStatus(err: any): MeldErrorStatus {
+  return err instanceof MeldError ? err.status : MeldErrorStatus['Request rejected'];
 }
 
 function deltaFromJson(json: any): DeltaMessage {

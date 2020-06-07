@@ -3,11 +3,11 @@ import { MockProxy } from 'jest-mock-extended';
 import { AsyncMqttClient } from 'async-mqtt';
 import { DeltaMessage } from '../src/m-ld';
 import { TreeClock } from '../src/clocks';
-import { Subject as Source, of } from 'rxjs';
+import { Subject as Source } from 'rxjs';
 import { mockLocal, MockMqtt, mockMqtt } from './testClones';
-import { filter, first, take, toArray } from 'rxjs/operators';
-import { Future } from '../src/util';
+import { take, toArray } from 'rxjs/operators';
 import { comesOnline, isOnline } from '../src/AbstractMeld';
+import { MeldErrorStatus } from '../src/m-ld/MeldError';
 
 describe('New MQTT remotes', () => {
   let mqtt: MockMqtt & MockProxy<AsyncMqttClient>;
@@ -54,7 +54,7 @@ describe('New MQTT remotes', () => {
 
     test('subscribes to topics', () => {
       expect(mqtt.subscribe).toBeCalledWith({
-        '__presence/test.m-ld.org/+': { qos:  1 },
+        '__presence/test.m-ld.org/+': { qos: 1 },
         'test.m-ld.org/operations': { qos: 1 },
         'test.m-ld.org/control': { qos: 1 },
         'test.m-ld.org/registry': { qos: 1 },
@@ -178,6 +178,98 @@ describe('New MQTT remotes', () => {
         }
       });
       expect((await remotes.newClock()).equals(newClock)).toBe(true);
+    });
+
+    test('round robins for clock', async () => {
+      const newClock = TreeClock.GENESIS.forked().right;
+      // Set presence of client2's consumer
+      await mqtt.mockPublish('__presence/test.m-ld.org/client2', '{"consumer2":"test.m-ld.org/control"}');
+      await mqtt.mockPublish('__presence/test.m-ld.org/client3', '{"consumer3":"test.m-ld.org/control"}');
+      let first = true;
+      mqtt.mockSubscribe((topic, json) => {
+        const [type, toId, , messageId] = topic.split('/');
+        if (type === '__send' && json['@type'] === 'http://control.m-ld.org/request/clock') {
+          if (first) {
+            first = false;
+            mqtt.mockPublish(`__reply/client1/${toId}/reply1/` + messageId, {
+              '@type': 'http://control.m-ld.org/response/rejected',
+              status: MeldErrorStatus['Request rejected']
+            });
+          } else {
+            mqtt.mockPublish(`__reply/client1/${toId}/reply1/` + messageId, {
+              '@type': 'http://control.m-ld.org/response/clock',
+              clock: newClock.toJson()
+            });
+          }
+        }
+      });
+      expect((await remotes.newClock()).equals(newClock)).toBe(true);
+    });
+
+    test('cannot get revup of no-one present', async () => {
+      await expect(remotes.revupFrom(TreeClock.GENESIS.forked().left)).rejects.toThrow();
+    });
+
+    test('no revup if no collaborator', async () => {
+      // Set presence of client2's consumer
+      await mqtt.mockPublish('__presence/test.m-ld.org/client2', '{"consumer2":"test.m-ld.org/control"}');
+      mqtt.mockSubscribe((topic, json) => {
+        const [type, toId, fromId, messageId, domain,] = topic.split('/');
+        if (type === '__send' && json['@type'] === 'http://control.m-ld.org/request/revup') {
+          expect(toId).toBe('consumer2');
+          expect(fromId).toBe('client1');
+          expect(domain).toBe('test.m-ld.org');
+          mqtt.mockPublish('__reply/client1/consumer2/reply1/' + messageId, {
+            '@type': 'http://control.m-ld.org/response/revup',
+            canRevup: false,
+            updatesAddress: 'consumer2'
+          });
+        }
+      });
+      await expect(remotes.revupFrom(TreeClock.GENESIS.forked().left)).resolves.toBeUndefined();
+    });
+
+    test('can revup from first collaborator', async () => {
+      // Set presence of client2's consumer
+      await mqtt.mockPublish('__presence/test.m-ld.org/client2', '{"consumer2":"test.m-ld.org/control"}');
+      mqtt.mockSubscribe((topic, json) => {
+        const [type, , , messageId] = topic.split('/');
+        if (type === '__send' && json['@type'] === 'http://control.m-ld.org/request/revup') {
+          mqtt.mockPublish('__reply/client1/consumer2/reply1/' + messageId, {
+            '@type': 'http://control.m-ld.org/response/revup',
+            canRevup: true,
+            updatesAddress: 'subChannel1'
+          });
+        }
+      });
+      await expect(remotes.revupFrom(TreeClock.GENESIS.forked().left)).resolves.toBeDefined();
+    });
+
+    test('can revup from second collaborator', async () => {
+      // Set presence of client2's consumer
+      await mqtt.mockPublish('__presence/test.m-ld.org/client2', '{"consumer2":"test.m-ld.org/control"}');
+      await mqtt.mockPublish('__presence/test.m-ld.org/client3', '{"consumer3":"test.m-ld.org/control"}');
+      let first = true;
+      mqtt.mockSubscribe((topic, json) => {
+        const [type, toId, , messageId] = topic.split('/');
+        if (type === '__send' && json['@type'] === 'http://control.m-ld.org/request/revup') {
+          if (first) {
+            first = false;
+            mqtt.mockPublish(`__reply/client1/${toId}/reply1/${messageId}`, {
+              '@type': 'http://control.m-ld.org/response/revup',
+              canRevup: false,
+              updatesAddress: toId
+            });
+          } else {
+            mqtt.mockPublish(`__reply/client1/${toId}/reply2/${messageId}`, {
+              '@type': 'http://control.m-ld.org/response/revup',
+              canRevup: true,
+              updatesAddress: 'subChannel1'
+            });
+          }
+        }
+      });
+      await expect(remotes.revupFrom(TreeClock.GENESIS.forked().left)).resolves.toBeDefined();
     });
   });
 });

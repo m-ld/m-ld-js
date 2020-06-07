@@ -9,30 +9,38 @@ import { Iri } from 'jsonld/jsonld-spec';
 import { JrqlGraph, toGroup } from './JrqlGraph';
 import { JsonDeltaBagBlock, newDelta, asMeldDelta, toTimeString, fromTimeString, reify, unreify, hashTriple } from '../m-ld/MeldJson';
 import { Observable, from, Subject as Source, asapScheduler, Observer } from 'rxjs';
-import { toArray, bufferCount, flatMap, reduce, observeOn, isEmpty } from 'rxjs/operators';
+import { toArray, bufferCount, flatMap, reduce, observeOn, isEmpty, map } from 'rxjs/operators';
 import { flatten, Future, tapComplete, getIdLogger, check } from '../util';
 import { generate as uuid } from 'short-uuid';
 import { LogLevelDesc, Logger } from 'loglevel';
-import { MeldError, DATA_LOCKED, IS_CLOSED } from '../m-ld/MeldError';
+import { MeldError } from '../m-ld/MeldError';
 import { LocalLock } from '../local';
 
-const TIDS_CONTEXT: Context = {
+const BASE_CONTEXT: Context = {
   qs: 'http://qs.m-ld.org/',
-  hash: 'qs:hash/', // Namespace for triple hashes
-  tid: 'qs:#tid' // Property of a triple hash
+  tid: 'qs:#tid' // Property of triple hash and journal entry
+}
+
+const TIDS_CONTEXT: Context = {
+  ...BASE_CONTEXT,
+  hash: 'qs:hash/' // Namespace for triple hashes
 };
 
 interface HashTid extends Subject {
-  '@id': Iri,
-  tid: UUID // Transaction ID
+  '@id': Iri;
+  tid: UUID; // Transaction ID
+}
+
+interface AllTids extends Subject {
+  '@id': 'qs:all'; // Singleton object
+  tid: UUID[];
 }
 
 const CONTROL_CONTEXT: Context = {
-  qs: 'http://qs.m-ld.org/',
+  ...BASE_CONTEXT,
   tail: { '@id': 'qs:#tail', '@type': '@id' }, // Property of the journal
   lastDelivered: { '@id': 'qs:#lastDelivered', '@type': '@id' }, // Property of the journal
   entry: 'qs:journal/entry/', // Namespace for journal entries
-  tid: 'qs:#tid', // Property of a journal entry
   hash: 'qs:#hash', // Property of a journal entry
   delta: 'qs:#delta', // Property of a journal entry
   remote: 'qs:#remote', // Property of a journal entry
@@ -43,26 +51,32 @@ const CONTROL_CONTEXT: Context = {
 
 interface Journal extends Subject {
   '@id': 'qs:journal', // Singleton object
-  tail: JournalEntry['@id'],
-  lastDelivered: JournalEntry['@id'],
-  time: string // JSON-encoded TreeClock (the local clock)
+  tail: JournalEntry['@id'];
+  lastDelivered: JournalEntry['@id'];
+  time: string; // JSON-encoded TreeClock (the local clock)
 }
 
 /**
  * A journal entry includes a transaction Id
  */
 interface JournalEntry extends HashTid {
-  hash: string, // Encoded Hash
-  delta: string, // JSON-encoded JsonDelta
-  remote: boolean,
-  time: string, // JSON-encoded TreeClock (the remote clock)
-  ticks: number, // Local clock ticks on delivery
-  next?: JournalEntry['@id']
+  hash: string; // Encoded Hash
+  delta: string; // JSON-encoded JsonDelta
+  remote: boolean;
+  time: string; // JSON-encoded TreeClock (the remote clock)
+  ticks: number; // Local clock ticks on delivery
+  next?: JournalEntry['@id'];
 }
 
 function safeTime(je: Journal | JournalEntry) {
   return fromTimeString(je.time) as TreeClock; // Safe after init
 }
+
+function qsName(name: string) {
+  return namedNode(BASE_CONTEXT.qs + name);
+}
+
+type DatasetSnapshot = Omit<Snapshot, 'updates'>;
 
 /**
  * Writeable Graph, similar to a Dataset, but with a slightly different transaction API.
@@ -70,7 +84,7 @@ function safeTime(je: Journal | JournalEntry) {
  */
 export class SuSetDataset extends JrqlGraph {
   private static checkNotClosed =
-    check((d: SuSetDataset) => !d.dataset.closed, () => new MeldError(IS_CLOSED));
+    check((d: SuSetDataset) => !d.dataset.closed, () => new MeldError('Clone has closed'));
 
   private readonly controlGraph: JrqlGraph;
   private readonly tidsGraph: JrqlGraph;
@@ -84,9 +98,9 @@ export class SuSetDataset extends JrqlGraph {
     super(dataset.graph());
     // Named graph for control quads e.g. Journal
     this.controlGraph = new JrqlGraph(
-      dataset.graph(namedNode(CONTROL_CONTEXT.qs + 'control')), CONTROL_CONTEXT);
+      dataset.graph(qsName('control')), CONTROL_CONTEXT);
     this.tidsGraph = new JrqlGraph(
-      dataset.graph(namedNode(CONTROL_CONTEXT.qs + 'tids')), TIDS_CONTEXT);
+      dataset.graph(qsName('tids')), TIDS_CONTEXT);
     // Update notifications are strictly ordered but don't hold up transactions
     this.updates = this.updateSource.pipe(observeOn(asapScheduler));
     this.datasetLock = new LocalLock(id, dataset.location);
@@ -99,7 +113,7 @@ export class SuSetDataset extends JrqlGraph {
     try {
       await this.datasetLock.acquire();
     } catch (err) {
-      throw new MeldError(DATA_LOCKED, err);
+      throw new MeldError('Clone data is locked', err);
     }
     // Create the Journal if not exists
     if (await this.controlGraph.describe('qs:journal').pipe(isEmpty()).toPromise())
@@ -181,7 +195,7 @@ export class SuSetDataset extends JrqlGraph {
     if (subs.closed == null || !subs.closed) {
       if (entryId != null) {
         if (this.dataset.closed) {
-          subs.error(new MeldError(IS_CLOSED));
+          subs.error(new MeldError('Clone has closed'));
         } else {
           this.controlGraph.describe1<JournalEntry>(entryId).then(entry => {
             if (filter(entry)) {
@@ -209,8 +223,8 @@ export class SuSetDataset extends JrqlGraph {
       this.dataset.transact(async () => {
         const journal = await this.loadJournal();
         const findTime = time.getTicks(safeTime(journal));
-        const found = findTime != null ? await this.controlGraph.find1(
-          <Partial<JournalEntry>>{ ticks: findTime }) : '';
+        const found = findTime != null ?
+          await this.controlGraph.find1<JournalEntry>({ ticks: findTime }) : '';
         if (found) {
           // Don't emit an entry if it's all less than the requested time (based on remote ID)
           resolve(new Observable(subs =>
@@ -258,22 +272,22 @@ export class SuSetDataset extends JrqlGraph {
       const tidPatch = (await this.newTriplesTid(delta.insert, delta.tid))
         .concat({ oldQuads: flatten(deletedTriplesTids.map(tripleTids => tripleTids.tids)) });
       // Include journaling in final patch
+      const allTidsPatch = await this.newTid(delta.tid);
       const [journaling, entry] = await this.journal(delta, time);
-      this.notifyUpdate(patch, time);
-      return [patch.concat(tidPatch).concat(journaling), entry];
+      return [this.transactionPatch(time, patch, allTidsPatch, tidPatch, journaling), entry];
     });
   }
 
-  @SuSetDataset.checkNotClosed.async
-  async apply(msgData: JsonDelta, msgTime: TreeClock, localTime: () => TreeClock): Promise<void> {
+  @SuSetDataset.checkNotClosed.async 
+  async apply(msgData: JsonDelta, msgTime: TreeClock, localTime: TreeClock): Promise<void> {
     return this.dataset.transact(async () => {
       // Check we haven't seen this transaction before in the journal
-      if (!(await this.controlGraph.find1({ tid: msgData.tid } as Partial<JournalEntry>))) {
+      if (!(await this.tidsGraph.find1<AllTids>({ '@id': 'qs:all', tid: [msgData.tid] }))) {
         this.log.debug(`Applying tid: ${msgData.tid}`);
         const delta = await asMeldDelta(msgData);
         const patch = new PatchQuads([], delta.insert);
         // The delta's delete contains reifications of deleted triples
-        const tripleTidPatch = await unreify(delta.delete)
+        const tidPatch = await unreify(delta.delete)
           .reduce(async (tripleTidPatch, [triple, theirTids]) => {
             // For each unique deleted triple, subtract the claimed tids from the tids we have
             const ourTripleTids = await this.findTripleTids(tripleId(triple));
@@ -284,14 +298,34 @@ export class SuSetDataset extends JrqlGraph {
             return (await tripleTidPatch).concat({ oldQuads: toRemove });
           }, this.newTriplesTid(delta.insert, delta.tid));
         // Include journaling in final patch
-        const time = localTime();
-        const [journaling,] = await this.journal(delta, time, msgTime);
-        this.notifyUpdate(patch, time);
-        return patch.concat(tripleTidPatch).concat(journaling);
+        const allTidsPatch = await this.newTid(delta.tid);
+        const journaling = await this.journal(delta, localTime, msgTime);
+        return this.transactionPatch(localTime, patch, allTidsPatch, tidPatch, journaling);
       } else {
         this.log.debug(`Rejecting tid: ${msgData.tid} as duplicate`);
       }
     });
+  }
+
+  /**
+   * Rolls up the given transaction details into a single patch and notifies
+   * data observers. Mostly this method is just a type convenience for ensuring
+   * everything needed for a transaction is present.
+   * @param time the local time of the transaction
+   * @param dataPatch the transaction data patch
+   * @param allTidsPatch insertion to qs:all TIDs in TID graph
+   * @param tripleTidPatch triple TID patch (inserts and deletes)
+   * @param journaling transaction journaling patch
+   */
+  private transactionPatch(
+    time: TreeClock,
+    dataPatch: PatchQuads,
+    allTidsPatch: PatchQuads,
+    tripleTidPatch: PatchQuads,
+    journaling: PatchQuads): Patch {
+    // Notify the update (we don't have to wait for this)
+    this.notifyUpdate(dataPatch, time);
+    return dataPatch.concat(allTidsPatch).concat(tripleTidPatch).concat(journaling);
   }
 
   private async notifyUpdate(patch: PatchQuads, time: TreeClock) {
@@ -300,6 +334,10 @@ export class SuSetDataset extends JrqlGraph {
       '@delete': await toGroup(patch.oldQuads, this.defaultContext),
       '@insert': await toGroup(patch.newQuads, this.defaultContext)
     });
+  }
+
+  private newTid(tid: UUID | UUID[]): Promise<PatchQuads> {
+    return this.tidsGraph.insert(<AllTids>{ '@id': 'qs:all', tid });
   }
 
   private newTriplesTid(triples: Triple[], tid: UUID): Promise<PatchQuads> {
@@ -334,18 +372,25 @@ export class SuSetDataset extends JrqlGraph {
   /**
    * Applies a snapshot to this dataset.
    * Caution: uses multiple transactions, so the world must be held up by the caller.
-   * @param data a hot observable of snapshot data in batches of quads
-   * @param lastHash the last hash of the snapshot dataset
-   * @param lastTime the last time of the snapshot dataset (not the local time of the provider)
+   * @param snapshot snapshot with batches of quads and tids
    * @param localTime the time of the local process, to be saved
    */
   @SuSetDataset.checkNotClosed.async
-  async applySnapshot(data: Observable<Quad[]>,
-    lastHash: Hash, lastTime: TreeClock, localTime: TreeClock) {
-    // First reset the dataset with the given parameters
-    const haveReset = this.dataset.transact(() => this.reset(lastHash, lastTime, localTime));
-    // For each batch of reified quads with TIDs, first unreify
-    const snapshotApplied = data.pipe(
+  async applySnapshot(snapshot: DatasetSnapshot, localTime: TreeClock) {
+    // First reset the dataset with the given parameters.
+    // Note that this is not awaited because the tids and quads are hot, so we
+    // must subscribe to them on the current tick. The transaction lock will
+    // take care of making sure the reset happens first.
+    const dataReset = this.dataset.transact(() =>
+      this.reset(snapshot.lastHash, snapshot.lastTime, localTime));
+
+    const tidsApplied = snapshot.tids.pipe(flatMap(
+      // Each batch of TIDs goes in happily as an array
+      tids => this.dataset.transact(() => this.newTid(tids))))
+      .toPromise();
+
+    const quadsApplied = snapshot.quads.pipe(
+      // For each batch of reified quads with TIDs, first unreify
       flatMap(async batch => this.dataset.transact(async () => from(unreify(batch)).pipe(
         // For each triple in the batch, insert the TIDs into the tids graph
         flatMap(async ([triple, tids]) => (await this.newTripleTids(triple, tids))
@@ -354,7 +399,7 @@ export class SuSetDataset extends JrqlGraph {
         // Concat all of the resultant batch patches together
         reduce((batchPatch, entryPatch) => batchPatch.concat(entryPatch)))
         .toPromise()))).toPromise();
-    return Promise.all([haveReset, snapshotApplied]);
+    return Promise.all([dataReset, quadsApplied, tidsApplied]);
   }
 
   /**
@@ -363,31 +408,33 @@ export class SuSetDataset extends JrqlGraph {
    * To avoid holding up the world, buffer the data.
    */
   @SuSetDataset.checkNotClosed.async
-  async takeSnapshot(): Promise<Omit<Snapshot, 'updates'>> {
+  async takeSnapshot(): Promise<DatasetSnapshot> {
     return new Promise((resolve, reject) => {
       this.dataset.transact(async () => {
         const dataEmitted = new Future;
         const [, tail] = await this.journalTail();
         resolve({
-          time: safeTime(tail),
+          lastTime: safeTime(tail),
           lastHash: Hash.decode(tail.hash),
-          data: this.graph.match().pipe(
+          quads: this.graph.match().pipe(
             bufferCount(10), // TODO batch size config
             flatMap(async (batch) => this.reify(await this.findTriplesTids(batch))),
-            tapComplete(dataEmitted))
+            tapComplete(dataEmitted)),
+          tids: this.tidsGraph.graph.match(qsName('all'), qsName('#tid')).pipe(
+            map(tid => tid.object.value), bufferCount(10)) // TODO batch size config
         });
         await dataEmitted; // If this rejects, data will error
       }).catch(reject);
     });
   }
 
+  private async journal(delta: MeldDelta, localTime: TreeClock): Promise<[PatchQuads, DeltaMessage]>
+  private async journal(delta: MeldDelta, localTime: TreeClock, remoteTime: TreeClock): Promise<PatchQuads>
   private async journal(delta: MeldDelta, localTime: TreeClock, remoteTime?: TreeClock):
-    Promise<[PatchQuads, DeltaMessage]> {
+    Promise<PatchQuads | [PatchQuads, DeltaMessage]> {
     const [journal, oldTail] = await this.journalTail();
     const block = new JsonDeltaBagBlock(Hash.decode(oldTail.hash)).next(delta.json);
     const entryId = toPrefixedId('entry', block.id.encode());
-    const deltaMsg = new DeltaMessage(localTime, delta.json);
-    deltaMsg.delivered.then(() => this.markDelivered(entryId));
     const patch = (await this.controlGraph.write({
       '@delete': { '@id': 'qs:journal', tail: journal.tail } as Partial<Journal>,
       '@insert': [
@@ -404,7 +451,14 @@ export class SuSetDataset extends JrqlGraph {
         } as JournalEntry
       ]
     })).concat(await this.patchClock(journal, localTime));
-    return [patch, deltaMsg];
+    if (remoteTime == null) { // This is a local transaction
+      // Create a DeltaMessage to be marked delivered later
+      const deltaMsg = new DeltaMessage(localTime, delta.json);
+      deltaMsg.delivered.then(() => this.markDelivered(entryId));
+      return [patch, deltaMsg];
+    } else { // This is a remote transaction
+      return patch;
+    }
   };
 
   private async markDelivered(entryId: Iri) {

@@ -1,18 +1,40 @@
 const { fork } = require('child_process');
 const { join } = require('path');
 const { dirSync } = require('tmp');
+const restify = require('restify');
 const { BadRequestError, InternalServerError, NotFoundError } = require('restify-errors');
 const { createServer } = require('net');
 const LOG = require('loglevel');
 const inspector = require('inspector');
 const aedes = require('aedes')();
+
 const clones = {/* cloneId: { process, tmpDir, mqtt: { client, server, port } } */ };
 const requests = {/* requestId: [res, next] */ };
 
-exports.routes = { start, transact, stop, kill, destroy, partition };
-exports.afterRequest = req => delete requests[req.id()];
-exports.onExit = () => Object.values(clones).forEach(
-  ({ process }) => process && process.kill());
+// Arguments expected
+const [, , httpUrl, nextDebugPort, logLevel] = process.argv;
+const port = new URL(httpUrl).port;
+
+LOG.setLevel(Number(logLevel));
+LOG.getLogger('aedes').setLevel(LOG.levels.WARN);
+global.nextDebugPort = Number(nextDebugPort);
+
+const http = restify.createServer();
+http.use(restify.plugins.queryParser());
+http.use(restify.plugins.bodyParser());
+Object.entries({ start, transact, stop, kill, destroy, partition })
+  .forEach(([path, route]) => http.post('/' + path, route));
+http.on('after', req => delete requests[req.id()]);
+http.listen(port, () => {
+  LOG.info(`Orchestrator listening on ${httpUrl}`);
+  process.send('listening');
+  process.on('exit', () => {
+    LOG.info(`Orchestrator shutting down`);
+    Object.values(clones).forEach(
+      ({ process }) => process && process.kill());
+    http.close();
+  });
+});
 
 aedes.on('publish', function (packet, client) {
   const log = LOG.getLogger('aedes');

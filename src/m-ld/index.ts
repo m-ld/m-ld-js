@@ -1,5 +1,5 @@
 /**
- * Primary interfaces involved in a m-ld implementation
+ * Primary interfaces involved in a m-ld engine
  */
 import { TreeClock } from '../clocks';
 import { Observable } from 'rxjs';
@@ -78,11 +78,17 @@ export type JsonDelta = {
   [key in 'tid' | 'insert' | 'delete']: string;
 }
 
-/**
- * An observable of quad arrays. Quads, because it must include the TID graph;
- * arrays for batching (sender decides array size).
- */
-export interface Snapshot extends Message<TreeClock, Observable<Quad[]>> {
+export interface Snapshot {
+  readonly lastTime: TreeClock;
+  /**
+   * An observable of reified quad arrays. Reified quads include their observed
+   * TIDs. Arrays for batching (sender decides array size).
+   */
+  readonly quads: Observable<Quad[]>;
+  /**
+   * All observed TIDs, for detecting duplicates.
+   */
+  readonly tids: Observable<UUID[]>;
   readonly lastHash: Hash;
   readonly updates: Observable<DeltaMessage>;
 }

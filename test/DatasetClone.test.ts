@@ -9,28 +9,28 @@ import { TreeClock } from '../src/clocks';
 describe('Dataset clone', () => {
   describe('initialisation', () => {
     test('starts offline with unknown remotes', async () => {
-      const clone = await genesisClone(mockRemotes(NEVER, of(null)));
+      const clone = await genesisClone(mockRemotes(NEVER, [null]));
       await expect(isOnline(clone)).resolves.toBe(false);
     });
 
     test('connects if remotes online', async () => {
-      const clone = await genesisClone(mockRemotes(NEVER, of(true)));
+      const clone = await genesisClone(mockRemotes(NEVER, [true]));
       await expect(comesOnline(clone)).resolves.toBe(true);
     });
 
     test('comes online if siloed', async () => {
-      const clone = await genesisClone(mockRemotes(NEVER, of(null, false)));
+      const clone = await genesisClone(mockRemotes(NEVER, [null, false]));
       await expect(comesOnline(clone)).resolves.toBe(true);
     });
 
     test('stays online without reconnect if siloed', async () => {
-      const clone = await genesisClone(mockRemotes(NEVER, of(true, false)));
+      const clone = await genesisClone(mockRemotes(NEVER, [true, false]));
       await expect(comesOnline(clone)).resolves.toBe(true);
     });
 
     test('non-genesis fails to initialise if siloed', async () => {
       // This is a bit of a con: how did we get a clock if we're offline?
-      await expect(genesisClone(mockRemotes(NEVER, of(false),
+      await expect(genesisClone(mockRemotes(NEVER, [false],
         TreeClock.GENESIS.forked().left))).rejects.toThrow();
     });
   });
