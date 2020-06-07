@@ -5,7 +5,7 @@ const inspector = require('inspector');
 const LOG = require('loglevel');
 const httpUrl = new URL('http://localhost:3000');
 
-LOG.setLevel(LOG.levels.DEBUG);
+LOG.setLevel(LOG.levels.WARN);
 let testDebugPort, orchestratorDebugPort, firstCloneDebugPort;
 if (inspector.url() != null) {
   let debugPort = Number(new URL(inspector.url()).port);

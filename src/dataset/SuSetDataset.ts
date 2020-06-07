@@ -13,7 +13,7 @@ import { toArray, bufferCount, flatMap, reduce, observeOn, isEmpty, map } from '
 import { flatten, Future, tapComplete, getIdLogger, check } from '../util';
 import { generate as uuid } from 'short-uuid';
 import { LogLevelDesc, Logger } from 'loglevel';
-import { MeldError, DATA_LOCKED, IS_CLOSED } from '../m-ld/MeldError';
+import { MeldError } from '../m-ld/MeldError';
 import { LocalLock } from '../local';
 
 const BASE_CONTEXT: Context = {
@@ -84,7 +84,7 @@ type DatasetSnapshot = Omit<Snapshot, 'updates'>;
  */
 export class SuSetDataset extends JrqlGraph {
   private static checkNotClosed =
-    check((d: SuSetDataset) => !d.dataset.closed, () => new MeldError(IS_CLOSED));
+    check((d: SuSetDataset) => !d.dataset.closed, () => new MeldError('Clone has closed'));
 
   private readonly controlGraph: JrqlGraph;
   private readonly tidsGraph: JrqlGraph;
@@ -113,7 +113,7 @@ export class SuSetDataset extends JrqlGraph {
     try {
       await this.datasetLock.acquire();
     } catch (err) {
-      throw new MeldError(DATA_LOCKED, err);
+      throw new MeldError('Clone data is locked', err);
     }
     // Create the Journal if not exists
     if (await this.controlGraph.describe('qs:journal').pipe(isEmpty()).toPromise())
@@ -195,7 +195,7 @@ export class SuSetDataset extends JrqlGraph {
     if (subs.closed == null || !subs.closed) {
       if (entryId != null) {
         if (this.dataset.closed) {
-          subs.error(new MeldError(IS_CLOSED));
+          subs.error(new MeldError('Clone has closed'));
         } else {
           this.controlGraph.describe1<JournalEntry>(entryId).then(entry => {
             if (filter(entry)) {
@@ -274,12 +274,12 @@ export class SuSetDataset extends JrqlGraph {
       // Include journaling in final patch
       const allTidsPatch = await this.newTid(delta.tid);
       const [journaling, entry] = await this.journal(delta, time);
-      return [await this.transactionPatch(time, patch, allTidsPatch, tidPatch, journaling), entry];
+      return [this.transactionPatch(time, patch, allTidsPatch, tidPatch, journaling), entry];
     });
   }
 
-  @SuSetDataset.checkNotClosed.async
-  async apply(msgData: JsonDelta, msgTime: TreeClock, localTime: () => TreeClock): Promise<void> {
+  @SuSetDataset.checkNotClosed.async 
+  async apply(msgData: JsonDelta, msgTime: TreeClock, localTime: TreeClock): Promise<void> {
     return this.dataset.transact(async () => {
       // Check we haven't seen this transaction before in the journal
       if (!(await this.tidsGraph.find1<AllTids>({ '@id': 'qs:all', tid: [msgData.tid] }))) {
@@ -299,9 +299,8 @@ export class SuSetDataset extends JrqlGraph {
           }, this.newTriplesTid(delta.insert, delta.tid));
         // Include journaling in final patch
         const allTidsPatch = await this.newTid(delta.tid);
-        const time = localTime();
-        const journaling = await this.journal(delta, time, msgTime);
-        return await this.transactionPatch(time, patch, allTidsPatch, tidPatch, journaling);
+        const journaling = await this.journal(delta, localTime, msgTime);
+        return this.transactionPatch(localTime, patch, allTidsPatch, tidPatch, journaling);
       } else {
         this.log.debug(`Rejecting tid: ${msgData.tid} as duplicate`);
       }
@@ -318,9 +317,12 @@ export class SuSetDataset extends JrqlGraph {
    * @param tripleTidPatch triple TID patch (inserts and deletes)
    * @param journaling transaction journaling patch
    */
-  private async transactionPatch(
-    time: TreeClock, dataPatch: PatchQuads, allTidsPatch: PatchQuads, tripleTidPatch: PatchQuads, journaling: PatchQuads):
-    Promise<Patch> {
+  private transactionPatch(
+    time: TreeClock,
+    dataPatch: PatchQuads,
+    allTidsPatch: PatchQuads,
+    tripleTidPatch: PatchQuads,
+    journaling: PatchQuads): Patch {
     // Notify the update (we don't have to wait for this)
     this.notifyUpdate(dataPatch, time);
     return dataPatch.concat(allTidsPatch).concat(tripleTidPatch).concat(journaling);

@@ -8,7 +8,7 @@ import { Dataset } from '.';
 import { publishReplay, refCount, filter, ignoreElements, takeUntil, tap, isEmpty, finalize, flatMap, switchAll, toArray, catchError, first } from 'rxjs/operators';
 import { delayUntil, Future, tapComplete, tapCount, SharableLock, tapLast } from '../util';
 import { LogLevelDesc, levels } from 'loglevel';
-import { MeldError, HAS_UNSENT } from '../m-ld/MeldError';
+import { MeldError } from '../m-ld/MeldError';
 import { AbstractMeld, isOnline, comesOnline } from '../AbstractMeld';
 
 export interface DatasetCloneOpts {
@@ -98,7 +98,7 @@ export class DatasetClone extends AbstractMeld implements MeldClone {
         this.log.debug('Receiving', logBody, '@', this.localTime);
         this.messageService.receive(delta, this.orderingBuffer, msg => {
           this.log.debug('Accepting', logBody);
-          this.dataset.apply(msg.data, msg.time, () => this.localTime)
+          this.dataset.apply(msg.data, msg.time, this.localTime)
             .then(msg.delivered.resolve)
             .catch(err => this.close(err)); // Catastrophe
         });
@@ -219,7 +219,7 @@ export class DatasetClone extends AbstractMeld implements MeldClone {
   private async requestSnapshot(consumeRevups: Observer<DeltaMessage>) {
     // If there are unsent operations, we would lose data
     if (!(await this.dataset.undeliveredLocalOperations().pipe(isEmpty()).toPromise()))
-      throw new MeldError(HAS_UNSENT);
+      throw new MeldError('Unsent updates');
 
     const snapshot = await this.remotes.snapshot();
     this.messageService.join(snapshot.lastTime);
@@ -340,7 +340,7 @@ export class DatasetClone extends AbstractMeld implements MeldClone {
       time: ${this.localTime}`);
     }
     super.close(err);
-    this.dataset.close(err);
     this.remotes.setLocal(null);
+    await this.dataset.close(err);
   }
 }

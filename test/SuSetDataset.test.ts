@@ -107,7 +107,7 @@ describe('SU-Set Dataset', () => {
           tid: 'B6FVbHGtFxXhdLKEVmkcd',
           insert: '{"@graph":{"@id":"http://test.m-ld.org/fred","http://test.m-ld.org/#name":"Fred"}}',
           delete: '{"@graph":{}}'
-        }, remoteTime = remoteTime.ticked(), () => localTime = localTime.update(remoteTime).ticked());
+        }, remoteTime = remoteTime.ticked(), localTime = localTime.update(remoteTime).ticked());
 
         await expect(ssd.find1({ '@id': 'http://test.m-ld.org/fred' }))
           .resolves.toEqual('http://test.m-ld.org/fred');
@@ -196,7 +196,7 @@ describe('SU-Set Dataset', () => {
             delete: `{"@graph":{"@id":"b4vMkTurWFf6qjBuhkRvjX","@type":"rdf:Statement",
               "tid":"${firstTid}","o":"Fred","p":"http://test.m-ld.org/#name",
               "s":"http://test.m-ld.org/fred"}}`
-          }, remoteTime = remoteTime.ticked(), () => localTime = localTime.update(remoteTime).ticked());
+          }, remoteTime = remoteTime.ticked(), localTime = localTime.update(remoteTime).ticked());
 
           await expect(ssd.find1({ '@id': 'http://test.m-ld.org/fred' })).resolves.toEqual('');
           await expect(willUpdate).resolves.toHaveProperty('@delete', { '@graph': [fred] });
@@ -221,7 +221,7 @@ describe('SU-Set Dataset', () => {
             tid: firstTid,
             insert: '{"@graph":{"@id":"http://test.m-ld.org/fred","http://test.m-ld.org/#name":"Fred"}}',
             delete: '{"@graph":{}}'
-          }, remoteTime = remoteTime.ticked(), () => localTime = localTime.update(remoteTime).ticked());
+          }, remoteTime = remoteTime.ticked(), localTime = localTime.update(remoteTime).ticked());
 
           await expect(ssd.find1({ '@id': 'http://test.m-ld.org/fred' })).resolves.toEqual('');
         });
@@ -242,7 +242,7 @@ describe('SU-Set Dataset', () => {
             tid: firstTid,
             insert: '{"@graph":{"@id":"http://test.m-ld.org/fred","http://test.m-ld.org/#name":"Fred"}}',
             delete: '{"@graph":{}}'
-          }, remoteTime = remoteTime.ticked(), () => localTime = localTime.update(remoteTime).ticked());
+          }, remoteTime = remoteTime.ticked(), localTime = localTime.update(remoteTime).ticked());
 
           await expect(ssd.find1({ '@id': 'http://test.m-ld.org/fred' })).resolves.toEqual('');
         });
@@ -275,7 +275,7 @@ describe('SU-Set Dataset', () => {
             delete: `{"@graph":{"@id":"b4vMkTurWFf6qjBuhkRvjX","@type":"rdf:Statement",
               "tid":"${firstTid}","o":"Fred","p":"http://test.m-ld.org/#name",
               "s":"http://test.m-ld.org/fred"}}`
-          }, thirdTime, () => localTime = localTime.update(thirdTime).ticked());
+          }, thirdTime, localTime = localTime.update(thirdTime).ticked());
 
           const ops = await ssd.operationsSince(remoteTime);
           expect(ops).not.toBeUndefined();
@@ -295,7 +295,7 @@ describe('SU-Set Dataset', () => {
           // Don't update remote time from local
           await ssd.apply(remoteInsert(wilma),
             remoteTime = remoteTime.ticked(),
-            () => localTime = localTime.update(remoteTime).ticked());
+            localTime = localTime.update(remoteTime).ticked());
 
           const ops = await ssd.operationsSince(remoteTime);
           expect(ops).not.toBeUndefined();
@@ -314,11 +314,11 @@ describe('SU-Set Dataset', () => {
           const thirdOp = remoteInsert(wilma);
           await ssd.apply(thirdOp,
             thirdTime = thirdTime.ticked(),
-            () => localTime = localTime.update(thirdTime).ticked());
+            localTime = localTime.update(thirdTime).ticked());
           // Remote does see fourth party op
           await ssd.apply(remoteInsert(barney),
             fourthTime = fourthTime.ticked(),
-            () => localTime = localTime.update(fourthTime).ticked());
+            localTime = localTime.update(fourthTime).ticked());
           remoteTime = remoteTime.update(fourthTime).ticked();
 
           const ops = await ssd.operationsSince(remoteTime);

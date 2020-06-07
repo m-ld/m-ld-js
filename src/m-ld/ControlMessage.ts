@@ -1,5 +1,6 @@
 import { Hash } from '../hash';
 import { TreeClock } from '../clocks';
+import { MeldError, MeldErrorStatus } from './MeldError';
 const inspect = Symbol.for('nodejs.util.inspect.custom');
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -119,6 +120,20 @@ export namespace Response {
     [inspect] = () => this.toString();
   }
 
+  export class Rejected implements Response {
+    constructor(
+      readonly status: MeldErrorStatus) {
+    }
+
+    readonly toJson = () => ({
+      '@type': 'http://control.m-ld.org/response/rejected',
+      status: this.status
+    })
+
+    toString = () => `Rejected with ${MeldErrorStatus[this.status]}`;
+    [inspect] = () => this.toString();
+  }
+
   export function fromJson(json: any): Response {
     if (typeof json === 'object' && typeof json['@type'] === 'string') {
       switch (json['@type']) {
@@ -134,8 +149,10 @@ export namespace Response {
               Hash.decode(json.lastHash), json.updatesAddress);
         case 'http://control.m-ld.org/response/revup':
           return new Revup(json.canRevup, json.updatesAddress);
+        case 'http://control.m-ld.org/response/rejected':
+          return new Rejected(<MeldErrorStatus><number>json.status);
       }
     }
-    throw new Error('Bad response JSON');
+    throw new MeldError('Bad response');
   }
 }

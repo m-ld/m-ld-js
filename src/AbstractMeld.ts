@@ -4,13 +4,13 @@ import { Observable, Subject as Source, BehaviorSubject, asapScheduler } from 'r
 import { observeOn, tap, distinctUntilChanged, first, skip } from 'rxjs/operators';
 import { LogLevelDesc, Logger } from 'loglevel';
 import { getIdLogger, check } from './util';
-import { MeldError, IS_OFFLINE, IS_CLOSED } from './m-ld/MeldError';
+import { MeldError } from './m-ld/MeldError';
 
 export abstract class AbstractMeld implements Meld {
   protected static checkOnline =
-    check((m: AbstractMeld) => m.isOnline() === true, () => new MeldError(IS_OFFLINE));
+    check((m: AbstractMeld) => m.isOnline() === true, () => new MeldError('Meld is offline'));
   protected static checkNotClosed =
-    check((m: AbstractMeld) => !m.closed, () => new MeldError(IS_CLOSED));
+    check((m: AbstractMeld) => !m.closed, () => new MeldError('Clone has closed'));
 
   readonly updates: Observable<DeltaMessage>;
   readonly online: Observable<boolean | null>;
