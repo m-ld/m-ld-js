@@ -146,7 +146,7 @@ export class SuSetDataset extends JrqlGraph {
       '@id': entryId,
       hash: encodedHash,
       time: toTimeString(startingTime),
-      ticks: localTime?.getTicks?.()
+      ticks: localTime?.ticks
     } as Partial<JournalEntry>]);
     // Delete matches everything in all graphs
     return { oldQuads: {}, newQuads: insert.newQuads };
@@ -247,7 +247,7 @@ export class SuSetDataset extends JrqlGraph {
       update['@insert'].push({
         '@id': journal.tail,
         time: encodedTime,
-        ticks: localTime.getTicks()
+        ticks: localTime.ticks
       } as Partial<JournalEntry>);
     }
     return await this.controlGraph.write(update);
@@ -330,7 +330,7 @@ export class SuSetDataset extends JrqlGraph {
 
   private async notifyUpdate(patch: PatchQuads, time: TreeClock) {
     this.updateSource.next({
-      '@ticks': time.getTicks(),
+      '@ticks': time.ticks,
       '@delete': await toGroup(patch.oldQuads, this.defaultContext),
       '@insert': await toGroup(patch.newQuads, this.defaultContext)
     });
@@ -446,7 +446,7 @@ export class SuSetDataset extends JrqlGraph {
           hash: block.id.encode(),
           tid: delta.tid,
           time: toTimeString(remoteTime ?? localTime),
-          ticks: localTime.getTicks(),
+          ticks: localTime.ticks,
           delta: JSON.stringify(delta.json)
         } as JournalEntry
       ]

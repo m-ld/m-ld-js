@@ -4,7 +4,7 @@ import { TreeClock } from '../src/clocks';
 test('First message send', () => {
   const p1 = new TreeClockMessageService(TreeClock.GENESIS);
   p1.send();
-  expect(p1.peek().getTicks()).toBe(1);
+  expect(p1.peek().ticks).toBe(1);
 });
 
 test('First message receive', () => {

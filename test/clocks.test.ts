@@ -1,7 +1,7 @@
 import { TreeClock } from '../src/clocks'
 
 test('Genesis has no ticks', () => {
-  expect(TreeClock.GENESIS.getTicks()).toBe(0);
+  expect(TreeClock.GENESIS.ticks).toBe(0);
 });
 
 test('Fork not equal', () => {
@@ -15,45 +15,50 @@ test('Fork fork not equal', () => {
 });
 
 test('Genesis tick', () => {
-  expect(TreeClock.GENESIS.ticked().getTicks()).toBe(1);
-  expect(TreeClock.GENESIS.ticked().ticked().getTicks()).toBe(2);
+  expect(TreeClock.GENESIS.ticked().ticks).toBe(1);
+  expect(TreeClock.GENESIS.ticked().ticked().ticks).toBe(2);
 });
 
 test('Fork tick', () => {
-  expect(TreeClock.GENESIS.forked().left.ticked().getTicks()).toBe(1);
-  expect(TreeClock.GENESIS.forked().left.ticked().ticked().getTicks()).toBe(2);
+  expect(TreeClock.GENESIS.forked().left.ticked().ticks).toBe(1);
+  expect(TreeClock.GENESIS.forked().left.ticked().ticked().ticks).toBe(2);
 });
 
 test('Fork tick tick', () => {
-  expect(TreeClock.GENESIS.forked().left.forked().left.ticked().getTicks()).toBe(1);
-  expect(TreeClock.GENESIS.forked().left.forked().left.ticked().ticked().getTicks()).toBe(2);
+  expect(TreeClock.GENESIS.forked().left.forked().left.ticked().ticks).toBe(1);
+  expect(TreeClock.GENESIS.forked().left.forked().left.ticked().ticked().ticks).toBe(2);
 });
 
 test('Tick fork', () => {
   const ticked = TreeClock.GENESIS.ticked();
   const fork = ticked.forked();
-  expect(fork.left.getTicks()).toBe(1);
-  expect(fork.right.getTicks()).toBe(1);
+  expect(fork.left.ticks).toBe(1);
+  expect(fork.right.ticks).toBe(1);
 });
 
 test('Tick fork tick', () => {
   const ticked = TreeClock.GENESIS.ticked();
   let { left, right } = ticked.forked();
   left = left.ticked();
-  expect(left.getTicks()).toBe(2);
+  expect(left.ticks).toBe(2);
   right = right.update(left);
-  expect(right.getTicks()).toBe(1);
-  expect(right.getTicks(false)).toBe(2);
+  expect(right.ticks).toBe(1);
+  expect(right.nonIdTicks).toBe(2);
 });
 
 test('Ticks for genesis not Id', () => {
   const ticked = TreeClock.GENESIS.ticked();
-  expect(ticked.getTicks(false)).toBe(null);
+  expect(ticked.nonIdTicks).toBe(null);
 });
 
 test('Ticks for forked not Id', () => {
   const fork = TreeClock.GENESIS.forked();
-  expect(fork.left.getTicks(false)).toBe(0);
+  expect(fork.left.nonIdTicks).toBe(null);
+});
+
+test('Ticks for forked ticked not Id', () => {
+  const fork = TreeClock.GENESIS.forked();
+  expect(fork.left.update(fork.right.ticked()).nonIdTicks).toBe(1);
 });
 
 test('Ticks for other Id', () => {
@@ -61,8 +66,8 @@ test('Ticks for other Id', () => {
   left = left.ticked();
   right = right.ticked().update(left);
   left = left.ticked();
-  expect(left.getTicks()).toBe(2);
-  expect(right.getTicks()).toBe(1);
+  expect(left.ticks).toBe(2);
+  expect(right.ticks).toBe(1);
   expect(right.getTicks(left)).toBe(1);
 });
 
@@ -71,8 +76,8 @@ test('Ticks for other forked Id', () => {
   left = left.ticked();
   right = right.ticked().update(left); // Get one tick before fork
   left = left.forked().left.ticked();
-  expect(left.getTicks()).toBe(2);
-  expect(right.getTicks()).toBe(1);
+  expect(left.ticks).toBe(2);
+  expect(right.ticks).toBe(1);
   expect(right.getTicks(left)).toBe(1);
   expect(right.update(left).getTicks(left)).toBe(2);
   expect(left.getTicks(right)).toBe(0);
@@ -103,24 +108,24 @@ test('Forked right tick no update', () => {
 test('Forked left tick update from right', () => {
   const fork = TreeClock.GENESIS.forked();
   expect(fork.left.equals(fork.left.update(fork.right.ticked()))).toBe(false);
-  expect(fork.left.update(fork.right.ticked()).getTicks()).toBe(fork.left.getTicks());
+  expect(fork.left.update(fork.right.ticked()).ticks).toBe(fork.left.ticks);
 });
 
 test('Forked right tick update from left', () => {
   const fork = TreeClock.GENESIS.forked();
   expect(fork.right.equals(fork.right.update(fork.left.ticked()))).toBe(false);
-  expect(fork.right.update(fork.left.ticked()).getTicks()).toBe(fork.right.getTicks());
+  expect(fork.right.update(fork.left.ticked()).ticks).toBe(fork.right.ticks);
 });
 
 test('Ticks for updated forked not Id', () => {
   const fork = TreeClock.GENESIS.forked();
-  expect(fork.left.update(fork.right.ticked()).getTicks(false)).toBe(1);
+  expect(fork.left.update(fork.right.ticked()).nonIdTicks).toBe(1);
 });
 
 test('Ticks for ticked updated forked not Id', () => {
   const fork = TreeClock.GENESIS.ticked().forked();
   const updatedLeft = fork.left.update(fork.right.ticked());
-  expect(updatedLeft.getTicks(false)).toBe(2);
+  expect(updatedLeft.nonIdTicks).toBe(2);
 });
 
 test('No-op merge', () => {
@@ -140,20 +145,20 @@ test('Merge ticked forked', () => {
 
 test('Merge forked ticked', () => {
   const fork = TreeClock.GENESIS.forked();
-  expect(fork.left.ticked().mergeId(fork.right).getTicks()).toBe(1);
+  expect(fork.left.ticked().mergeId(fork.right).ticks).toBe(1);
 });
 
 test('Merge forked ticked ticked', () => {
   const fork = TreeClock.GENESIS.forked();
-  expect(fork.left.ticked().mergeId(fork.right.ticked()).getTicks()).toBe(1);
+  expect(fork.left.ticked().mergeId(fork.right.ticked()).ticks).toBe(1);
 });
 
 test('Non-contiguous merge', () => {
   const fork1 = TreeClock.GENESIS.forked(), fork2 = fork1.right.forked();
   const clock1 = fork1.left.ticked(), clock3 = fork2.right.ticked();
 
-  expect(clock1.mergeId(clock3).getTicks()).toBe(1);
-  expect(clock1.update(clock3).mergeId(clock3).getTicks()).toBe(2);
+  expect(clock1.mergeId(clock3).ticks).toBe(1);
+  expect(clock1.update(clock3).mergeId(clock3).ticks).toBe(2);
 });
 
 test('Merge all', () => {
@@ -164,7 +169,7 @@ test('Merge all', () => {
     clock4 = clock1.update(clock3).mergeId(clock3),
     clock5 = clock2.update(clock4).mergeId(clock4);
 
-  expect(clock5.getTicks()).toBe(3);
+  expect(clock5.ticks).toBe(3);
 });
 
 test('Less than genesis self', () => {
@@ -224,7 +229,31 @@ test('Get ticks for other ID', () => {
   left = left.ticked();
   right = right.ticked().update(left);
   left = left.ticked();
-  expect(left.getTicks()).toBe(2);
-  expect(right.getTicks()).toBe(1);
+  expect(left.ticks).toBe(2);
+  expect(right.ticks).toBe(1);
   expect(right.getTicks(left)).toBe(1);
+});
+
+test('to string', () => {
+  expect(TreeClock.GENESIS.toString()).toBe('ID');
+  expect(TreeClock.GENESIS.forked().left.toString()).toBe('{ ID,  }');
+  expect(TreeClock.GENESIS.ticked().forked().left.toString()).toBe('1{ ID,  }');
+  expect(TreeClock.GENESIS.forked().left.ticked().toString()).toBe('{ ID1,  }');
+});
+
+test('non-ID in fork with zero ticks is still lt', () => {
+  let { left: id1, right } = TreeClock.GENESIS.forked();
+  const fork = right.ticked().forked();
+  // New ID one level down
+  const id2 = fork.right.ticked();
+  expect(id1.anyLt(id2)).toBe(false);
+});
+
+test('non-ID in fork with ticks is not lt', () => {
+  let { left: id1, right } = TreeClock.GENESIS.forked();
+  const fork = right.ticked().forked();
+  const ticked = fork.left.ticked();
+  // New ID one level down, with ticked left
+  const id2 = fork.right.update(ticked).ticked();
+  expect(id1.anyLt(id2)).toBe(true);
 });

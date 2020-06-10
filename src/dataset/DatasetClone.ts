@@ -90,7 +90,7 @@ export class DatasetClone extends AbstractMeld implements MeldClone {
     }
     this.log.info(`has time ${time}`);
     this.messageService = new TreeClockMessageService(time);
-    this.latestTicks.next(time.getTicks());
+    this.latestTicks.next(time.ticks);
 
     this.remoteUpdatesSub = this.remoteUpdates.received.subscribe({
       next: delta => {

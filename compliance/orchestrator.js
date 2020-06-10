@@ -112,8 +112,15 @@ function start(req, res, next) {
       },
       error: message => {
         const { requestId, err } = message;
-        const [, next] = requests[requestId];
-        next(new InternalServerError(err));
+        const [res, next] = requests[requestId];
+        if (res.header('transfer-encoding') == 'chunked') {
+          // Restify tries to set content-length, which is bad for chunking
+          res.status(500);
+          res.write(err);
+          res.end();
+        } else {
+          next(new InternalServerError(err));
+        }
       },
       destroyed: message => {
         const { requestId } = message;
