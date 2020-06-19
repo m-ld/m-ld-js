@@ -1,7 +1,7 @@
 import { DatasetClone } from '../src/dataset/DatasetClone';
-import { Subject, Describe } from '../src/m-ld/jsonrql';
+import { Subject, Describe } from 'json-rql';
 import { genesisClone, mockRemotes } from './testClones';
-import { NEVER, of } from 'rxjs';
+import { NEVER } from 'rxjs';
 import { isOnline, comesOnline } from '../src/AbstractMeld';
 import {  first } from 'rxjs/operators';
 import { TreeClock } from '../src/clocks';

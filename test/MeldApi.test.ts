@@ -1,5 +1,5 @@
-import { MeldApi } from '../src/m-ld/MeldApi';
-import { Subject, Select, Describe, Reference, Resource } from '../src/m-ld/jsonrql';
+import { MeldApi, Resource } from '../src/m-ld/MeldApi';
+import { Subject, Select, Describe, Reference } from 'json-rql';
 import { genesisClone } from './testClones';
 import { first } from 'rxjs/operators';
 
@@ -15,8 +15,8 @@ describe('Meld API', () => {
     await api.transact({ '@id': 'fred', name: 'Fred' } as Subject).toPromise();
     await expect(captureUpdate).resolves.toEqual({
       '@ticks': 1,
-      '@insert': { '@graph': [{ '@id': 'fred', name: 'Fred' }] },
-      '@delete': { '@graph': [] }
+      '@insert': [{ '@id': 'fred', name: 'Fred' }],
+      '@delete': []
     });
     await expect(api.get('fred').toPromise())
       .resolves.toMatchObject({ '@id': 'fred', name: 'Fred' });
@@ -29,8 +29,8 @@ describe('Meld API', () => {
     await expect(api.get('fred').toPromise()).resolves.toBeUndefined();
     await expect(captureUpdate).resolves.toEqual({
       '@ticks': 2,
-      '@delete': { '@graph': [{ '@id': 'fred', name: 'Fred' }] },
-      '@insert': { '@graph': [] }
+      '@delete': [{ '@id': 'fred', name: 'Fred' }],
+      '@insert': []
     });
   });
 
@@ -86,8 +86,8 @@ describe('Meld API', () => {
 describe('Node utility', () => {
   test('converts simple group update to subject updates', () => {
     expect(MeldApi.asSubjectUpdates({
-      '@delete': { '@graph': { '@id': 'foo', size: 10 } },
-      '@insert': { '@graph': { '@id': 'foo', size: 20 } }
+      '@delete': [{ '@id': 'foo', size: 10 }],
+      '@insert': [{ '@id': 'foo', size: 20 }]
     })).toEqual({
       'foo': {
         '@delete': { '@id': 'foo', size: 10 },
@@ -98,8 +98,8 @@ describe('Node utility', () => {
 
   test('converts array group update to subject updates', () => {
     expect(MeldApi.asSubjectUpdates({
-      '@delete': { '@graph': [{ '@id': 'foo', size: 10 }, { '@id': 'bar', size: 30 }] },
-      '@insert': { '@graph': [{ '@id': 'foo', size: 20 }, { '@id': 'bar', size: 40 }] }
+      '@delete': [{ '@id': 'foo', size: 10 }, { '@id': 'bar', size: 30 }],
+      '@insert': [{ '@id': 'foo', size: 20 }, { '@id': 'bar', size: 40 }]
     })).toEqual({
       'foo': {
         '@delete': { '@id': 'foo', size: 10 },

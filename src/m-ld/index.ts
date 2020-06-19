@@ -6,7 +6,7 @@ import { Observable } from 'rxjs';
 import { Message } from '../messages';
 import { Triple, Quad } from 'rdf-js';
 import { Hash } from '../hash';
-import { Pattern, Subject, Group, DeleteInsert } from './jsonrql';
+import { Pattern, Subject } from 'json-rql';
 import { Future } from '../util';
 const inspect = Symbol.for('nodejs.util.inspect.custom');
 
@@ -101,7 +101,12 @@ export interface MeldLocal extends Meld {
   readonly id: string;
 }
 
-export interface MeldUpdate extends DeleteInsert<Group> {
+export interface DeleteInsert<T> {
+  '@delete': T;
+  '@insert': T;
+}
+
+export interface MeldUpdate extends DeleteInsert<Subject[]> {
   '@ticks': number;
 }
 

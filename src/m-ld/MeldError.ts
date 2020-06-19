@@ -2,6 +2,7 @@
 export enum MeldErrorStatus {
   'No error' = 1,
   'Unknown error',
+  'Pattern is not read or writeable',
   'No visible clones',
   'Bad Update',
   'Bad response',

@@ -5,13 +5,13 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "link-local-m-ld-spec": "sudo npm link ../m-ld-spec",
+    "link-locals": "sudo npm link ../m-ld-spec ../json-rql",
     "clean": "rm -rf dist _site",
     "build-quick": "tsc",
     "build": "npm run clean && jest --silent && tsc && npm run doc",
     "dev": "jest --watch --silent",
     "compliance": "node compliance/test.js",
-    "publish-patch": "npm run build && npm version patch && git push && npm publish",
+    "prepublishOnly": "npm run build && npm version $VERSION && git push",
     "doc": "dts-bundle-generator -o tmp.d.ts dist/index.d.ts --no-check && typedoc --options typedoc.js tmp.d.ts && rm tmp.d.ts"
   },
   "repository": {
@@ -64,6 +64,7 @@
     "async-mqtt": "^2.6.0",
     "bn.js": "^5.1.2",
     "detect-node": "^2.0.4",
+    "json-rql": "^0.4.0-1",
     "jsonld": "^2.0.2",
     "local-storage": "^2.0.0",
     "loglevel": "^1.6.8",

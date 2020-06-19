@@ -1,6 +1,6 @@
 import { MeldClone, Snapshot, DeltaMessage, MeldRemotes, MeldUpdate } from '../m-ld';
-import { Pattern, Subject, isRead } from '../m-ld/jsonrql';
-import { Observable, Subject as Source, merge, from, Observer, defer, NEVER, EMPTY, concat, BehaviorSubject, Subscription, onErrorResumeNext } from 'rxjs';
+import { Pattern, Subject, isRead, isWritable } from 'json-rql';
+import { Observable, Subject as Source, merge, from, Observer, defer, NEVER, EMPTY, concat, BehaviorSubject, Subscription, onErrorResumeNext, throwError } from 'rxjs';
 import { TreeClock } from '../clocks';
 import { SuSetDataset } from './SuSetDataset';
 import { TreeClockMessageService } from '../messages';
@@ -300,7 +300,7 @@ export class DatasetClone extends AbstractMeld implements MeldClone {
       return defer(() => this.onlineLock.enter(this.id))
         .pipe(flatMap(() => this.dataset.read(request)),
           finalize(() => this.onlineLock.leave(this.id)));
-    } else {
+    } else if (isWritable(request)) {
       // For a write, execute immediately
       return from(this.onlineLock.enter(this.id)
         .then(() => this.dataset.transact(async () => {
@@ -311,6 +311,8 @@ export class DatasetClone extends AbstractMeld implements MeldClone {
         .then(this.nextUpdate)
         .finally(() => this.onlineLock.leave(this.id)))
         .pipe(ignoreElements()); // Ignores the void promise result
+    } else {
+      return throwError(new MeldError('Pattern is not read or writeable'));
     }
   }
 

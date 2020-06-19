@@ -3,7 +3,7 @@ import { Triple, NamedNode } from 'rdf-js';
 import { literal, namedNode, blankNode, triple as newTriple } from '@rdfjs/data-model';
 import { HashBagBlock } from '../blocks';
 import { Hash } from '../hash';
-import { asGroup, GroupLike, Group } from './jsonrql';
+import { Context, Subject } from 'json-rql';
 import { compact, toRDF } from 'jsonld';
 import { rdfToJson } from '../util';
 import { TreeClock } from '../clocks';
@@ -116,15 +116,14 @@ export async function asMeldDelta(delta: JsonDelta): Promise<MeldDelta> {
 
 export async function toMeldJson(triples: Triple[]): Promise<any> {
   const jsonld = await rdfToJson(triples);
-  const group = asGroup(await compact(jsonld, DEFAULT_CONTEXT) as GroupLike);
-  delete group['@context'];
-  return group;
+  const graph: any = await compact(jsonld, DEFAULT_CONTEXT);
+  // The jsonld processor may create a top-level @graph with @context
+  delete graph['@context'];
+  return '@graph' in graph ? graph['@graph'] : graph;
 }
 
 export async function fromMeldJson(json: any): Promise<Triple[]> {
-  const jsonld = json as Group;
-  jsonld['@context'] = DEFAULT_CONTEXT;
-  return await toRDF(jsonld) as Triple[];
+  return await toRDF({ '@graph': json, '@context': DEFAULT_CONTEXT }) as Triple[];
 }
 
 export function toTimeString(time?: TreeClock): string | null {

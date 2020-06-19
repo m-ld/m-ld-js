@@ -1,9 +1,10 @@
-import { MeldStore, MeldUpdate } from '.';
-import { Context, Subject, Describe, Pattern, Update, Group, JrqlValue, isValueObject, Reference, DeleteInsert, Resource } from './jsonrql';
+import { MeldStore, MeldUpdate, DeleteInsert } from '.';
+import { Context, Subject, Describe, Pattern, Update, Group, Value, isValueObject, Reference } from 'json-rql';
 import { Observable } from 'rxjs';
 import { map, flatMap } from 'rxjs/operators';
 import { flatten } from 'jsonld';
 import { toArray } from '../util';
+import { Iri } from 'jsonld/jsonld-spec';
 
 export class MeldApi implements MeldStore {
   private readonly context: Context;
@@ -56,18 +57,17 @@ export class MeldApi implements MeldStore {
   follow(after?: number): Observable<MeldUpdate> {
     return this.store.follow(after).pipe(flatMap(async update => ({
       '@ticks': update['@ticks'],
-      '@delete': this.stripImplicitContext(await this.regroup(update['@delete']), this.context),
-      '@insert': this.stripImplicitContext(await this.regroup(update['@insert']), this.context)
+      '@delete': await this.regroup(update['@delete']),
+      '@insert': await this.regroup(update['@insert'])
     })));
   }
 
-  private async regroup(group?: Group): Promise<Group> {
-    return group ? await flatten(group, this.context) as Group : { '@graph': [] };
+  private async regroup(subjects: Subject[]): Promise<Subject[]> {
+    const graph: any = await flatten(subjects, this.context);
+    return graph['@graph'];
   }
 
-  private stripImplicitContext(jsonld: Subject, implicitContext: Context): Subject;
-  private stripImplicitContext(jsonld: Group, implicitContext: Context): Group;
-  private stripImplicitContext(jsonld: Subject | Group, implicitContext: Context): Subject | Group {
+  private stripImplicitContext(jsonld: Subject, implicitContext: Context): Subject {
     const { '@context': context, ...rtn } = jsonld;
     if (implicitContext && context)
       Object.keys(implicitContext).forEach((k: keyof Context) => delete context[k]);
@@ -75,21 +75,20 @@ export class MeldApi implements MeldStore {
   }
 }
 
-export namespace MeldApi {
-  /**
-   * @deprecated use Resource
-   */
-  export type Node<T> = Resource<T>;
+export type Resource<T> = Subject & {
+  [P in keyof T]: T extends '@id' ? Iri : T[P] extends Array<unknown> ? T[P] : T[P] | T[P][];
+};
 
-  export function asSubjectUpdates(update: DeleteInsert<Group>): SubjectUpdates {
+export namespace MeldApi {
+  export function asSubjectUpdates(update: DeleteInsert<Subject[]>): SubjectUpdates {
     return bySubject(update, '@insert', bySubject(update, '@delete', {}));
   }
 
   export type SubjectUpdates = { [id: string]: DeleteInsert<Subject> };
 
-  function bySubject(update: DeleteInsert<Group>,
+  function bySubject(update: DeleteInsert<Subject[]>,
     key: '@insert' | '@delete', bySubject: SubjectUpdates): SubjectUpdates {
-    return toArray(update[key]['@graph']).reduce((byId, subject) =>
+    return update[key].reduce((byId, subject) =>
       ({ ...byId, [subject['@id'] ?? '*']: { ...byId[subject['@id'] ?? '*'], [key]: subject } }), bySubject);
   }
 
@@ -112,9 +111,9 @@ export namespace MeldApi {
     return rtn.length == 1 && !Array.isArray(value) ? rtn[0] : rtn;
   }
 
-  export function includesValue(arr: JrqlValue[], value: JrqlValue): boolean {
+  export function includesValue(arr: Value[], value: Value): boolean {
     // TODO support value objects
-    function isSubjectOrRef(v: JrqlValue): v is Subject | Reference {
+    function isSubjectOrRef(v: Value): v is Subject | Reference {
       return typeof value == 'object' && !isValueObject(value);
     }
     if (isSubjectOrRef(value)) {

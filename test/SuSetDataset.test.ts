@@ -4,7 +4,7 @@ import { TreeClock } from '../src/clocks';
 import { Hash } from '../src/hash';
 import { first, toArray, isEmpty } from 'rxjs/operators';
 import { uuid } from 'short-uuid';
-import { Subject } from '../src/m-ld/jsonrql';
+import { Subject } from 'json-rql';
 import { JsonDelta } from '../src/m-ld';
 import { Dataset } from '../src/dataset';
 import { from } from 'rxjs';
@@ -92,12 +92,11 @@ describe('SU-Set Dataset', () => {
         expect(msg.data.tid).toBeTruthy();
 
         const insertedJsonLd = JSON.parse(msg.data.insert);
-        expect(insertedJsonLd).toHaveProperty(['@graph', '@id'], 'http://test.m-ld.org/fred');
-        expect(insertedJsonLd).toHaveProperty(['@graph', 'http://test.m-ld.org/#name'], 'Fred');
+        expect(insertedJsonLd).toEqual(fred);
 
-        expect(JSON.parse(msg.data.delete)).toHaveProperty('@graph', {});
+        expect(JSON.parse(msg.data.delete)).toEqual({});
 
-        await expect(willUpdate).resolves.toHaveProperty('@insert', { '@graph': [fred] });
+        await expect(willUpdate).resolves.toHaveProperty('@insert', [fred]);
       });
 
       test('applies an insert delta', async () => {
@@ -105,14 +104,14 @@ describe('SU-Set Dataset', () => {
 
         await ssd.apply({
           tid: 'B6FVbHGtFxXhdLKEVmkcd',
-          insert: '{"@graph":{"@id":"http://test.m-ld.org/fred","http://test.m-ld.org/#name":"Fred"}}',
-          delete: '{"@graph":{}}'
+          insert: '{"@id":"http://test.m-ld.org/fred","http://test.m-ld.org/#name":"Fred"}',
+          delete: '{}'
         }, remoteTime = remoteTime.ticked(), localTime = localTime.update(remoteTime).ticked());
 
         await expect(ssd.find1({ '@id': 'http://test.m-ld.org/fred' }))
           .resolves.toEqual('http://test.m-ld.org/fred');
 
-        await expect(willUpdate).resolves.toHaveProperty('@insert', { '@graph': [fred] });
+        await expect(willUpdate).resolves.toHaveProperty('@insert', [fred]);
       });
 
       describe('with an initial triple', () => {
@@ -174,16 +173,18 @@ describe('SU-Set Dataset', () => {
           expect(msg.time.equals(localTime)).toBe(true);
           expect(msg.data.tid).toBeTruthy();
 
-          expect(JSON.parse(msg.data.insert)).toHaveProperty('@graph', {});
+          expect(JSON.parse(msg.data.insert)).toEqual({});
 
           const deletedJsonLd = JSON.parse(msg.data.delete);
-          expect(deletedJsonLd).toHaveProperty(['@graph', '@type'], 'rdf:Statement');
-          expect(deletedJsonLd).toHaveProperty(['@graph', 'tid']);
-          expect(deletedJsonLd).toHaveProperty(['@graph', 's'], 'http://test.m-ld.org/fred');
-          expect(deletedJsonLd).toHaveProperty(['@graph', 'p'], 'http://test.m-ld.org/#name');
-          expect(deletedJsonLd).toHaveProperty(['@graph', 'o'], 'Fred');
+          expect(deletedJsonLd).toMatchObject({
+            '@type': 'rdf:Statement',
+            'tid': firstTid,
+            's': 'http://test.m-ld.org/fred',
+            'p': 'http://test.m-ld.org/#name',
+            'o': 'Fred'
+          });
 
-          await expect(willUpdate).resolves.toHaveProperty('@delete', { '@graph': [fred] });
+          await expect(willUpdate).resolves.toHaveProperty('@delete', [fred]);
         });
 
         test('applies a delete delta', async () => {
@@ -191,15 +192,15 @@ describe('SU-Set Dataset', () => {
 
           await ssd.apply({
             tid: 'uSX1mPGhuWAEH56RLwYmvG',
-            insert: '{"@graph":{}}',
+            insert: '{}',
             // Deleting the triple based on the inserted Transaction ID
-            delete: `{"@graph":{"@id":"b4vMkTurWFf6qjBuhkRvjX","@type":"rdf:Statement",
+            delete: `{"@id":"b4vMkTurWFf6qjBuhkRvjX","@type":"rdf:Statement",
               "tid":"${firstTid}","o":"Fred","p":"http://test.m-ld.org/#name",
-              "s":"http://test.m-ld.org/fred"}}`
+              "s":"http://test.m-ld.org/fred"}`
           }, remoteTime = remoteTime.ticked(), localTime = localTime.update(remoteTime).ticked());
 
           await expect(ssd.find1({ '@id': 'http://test.m-ld.org/fred' })).resolves.toEqual('');
-          await expect(willUpdate).resolves.toHaveProperty('@delete', { '@graph': [fred] });
+          await expect(willUpdate).resolves.toHaveProperty('@delete', [fred]);
         });
 
         test('transacts another insert', async () => {
@@ -219,8 +220,8 @@ describe('SU-Set Dataset', () => {
           ]);
           await ssd.apply({
             tid: firstTid,
-            insert: '{"@graph":{"@id":"http://test.m-ld.org/fred","http://test.m-ld.org/#name":"Fred"}}',
-            delete: '{"@graph":{}}'
+            insert: '{"@id":"http://test.m-ld.org/fred","http://test.m-ld.org/#name":"Fred"}',
+            delete: '{}'
           }, remoteTime = remoteTime.ticked(), localTime = localTime.update(remoteTime).ticked());
 
           await expect(ssd.find1({ '@id': 'http://test.m-ld.org/fred' })).resolves.toEqual('');
@@ -240,8 +241,8 @@ describe('SU-Set Dataset', () => {
           }, localTime = localTime.ticked());
           await ssd.apply({
             tid: firstTid,
-            insert: '{"@graph":{"@id":"http://test.m-ld.org/fred","http://test.m-ld.org/#name":"Fred"}}',
-            delete: '{"@graph":{}}'
+            insert: '{"@id":"http://test.m-ld.org/fred","http://test.m-ld.org/#name":"Fred"}',
+            delete: '{}'
           }, remoteTime = remoteTime.ticked(), localTime = localTime.update(remoteTime).ticked());
 
           await expect(ssd.find1({ '@id': 'http://test.m-ld.org/fred' })).resolves.toEqual('');
@@ -271,10 +272,10 @@ describe('SU-Set Dataset', () => {
           const thirdTime = forkLocal.right.ticked();
           await ssd.apply({
             tid: 'uSX1mPGhuWAEH56RLwYmvG',
-            insert: '{"@graph":{}}',
-            delete: `{"@graph":{"@id":"b4vMkTurWFf6qjBuhkRvjX","@type":"rdf:Statement",
+            insert: '{}',
+            delete: `{"@id":"b4vMkTurWFf6qjBuhkRvjX","@type":"rdf:Statement",
               "tid":"${firstTid}","o":"Fred","p":"http://test.m-ld.org/#name",
-              "s":"http://test.m-ld.org/fred"}}`
+              "s":"http://test.m-ld.org/fred"}`
           }, thirdTime, localTime = localTime.update(thirdTime).ticked());
 
           const ops = await ssd.operationsSince(remoteTime);
@@ -334,5 +335,5 @@ describe('SU-Set Dataset', () => {
 });
 
 function remoteInsert(subject: Subject): JsonDelta {
-  return { tid: uuid(), insert: JSON.stringify({ '@graph': subject }), delete: '{"@graph":{}}' };
+  return { tid: uuid(), insert: JSON.stringify(subject), delete: '{}' };
 }

@@ -3,14 +3,15 @@ import { Quad, Triple } from 'rdf-js';
 import { namedNode, defaultGraph } from '@rdfjs/data-model';
 import { TreeClock } from '../clocks';
 import { Hash } from '../hash';
-import { Context, Subject } from '../m-ld/jsonrql';
+import { Context, Subject } from 'json-rql';
 import { Dataset, PatchQuads, Patch } from '.';
+import { flatten as flatJsonLd } from 'jsonld';
 import { Iri } from 'jsonld/jsonld-spec';
-import { JrqlGraph, toGroup } from './JrqlGraph';
+import { JrqlGraph } from './JrqlGraph';
 import { JsonDeltaBagBlock, newDelta, asMeldDelta, toTimeString, fromTimeString, reify, unreify, hashTriple } from '../m-ld/MeldJson';
 import { Observable, from, Subject as Source, asapScheduler, Observer } from 'rxjs';
 import { toArray, bufferCount, flatMap, reduce, observeOn, isEmpty, map } from 'rxjs/operators';
-import { flatten, Future, tapComplete, getIdLogger, check } from '../util';
+import { flatten, Future, tapComplete, getIdLogger, check, rdfToJson } from '../util';
 import { generate as uuid } from 'short-uuid';
 import { LogLevelDesc, Logger } from 'loglevel';
 import { MeldError } from '../m-ld/MeldError';
@@ -278,7 +279,7 @@ export class SuSetDataset extends JrqlGraph {
     });
   }
 
-  @SuSetDataset.checkNotClosed.async 
+  @SuSetDataset.checkNotClosed.async
   async apply(msgData: JsonDelta, msgTime: TreeClock, localTime: TreeClock): Promise<void> {
     return this.dataset.transact(async () => {
       // Check we haven't seen this transaction before in the journal
@@ -331,9 +332,19 @@ export class SuSetDataset extends JrqlGraph {
   private async notifyUpdate(patch: PatchQuads, time: TreeClock) {
     this.updateSource.next({
       '@ticks': time.ticks,
-      '@delete': await toGroup(patch.oldQuads, this.defaultContext),
-      '@insert': await toGroup(patch.newQuads, this.defaultContext)
+      '@delete': await this.toSubjects(patch.oldQuads),
+      '@insert': await this.toSubjects(patch.newQuads)
     });
+  }
+
+  /**
+   * @returns flattened subjects compacted with no context
+   * @see https://www.w3.org/TR/json-ld11/#flattened-document-form
+   */
+  private async toSubjects(quads: Quad[]): Promise<Subject[]> {
+    // The flatten function is guaranteed to create a graph object
+    const graph: any = await flatJsonLd(await rdfToJson(quads), {});
+    return graph['@graph'];
   }
 
   private newTid(tid: UUID | UUID[]): Promise<PatchQuads> {

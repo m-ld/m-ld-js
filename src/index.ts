@@ -3,14 +3,14 @@ import { DatasetClone } from './dataset/DatasetClone';
 import { generate } from 'short-uuid';
 import { AbstractLevelDOWN, AbstractOpenOptions } from 'abstract-leveldown';
 import { MeldApi } from './m-ld/MeldApi';
-import { Context, Reference } from './m-ld/jsonrql';
+import { Context, Reference } from 'json-rql';
 import { MqttRemotes, MeldMqttOpts } from './mqtt/MqttRemotes';
 import { MeldRemotes, MeldStore } from './m-ld';
 import { LogLevelDesc } from 'loglevel';
 
 export { MeldApi };
 export { shortId } from './util';
-export * from './m-ld/jsonrql';
+export * from 'json-rql';
 
 /**
  * m-ld clone configuration
