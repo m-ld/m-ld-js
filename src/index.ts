@@ -3,14 +3,17 @@ import { DatasetClone } from './dataset/DatasetClone';
 import { generate } from 'short-uuid';
 import { AbstractLevelDOWN, AbstractOpenOptions } from 'abstract-leveldown';
 import { MeldApi } from './m-ld/MeldApi';
-import { Context, Reference } from 'json-rql';
+import { Context, Reference } from './dataset/jrql-support';
 import { MqttRemotes, MeldMqttOpts } from './mqtt/MqttRemotes';
 import { MeldRemotes, MeldStore } from './m-ld';
 import { LogLevelDesc } from 'loglevel';
 
 export { MeldApi };
 export { shortId } from './util';
-export * from 'json-rql';
+export {
+  Pattern, Reference, Context, Variable, Value, Describe,
+  Group, Query, Read, Result, Select, Subject, Update
+} from './dataset/jrql-support';
 
 /**
  * m-ld clone configuration
@@ -54,7 +57,7 @@ export interface MeldConfig {
  * database already exists. This function returns as soon as it is safe to
  * begin transactions against the clone; this may be before the clone has
  * received all updates from the domain. To await latest updates, await a call
- * to the {@link MeldApi#latest} method.
+ * to the {@link MeldApi.latest} method.
  * @param ldb an instance of a leveldb backend
  * @param config the clone configuration
  */

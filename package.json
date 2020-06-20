@@ -12,7 +12,8 @@
     "dev": "jest --watch --silent",
     "compliance": "node compliance/test.js",
     "prepublishOnly": "npm run build && npm version $VERSION && git push",
-    "doc": "dts-bundle-generator -o tmp.d.ts dist/index.d.ts --no-check && typedoc --options typedoc.js tmp.d.ts && rm tmp.d.ts"
+    "doc": "dts-bundle-generator -o tmp.d.ts dist/index.d.ts --no-check && typedoc --options typedoc.js tmp.d.ts && rm tmp.d.ts",
+    "doc-dev": "tsc-watch --onSuccess \"npm run doc\" & browser-sync start --server _site --files _site"
   },
   "repository": {
     "type": "git",
@@ -30,6 +31,7 @@
     "@types/memdown": "^3.0.0",
     "@types/readable-stream": "2.3.5",
     "aedes": "^0.42.0",
+    "browser-sync": "^2.26.7",
     "dts-bundle-generator": "^4.3.0",
     "jest": "^26.0.1",
     "jest-mock-extended": "^1.0.8",
@@ -38,6 +40,7 @@
     "restify": "^8.5.1",
     "tmp": "^0.2.1",
     "ts-jest": "^26.0.0",
+    "tsc-watch": "^4.2.8",
     "typedoc": "^0.17.7",
     "typescript": "^3.9.3"
   },

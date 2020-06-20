@@ -3,7 +3,7 @@ import { Quad, Triple } from 'rdf-js';
 import { namedNode, defaultGraph } from '@rdfjs/data-model';
 import { TreeClock } from '../clocks';
 import { Hash } from '../hash';
-import { Context, Subject } from 'json-rql';
+import { Context, Subject } from './jrql-support';
 import { Dataset, PatchQuads, Patch } from '.';
 import { flatten as flatJsonLd } from 'jsonld';
 import { Iri } from 'jsonld/jsonld-spec';

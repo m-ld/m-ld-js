@@ -3,7 +3,6 @@ import { Triple, NamedNode } from 'rdf-js';
 import { literal, namedNode, blankNode, triple as newTriple } from '@rdfjs/data-model';
 import { HashBagBlock } from '../blocks';
 import { Hash } from '../hash';
-import { Context, Subject } from 'json-rql';
 import { compact, toRDF } from 'jsonld';
 import { rdfToJson } from '../util';
 import { TreeClock } from '../clocks';

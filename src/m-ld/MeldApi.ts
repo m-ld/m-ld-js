@@ -1,5 +1,5 @@
 import { MeldStore, MeldUpdate, DeleteInsert } from '.';
-import { Context, Subject, Describe, Pattern, Update, Group, Value, isValueObject, Reference } from 'json-rql';
+import { Context, Subject, Describe, Pattern, Update, Value, isValueObject, Reference } from '../dataset/jrql-support';
 import { Observable } from 'rxjs';
 import { map, flatMap } from 'rxjs/operators';
 import { flatten } from 'jsonld';

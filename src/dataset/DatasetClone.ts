@@ -1,5 +1,5 @@
 import { MeldClone, Snapshot, DeltaMessage, MeldRemotes, MeldUpdate } from '../m-ld';
-import { Pattern, Subject, isRead, isWritable } from 'json-rql';
+import { Pattern, Subject, isRead, isSubject, isGroup, isUpdate } from './jrql-support';
 import { Observable, Subject as Source, merge, from, Observer, defer, NEVER, EMPTY, concat, BehaviorSubject, Subscription, onErrorResumeNext, throwError } from 'rxjs';
 import { TreeClock } from '../clocks';
 import { SuSetDataset } from './SuSetDataset';
@@ -300,7 +300,7 @@ export class DatasetClone extends AbstractMeld implements MeldClone {
       return defer(() => this.onlineLock.enter(this.id))
         .pipe(flatMap(() => this.dataset.read(request)),
           finalize(() => this.onlineLock.leave(this.id)));
-    } else if (isWritable(request)) {
+    } else if (isSubject(request) || isGroup(request) || isUpdate(request)) {
       // For a write, execute immediately
       return from(this.onlineLock.enter(this.id)
         .then(() => this.dataset.transact(async () => {

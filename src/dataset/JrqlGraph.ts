@@ -1,8 +1,8 @@
 import { Iri } from 'jsonld/jsonld-spec';
 import {
   Context, Read, Subject, Update, isDescribe, isGroup, isSubject, isUpdate,
-  Group, isSelect, Result, Variable, Value, isValueObject, isReference, Query
-} from 'json-rql';
+  Group, isSelect, Result, Variable, Value, isValueObject, isReference
+} from './jrql-support';
 import { NamedNode, Quad, Term, Variable as VariableNode, Quad_Subject, Quad_Predicate, Quad_Object } from 'rdf-js';
 import { compact, toRDF } from 'jsonld';
 import { namedNode, defaultGraph, variable, quad as createQuad, blankNode } from '@rdfjs/data-model';
@@ -11,10 +11,6 @@ import { toArray, flatMap, defaultIfEmpty, map, filter, distinct, first } from '
 import { from, of, EMPTY, Observable, throwError } from 'rxjs';
 import { toArray as array, shortId, flatten, rdfToJson } from '../util';
 import { QuadSolution } from './QuadSolution';
-
-function isSubjects(where: Exclude<Query['@where'], undefined>): where is Subject | Subject[] {
-  return Array.isArray(where) ? where.every(isSubject) : isSubject(where);
-}
 
 /**
  * A graph wrapper that provides low-level json-rql handling for queries. The
@@ -28,11 +24,9 @@ export class JrqlGraph {
   }
 
   read(query: Read, context: Context = query['@context'] || this.defaultContext): Observable<Subject> {
-    if (isDescribe(query) && typeof query['@describe'] != 'object' &&
-      (query['@where'] == null || isSubjects(query['@where']))) {
+    if (isDescribe(query) && !Array.isArray(query['@describe'])) {
       return this.describe(query['@describe'], query['@where'], context);
-    } else if (isSelect(query) && query['@where'] != null &&
-      isSubjects(query['@where'])) {
+    } else if (isSelect(query) && query['@where'] != null) {
       return this.select(query['@select'], query['@where'], context);
     }
     return throwError(new Error('Read type not supported.'));
@@ -59,7 +53,7 @@ export class JrqlGraph {
     return patch;
   }
 
-  select(select: Result[] | Result, where: Subject | Subject[], context: Context = this.defaultContext): Observable<Subject> {
+  select(select: Result, where: Subject | Subject[], context: Context = this.defaultContext): Observable<Subject> {
     return from(this.quads(where, context).then(quads => this.matchSolutions(quads))).pipe(flatMap(solutions =>
       from(solutions).pipe(flatMap(solution => solutionSubject(select, solution, context)))));
   }

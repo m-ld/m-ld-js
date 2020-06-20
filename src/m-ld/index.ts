@@ -6,7 +6,7 @@ import { Observable } from 'rxjs';
 import { Message } from '../messages';
 import { Triple, Quad } from 'rdf-js';
 import { Hash } from '../hash';
-import { Pattern, Subject } from 'json-rql';
+import { Pattern, Subject } from '../dataset/jrql-support';
 import { Future } from '../util';
 const inspect = Symbol.for('nodejs.util.inspect.custom');
 
