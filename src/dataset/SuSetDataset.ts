@@ -227,7 +227,7 @@ export class SuSetDataset extends JrqlGraph {
         const found = findTime != null ?
           await this.controlGraph.find1<JournalEntry>({ ticks: findTime }) : '';
         if (found) {
-          // Don't emit an entry if it's all less than the requested time (based on remote ID)
+          // Don't emit an entry if it's all less than the requested time
           resolve(new Observable(subs =>
             this.emitJournalFrom(found, subs, entry => time.anyLt(safeTime(entry), 'includeIds'))));
         } else {

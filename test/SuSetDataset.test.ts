@@ -329,6 +329,40 @@ describe('SU-Set Dataset', () => {
           expect(opArray.length).toBe(1);
           expect(opArray[0].data.tid).toBe(thirdOp.tid);
         });
+
+        // @see https://github.com/m-ld/m-ld-js/issues/29
+        test('accepts own unpersisted update', async () => {
+          await ssd.apply({
+            tid: 'uSX1mPGhuWAEH56RLwYmvG',
+            insert: '{"@id":"http://test.m-ld.org/wilma","http://test.m-ld.org/#name":"Wilma"}',
+            delete: '{}'
+          }, localTime = localTime.ticked(), localTime);
+
+          await expect(ssd.find1({ '@id': 'http://test.m-ld.org/wilma' }))
+            .resolves.toEqual('http://test.m-ld.org/wilma');
+        });
+
+        // @see https://github.com/m-ld/m-ld-js/issues/29
+        test('answers unpersisted remote op', async () => {
+          // Remote knows about first entry
+          remoteTime = remoteTime.update(localTime);
+          // Create a remote entry that the remote fails to persist fully
+          const unpersistedTime = remoteTime.ticked();
+          await ssd.apply({
+            tid: 'uSX1mPGhuWAEH56RLwYmvG',
+            insert: '{}',
+            delete: `{"@id":"b4vMkTurWFf6qjBuhkRvjX","@type":"rdf:Statement",
+              "tid":"${firstTid}","o":"Fred","p":"http://test.m-ld.org/#name",
+              "s":"http://test.m-ld.org/fred"}`
+          }, unpersistedTime, localTime = localTime.update(unpersistedTime).ticked());
+
+          const ops = await ssd.operationsSince(remoteTime);
+          expect(ops).not.toBeUndefined();
+          const opArray = ops ? await ops.pipe(toArray()).toPromise() : [];
+          expect(opArray.length).toBe(1);
+          expect(unpersistedTime.equals(opArray[0].time)).toBe(true);
+          expect(opArray[0].data.tid).toBe('uSX1mPGhuWAEH56RLwYmvG');
+        });
       });
     });
   });

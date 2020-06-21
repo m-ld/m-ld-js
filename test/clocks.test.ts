@@ -84,8 +84,13 @@ test('Ticks for other forked Id', () => {
   expect(left.update(right).getTicks(right)).toBe(1);
 });
 
-test('Bad update', () => {
-  expect(() => TreeClock.GENESIS.update(TreeClock.GENESIS.ticked())).toThrowError();
+test('Self-update is allowed', () => {
+  expect(TreeClock.GENESIS.update(TreeClock.GENESIS.ticked())
+    .equals(TreeClock.GENESIS.ticked())).toBe(true);
+});
+
+test('Self-update with fork is not allowed', () => {
+  expect(() => TreeClock.GENESIS.update(TreeClock.GENESIS.forked().left)).toThrowError();
 });
 
 test('Forked no update', () => {

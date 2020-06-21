@@ -182,9 +182,12 @@ export class TreeClock implements CausalClock<TreeClock> {
 
   update(other: TreeClock): TreeClock {
     if (this.isId) {
-      if (other.isId && other._ticks > this._ticks)
-        throw new Error("Trying to update from overlapping clock");
-      return this;
+      if (other._fork != null)
+        throw new Error("Trying to update from overlapping forked clock");
+      else if (other._ticks > this._ticks)
+        return new TreeClock(true, other._ticks);
+      else
+        return this; // Typical case: we have the most ticks for our own ID
     } else {
       return new TreeClock(
         false, Math.max(this._ticks, other._ticks),

@@ -49,3 +49,12 @@ test('First message unbuffer', () => {
   expect(messages[1].data).toBe('Bar');
   expect(buffer.length).toBe(0);
 });
+
+test('Accept own more recent message', () => {
+  const { left: p1Clock } = TreeClock.GENESIS.forked();
+  const p1 = new TreeClockMessageService(p1Clock);
+  const messages: Message<TreeClock, string>[] = [];
+  p1.receive({ time: p1Clock.ticked().ticked(), data: 'Foo' }, [], msg => messages.push(msg));
+  expect(p1.peek().equals(p1Clock.ticked().ticked())).toBe(true);
+  expect(messages[0].data).toBe('Foo');
+});
