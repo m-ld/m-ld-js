@@ -1,11 +1,12 @@
 import { hashTriple } from '../src/m-ld/MeldJson';
 import { namedNode, triple, literal } from '@rdfjs/data-model';
+import { Quad } from 'rdf-js';
 
   ////////////////////////////////////////////////////////////////////////////////////////////////////
   // Canonical hash tests - see m-ld/m-ld-jena/src/test/java/org/m_ld/jena/JenaDeltaTest.java
 
 test('Hashing a canonical triple with named node object', () => {
-  expect(hashTriple(triple(
+  expect(hashTriple(triple<Quad>(
     namedNode('http://test.m-ld.org/subject'),
     namedNode('http://test.m-ld.org/predicate'),
     namedNode('http://test.m-ld.org/object'))).encode())
@@ -13,7 +14,7 @@ test('Hashing a canonical triple with named node object', () => {
 });
 
 test('Hashing a canonical triple with literal object', () => {
-  expect(hashTriple(triple(
+  expect(hashTriple(triple<Quad>(
     namedNode('http://test.m-ld.org/subject'),
     namedNode('http://test.m-ld.org/predicate'),
     literal('value'))).encode())
@@ -21,7 +22,7 @@ test('Hashing a canonical triple with literal object', () => {
 });
 
 test('Hashing a canonical triple with literal language object', () => {
-  expect(hashTriple(triple(
+  expect(hashTriple(triple<Quad>(
     namedNode('http://test.m-ld.org/subject'),
     namedNode('http://test.m-ld.org/predicate'),
     literal('value', 'en-us'))).encode())
@@ -29,7 +30,7 @@ test('Hashing a canonical triple with literal language object', () => {
 });
 
 test('Hashing a canonical triple with typed literal object', () => {
-  expect(hashTriple(triple(
+  expect(hashTriple(triple<Quad>(
     namedNode('http://test.m-ld.org/subject'),
     namedNode('http://test.m-ld.org/predicate'),
     literal('1', namedNode('http://www.w3.org/2001/XMLSchema#integer')))).encode())

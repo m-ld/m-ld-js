@@ -66,7 +66,7 @@ export function isGroup(p: Pattern): p is Group {
 
 export interface Query extends Pattern {
   // No support for @values
-  '@where': Subject | Subject[];
+  '@where'?: Subject | Subject[];
 }
 
 export function isQuery(p: Pattern): p is Query {
@@ -98,8 +98,8 @@ export function isSelect(p: Pattern): p is Select {
 }
 
 export interface Update extends Query {
-  '@insert': Subject | Subject[];
-  '@delete': Subject | Subject[];
+  '@insert'?: Subject | Subject[];
+  '@delete'?: Subject | Subject[];
 }
 
 export function isUpdate(p: Pattern): p is Update {

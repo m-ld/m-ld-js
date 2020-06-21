@@ -1,5 +1,5 @@
-import { MeldDelta, JsonDelta, Snapshot, UUID, MeldUpdate, DeltaMessage } from '../m-ld';
-import { Quad, Triple } from 'rdf-js';
+import { MeldDelta, JsonDelta, Snapshot, UUID, MeldUpdate, DeltaMessage, Triple } from '../m-ld';
+import { Quad } from 'rdf-js';
 import { namedNode, defaultGraph } from '@rdfjs/data-model';
 import { TreeClock } from '../clocks';
 import { Hash } from '../hash';
@@ -8,7 +8,7 @@ import { Dataset, PatchQuads, Patch } from '.';
 import { flatten as flatJsonLd } from 'jsonld';
 import { Iri } from 'jsonld/jsonld-spec';
 import { JrqlGraph } from './JrqlGraph';
-import { JsonDeltaBagBlock, newDelta, asMeldDelta, toTimeString, fromTimeString, reify, unreify, hashTriple } from '../m-ld/MeldJson';
+import { JsonDeltaBagBlock, newDelta, asMeldDelta, toTimeString, fromTimeString, reify, unreify, hashTriple, toDomainQuad } from '../m-ld/MeldJson';
 import { Observable, from, Subject as Source, asapScheduler, Observer } from 'rxjs';
 import { toArray, bufferCount, flatMap, reduce, observeOn, isEmpty, map } from 'rxjs/operators';
 import { flatten, Future, tapComplete, getIdLogger, check, rdfToJson } from '../util';
@@ -286,7 +286,7 @@ export class SuSetDataset extends JrqlGraph {
       if (!(await this.tidsGraph.find1<AllTids>({ '@id': 'qs:all', tid: [msgData.tid] }))) {
         this.log.debug(`Applying tid: ${msgData.tid}`);
         const delta = await asMeldDelta(msgData);
-        const patch = new PatchQuads([], delta.insert);
+        const patch = new PatchQuads([], delta.insert.map(toDomainQuad));
         // The delta's delete contains reifications of deleted triples
         const tidPatch = await unreify(delta.delete)
           .reduce(async (tripleTidPatch, [triple, theirTids]) => {
@@ -295,7 +295,7 @@ export class SuSetDataset extends JrqlGraph {
             const toRemove = ourTripleTids.filter(tripleTid => theirTids.includes(tripleTid.object.value));
             // If no tids are left, delete the triple in our graph
             if (toRemove.length == ourTripleTids.length)
-              patch.oldQuads.push({ ...triple, graph: defaultGraph() });
+              patch.oldQuads.push(toDomainQuad(triple));
             return (await tripleTidPatch).concat({ oldQuads: toRemove });
           }, this.newTriplesTid(delta.insert, delta.tid));
         // Include journaling in final patch
@@ -362,7 +362,7 @@ export class SuSetDataset extends JrqlGraph {
       ({ '@id': theTripleId, tid } as HashTid)));
   }
 
-  private async findTriplesTids(quads: Quad[]): Promise<{ triple: Triple, tids: Triple[] }[]> {
+  private async findTriplesTids(quads: Triple[]): Promise<{ triple: Triple, tids: Quad[] }[]> {
     return from(quads).pipe(
       flatMap(async quad => ({
         triple: quad,
@@ -375,7 +375,7 @@ export class SuSetDataset extends JrqlGraph {
     return this.tidsGraph.findQuads({ '@id': tripleId } as Partial<HashTid>);
   }
 
-  private reify(triplesTids: { triple: Triple, tids: Triple[] }[]): Triple[] {
+  private reify(triplesTids: { triple: Triple, tids: Quad[] }[]): Triple[] {
     return flatten(triplesTids.map(tripleTids =>
       reify(tripleTids.triple, tripleTids.tids.map(tidQuad => tidQuad.object.value))));
   }
@@ -406,7 +406,7 @@ export class SuSetDataset extends JrqlGraph {
         // For each triple in the batch, insert the TIDs into the tids graph
         flatMap(async ([triple, tids]) => (await this.newTripleTids(triple, tids))
           // And include the triple itself
-          .concat({ newQuads: [{ ...triple, graph: defaultGraph() }] })),
+          .concat({ newQuads: [toDomainQuad(triple)] })),
         // Concat all of the resultant batch patches together
         reduce((batchPatch, entryPatch) => batchPatch.concat(entryPatch)))
         .toPromise()))).toPromise();
@@ -483,8 +483,8 @@ export class SuSetDataset extends JrqlGraph {
   }
 }
 
-function tripleId(quad: Quad): string {
-  return toPrefixedId('hash', hashTriple(quad).encode());
+function tripleId(triple: Triple): string {
+  return toPrefixedId('hash', hashTriple(triple).encode());
 }
 
 function toPrefixedId(prefix: string, ...path: string[]) {

@@ -8,7 +8,7 @@ import { MqttRemotes, MeldMqttOpts } from './mqtt/MqttRemotes';
 import { MeldRemotes, MeldStore } from './m-ld';
 import { LogLevelDesc } from 'loglevel';
 
-export { MeldApi };
+export * from './m-ld/MeldApi';
 export { shortId } from './util';
 export {
   Pattern, Reference, Context, Variable, Value, Describe,

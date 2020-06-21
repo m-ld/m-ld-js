@@ -4,11 +4,16 @@
 import { TreeClock } from '../clocks';
 import { Observable } from 'rxjs';
 import { Message } from '../messages';
-import { Triple, Quad } from 'rdf-js';
+import { Quad } from 'rdf-js';
 import { Hash } from '../hash';
 import { Pattern, Subject } from '../dataset/jrql-support';
 import { Future } from '../util';
 const inspect = Symbol.for('nodejs.util.inspect.custom');
+
+/**
+ * The graph is implicit in m-ld operations.
+ */
+export type Triple = Omit<Quad, 'graph'>;
 
 export class DeltaMessage implements Message<TreeClock, JsonDelta> {
   readonly delivered = new Future;
@@ -84,7 +89,7 @@ export interface Snapshot {
    * An observable of reified quad arrays. Reified quads include their observed
    * TIDs. Arrays for batching (sender decides array size).
    */
-  readonly quads: Observable<Quad[]>;
+  readonly quads: Observable<Triple[]>;
   /**
    * All observed TIDs, for detecting duplicates.
    */

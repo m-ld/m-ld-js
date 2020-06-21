@@ -81,13 +81,13 @@ export type Resource<T> = Subject & {
 
 export namespace MeldApi {
   export function asSubjectUpdates(update: DeleteInsert<Subject[]>): SubjectUpdates {
-    return bySubject(update, '@insert', bySubject(update, '@delete', {}));
+    return bySubject(update, '@insert', bySubject(update, '@delete'));
   }
 
   export type SubjectUpdates = { [id: string]: DeleteInsert<Subject> };
 
   function bySubject(update: DeleteInsert<Subject[]>,
-    key: '@insert' | '@delete', bySubject: SubjectUpdates): SubjectUpdates {
+    key: '@insert' | '@delete', bySubject: SubjectUpdates = {}): SubjectUpdates {
     return update[key].reduce((byId, subject) =>
       ({ ...byId, [subject['@id'] ?? '*']: { ...byId[subject['@id'] ?? '*'], [key]: subject } }), bySubject);
   }

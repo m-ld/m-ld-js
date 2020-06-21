@@ -1,6 +1,6 @@
-import { MeldDelta, JsonDelta, UUID } from '.';
-import { Triple, NamedNode } from 'rdf-js';
-import { literal, namedNode, blankNode, triple as newTriple } from '@rdfjs/data-model';
+import { MeldDelta, JsonDelta, UUID, Triple } from '.';
+import { NamedNode, Quad } from 'rdf-js';
+import { literal, namedNode, blankNode, triple as newTriple, defaultGraph } from '@rdfjs/data-model';
 import { HashBagBlock } from '../blocks';
 import { Hash } from '../hash';
 import { compact, toRDF } from 'jsonld';
@@ -113,8 +113,12 @@ export async function asMeldDelta(delta: JsonDelta): Promise<MeldDelta> {
   }
 }
 
+export function toDomainQuad(triple: any): Quad {
+  return { ...triple, graph: defaultGraph() };
+}
+
 export async function toMeldJson(triples: Triple[]): Promise<any> {
-  const jsonld = await rdfToJson(triples);
+  const jsonld = await rdfToJson(triples.map(toDomainQuad));
   const graph: any = await compact(jsonld, DEFAULT_CONTEXT);
   // The jsonld processor may create a top-level @graph with @context
   delete graph['@context'];

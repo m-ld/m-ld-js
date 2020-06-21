@@ -84,6 +84,12 @@ export class QuadStoreDataset implements Dataset {
 
   @notClosed.async
   transact<T>(prepare: () => Promise<Patch | [Patch | undefined, T] | undefined | void>): Promise<T | void> {
+    // The transaction lock ensures that read operations that are part of a
+    // transaction (e.g. evaluating the @where clause) are not affected by
+    // concurrent transactions (fully serialiseable consistency). This is
+    // particularly important for SU-Set operation.
+    // TODO: This could be improved with snapshots
+    // https://github.com/Level/leveldown/issues/486
     return this.lock.acquire('txn', async () => {
       const prep = await prepare();
       const [patch, rtn] = Array.isArray(prep) ? prep : [prep, undefined];
