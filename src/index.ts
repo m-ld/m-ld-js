@@ -47,6 +47,11 @@ export interface MeldConfig {
   // TODO: Refactor to make MQTT an optional specialisation
   mqttOpts: MeldMqttOpts;
   /**
+   * An upper bound on how long any to wait for a response over the network.
+   * Used for message send timeouts and to trigger fallback behaviours.
+   */
+  networkTimeout?: number;
+  /**
    * Log level for the clone
    */
   logLevel?: LogLevelDesc;
@@ -70,14 +75,16 @@ export async function clone(ldb: AbstractLevelDOWN, config: MeldConfig): Promise
 async function initLocal(ldb: AbstractLevelDOWN,
   config: Reference & MeldConfig, remotes: MeldRemotes): Promise<MeldStore> {
   const dataset = new QuadStoreDataset(ldb, config.ldbOpts);
-  const clone = new DatasetClone(config['@id'], dataset, remotes, config.logLevel);
+  const clone = new DatasetClone(config['@id'], dataset, remotes, config);
   await clone.initialise();
   return clone;
 }
 
 function initRemotes(config: Reference & MeldConfig): MeldRemotes {
   return new MqttRemotes(config['@domain'], config['@id'], {
-    ...config.mqttOpts, logLevel: config.mqttOpts.logLevel ?? config.logLevel
+    sendTimeout: config.networkTimeout,
+    logLevel: config.logLevel,
+    ...config.mqttOpts
   });
 }
 

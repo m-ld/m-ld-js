@@ -14,9 +14,9 @@ clone(leveldown(tmpDirName), {
     port: Number(mqttPort),
      // Short timeouts as everything is local
     connectTimeout: 100,
-    sendTimeout: 1000,
     keepalive: 1
   },
+  networkTimeout: 1000,
   logLevel: Number(logLevel)
 }).then(meld => {
   send(requestId, 'started', { cloneId });

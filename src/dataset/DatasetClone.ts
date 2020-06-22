@@ -1,11 +1,17 @@
 import { MeldClone, Snapshot, DeltaMessage, MeldRemotes, MeldUpdate } from '../m-ld';
 import { Pattern, Subject, isRead, isSubject, isGroup, isUpdate } from './jrql-support';
-import { Observable, Subject as Source, merge, from, Observer, defer, NEVER, EMPTY, concat, BehaviorSubject, Subscription, onErrorResumeNext, throwError } from 'rxjs';
+import {
+  Observable, Subject as Source, merge, from, Observer, defer, NEVER, EMPTY,
+  concat, BehaviorSubject, Subscription, onErrorResumeNext, throwError, identity
+} from 'rxjs';
 import { TreeClock } from '../clocks';
 import { SuSetDataset } from './SuSetDataset';
 import { TreeClockMessageService } from '../messages';
 import { Dataset } from '.';
-import { publishReplay, refCount, filter, ignoreElements, takeUntil, tap, isEmpty, finalize, flatMap, switchAll, toArray, catchError, first } from 'rxjs/operators';
+import {
+  publishReplay, refCount, filter, ignoreElements, takeUntil, tap,
+  isEmpty, finalize, flatMap, switchAll, toArray, first, map, debounceTime
+} from 'rxjs/operators';
 import { delayUntil, Future, tapComplete, tapCount, SharableLock, tapLast } from '../util';
 import { LogLevelDesc, levels } from 'loglevel';
 import { MeldError } from '../m-ld/MeldError';
@@ -41,6 +47,11 @@ class RemoteUpdates {
   }
 }
 
+export interface DatasetCloneOpts {
+  networkTimeout?: number;
+  logLevel?: LogLevelDesc;
+}
+
 export class DatasetClone extends AbstractMeld implements MeldClone {
   private readonly dataset: SuSetDataset;
   private messageService: TreeClockMessageService;
@@ -52,18 +63,20 @@ export class DatasetClone extends AbstractMeld implements MeldClone {
   private newClone: boolean = false;
   private readonly latestTicks = new BehaviorSubject<number>(NaN);
   private readonly revvingUp = new BehaviorSubject<boolean>(false);
+  private readonly networkTimeout: number;
 
   constructor(
     id: string,
     dataset: Dataset,
     remotes: MeldRemotes,
-    logLevel: LogLevelDesc = 'info') {
-    super(id, logLevel);
-    this.dataset = new SuSetDataset(id, dataset, logLevel);
+    opts?: DatasetCloneOpts) {
+    super(id, opts?.logLevel);
+    this.dataset = new SuSetDataset(id, dataset, opts?.logLevel);
     this.dataset.updates.subscribe(next => this.latestTicks.next(next['@ticks']));
     this.remotes = remotes;
     this.remotes.setLocal(this);
     this.remoteUpdates = new RemoteUpdates(remotes);
+    this.networkTimeout = opts?.networkTimeout ?? 2000;
   }
 
   /**
@@ -92,20 +105,34 @@ export class DatasetClone extends AbstractMeld implements MeldClone {
     this.messageService = new TreeClockMessageService(time);
     this.latestTicks.next(time.ticks);
 
-    this.remoteUpdatesSub = this.remoteUpdates.received.subscribe({
-      next: delta => {
+    this.remoteUpdatesSub = this.remoteUpdates.received.pipe(
+      map(delta => {
         const logBody = this.log.getLevel() < levels.DEBUG ? delta : `tid: ${delta.data.tid}`;
         this.log.debug('Receiving', logBody, '@', this.localTime);
-        this.messageService.receive(delta, this.orderingBuffer, msg => {
+        // If we buffer a message, return true to signal we might need a re-connect
+        return !this.messageService.receive(delta, this.orderingBuffer, msg => {
           this.log.debug('Accepting', logBody);
           this.dataset.apply(msg.data, msg.time, this.localTime)
             .then(msg.delivered.resolve)
             .catch(err => this.close(err)); // Catastrophe
         });
-      },
-      error: err => this.close(err),
-      complete: () => this.close()
-    });
+      }),
+      filter(identity), // From this point we are only interested in buffered messages
+      debounceTime(this.networkTimeout)).subscribe({
+        next: () => {
+          if (this.orderingBuffer.length) {
+            // We're missing messages that have been receieved by others.
+            // Let's re-connect to see if we can get back on track.
+            this.log.warn('Messages are out of order and backing up. Re-connecting.');
+            // At this point we will be online if the connect was OK
+            this.reconnect().catch(this.warnError);
+          } else {
+            this.log.debug('Messages were out of order, but now cleared.');
+          }
+        },
+        error: err => this.close(err),
+        complete: () => this.close()
+    })
 
     await new Promise((resolve, reject) => {
       // Subscribe will synchronously receive the current value, but we don't
@@ -183,10 +210,14 @@ export class DatasetClone extends AbstractMeld implements MeldClone {
       // it's not a catastrophe but we do need to enqueue a retry
       this.log.warn('Rev-up did not complete due to', err);
       // At this point we will be online if the connect was OK
-      this.setOnline(false);
-      return this.decideOnline();
+      return this.reconnect();
     }).then(undefined, this.warnError); // TODO: Check data integrity;
     return revups;
+  }
+
+  private reconnect(): Promise<void> {
+    this.setOnline(false);
+    return this.decideOnline();
   }
 
   private async tryRevup(consumeRevups: Observer<DeltaMessage>) {
