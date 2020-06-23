@@ -10,9 +10,19 @@ import { Response, Request, Hello } from '../m-ld/ControlMessage';
 import { Future, jsonFrom, toJson } from '../util';
 import { finalize, flatMap, reduce, toArray, first, concatMap, materialize, timeout } from 'rxjs/operators';
 import { toMeldJson, fromMeldJson } from '../m-ld/MeldJson';
-import { LogLevelDesc } from 'loglevel';
 import { MeldError, MeldErrorStatus } from '../m-ld/MeldError';
 import { AbstractMeld, isOnline } from '../AbstractMeld';
+import { MeldConfig } from '..';
+
+export interface MeldMqttConfig extends MeldConfig {
+  /**
+   * Options required for the MQTT driver. These must not include the `will` and
+   * `clientId` options as these are generated internally. They must include a
+   * `hostname` _or_ a `host` and `port`.
+   * @see https://www.npmjs.com/package/mqtt#client
+   */
+  mqttOpts?: Omit<IClientOptions, 'will' | 'clientId'> & ({ hostname: string } | { host: string, port: number })
+}
 
 interface DomainParams extends TopicParams { domain: string; }
 const OPERATIONS_TOPIC = new MqttTopic<DomainParams>([{ '+': 'domain' }, 'operations']);
@@ -27,9 +37,6 @@ interface JsonNotification {
 }
 
 const CHANNEL_ID_HEADER = '__channel.id';
-
-export type MeldMqttOpts = Omit<IClientOptions, 'will' | 'clientId'> &
-  ({ hostname: string } | { host: string, port: number }) & { sendTimeout?: number, logLevel?: LogLevelDesc }
 
 export class MqttRemotes extends AbstractMeld implements MeldRemotes {
   private readonly mqtt: AsyncMqttClient;
@@ -49,18 +56,19 @@ export class MqttRemotes extends AbstractMeld implements MeldRemotes {
   private readonly sendTimeout: number;
   private readonly activity: Set<Promise<void>> = new Set;
 
-  constructor(domain: string, id: string, opts: MeldMqttOpts,
+  constructor(config: MeldMqttConfig,
     connect: (opts: IClientOptions) => AsyncMqttClient = defaultConnect) {
-    super(id, opts.logLevel ?? 'info');
+    super(config['@id'], config.logLevel ?? 'info');
 
-    this.sendTimeout = opts.sendTimeout || 2000;
+    const id = config['@id'], domain = config['@domain'];
+    this.sendTimeout = config.networkTimeout || 2000;
     this.operationsTopic = OPERATIONS_TOPIC.with({ domain });
     this.controlTopic = CONTROL_TOPIC.with({ domain });
     this.registryTopic = REGISTRY_TOPIC.with({ domain });
     // We only listen for control requests
     this.sentTopic = SEND_TOPIC.with({ toId: this.id, address: this.controlTopic.path });
     this.replyTopic = REPLY_TOPIC.with({ toId: this.id });
-    this.mqtt = connect({ ...opts, clientId: id, will: MqttPresence.will(domain, id) });
+    this.mqtt = connect({ ...config.mqttOpts, clientId: id, will: MqttPresence.will(domain, id) });
     this.presence = new MqttPresence(this.mqtt, domain, id);
 
     // Set up listeners

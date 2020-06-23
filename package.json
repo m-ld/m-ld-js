@@ -4,6 +4,9 @@
   "description": "m-ld native Javascript",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    "./": "./dist/"
+  },
   "scripts": {
     "link-locals": "sudo npm link ../m-ld-spec ../json-rql",
     "clean": "rm -rf dist _site",

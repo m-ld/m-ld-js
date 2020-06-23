@@ -15,7 +15,11 @@ describe('New MQTT remotes', () => {
 
   beforeEach(() => {
     mqtt = mockMqtt();
-    remotes = new MqttRemotes('test.m-ld.org', 'client1', { hostname: 'unused' }, () => mqtt);
+    remotes = new MqttRemotes({
+      '@id': 'client1',
+      '@domain': 'test.m-ld.org',
+      mqttOpts: { hostname: 'unused' }
+    }, () => mqtt);
   });
 
   test('online starts unknown', async () => {
