@@ -9,8 +9,10 @@ import { AsyncMqttClient, IPublishPacket } from 'async-mqtt';
 import { EventEmitter } from 'events';
 import { observeOn } from 'rxjs/operators';
 
-export async function genesisClone(remotes?: MeldRemotes) {
-  const clone = new DatasetClone('test', memStore(), remotes ?? mockRemotes());
+export async function genesisClone(remotes?: MeldRemotes, genesis = true) {
+  const clone = new DatasetClone(memStore(), remotes ?? mockRemotes(), {
+    '@id': 'test', '@domain': 'test.m-ld.org', genesis
+  });
   await clone.initialise();
   return clone;
 }

@@ -24,7 +24,7 @@ export interface MeldConfig {
    */
   '@id': string;
   /**
-   * The URI domain name, which defines the universal identity of the dataset
+   * A URI domain name, which defines the universal identity of the dataset
    * being manipulated by a set of clones (for example, on the configured
    * message bus).
    */
@@ -35,6 +35,16 @@ export interface MeldConfig {
    * * `@vocab` defaults to the resolution of `/#` against the base
    */
   '@context'?: Context;
+  /**
+   * Set to `true` to indicate that this clone will be 'genesis'; that is, the
+   * first new clone on a new domain. This flag will be ignored if the clone is
+   * not new. If `false`, and this clone is new, successful clone initialisation
+   * is dependent on the availability of another clone. If set to true, and
+   * subsequently another non-new clone appears on the same domain, either or
+   * both clones will become permanently 'siloed', that is, unable to
+   * participate further in the domain.
+   */
+  genesis: boolean;
   /**
    * Options for the LevelDB instance to be opened for the clone data
    */
@@ -67,7 +77,7 @@ export { generate as uuid } from 'short-uuid';
  */
 export async function clone(ldb: AbstractLevelDOWN, remotes: MeldRemotes, config: MeldConfig): Promise<MeldApi> {
   const dataset = new QuadStoreDataset(ldb, config.ldbOpts);
-  const clone = new DatasetClone(config['@id'], dataset, remotes, config);
+  const clone = new DatasetClone(dataset, remotes, config);
   await clone.initialise();
   return new MeldApi(config['@domain'], config['@context'] ?? null, clone);
 }

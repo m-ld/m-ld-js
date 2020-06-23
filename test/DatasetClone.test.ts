@@ -29,9 +29,8 @@ describe('Dataset clone', () => {
     });
 
     test('non-genesis fails to initialise if siloed', async () => {
-      // This is a bit of a con: how did we get a clock if we're offline?
       await expect(genesisClone(mockRemotes(NEVER, [false],
-        TreeClock.GENESIS.forked().left))).rejects.toThrow();
+        TreeClock.GENESIS.forked().left), false)).rejects.toThrow();
     });
   });
 

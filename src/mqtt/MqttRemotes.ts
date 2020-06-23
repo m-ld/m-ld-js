@@ -27,7 +27,6 @@ export interface MeldMqttConfig extends MeldConfig {
 interface DomainParams extends TopicParams { domain: string; }
 const OPERATIONS_TOPIC = new MqttTopic<DomainParams>([{ '+': 'domain' }, 'operations']);
 const CONTROL_TOPIC = new MqttTopic<DomainParams>([{ '+': 'domain' }, 'control']);
-const REGISTRY_TOPIC = new MqttTopic<DomainParams>([{ '+': 'domain' }, 'registry']);
 
 // @see org.m_ld.json.MeldJacksonModule.NotificationDeserializer
 interface JsonNotification {
@@ -43,7 +42,6 @@ export class MqttRemotes extends AbstractMeld implements MeldRemotes {
   private readonly localClone = new BehaviorSubject<MeldLocal | null>(null);
   private readonly operationsTopic: MqttTopic<DomainParams>;
   private readonly controlTopic: MqttTopic<DomainParams>;
-  private readonly registryTopic: MqttTopic<DomainParams>;
   private readonly sentTopic: MqttTopic<SendParams>;
   private readonly replyTopic: MqttTopic<ReplyParams>;
   private readonly presence: MqttPresence;
@@ -52,7 +50,6 @@ export class MqttRemotes extends AbstractMeld implements MeldRemotes {
   } = {};
   private readonly recentlySentTo: Set<string> = new Set;
   private readonly consuming: { [address: string]: Source<any> } = {};
-  isGenesis: Future<boolean> = new Future;
   private readonly sendTimeout: number;
   private readonly activity: Set<Promise<void>> = new Set;
 
@@ -64,7 +61,6 @@ export class MqttRemotes extends AbstractMeld implements MeldRemotes {
     this.sendTimeout = config.networkTimeout || 2000;
     this.operationsTopic = OPERATIONS_TOPIC.with({ domain });
     this.controlTopic = CONTROL_TOPIC.with({ domain });
-    this.registryTopic = REGISTRY_TOPIC.with({ domain });
     // We only listen for control requests
     this.sentTopic = SEND_TOPIC.with({ toId: this.id, address: this.controlTopic.path });
     this.replyTopic = REPLY_TOPIC.with({ toId: this.id });
@@ -95,7 +91,6 @@ export class MqttRemotes extends AbstractMeld implements MeldRemotes {
           ...this.presence.subscriptions,
           [this.operationsTopic.address]: { qos: 1 },
           [this.controlTopic.address]: { qos: 1 },
-          [this.registryTopic.address]: { qos: 1 },
           [this.sentTopic.address]: { qos: 0 },
           [this.replyTopic.address]: { qos: 0 }
         };
@@ -104,9 +99,6 @@ export class MqttRemotes extends AbstractMeld implements MeldRemotes {
           throw new Error('Requested QoS was not granted');
         // We don't have to wait for the presence to initialise
         this.presence.initialise().catch(this.warnError);
-        // Tell the world that we will be a clone on this domain
-        await this.mqtt.publish(this.registryTopic.address,
-          JSON.stringify({ id: this.id } as Hello), { qos: 1, retain: true });
         if (this.clone != null && await isOnline(this.clone) === true)
           this.clonePresent(true).catch(this.warnError);
       } catch (err) {
@@ -184,9 +176,7 @@ export class MqttRemotes extends AbstractMeld implements MeldRemotes {
   }
 
   async newClock(): Promise<TreeClock> {
-    const isGenesis = await this.isGenesis;
-    return isGenesis ? Promise.resolve(TreeClock.GENESIS) :
-      (await this.send<Response.NewClock>(new Request.NewClock)).clock;
+    return (await this.send<Response.NewClock>(new Request.NewClock)).clock;
   }
 
   async snapshot(): Promise<Snapshot> {
@@ -260,7 +250,6 @@ export class MqttRemotes extends AbstractMeld implements MeldRemotes {
 
   private onMessage(topic: string, payload: Buffer) {
     this.operationsTopic.match(topic, () => this.onRemoteUpdate(payload));
-    this.registryTopic.match(topic, () => this.onHello(payload));
     this.sentTopic.match(topic, sent => this.onSent(jsonFrom(payload), sent));
     this.replyTopic.match(topic, replied => this.onReply(jsonFrom(payload), replied));
     this.matchConsuming(topic, payload);
@@ -277,15 +266,6 @@ export class MqttRemotes extends AbstractMeld implements MeldRemotes {
         // This is extremely bad - may indicate a bad actor
         this.close(new MeldError('Bad Update'));
     }
-  }
-
-  private onHello(payload: Buffer) {
-    const hello = jsonFrom(payload);
-    // This is a race, since a Future will ignore a re-resolve
-    if (this.id === hello.id)
-      this.isGenesis.resolve(true);
-    else
-      this.isGenesis.resolve(false);
   }
 
   private matchConsuming(topic: string, payload: Buffer) {
