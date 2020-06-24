@@ -62,8 +62,8 @@ export function mockMqtt(): MockMqtt & MockProxy<AsyncMqttClient> {
   };
   mqtt.mockPublish = (topic: string, json: any) => {
     return new Promise<void>((resolve) => setImmediate(mqtt => {
-      mqtt.emit('message', topic, Buffer.from(
-        typeof json === 'string' ? json : JSON.stringify(json)));
+      mqtt.emit('message', topic,
+        Buffer.from(typeof json === 'string' ? json : JSON.stringify(json)));
       resolve();
     }, mqtt)); // Pass current mqtt in case of sync test
   };

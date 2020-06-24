@@ -11,7 +11,7 @@ interface PresenceParams extends TopicParams {
   client: string;
 }
 const PRESENCE_TOPIC = new MqttTopic<PresenceParams>(
-  ['__presence', { '+': 'domain' }, { '+': 'client' }]);
+  '__presence', { '+': 'domain' }, { '+': 'client' });
 const PRESENCE_OPTS: Required<Pick<IClientPublishOptions, 'qos' | 'retain'>> =
   { qos: 1, retain: true };
 /**
