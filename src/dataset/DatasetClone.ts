@@ -16,11 +16,7 @@ import { delayUntil, Future, tapComplete, tapCount, SharableLock, tapLast } from
 import { LogLevelDesc, levels } from 'loglevel';
 import { MeldError } from '../m-ld/MeldError';
 import { AbstractMeld, isOnline, comesOnline } from '../AbstractMeld';
-
-export interface DatasetCloneOpts {
-  logLevel?: LogLevelDesc; // = 'info'
-  reconnectDelayMillis?: number; // = 1000
-}
+import { MeldConfig } from '..';
 
 class RemoteUpdates {
   readonly received: Observable<DeltaMessage>;
@@ -47,11 +43,6 @@ class RemoteUpdates {
   }
 }
 
-export interface DatasetCloneOpts {
-  networkTimeout?: number;
-  logLevel?: LogLevelDesc;
-}
-
 export class DatasetClone extends AbstractMeld implements MeldClone {
   private readonly dataset: SuSetDataset;
   private messageService: TreeClockMessageService;
@@ -64,19 +55,20 @@ export class DatasetClone extends AbstractMeld implements MeldClone {
   private readonly latestTicks = new BehaviorSubject<number>(NaN);
   private readonly revvingUp = new BehaviorSubject<boolean>(false);
   private readonly networkTimeout: number;
+  private readonly genesisClaim: boolean;
 
   constructor(
-    id: string,
     dataset: Dataset,
     remotes: MeldRemotes,
-    opts?: DatasetCloneOpts) {
-    super(id, opts?.logLevel);
-    this.dataset = new SuSetDataset(id, dataset, opts?.logLevel);
+    config: MeldConfig) {
+    super(config['@id'], config.logLevel);
+    this.dataset = new SuSetDataset(config['@id'], dataset, config.logLevel);
     this.dataset.updates.subscribe(next => this.latestTicks.next(next['@ticks']));
     this.remotes = remotes;
     this.remotes.setLocal(this);
     this.remoteUpdates = new RemoteUpdates(remotes);
-    this.networkTimeout = opts?.networkTimeout ?? 2000;
+    this.networkTimeout = config.networkTimeout ?? 5000;
+    this.genesisClaim = config.genesis;
   }
 
   /**
@@ -97,8 +89,8 @@ export class DatasetClone extends AbstractMeld implements MeldClone {
     // Establish a clock for this clone
     let time = await this.dataset.loadClock();
     if (!time) {
-      time = await this.remotes.newClock();
-      this.newClone = !time.isId; // New clone means non-genesis
+      time = this.genesisClaim ? TreeClock.GENESIS : await this.remotes.newClock();
+      this.newClone = !this.genesisClaim; // New clone means non-genesis
       await this.dataset.saveClock(time, true);
     }
     this.log.info(`has time ${time}`);

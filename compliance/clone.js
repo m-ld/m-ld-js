@@ -1,24 +1,29 @@
 const leveldown = require('leveldown');
 const { clone } = require('../dist');
+const { MqttRemotes } = require('../dist/mqtt');
 const LOG = require('loglevel');
 
 Error.stackTraceLimit = Infinity;
 
-const [, , cloneId, domain, tmpDirName, requestId, mqttPort, logLevel] = process.argv;
+const [, , cloneId, domain, genesis, tmpDirName, requestId, mqttPort, logLevel] = process.argv;
 LOG.setLevel(Number(logLevel));
-
-clone(leveldown(tmpDirName), {
-  '@id': cloneId, '@domain': domain,
-  mqttOpts: {
+console.log(genesis);
+const config = {
+  '@id': cloneId,
+  '@domain': domain,
+  genesis: genesis == 'true',
+  mqtt: {
     host: 'localhost',
     port: Number(mqttPort),
-     // Short timeouts as everything is local
+    // Short timeouts as everything is local
     connectTimeout: 100,
     keepalive: 1
   },
   networkTimeout: 1000,
   logLevel: Number(logLevel)
-}).then(meld => {
+};
+LOG.debug(cloneId, 'config is', JSON.stringify(config));
+clone(leveldown(tmpDirName), new MqttRemotes(config), config).then(meld => {
   send(requestId, 'started', { cloneId });
 
   const handlers = {
@@ -48,7 +53,7 @@ clone(leveldown(tmpDirName), {
     error: err => sendError(requestId, err)
   });
 }).catch(err => {
-  LOG.error(`${cloneId}: ${err}`);
+  LOG.error(cloneId, err);
   send(requestId, 'unstarted', { err: `${err}` });
 });
 

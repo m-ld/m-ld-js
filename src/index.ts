@@ -1,11 +1,9 @@
 import { QuadStoreDataset } from './dataset';
 import { DatasetClone } from './dataset/DatasetClone';
-import { generate } from 'short-uuid';
 import { AbstractLevelDOWN, AbstractOpenOptions } from 'abstract-leveldown';
 import { MeldApi } from './m-ld/MeldApi';
-import { Context, Reference } from './dataset/jrql-support';
-import { MqttRemotes, MeldMqttOpts } from './mqtt/MqttRemotes';
-import { MeldRemotes, MeldStore } from './m-ld';
+import { Context } from './dataset/jrql-support';
+import { MeldRemotes } from './m-ld';
 import { LogLevelDesc } from 'loglevel';
 
 export * from './m-ld/MeldApi';
@@ -21,12 +19,12 @@ export {
 export interface MeldConfig {
   /**
    * The local identity of the m-ld clone, used for message bus identity and
-   * logging. Must be unique among the clones for the domain. If not provided,
-   * an identity will be automatically assigned.
+   * logging. Must be unique among the clones for the domain. For convenience,
+   * you can use the {@link uuid} function.
    */
-  '@id'?: string;
+  '@id': string;
   /**
-   * The URI domain name, which defines the universal identity of the dataset
+   * A URI domain name, which defines the universal identity of the dataset
    * being manipulated by a set of clones (for example, on the configured
    * message bus).
    */
@@ -38,17 +36,23 @@ export interface MeldConfig {
    */
   '@context'?: Context;
   /**
+   * Set to `true` to indicate that this clone will be 'genesis'; that is, the
+   * first new clone on a new domain. This flag will be ignored if the clone is
+   * not new. If `false`, and this clone is new, successful clone initialisation
+   * is dependent on the availability of another clone. If set to true, and
+   * subsequently another non-new clone appears on the same domain, either or
+   * both clones will become permanently 'siloed', that is, unable to
+   * participate further in the domain.
+   */
+  genesis: boolean;
+  /**
    * Options for the LevelDB instance to be opened for the clone data
    */
   ldbOpts?: AbstractOpenOptions;
   /**
-   * Options for the MQTT message bus
-   */
-  // TODO: Refactor to make MQTT an optional specialisation
-  mqttOpts: MeldMqttOpts;
-  /**
-   * An upper bound on how long any to wait for a response over the network.
-   * Used for message send timeouts and to trigger fallback behaviours.
+   * An sane upper bound on how long any to wait for a response over the
+   * network. Used for message send timeouts and to trigger fallback behaviours.
+   * Default is five seconds.
    */
   networkTimeout?: number;
   /**
@@ -57,6 +61,11 @@ export interface MeldConfig {
   logLevel?: LogLevelDesc;
 }
 
+/** 
+ * Utility to generate a unique UUID for use in a MeldConfig
+ */
+export { generate as uuid } from 'short-uuid';
+
 /**
  * Create or initialise a local clone, depending on whether the given LevelDB
  * database already exists. This function returns as soon as it is safe to
@@ -64,27 +73,12 @@ export interface MeldConfig {
  * received all updates from the domain. To await latest updates, await a call
  * to the {@link MeldApi.latest} method.
  * @param ldb an instance of a leveldb backend
+ * @param remotes a driver for connecting to remote m-ld clones on the domain
  * @param config the clone configuration
  */
-export async function clone(ldb: AbstractLevelDOWN, config: MeldConfig): Promise<MeldApi> {
-  const theConfig = { ...config, '@id': config['@id'] ?? generate() };
-  const clone = await initLocal(ldb, theConfig, initRemotes(theConfig));
-  return new MeldApi(config['@domain'], theConfig['@context'] || null, clone);
-}
-
-async function initLocal(ldb: AbstractLevelDOWN,
-  config: Reference & MeldConfig, remotes: MeldRemotes): Promise<MeldStore> {
+export async function clone(ldb: AbstractLevelDOWN, remotes: MeldRemotes, config: MeldConfig): Promise<MeldApi> {
   const dataset = new QuadStoreDataset(ldb, config.ldbOpts);
-  const clone = new DatasetClone(config['@id'], dataset, remotes, config);
+  const clone = new DatasetClone(dataset, remotes, config);
   await clone.initialise();
-  return clone;
+  return new MeldApi(config['@domain'], config['@context'] ?? null, clone);
 }
-
-function initRemotes(config: Reference & MeldConfig): MeldRemotes {
-  return new MqttRemotes(config['@domain'], config['@id'], {
-    sendTimeout: config.networkTimeout,
-    logLevel: config.logLevel,
-    ...config.mqttOpts
-  });
-}
-

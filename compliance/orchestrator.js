@@ -1,6 +1,6 @@
 const { fork } = require('child_process');
 const { join } = require('path');
-const { dirSync } = require('tmp');
+const { dirSync: newTmpDir } = require('tmp');
 const restify = require('restify');
 const { BadRequestError, InternalServerError, NotFoundError } = require('restify-errors');
 const { createServer } = require('net');
@@ -8,6 +8,7 @@ const LOG = require('loglevel');
 const inspector = require('inspector');
 const aedes = require('aedes')();
 
+const domains = new Set;
 const clones = {/* cloneId: { process, tmpDir, mqtt: { client, server, port } } */ };
 const requests = {/* requestId: [res, next] */ };
 
@@ -65,9 +66,11 @@ function start(req, res, next) {
     if (clones[cloneId].process)
       return next(new BadRequestError(`Clone ${cloneId} is already started`));
   } else {
-    tmpDir = dirSync({ unsafeCleanup: true });
+    tmpDir = newTmpDir({ unsafeCleanup: true });
   }
-  LOG.info(`${cloneId}: Starting clone on domain ${domain}`);
+  const genesis = !domains.has(domain);
+  LOG.info(`${cloneId}: Starting ${genesis ? 'genesis ' : ''}clone on domain ${domain}`);
+  domains.add(domain);
 
   const mqttServer = createServer(aedes.handle);
   mqttServer.listen(err => {
@@ -78,7 +81,7 @@ function start(req, res, next) {
     LOG.debug(`${cloneId}: Clone MQTT port is ${mqttPort}`);
     clones[cloneId] = {
       process: fork(join(__dirname, 'clone.js'),
-        [cloneId, domain, tmpDir.name, req.id(), mqttPort, LOG.getLevel()],
+        [cloneId, domain, genesis, tmpDir.name, req.id(), mqttPort, LOG.getLevel()],
         { execArgv: inspector.url() ? [`--inspect-brk=${global.nextDebugPort++}`] : [] }),
       tmpDir,
       mqtt: { server: mqttServer, port: mqttPort }

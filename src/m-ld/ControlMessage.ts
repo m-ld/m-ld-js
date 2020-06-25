@@ -6,10 +6,6 @@ const inspect = Symbol.for('nodejs.util.inspect.custom');
 ////////////////////////////////////////////////////////////////////////////////
 // TODO: Protect all of this with json-schema
 
-export interface Hello {
-  id: string;
-}
-
 export interface Request {
   toJson(): object;
 }

@@ -1,11 +1,14 @@
 import { exec, TopicParams } from 'mqtt-pattern';
 import { flatten, toArray } from '../util';
+import { DirectParams, ReplyParams } from '../PubsubRemotes';
 
 type TopicPart<P> = string | { '+': keyof P; } | { '#': keyof P; };
 
 export class MqttTopic<P extends TopicParams = TopicParams> {
-  constructor(
-    private readonly parts: Array<TopicPart<P>>) {
+  private readonly parts: TopicPart<P>[];
+
+  constructor(...parts: TopicPart<P>[]) {
+    this.parts = parts;
   }
 
   match(topic: string): P | null;
@@ -19,7 +22,7 @@ export class MqttTopic<P extends TopicParams = TopicParams> {
   }
 
   with(params: Partial<P>) {
-    return new MqttTopic<P>(flatten<TopicPart<P>>(this.parts.map(part => typeof part === 'string' ?
+    return new MqttTopic<P>(...flatten<TopicPart<P>>(this.parts.map(part => typeof part === 'string' ?
       [part] : '+' in part ? toArray<TopicPart<P>>(params[part['+']] || part) :
         toArray<TopicPart<P>>(params[part['#']] || part))));
   }
@@ -39,23 +42,13 @@ export class MqttTopic<P extends TopicParams = TopicParams> {
   }
 }
 
-export interface DirectParams extends TopicParams {
-  toId: string;
-  fromId: string;
-  messageId: string;
-}
-
 export interface SendParams extends DirectParams {
   address: string[];
 }
 
-export interface ReplyParams extends DirectParams {
-  sentMessageId: string;
-}
+export const SEND_TOPIC = new MqttTopic<SendParams & TopicParams>
+  ('__send', { '+': 'toId' }, { '+': 'fromId' }, { '+': 'messageId' }, { '#': 'address' });
 
-export const SEND_TOPIC = new MqttTopic<SendParams>
-  (['__send', { '+': 'toId' }, { '+': 'fromId' }, { '+': 'messageId' }, { '#': 'address' }]);
-
-export const REPLY_TOPIC = new MqttTopic<ReplyParams>
-  (['__reply', { '+': 'toId' }, { '+': 'fromId' }, { '+': 'messageId' }, { '+': 'sentMessageId' }]);
+export const REPLY_TOPIC = new MqttTopic<ReplyParams & TopicParams>
+  ('__reply', { '+': 'toId' }, { '+': 'fromId' }, { '+': 'messageId' }, { '+': 'sentMessageId' });
 

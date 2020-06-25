@@ -9,13 +9,21 @@ import { take, toArray } from 'rxjs/operators';
 import { comesOnline, isOnline } from '../src/AbstractMeld';
 import { MeldErrorStatus } from '../src/m-ld/MeldError';
 
+/**
+ * These tests also test the abstract base class, PubsubRemotes
+ */
 describe('New MQTT remotes', () => {
   let mqtt: MockMqtt & MockProxy<AsyncMqttClient>;
   let remotes: MqttRemotes;
 
   beforeEach(() => {
     mqtt = mockMqtt();
-    remotes = new MqttRemotes('test.m-ld.org', 'client1', { hostname: 'unused' }, () => mqtt);
+    remotes = new MqttRemotes({
+      '@id': 'client1',
+      '@domain': 'test.m-ld.org',
+      genesis: true, // Actually not used by MqttRemotes
+      mqtt: { hostname: 'unused' }
+    }, () => mqtt);
   });
 
   test('online starts unknown', async () => {
@@ -57,7 +65,6 @@ describe('New MQTT remotes', () => {
         '__presence/test.m-ld.org/+': { qos: 1 },
         'test.m-ld.org/operations': { qos: 1 },
         'test.m-ld.org/control': { qos: 1 },
-        'test.m-ld.org/registry': { qos: 1 },
         '__send/client1/+/+/test.m-ld.org/control': { qos: 0 },
         '__reply/client1/+/+/+': { qos: 0 }
       });
@@ -65,15 +72,6 @@ describe('New MQTT remotes', () => {
       expect(mqtt.publish).toBeCalledWith(
         '__presence/test.m-ld.org/client1', '-',
         { qos: 1 });
-      // Setting retained last joined clone (no longer genesis)
-      expect(mqtt.publish).toBeCalledWith(
-        'test.m-ld.org/registry',
-        '{"id":"client1"}',
-        { qos: 1, retain: true });
-    });
-
-    test('can get new clock', async () => {
-      expect((await remotes.newClock()).equals(TreeClock.GENESIS)).toBe(true);
     });
 
     test('emits remote operations', async () => {
@@ -147,8 +145,6 @@ describe('New MQTT remotes', () => {
 
   describe('when not genesis', () => {
     beforeEach(() => {
-      // Send retained Hello (remotes already constructed & listening)
-      mqtt.mockPublish('test.m-ld.org/registry', { id: 'client2' });
       mqtt.mockConnect();
     });
 
