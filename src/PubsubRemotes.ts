@@ -47,11 +47,12 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
   private readonly consuming: { [address: string]: Source<any> } = {};
   private readonly sendTimeout: number;
   private readonly activity: Set<Promise<void>> = new Set;
+  private connected: boolean;
 
   constructor(config: MeldConfig) {
     super(config['@id'], config.logLevel ?? 'info');
     this.domain = config['@domain'];
-    this.sendTimeout = config.networkTimeout || 2000;
+    this.sendTimeout = config.networkTimeout ?? 5000;
   }
 
   setLocal(clone: MeldLocal | null): void {
@@ -103,8 +104,6 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
    */
   protected abstract reconnect(): void;
 
-  protected abstract get connected(): boolean;
-
   protected abstract setPresent(online: boolean): Promise<unknown>;
 
   protected abstract publishDelta(msg: object): Promise<unknown>;
@@ -139,16 +138,15 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
   async snapshot(): Promise<Snapshot> {
     const ack = new Future;
     const res = await this.send<Response.Snapshot>(new Request.Snapshot, { ack });
-    const snapshot: Snapshot = {
-      lastTime: res.lastTime,
-      quads: await this.consume(res.quadsAddress, fromMeldJson, 'failIfSlow'),
-      tids: await this.consume<UUID[]>(res.tidsAddress, identity, 'failIfSlow'),
-      lastHash: res.lastHash,
-      updates: await this.consume(res.updatesAddress, deltaFromJson)
-    };
+    // Subscribe in parallel (subscription can be slow)
+    const [quads, tids, updates] = await Promise.all([
+      this.consume(res.quadsAddress, fromMeldJson, 'failIfSlow'),
+      this.consume<UUID[]>(res.tidsAddress, identity, 'failIfSlow'),
+      this.consume(res.updatesAddress, deltaFromJson)
+    ]);
     // Ack the response to start the streams
     ack.resolve();
-    return snapshot;
+    return { lastTime: res.lastTime, lastHash: res.lastHash, quads, tids, updates };
   }
 
   async revupFrom(time: TreeClock): Promise<Observable<DeltaMessage> | undefined> {
@@ -167,11 +165,13 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
   }
 
   protected async onConnect() {
+    this.connected = true;
     if (this.clone != null && await isOnline(this.clone) === true)
       return this.cloneOnline(true);
   }
 
   protected onDisconnect() {
+    this.connected = false;
     this.setOnline(null);
   }
 
@@ -393,7 +393,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     { fromId: toId, messageId: sentMessageId }: DirectParams, res: Response | null, expectAck?: 'expectAck') {
     const messageId = uuid();
     const replier = this.replier(toId, messageId, sentMessageId);
-    this.log.debug('Replying response', messageId, res, replier.id);
+    this.log.debug('Replying response', messageId, 'to', sentMessageId, res, replier.id);
     await replier.publish(res == null ? null : res.toJson());
     if (expectAck)
       return this.getResponse<null>(messageId, null);

@@ -67,7 +67,7 @@ export class DatasetClone extends AbstractMeld implements MeldClone {
     this.remotes = remotes;
     this.remotes.setLocal(this);
     this.remoteUpdates = new RemoteUpdates(remotes);
-    this.networkTimeout = config.networkTimeout ?? 2000;
+    this.networkTimeout = config.networkTimeout ?? 5000;
     this.genesisClaim = config.genesis;
   }
 

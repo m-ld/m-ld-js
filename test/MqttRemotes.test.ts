@@ -22,7 +22,7 @@ describe('New MQTT remotes', () => {
       '@id': 'client1',
       '@domain': 'test.m-ld.org',
       genesis: true, // Actually not used by MqttRemotes
-      mqttOpts: { hostname: 'unused' }
+      mqtt: { hostname: 'unused' }
     }, () => mqtt);
   });
 

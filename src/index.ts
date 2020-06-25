@@ -50,8 +50,9 @@ export interface MeldConfig {
    */
   ldbOpts?: AbstractOpenOptions;
   /**
-   * An upper bound on how long any to wait for a response over the network.
-   * Used for message send timeouts and to trigger fallback behaviours.
+   * An sane upper bound on how long any to wait for a response over the
+   * network. Used for message send timeouts and to trigger fallback behaviours.
+   * Default is five seconds.
    */
   networkTimeout?: number;
   /**

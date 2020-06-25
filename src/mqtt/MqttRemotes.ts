@@ -14,7 +14,7 @@ export interface MeldMqttConfig extends MeldConfig {
    * `hostname` _or_ a `host` and `port`.
    * @see https://www.npmjs.com/package/mqtt#client
    */
-  mqttOpts?: Omit<IClientOptions, 'will' | 'clientId'> & ({ hostname: string } | { host: string, port: number })
+  mqtt?: Omit<IClientOptions, 'will' | 'clientId'> & ({ hostname: string } | { host: string, port: number })
 }
 
 interface DomainParams extends TopicParams { domain: string; }
@@ -44,7 +44,7 @@ export class MqttRemotes extends PubsubRemotes {
     // We only listen for control requests
     this.sentTopic = SEND_TOPIC.with({ toId: this.id, address: this.controlTopic.path });
     this.replyTopic = REPLY_TOPIC.with({ toId: this.id });
-    this.mqtt = connect({ ...config.mqttOpts, clientId: id, will: MqttPresence.will(domain, id) });
+    this.mqtt = connect({ ...config.mqtt, clientId: id, will: MqttPresence.will(domain, id) });
     this.presence = new MqttPresence(this.mqtt, domain, id);
 
     // Set up listeners
@@ -96,10 +96,6 @@ export class MqttRemotes extends PubsubRemotes {
 
   protected reconnect(): void {
     this.mqtt.reconnect();
-  }
-
-  protected get connected() {
-    return this.mqtt.connected;
   }
 
   protected async setPresent(present: boolean) {

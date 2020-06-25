@@ -12,7 +12,7 @@ const config = {
   '@id': cloneId,
   '@domain': domain,
   genesis: genesis == 'true',
-  mqttOpts: {
+  mqtt: {
     host: 'localhost',
     port: Number(mqttPort),
     // Short timeouts as everything is local

@@ -5,7 +5,7 @@ import { Observable, from, identity } from 'rxjs';
 import { flatMap, filter, map } from 'rxjs/operators';
 
 export interface MeldAblyConfig extends MeldConfig {
-  ablyOpts: Omit<Ably.Types.ClientOptions, 'echoMessages' | 'clientId'>;
+  ably: Omit<Ably.Types.ClientOptions, 'echoMessages' | 'clientId'>;
 }
 
 interface SendTypeParams extends DirectParams { type: '__send'; }
@@ -18,13 +18,15 @@ export class AblyRemotes extends PubsubRemotes {
   constructor(config: MeldAblyConfig) {
     super(config);
     this.client = new Ably.Realtime.Promise({
-      ...config.ablyOpts, echoMessages: false, clientId: config['@id']
+      ...config.ably, echoMessages: false, clientId: config['@id']
     });
-    this.channel = this.client.channels.get(config['@domain']);
+    this.channel = this.client.channels.get(this.channelName('operations'));
     this.channel.subscribe(message => this.onRemoteUpdate(message.data));
-    this.channel.presence.subscribe(() => this.onPresenceChange());
+    this.channel.presence
+      .subscribe(() => this.onPresenceChange())
+      .then(() => this.onPresenceChange()); // Ably does not notify if no-one around
     // Direct channel that is specific to us, for sending and replying to requests
-    this.client.channels.get(this.directChannelName(this.client.clientId))
+    this.client.channels.get(this.channelName(config['@id']))
       .subscribe(message => this.onDirectMessage(message).catch(this.warnError));
     // Ably has connection recovery with no message loss for 2min. During that
     // time we treat the remotes as online. After that, the connection becomes
@@ -38,8 +40,9 @@ export class AblyRemotes extends PubsubRemotes {
     this.client.connection.close();
   }
 
-  private directChannelName(id: string) {
-    return `${this.domain}-${id}`;
+  private channelName(id: string) {
+    // https://www.ably.io/documentation/realtime/channels#channel-namespaces
+    return `${this.domain}:${id}`;
   }
 
   private async onDirectMessage(message: Ably.Types.Message): Promise<void> {
@@ -55,10 +58,6 @@ export class AblyRemotes extends PubsubRemotes {
     throw new Error('Method not implemented.'); // TODO
   }
 
-  protected get connected() {
-    return this.client.connection.state === 'connected';
-  }
-
   protected setPresent(present: boolean): Promise<unknown> {
     if (present)
       return this.channel.presence.update('__online');
@@ -67,7 +66,7 @@ export class AblyRemotes extends PubsubRemotes {
   }
 
   protected publishDelta(msg: object): Promise<unknown> {
-    return this.channel.publish(msg);
+    return this.channel.publish('__delta', msg);
   }
 
   protected present(): Observable<string> {
@@ -78,9 +77,9 @@ export class AblyRemotes extends PubsubRemotes {
   }
 
   protected notifier(id: string): SubPubsub {
-    const channel = this.client.channels.get(this.directChannelName(id));
+    const channel = this.client.channels.get(this.channelName(id));
     return {
-      id, publish: notification => channel.publish(notification),
+      id, publish: notification => channel.publish('__notify', notification),
       subscribe: () => channel.subscribe(message => this.onNotify(id, message.data)),
       unsubscribe: async () => channel.unsubscribe()
     };
@@ -100,7 +99,7 @@ export class AblyRemotes extends PubsubRemotes {
 
   private getParams(message: Ably.Types.Message): SendTypeParams | ReplyTypeParams | undefined {
     const [type, messageId, sentMessageId] = message.name.split(':');
-    const params = { fromId: message.clientId, toId: this.client.clientId };
+    const params = { fromId: message.clientId, toId: this.id };
     switch (type) {
       case '__send': return { type, messageId, ...params }
       case '__reply': return { type, messageId, sentMessageId, ...params }
@@ -108,7 +107,7 @@ export class AblyRemotes extends PubsubRemotes {
   }
 
   private getSubPub(name: Omit<SendTypeParams, 'fromId'> | Omit<ReplyTypeParams, 'fromId'>): SubPub {
-    const channelName = this.directChannelName(name.toId);
+    const channelName = this.channelName(name.toId);
     const channel = this.client.channels.get(channelName);
     return {
       id: channelName,
