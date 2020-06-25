@@ -1,13 +1,11 @@
-import { DeltaMessage } from '../m-ld';
 import { Observable } from 'rxjs';
 import { AsyncMqttClient, IClientOptions, ISubscriptionMap, connect as defaultConnect } from 'async-mqtt';
-import { MqttTopic, SEND_TOPIC, REPLY_TOPIC, } from './MqttTopic';
+import { MqttTopic, SEND_TOPIC, REPLY_TOPIC, SendParams, } from './MqttTopic';
 import { TopicParams } from 'mqtt-pattern';
 import { MqttPresence } from './MqttPresence';
-import { Response, Request } from '../m-ld/ControlMessage';
 import { jsonFrom } from '../util';
 import { MeldConfig } from '..';
-import { SendParams, ReplyParams, PubsubRemotes, SubPubsub, JsonNotification, SubPub } from '../PubsubRemotes';
+import { ReplyParams, PubsubRemotes, SubPubsub, SubPub } from '../PubsubRemotes';
 
 export interface MeldMqttConfig extends MeldConfig {
   /**
@@ -63,8 +61,13 @@ export class MqttRemotes extends PubsubRemotes {
     this.presence.on('error', this.warnError);
 
     // MQTT.js 'close' event signals a disconnect - definitely offline.
-    this.mqtt.on('close', () => this.setOnline(null));
+    this.mqtt.on('close', () => this.onDisconnect());
     this.mqtt.on('connect', () => this.onConnect());
+  }
+
+  async close(err?: any) {
+    await super.close(err);
+    await this.mqtt.end();
   }
 
   protected async onConnect() {
@@ -95,20 +98,21 @@ export class MqttRemotes extends PubsubRemotes {
     this.mqtt.reconnect();
   }
 
-  protected async clonePresent(online: boolean) {
-    if (this.mqtt.connected) {
-      if (online)
-        return this.presence.join(this.id, this.controlTopic.address);
-      else
-        return this.presence.leave(this.id);
-    }
+  protected get connected() {
+    return this.mqtt.connected;
   }
 
-  protected publishDelta(msg: DeltaMessage): Promise<unknown> {
+  protected async setPresent(present: boolean) {
+    if (present)
+      return this.presence.join(this.id, this.controlTopic.address);
+    else
+      return this.presence.leave(this.id);
+  }
+
+  protected publishDelta(msg: object): Promise<unknown> {
     return this.mqtt.publish(
       this.operationsTopic.address, JSON.stringify({
-        ...msg.toJson(),
-        [CHANNEL_ID_HEADER]: this.id
+        ...msg, [CHANNEL_ID_HEADER]: this.id
       }), { qos: 1 });
   }
 
@@ -116,7 +120,7 @@ export class MqttRemotes extends PubsubRemotes {
     return this.presence.present(this.controlTopic.address);
   }
 
-  protected notifier(id: string): SubPubsub<JsonNotification> {
+  protected notifier(id: string): SubPubsub {
     const address = this.notifyTopic.with({ id }).address;
     return {
       id,
@@ -126,32 +130,27 @@ export class MqttRemotes extends PubsubRemotes {
     };
   }
 
-  protected sender(toId: string, messageId: string): SubPub<Request> {
+  protected sender(toId: string, messageId: string): SubPub {
     const address = SEND_TOPIC.with({
       toId, fromId: this.id, messageId, address: this.controlTopic.path
     }).address;
     return {
       id: address,
-      publish: request => this.mqtt.publish(address, JSON.stringify(request.toJson()))
+      publish: request => this.mqtt.publish(address, JSON.stringify(request))
     };
   }
 
-  protected replier(messageId: string, toId: string, sentMessageId: string): SubPub<Response | null> {
+  protected replier(toId: string, messageId: string, sentMessageId: string): SubPub {
     const address = REPLY_TOPIC.with({
       messageId, fromId: this.id, toId, sentMessageId
     }).address;
     return {
       id: address,
-      publish: res => this.mqtt.publish(address, JSON.stringify(res != null ? res.toJson() : null))
+      publish: res => this.mqtt.publish(address, JSON.stringify(res))
     };
   }
 
   protected isEcho(json: any): boolean {
     return json[CHANNEL_ID_HEADER] && json[CHANNEL_ID_HEADER] === this.id;
-  }
-
-  async close(err?: any) {
-    await super.close(err);
-    await this.mqtt.end();
   }
 }

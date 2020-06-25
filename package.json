@@ -66,6 +66,7 @@
     "@types/detect-node": "^2.0.0",
     "@types/jsonld": "^1.5.1",
     "@types/rdf-js": "^3.0.1",
+    "ably": "^1.2.1",
     "async-lock": "^1.2.4",
     "async-mqtt": "^2.6.0",
     "bn.js": "^5.1.2",

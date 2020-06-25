@@ -23,26 +23,22 @@ export interface DirectParams {
   messageId: string;
 }
 
-export interface SendParams extends DirectParams {
-  address: string[];
-}
-
 export interface ReplyParams extends DirectParams {
   sentMessageId: string;
 }
 
-export interface SubPub<T> {
+export interface SubPub {
   readonly id: string;
-  publish(msg: T): Promise<unknown>;
+  publish(msg: object | null): Promise<unknown>;
 }
 
-export interface SubPubsub<T> extends SubPub<T> {
+export interface SubPubsub extends SubPub {
   subscribe(): Promise<unknown>;
   unsubscribe(): Promise<unknown>;
 }
 
 export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes {
-  private readonly domain: string;
+  protected readonly domain: string;
   private readonly localClone = new BehaviorSubject<MeldLocal | null>(null);
   private readonly replyResolvers: {
     [messageId: string]: [(res: Response | null) => void, PromiseLike<void> | null]
@@ -61,7 +57,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
   setLocal(clone: MeldLocal | null): void {
     if (clone == null) {
       if (this.clone != null)
-        this.clonePresent(false)
+        this.cloneOnline(false)
           .then(() => this.clone = null)
           .catch(this.warnError);
     } else if (this.clone == null) {
@@ -74,7 +70,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
           if (this.isOnline()) {
             try {
               // Delta received from the local clone. Relay to the domain
-              await this.publishDelta(msg);
+              await this.publishDelta(msg.toJson());
               // When done, mark the message as delivered
               msg.delivered.resolve();
             } catch (err) {
@@ -94,7 +90,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
       // When the clone comes online, join the presence on this domain if we can
       clone.online.subscribe(online => {
         if (online != null)
-          this.clonePresent(online).catch(this.warnError);
+          this.cloneOnline(online).catch(this.warnError);
       });
     } else if (clone != this.clone) {
       throw new Error(`${this.id}: Local clone cannot change`);
@@ -107,17 +103,19 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
    */
   protected abstract reconnect(): void;
 
-  protected abstract clonePresent(online: boolean): Promise<unknown>;
+  protected abstract get connected(): boolean;
 
-  protected abstract publishDelta(msg: DeltaMessage): Promise<unknown>;
+  protected abstract setPresent(online: boolean): Promise<unknown>;
+
+  protected abstract publishDelta(msg: object): Promise<unknown>;
 
   protected abstract present(): Observable<string>;
 
-  protected abstract notifier(id: string): SubPubsub<JsonNotification>;
+  protected abstract notifier(id: string): SubPubsub;
 
-  protected abstract sender(toId: string, messageId: string): SubPub<Request>;
+  protected abstract sender(toId: string, messageId: string): SubPub;
 
-  protected abstract replier(messageId: string, toId: string, sentMessageId: string): SubPub<Response | null>;
+  protected abstract replier(toId: string, messageId: string, sentMessageId: string): SubPub;
 
   protected abstract isEcho(json: any): boolean;
 
@@ -170,7 +168,11 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
 
   protected async onConnect() {
     if (this.clone != null && await isOnline(this.clone) === true)
-      this.clonePresent(true).catch(this.warnError);
+      return this.cloneOnline(true);
+  }
+
+  protected onDisconnect() {
+    this.setOnline(null);
   }
 
   protected onPresenceChange() {
@@ -192,7 +194,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     }
   }
 
-  protected async onSent(json: any, sentParams: SendParams) {
+  protected async onSent(json: any, sentParams: DirectParams) {
     // Ignore control messages before we have a clone
     const replyRejected = (err: any) => {
       this.reply(sentParams, new Response.Rejected(asMeldErrorStatus(err)))
@@ -257,6 +259,11 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     this.localClone.next(clone);
   }
 
+  private async cloneOnline(online: boolean): Promise<unknown> {
+    if (this.connected)
+      return this.setPresent(online);
+  }
+
   private async send<T extends Response>(
     request: Request,
     { ack, check }: {
@@ -275,7 +282,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     }
     this.log.debug('Sending request', messageId, request, sender.id);
     // If the publish fails, don't keep trying other addresses
-    await sender.publish(request);
+    await sender.publish(request.toJson());
     tried[sender.id] = this.getResponse<T>(messageId, ack ?? null);
     // If the caller doesn't like this response, try again
     return tried[sender.id].then(res => check == null || check(res) ? res :
@@ -309,11 +316,11 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     return active;
   }
 
-  private async replyClock(sentParams: SendParams, clock: TreeClock) {
+  private async replyClock(sentParams: DirectParams, clock: TreeClock) {
     await this.reply(sentParams, new Response.NewClock(clock));
   }
 
-  private async replySnapshot(sentParams: SendParams, snapshot: Snapshot): Promise<void> {
+  private async replySnapshot(sentParams: DirectParams, snapshot: Snapshot): Promise<void> {
     const { lastTime, lastHash, quads, tids, updates } = snapshot;
     const quadsAddress = uuid(), tidsAddress = uuid(), updatesAddress = uuid();
     await this.reply(sentParams, new Response.Snapshot(
@@ -327,8 +334,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     ]);
   }
 
-  private async replyRevup(sentParams: SendParams,
-    revup: Observable<DeltaMessage> | undefined) {
+  private async replyRevup(sentParams: DirectParams, revup: Observable<DeltaMessage> | undefined) {
     if (revup) {
       const updatesAddress = uuid();
       await this.reply(sentParams, new Response.Revup(true, updatesAddress), 'expectAck');
@@ -386,14 +392,14 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
   private async reply(
     { fromId: toId, messageId: sentMessageId }: DirectParams, res: Response | null, expectAck?: 'expectAck') {
     const messageId = uuid();
-    const replier = this.replier(messageId, toId, sentMessageId);
+    const replier = this.replier(toId, messageId, sentMessageId);
     this.log.debug('Replying response', messageId, res, replier.id);
-    await replier.publish(res);
+    await replier.publish(res == null ? null : res.toJson());
     if (expectAck)
       return this.getResponse<null>(messageId, null);
   }
 
-  private async nextSender(messageId: string): Promise<SubPub<Request> | null> {
+  private async nextSender(messageId: string): Promise<SubPub | null> {
     const present = await this.present().pipe(toArray()).toPromise();
     if (present.every(id => this.recentlySentTo.has(id)))
       this.recentlySentTo.clear();

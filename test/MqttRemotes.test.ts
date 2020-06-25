@@ -9,6 +9,9 @@ import { take, toArray } from 'rxjs/operators';
 import { comesOnline, isOnline } from '../src/AbstractMeld';
 import { MeldErrorStatus } from '../src/m-ld/MeldError';
 
+/**
+ * These tests also test the abstract base class, PubsubRemotes
+ */
 describe('New MQTT remotes', () => {
   let mqtt: MockMqtt & MockProxy<AsyncMqttClient>;
   let remotes: MqttRemotes;
