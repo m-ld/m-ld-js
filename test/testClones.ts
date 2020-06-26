@@ -21,14 +21,18 @@ export function mockRemotes(
   updates: Observable<DeltaMessage> = NEVER,
   onlines: Array<boolean | null> = [true],
   newClock: TreeClock = TreeClock.GENESIS): MeldRemotes {
-  const online = new BehaviorSubject(onlines[0]);
-  from(onlines.slice(1)).pipe(observeOn(asapScheduler)).forEach(v => online.next(v));
   return {
     ...mock<MeldRemotes>(),
     setLocal: () => { },
-    updates, online,
+    updates, online: hotOnline(onlines),
     newClock: () => Promise.resolve(newClock)
   };
+}
+
+function hotOnline(onlines: Array<boolean | null>) {
+  const online = new BehaviorSubject(onlines[0]);
+  from(onlines.slice(1)).pipe(observeOn(asapScheduler)).forEach(v => online.next(v));
+  return online;
 }
 
 export function memStore(): Dataset {
@@ -37,9 +41,9 @@ export function memStore(): Dataset {
 
 export function mockLocal(
   updates: Observable<DeltaMessage> = NEVER,
-  online: Observable<boolean | null> = of(true)): MeldLocal {
+  onlines: Array<boolean | null> = [true]): MeldLocal {
   // This weirdness is due to jest-mock-extended trying to mock arrays
-  return { ...mock<MeldLocal>(), updates, online };
+  return { ...mock<MeldLocal>(), updates, online: hotOnline(onlines) };
 }
 
 export interface MockMqtt extends AsyncMqttClient {

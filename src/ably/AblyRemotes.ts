@@ -15,19 +15,23 @@ export class AblyRemotes extends PubsubRemotes {
   private readonly client: Ably.Types.RealtimePromise;
   private readonly channel: Ably.Types.RealtimeChannelPromise;
 
-  constructor(config: MeldAblyConfig) {
+  constructor(config: MeldAblyConfig,
+    connect: (opts: Ably.Types.ClientOptions) => Ably.Types.RealtimePromise
+      = opts => new Ably.Realtime.Promise(opts)) {
     super(config);
-    this.client = new Ably.Realtime.Promise({
-      ...config.ably, echoMessages: false, clientId: config['@id']
-    });
+    this.client = connect({ ...config.ably, echoMessages: false, clientId: config['@id'] });
     this.channel = this.client.channels.get(this.channelName('operations'));
-    this.channel.subscribe(message => this.onRemoteUpdate(message.data));
+    this.channel
+      .subscribe(message => this.onRemoteUpdate(message.data))
+      .catch(err => this.close(err));
     this.channel.presence
       .subscribe(() => this.onPresenceChange())
-      .then(() => this.onPresenceChange()); // Ably does not notify if no-one around
+      .then(() => this.onPresenceChange()) // Ably does not notify if no-one around
+      .catch(err => this.close(err));
     // Direct channel that is specific to us, for sending and replying to requests
     this.client.channels.get(this.channelName(config['@id']))
-      .subscribe(message => this.onDirectMessage(message).catch(this.warnError));
+      .subscribe(message => this.onDirectMessage(message).catch(this.warnError))
+      .catch(err => this.close(err));
     // Ably has connection recovery with no message loss for 2min. During that
     // time we treat the remotes as online. After that, the connection becomes
     // suspended and we are offline.
