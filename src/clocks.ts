@@ -96,7 +96,7 @@ export class TreeClock implements CausalClock<TreeClock> {
     }
     return null; // We're all ID
   }
-  
+
   /**
    * Get the ticks for a different process ID in the same process group
    * @param forId another clock to be used as the ID
@@ -217,14 +217,15 @@ export class TreeClock implements CausalClock<TreeClock> {
 
   anyLt(other: TreeClock, includeIds?: 'includeIds'): boolean {
     if (this._fork == null || other._fork == null) {
-      if (includeIds || (!this.isId && !other.isId)) {
-        if (includeIds) {
-          return this.allTicks < other.allTicks;
-        } else {
-          return (this.nonIdTicks ?? 0) < (other.nonIdTicks ?? 0);
-        }
+      if (includeIds) {
+        return this.allTicks < other.allTicks;
       } else {
-        return false; // Either is an ID but we don't want IDs, or both not IDs and we want IDs
+        const thisTicks = this.nonIdTicks, otherTicks = other.nonIdTicks;
+        if (thisTicks != null && otherTicks != null) {
+          return thisTicks < otherTicks;
+        } else {
+          return false; // Either is an ID but we don't want IDs, or both not IDs and we want IDs
+        }
       }
     } else {
       return this._fork.left.anyLt(other._fork.left, includeIds) ||
