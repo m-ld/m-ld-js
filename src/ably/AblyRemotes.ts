@@ -1,3 +1,7 @@
+/**
+ * [[include:ably-remotes.md]]
+ * @packageDocumentation
+ */
 import * as Ably from 'ably';
 import { MeldConfig } from '..';
 import { PubsubRemotes, SubPubsub, SubPub, DirectParams, ReplyParams } from '../PubsubRemotes';

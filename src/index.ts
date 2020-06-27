@@ -3,8 +3,8 @@ import { DatasetClone } from './dataset/DatasetClone';
 import { AbstractLevelDOWN, AbstractOpenOptions } from 'abstract-leveldown';
 import { MeldApi } from './m-ld/MeldApi';
 import { Context } from './dataset/jrql-support';
-import { MeldRemotes } from './m-ld';
 import { LogLevelDesc } from 'loglevel';
+import { generate } from 'short-uuid';
 
 export * from './m-ld/MeldApi';
 export { shortId } from './util';
@@ -64,7 +64,10 @@ export interface MeldConfig {
 /** 
  * Utility to generate a unique UUID for use in a MeldConfig
  */
-export { generate as uuid } from 'short-uuid';
+export function uuid() {
+  // This is indirected for documentation (do not just re-export generate)
+  return generate();
+}
 
 /**
  * Create or initialise a local clone, depending on whether the given LevelDB
@@ -73,12 +76,26 @@ export { generate as uuid } from 'short-uuid';
  * received all updates from the domain. To await latest updates, await a call
  * to the {@link MeldApi.latest} method.
  * @param ldb an instance of a leveldb backend
- * @param remotes a driver for connecting to remote m-ld clones on the domain
+ * @param remotes a driver for connecting to remote m-ld clones on the domain.
+ * This can be a configured object (e.g. `new MqttRemotes(config)`) or just the
+ * class (`MqttRemotes`).
  * @param config the clone configuration
  */
-export async function clone(ldb: AbstractLevelDOWN, remotes: MeldRemotes, config: MeldConfig): Promise<MeldApi> {
+export async function clone(
+  ldb: AbstractLevelDOWN,
+  remotes: dist.mqtt.MqttRemotes | dist.ably.AblyRemotes,
+  config: MeldConfig): Promise<MeldApi> {
   const dataset = new QuadStoreDataset(ldb, config.ldbOpts);
+  if (typeof remotes == 'function')
+    remotes = new remotes(config);
   const clone = new DatasetClone(dataset, remotes, config);
   await clone.initialise();
   return new MeldApi(config['@domain'], config['@context'] ?? null, clone);
+}
+
+// The m-ld remotes API is not yet public, so here we just declare the available
+// modules for documentation purposes.
+declare module dist {
+  module mqtt { export type MqttRemotes = any; }
+  module ably { export type AblyRemotes = any; }
 }

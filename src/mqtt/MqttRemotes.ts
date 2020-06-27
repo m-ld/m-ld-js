@@ -1,3 +1,7 @@
+/**
+ * [[include:ably-remotes.md]]
+ * @packageDocumentation
+ */
 import { Observable } from 'rxjs';
 import { AsyncMqttClient, IClientOptions, ISubscriptionMap, connect as defaultConnect } from 'async-mqtt';
 import { MqttTopic, SEND_TOPIC, REPLY_TOPIC, SendParams, } from './MqttTopic';
@@ -8,12 +12,6 @@ import { MeldConfig } from '..';
 import { ReplyParams, PubsubRemotes, SubPubsub, SubPub } from '../PubsubRemotes';
 
 export interface MeldMqttConfig extends MeldConfig {
-  /**
-   * Options required for the MQTT driver. These must not include the `will` and
-   * `clientId` options as these are generated internally. They must include a
-   * `hostname` _or_ a `host` and `port`.
-   * @see https://www.npmjs.com/package/mqtt#client
-   */
   mqtt?: Omit<IClientOptions, 'will' | 'clientId'> & ({ hostname: string } | { host: string, port: number })
 }
 
