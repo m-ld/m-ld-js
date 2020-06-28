@@ -98,7 +98,7 @@ describe('Dataset clone', () => {
     test('ticks increase monotonically', async () => {
       // Edge case from compliance tests: a local transaction racing a remote
       // transaction could cause a clock reversal.
-      const updates = store.follow().pipe(tap(console.log), map(next => next['@ticks']), take(2), toArray()).toPromise();
+      const updates = store.follow().pipe(map(next => next['@ticks']), take(2), toArray()).toPromise();
       store.transact({
         '@id': 'http://test.m-ld.org/fred',
         'http://test.m-ld.org/#name': 'Fred'
