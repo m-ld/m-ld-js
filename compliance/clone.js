@@ -7,7 +7,6 @@ Error.stackTraceLimit = Infinity;
 
 const [, , cloneId, domain, genesis, tmpDirName, requestId, mqttPort, logLevel] = process.argv;
 LOG.setLevel(Number(logLevel));
-console.log(genesis);
 const config = {
   '@id': cloneId,
   '@domain': domain,

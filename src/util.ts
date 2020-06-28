@@ -1,6 +1,6 @@
 import { Quad } from 'rdf-js';
 import { fromRDF } from 'jsonld';
-import { concat, Observable, OperatorFunction, Subscription, throwError, AsyncSubject } from "rxjs";
+import { concat, Observable, OperatorFunction, Subscription, throwError, AsyncSubject, ObservableInput, onErrorResumeNext, NEVER } from "rxjs";
 import { publish, tap } from "rxjs/operators";
 import AsyncLock = require('async-lock');
 import { LogLevelDesc, getLogger, getLoggers } from 'loglevel';
@@ -138,6 +138,10 @@ export function delayUntil<T>(notifier: Observable<any>): OperatorFunction<T, T>
         return concat(delayed, published);
       })
     );
+}
+
+export function onErrorNever<T, R>(v: ObservableInput<T>): Observable<R> {
+  return onErrorResumeNext(v, NEVER);
 }
 
 export class SharableLock extends AsyncLock {

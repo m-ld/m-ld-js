@@ -1,8 +1,8 @@
 import { MeldClone, Snapshot, DeltaMessage, MeldRemotes, MeldUpdate } from '../m-ld';
 import { Pattern, Subject, isRead, isSubject, isGroup, isUpdate } from './jrql-support';
 import {
-  Observable, Subject as Source, merge, from, Observer, defer, NEVER, EMPTY,
-  concat, BehaviorSubject, Subscription, onErrorResumeNext, throwError, identity
+  Observable, Subject as Source, merge, from, defer, NEVER, EMPTY,
+  concat, BehaviorSubject, Subscription, throwError, identity
 } from 'rxjs';
 import { TreeClock } from '../clocks';
 import { SuSetDataset } from './SuSetDataset';
@@ -12,8 +12,8 @@ import {
   publishReplay, refCount, filter, ignoreElements, takeUntil, tap,
   isEmpty, finalize, flatMap, switchAll, toArray, first, map, debounceTime
 } from 'rxjs/operators';
-import { delayUntil, Future, tapComplete, tapCount, SharableLock, tapLast } from '../util';
-import { LogLevelDesc, levels } from 'loglevel';
+import { delayUntil, Future, tapComplete, tapCount, SharableLock, tapLast, onErrorNever } from '../util';
+import { levels } from 'loglevel';
 import { MeldError } from '../m-ld/MeldError';
 import { AbstractMeld, isOnline, comesOnline } from '../AbstractMeld';
 import { MeldConfig } from '..';
@@ -30,16 +30,16 @@ class RemoteUpdates {
   attach = () => this.remoteUpdates.next(this.remotes.updates);
   detach = () => this.remoteUpdates.next(NEVER);
 
-  inject(revups: Observable<DeltaMessage>): PromiseLike<DeltaMessage | undefined> {
+  inject(revups: Observable<DeltaMessage>): Promise<DeltaMessage | undefined> {
     const lastRevup = new Future<DeltaMessage | undefined>();
     // Updates must be paused during revups because the collaborator might
     // send an update while also sending revups of its own prior updates.
     // That would break the ordering guarantee.
     this.remoteUpdates.next(merge(
       // Errors should be handled in the returned promise
-      onErrorResumeNext(revups.pipe(tapLast(lastRevup)), NEVER),
-      this.remotes.updates.pipe(delayUntil(onErrorResumeNext(from(lastRevup), NEVER)))));
-    return lastRevup;
+      onErrorNever(revups.pipe(tapLast(lastRevup))),
+      this.remotes.updates.pipe(delayUntil(onErrorNever(lastRevup)))));
+    return Promise.resolve(lastRevup);
   }
 }
 
@@ -117,14 +117,14 @@ export class DatasetClone extends AbstractMeld implements MeldClone {
             // Let's re-connect to see if we can get back on track.
             this.log.warn('Messages are out of order and backing up. Re-connecting.');
             // At this point we will be online if the connect was OK
-            this.reconnect().catch(this.warnError);
+            this.forceReconnect().catch(this.warnError);
           } else {
             this.log.debug('Messages were out of order, but now cleared.');
           }
         },
         error: err => this.close(err),
         complete: () => this.close()
-    })
+      })
 
     await new Promise((resolve, reject) => {
       // Subscribe will synchronously receive the current value, but we don't
@@ -169,14 +169,11 @@ export class DatasetClone extends AbstractMeld implements MeldClone {
       if (this.isOnline() || this.localTime.isId) {
         this.remoteUpdates.attach();
         this.revvingUp.next(false);
+      } else if (this.newClone) {
+        this.log.info('New clone requesting snapshot');
+        await this.requestSnapshot();
       } else {
-        const revups = this.setupRevups();
-        if (this.newClone) {
-          this.log.info('New clone requesting snapshot');
-          await this.requestSnapshot(revups);
-        } else {
-          await this.tryRevup(revups);
-        }
+        await this.tryRevup();
       }
       this.log.info('connected.');
       this.setOnline(true);
@@ -188,46 +185,66 @@ export class DatasetClone extends AbstractMeld implements MeldClone {
     }
   }
 
-  private setupRevups(): Observer<DeltaMessage> {
-    // TODO: Change this source to a new Observable(subs)
-    const revups = new Source<DeltaMessage>();
-    this.remoteUpdates.inject(revups).then(async last => {
-      // Here, we are definitely before the first post-revup update, but
-      // the actual last revup might not yet have been applied to the dataset.
-      if (last != null)
-        await last.delivered;
-      this.revvingUp.next(false);
-    }, err => {
-      // If rev-ups fail (for example, if the collaborator goes offline)
-      // it's not a catastrophe but we do need to enqueue a retry
-      this.log.warn('Rev-up did not complete due to', err);
-      // At this point we will be online if the connect was OK
-      return this.reconnect();
-    }).then(undefined, this.warnError); // TODO: Check data integrity;
-    return revups;
+  private onRevupComplete = async (lastRevup: DeltaMessage | undefined) => {
+    // Here, we are definitely before the first post-revup update, but
+    // the actual last revup might not yet have been applied to the dataset.
+    if (lastRevup != null)
+      await lastRevup.delivered;
+    this.revvingUp.next(false);
   }
 
-  private reconnect(): Promise<void> {
+  private onRevupFailed = (err: any) => {
+    // If rev-ups fail (for example, if the collaborator goes offline)
+    // it's not a catastrophe but we do need to enqueue a retry
+    this.log.warn('Rev-up did not complete due to', err);
+    return this.forceReconnect();
+  };
+
+  private forceReconnect(): Promise<void> {
+    // At this point we may be online
+    this.remoteUpdates.detach();
     this.setOnline(false);
     return this.decideOnline();
   }
 
-  private async tryRevup(consumeRevups: Observer<DeltaMessage>) {
+  private async tryRevup() {
     // For a new clone, last hash is random so this will return undefined
     const revup = await this.remotes.revupFrom(this.localTime);
     if (revup) {
       this.log.info('revving-up from collaborator');
-      const lastRevup = new Future<DeltaMessage | undefined>();
-      revup.pipe(tapLast(lastRevup)).subscribe(consumeRevups);
-      // Emit anything in our journal that post-dates the last revup
-      lastRevup
-        .then(lastEntry => lastEntry && this.dataset.operationsSince(lastEntry.time))
-        .then(recent => recent && recent.subscribe(this.nextUpdate))
-        .catch(this.warnError); // TODO Check for data risk
+      this.remoteUpdates.inject(revup).then(async lastRevup => {
+        // Emit anything in our journal that post-dates the last revup
+        const recent = lastRevup && await this.dataset.operationsSince(lastRevup.time);
+        recent && recent.subscribe(this.nextUpdate);
+        return lastRevup;
+      }).then(this.onRevupComplete).catch(this.onRevupFailed);
     } else {
       this.log.info('cannot rev-up, requesting snapshot');
-      await this.requestSnapshot(consumeRevups);
+      await this.requestSnapshot();
     }
+  }
+
+  private async requestSnapshot() {
+    // If there are unsent operations, we would lose data
+    if (!(await this.dataset.undeliveredLocalOperations().pipe(isEmpty()).toPromise()))
+      throw new MeldError('Unsent updates');
+
+    const snapshot = await this.remotes.snapshot();
+    this.messageService.join(snapshot.lastTime);
+
+    // If we have any operations since the snapshot: re-emit them now and
+    // re-apply them to our own dataset when the snapshot is applied.
+    const reEmits = this.dataset.operationsSince(snapshot.lastTime)
+      .then(recent => (recent ?? EMPTY).pipe(tap(this.nextUpdate), toArray()).toPromise());
+    // Start delivering the snapshot when we have done re-emitting
+    const delivered = reEmits.then(() =>
+      this.dataset.applySnapshot(snapshot, this.localTime));
+    // Delay all updates until the snapshot has been fully delivered
+    // This is because a snapshot is applied in multiple transactions
+    const updates = snapshot.updates.pipe(delayUntil(from(delivered)));
+    this.remoteUpdates.inject(concat(updates, from(reEmits).pipe(flatMap(from))))
+      .then(this.onRevupComplete).catch(this.onRevupFailed);
+    return delivered; // We can go online as soon as the snapshot is delivered
   }
 
   private flushUndeliveredOperations() {
@@ -237,27 +254,6 @@ export class DatasetClone extends AbstractMeld implements MeldClone {
       this.dataset.undeliveredLocalOperations().pipe(tapCount(counted))
         .subscribe(this.nextUpdate, reject, resolve);
     });
-  }
-
-  private async requestSnapshot(consumeRevups: Observer<DeltaMessage>) {
-    // If there are unsent operations, we would lose data
-    if (!(await this.dataset.undeliveredLocalOperations().pipe(isEmpty()).toPromise()))
-      throw new MeldError('Unsent updates');
-
-    const snapshot = await this.remotes.snapshot();
-    this.messageService.join(snapshot.lastTime);
-
-    // If we have any operations since the snapshot, re-emit them
-    const reEmits = this.dataset.operationsSince(snapshot.lastTime)
-      .then(recent => (recent ?? EMPTY).pipe(tap(this.nextUpdate), toArray()).toPromise());
-    // Start delivering the snapshot when we have done re-emitting
-    const delivered = reEmits.then(() =>
-      this.dataset.applySnapshot(snapshot, this.localTime));
-    // Delay all updates until the snapshot has been fully delivered
-    // This is because a snapshot is applied in multiple transactions
-    const updates = snapshot.updates.pipe(delayUntil(from(delivered)));
-    concat(updates, from(reEmits).pipe(flatMap(from))).subscribe(consumeRevups);
-    return delivered; // We can go online as soon as the snapshot is delivered
   }
 
   @AbstractMeld.checkNotClosed.async
