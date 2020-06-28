@@ -320,11 +320,14 @@ export class DatasetClone extends AbstractMeld implements MeldClone {
         .pipe(flatMap(() => this.dataset.read(request)),
           finalize(() => this.onlineLock.leave(this.id)));
     } else if (isSubject(request) || isGroup(request) || isUpdate(request)) {
-      // For a write, execute immediately
+      // For a write, execute immediately.
+      // Take the timestamp as soon as we have the transaction. This prevents a
+      // concurrent remote update from causing a clock reversal when it commits.
+      const sendTime = this.messageService.send();
       return from(this.onlineLock.enter(this.id)
         .then(() => this.dataset.transact(async () => {
           const patch = await this.dataset.write(request);
-          return [this.messageService.send(), patch];
+          return [sendTime, patch];
         }))
         // Publish the delta
         .then(this.nextUpdate)

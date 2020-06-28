@@ -1,10 +1,12 @@
 import { DatasetClone } from '../src/dataset/DatasetClone';
 import { Subject, Describe } from 'json-rql';
 import { genesisClone, mockRemotes } from './testClones';
-import { NEVER } from 'rxjs';
+import { NEVER, Subject as Source, asapScheduler } from 'rxjs';
 import { isOnline, comesOnline } from '../src/AbstractMeld';
-import {  first } from 'rxjs/operators';
+import { first, take, toArray, map, tap, observeOn } from 'rxjs/operators';
 import { TreeClock } from '../src/clocks';
+import { DeltaMessage } from '../src/m-ld';
+import { uuid } from 'short-uuid';
 
 describe('Dataset clone', () => {
   describe('initialisation', () => {
@@ -34,7 +36,7 @@ describe('Dataset clone', () => {
     });
   });
 
-  describe('as a m-ld store', () => {
+  describe('as a silo m-ld store', () => {
     let store: DatasetClone;
 
     beforeEach(async () => {
@@ -79,6 +81,34 @@ describe('Dataset clone', () => {
       } as Subject);
       await store.follow().pipe(first()).toPromise();
       await expect(store.latest()).resolves.toBe(1);
+    });
+  });
+
+  describe('as a new clone', () => {
+    let store: DatasetClone;
+    let remoteTime: TreeClock;
+    let remoteUpdates: Source<DeltaMessage> = new Source;
+
+    beforeEach(async () => {
+      store = await genesisClone(mockRemotes(remoteUpdates.pipe(observeOn(asapScheduler))));
+      await comesOnline(store);
+      remoteTime = await store.newClock();
+    });
+
+    test('ticks increase monotonically', async () => {
+      // Edge case from compliance tests: a local transaction racing a remote
+      // transaction could cause a clock reversal.
+      const updates = store.follow().pipe(tap(console.log), map(next => next['@ticks']), take(2), toArray()).toPromise();
+      store.transact({
+        '@id': 'http://test.m-ld.org/fred',
+        'http://test.m-ld.org/#name': 'Fred'
+      } as Subject);
+      remoteUpdates.next(new DeltaMessage(remoteTime.ticked(), {
+        tid: uuid(),
+        insert: '{"@id":"http://test.m-ld.org/wilma","http://test.m-ld.org/#name":"Wilma"}',
+        delete: '{}'
+      }));
+      await expect(updates).resolves.toEqual([1, 2]);
     });
   });
 });

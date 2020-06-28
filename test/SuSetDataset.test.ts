@@ -213,7 +213,7 @@ describe('SU-Set Dataset', () => {
           await expect(ssd.describe1('http://test.m-ld.org/barney')).resolves.toEqual(barney);
         });
 
-        test('ignores a duplicate transaction', async () => {
+        test('rejects a duplicate transaction', async () => {
           await ssd.transact(async () => [
             localTime = localTime.ticked(),
             await ssd.delete({ '@id': 'http://test.m-ld.org/fred' })
@@ -227,7 +227,7 @@ describe('SU-Set Dataset', () => {
           await expect(ssd.find1({ '@id': 'http://test.m-ld.org/fred' })).resolves.toEqual('');
         });
 
-        test('ignores a duplicate txn after snapshot', async () => {
+        test('rejects a duplicate txn after snapshot', async () => {
           await ssd.transact(async () => [
             localTime = localTime.ticked(),
             await ssd.delete({ '@id': 'http://test.m-ld.org/fred' })

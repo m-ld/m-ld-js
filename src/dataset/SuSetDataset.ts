@@ -304,6 +304,7 @@ export class SuSetDataset extends JrqlGraph {
         return this.transactionPatch(localTime, patch, allTidsPatch, tidPatch, journaling);
       } else {
         this.log.debug(`Rejecting tid: ${msgData.tid} as duplicate`);
+        // We don't have to save the new local clock time, because nothing has happened
       }
     });
   }
