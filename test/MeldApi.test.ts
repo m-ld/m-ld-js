@@ -1,13 +1,16 @@
 import { MeldApi, Resource } from '../src/m-ld/MeldApi';
 import { Subject, Select, Describe, Reference } from 'json-rql';
-import { genesisClone } from './testClones';
+import { memStore, mockRemotes, testConfig } from './testClones';
 import { first } from 'rxjs/operators';
+import { DatasetClone } from '../src/dataset/DatasetClone';
 
 describe('Meld API', () => {
   let api: MeldApi;
 
   beforeEach(async () => {
-    api = new MeldApi('test.m-ld.org', null, await genesisClone());
+    let clone = new DatasetClone(memStore(), mockRemotes(), testConfig());
+    await clone.initialise();
+    api = new MeldApi('test.m-ld.org', null, clone);
   });
 
   test('retrieves a JSON-LD subject', async () => {

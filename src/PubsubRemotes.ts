@@ -7,7 +7,7 @@ import { Future, toJson } from './util';
 import { finalize, flatMap, reduce, toArray, first, concatMap, materialize, timeout } from 'rxjs/operators';
 import { toMeldJson, fromMeldJson } from './m-ld/MeldJson';
 import { MeldError, MeldErrorStatus } from './m-ld/MeldError';
-import { AbstractMeld, isOnline } from './AbstractMeld';
+import { AbstractMeld, isLive } from './AbstractMeld';
 import { MeldConfig } from '.';
 
 // @see org.m_ld.json.MeldJacksonModule.NotificationDeserializer
@@ -58,7 +58,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
   setLocal(clone: MeldLocal | null): void {
     if (clone == null) {
       if (this.clone != null)
-        this.cloneOnline(false)
+        this.cloneLive(false)
           .then(() => this.clone = null)
           .catch(this.warnError);
     } else if (this.clone == null) {
@@ -66,9 +66,9 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
       // Start sending updates from the local clone to the remotes
       clone.updates.subscribe({
         next: async msg => {
-          // If we are not online, we just ignore updates.
+          // If we are not live, we just ignore updates.
           // They will be replayed from the clone's journal on re-connection.
-          if (this.isOnline()) {
+          if (this.isLive()) {
             try {
               // Delta received from the local clone. Relay to the domain
               await this.publishDelta(msg.toJson());
@@ -88,10 +88,10 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
         // The application will already know, so just shut down gracefully.
         error: err => this.close(err).catch(this.warnError)
       });
-      // When the clone comes online, join the presence on this domain if we can
-      clone.online.subscribe(online => {
-        if (online != null)
-          this.cloneOnline(online).catch(this.warnError);
+      // When the clone comes live, join the presence on this domain if we can
+      clone.live.subscribe(live => {
+        if (live != null)
+          this.cloneLive(live).catch(this.warnError);
       });
     } else if (clone != this.clone) {
       throw new Error(`${this.id}: Local clone cannot change`);
@@ -100,11 +100,11 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
 
   /**
    * Force a re-connect to the pubsub layer. This must be sufficiently violent
-   * to lead to an unset and reset of the online flag.
+   * to lead to an unset and reset of the live flag.
    */
   protected abstract reconnect(): void;
 
-  protected abstract setPresent(online: boolean): Promise<unknown>;
+  protected abstract setPresent(present: boolean): Promise<unknown>;
 
   protected abstract publishDelta(msg: object): Promise<unknown>;
 
@@ -166,20 +166,20 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
 
   protected async onConnect() {
     this.connected = true;
-    if (this.clone != null && await isOnline(this.clone) === true)
-      return this.cloneOnline(true);
+    if (this.clone != null && await isLive(this.clone) === true)
+      return this.cloneLive(true);
   }
 
   protected onDisconnect() {
     this.connected = false;
-    this.setOnline(null);
+    this.setLive(null);
   }
 
   protected onPresenceChange() {
-    // If there is more than just me present, we are online
+    // If there is more than just me present, we are live
     this.present()
-      .pipe(reduce((online, id) => online || id !== this.id, false))
-      .subscribe(online => this.setOnline(online));
+      .pipe(reduce((live, id) => live || id !== this.id, false))
+      .subscribe(live => this.setLive(live));
   }
 
   protected onRemoteUpdate(json: any) {
@@ -259,9 +259,9 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     this.localClone.next(clone);
   }
 
-  private async cloneOnline(online: boolean): Promise<unknown> {
+  private async cloneLive(live: boolean): Promise<unknown> {
     if (this.connected)
-      return this.setPresent(online);
+      return this.setPresent(live);
   }
 
   private async send<T extends Response>(

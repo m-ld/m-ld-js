@@ -6,7 +6,7 @@ import { TreeClock } from '../src/clocks';
 import { Subject as Source } from 'rxjs';
 import { mockLocal, MockMqtt, mockMqtt } from './testClones';
 import { take, toArray } from 'rxjs/operators';
-import { comesOnline, isOnline } from '../src/AbstractMeld';
+import { comesAlive, isLive } from '../src/AbstractMeld';
 import { MeldErrorStatus } from '../src/m-ld/MeldError';
 
 /**
@@ -26,30 +26,30 @@ describe('New MQTT remotes', () => {
     }, () => mqtt);
   });
 
-  test('online starts unknown', async () => {
-    await expect(isOnline(remotes)).resolves.toBe(null);
+  test('live starts unknown', async () => {
+    await expect(isLive(remotes)).resolves.toBe(null);
   });
 
   test('goes offline if no other clones', async () => {
     mqtt.mockConnect();
-    await expect(remotes.online.pipe(take(2), toArray()).toPromise())
+    await expect(remotes.live.pipe(take(2), toArray()).toPromise())
       .resolves.toEqual([null, false]);
   });
 
-  test('goes online if clone already present', async () => {
+  test('goes live if clone already present', async () => {
     mqtt.mockPublish(
       '__presence/test.m-ld.org/client2',
       '{"consumer2":"test.m-ld.org/control"}');
     mqtt.mockConnect();
-    await expect(remotes.online.pipe(take(2), toArray()).toPromise())
+    await expect(remotes.live.pipe(take(2), toArray()).toPromise())
       .resolves.toEqual([null, true]);
   });
 
   test('sets presence with local clone on connect', async () => {
     remotes.setLocal(mockLocal());
     mqtt.mockConnect();
-    // Presence is joined when the remotes' online status resolves
-    await comesOnline(remotes, false);
+    // Presence is joined when the remotes' live status resolves
+    await comesAlive(remotes, false);
     expect(mqtt.publish).lastCalledWith(
       '__presence/test.m-ld.org/client1',
       '{"client1":"test.m-ld.org/control"}',
@@ -84,30 +84,30 @@ describe('New MQTT remotes', () => {
       })).resolves.toHaveProperty('data');
     });
 
-    test('goes online if clone appears', async () => {
+    test('goes live if clone appears', async () => {
       mqtt.mockPublish(
         '__presence/test.m-ld.org/client2',
         '{"consumer2":"test.m-ld.org/control"}');
-      await expect(remotes.online.pipe(take(3), toArray()).toPromise())
+      await expect(remotes.live.pipe(take(3), toArray()).toPromise())
         .resolves.toEqual([null, false, true]);
     });
 
     test('sets presence with local clone', async () => {
       remotes.setLocal(mockLocal());
-      // Presence is joined when the remotes' online status resolves
-      await comesOnline(remotes, false);
+      // Presence is joined when the remotes' live status resolves
+      await comesAlive(remotes, false);
       expect(mqtt.publish).lastCalledWith(
         '__presence/test.m-ld.org/client1',
         '{"client1":"test.m-ld.org/control"}',
         { qos: 1, retain: true });
     });
 
-    test('publishes local operations if online', async () => {
-      // Set someone else's presence so we're marked online
+    test('publishes local operations if live', async () => {
+      // Set someone else's presence so we're marked live
       mqtt.mockPublish(
         '__presence/test.m-ld.org/client2',
         '{"consumer2":"test.m-ld.org/control"}');
-      await comesOnline(remotes);
+      await comesAlive(remotes);
 
       const entry = new DeltaMessage(
         TreeClock.GENESIS.forked().left,
@@ -125,9 +125,9 @@ describe('New MQTT remotes', () => {
       await expect(entry.delivered).resolves.toBeUndefined();
     });
 
-    test('online goes unknown if mqtt closes', async () => {
+    test('live goes unknown if mqtt closes', async () => {
       mqtt.emit('close');
-      await expect(isOnline(remotes)).resolves.toBe(null);
+      await expect(isLive(remotes)).resolves.toBe(null);
     });
 
     test('closes with local clone', async () => {

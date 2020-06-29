@@ -34,7 +34,7 @@ const config: MeldMqttConfig = {
 };
 
 const meld = await clone(new MemDown, MqttRemotes, config);
-await meld.latest();
+await meld.status({ online: true, outdated: false });
 ```
 [[include:mqtt-remotes.md]]
 [[include:ably-remotes.md]]

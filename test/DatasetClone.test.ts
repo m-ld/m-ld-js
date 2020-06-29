@@ -1,56 +1,70 @@
 import { DatasetClone } from '../src/dataset/DatasetClone';
 import { Subject, Describe } from 'json-rql';
-import { genesisClone, mockRemotes } from './testClones';
-import { NEVER, Subject as Source, asapScheduler } from 'rxjs';
-import { isOnline, comesOnline } from '../src/AbstractMeld';
-import { first, take, toArray, map, tap, observeOn } from 'rxjs/operators';
+import { memStore, mockRemotes, testConfig } from './testClones';
+import { NEVER, Subject as Source, asapScheduler, EMPTY } from 'rxjs';
+import { isLive, comesAlive } from '../src/AbstractMeld';
+import { first, take, toArray, map, observeOn } from 'rxjs/operators';
 import { TreeClock } from '../src/clocks';
-import { DeltaMessage } from '../src/m-ld';
+import { DeltaMessage, MeldRemotes } from '../src/m-ld';
 import { uuid } from 'short-uuid';
+import { MeldConfig } from '../src';
+import MemDown from 'memdown';
+import { AbstractLevelDOWN } from 'abstract-leveldown';
 
 describe('Dataset clone', () => {
-  describe('initialisation', () => {
+  describe('as genesis', () => {
+    async function genesis(remotes: MeldRemotes, config?: Partial<MeldConfig>): Promise<DatasetClone> {
+      let clone = new DatasetClone(memStore(), remotes, testConfig(config));
+      await clone.initialise();
+      return clone;
+    }
+
     test('starts offline with unknown remotes', async () => {
-      const clone = await genesisClone(mockRemotes(NEVER, [null]));
-      await expect(isOnline(clone)).resolves.toBe(false);
+      const clone = await genesis(mockRemotes(NEVER, [null]));
+      await expect(isLive(clone)).resolves.toBe(false);
+      await expect(clone.status()).resolves.toEqual({ online: false, outdated: false, ticks: 0 });
     });
 
-    test('connects if remotes online', async () => {
-      const clone = await genesisClone(mockRemotes(NEVER, [true]));
-      await expect(comesOnline(clone)).resolves.toBe(true);
+    test('connects if remotes live', async () => {
+      const clone = await genesis(mockRemotes(NEVER, [true]));
+      await expect(comesAlive(clone)).resolves.toBe(true);
+      await expect(clone.status()).resolves.toEqual({ online: true, outdated: false, ticks: 0 });
     });
 
-    test('comes online if siloed', async () => {
-      const clone = await genesisClone(mockRemotes(NEVER, [null, false]));
-      await expect(comesOnline(clone)).resolves.toBe(true);
+    test('comes alive if siloed', async () => {
+      const clone = await genesis(mockRemotes(NEVER, [null, false]));
+      await expect(comesAlive(clone)).resolves.toBe(true);
+      await expect(clone.status()).resolves.toEqual({ online: true, outdated: false, ticks: 0 });
     });
 
-    test('stays online without reconnect if siloed', async () => {
-      const clone = await genesisClone(mockRemotes(NEVER, [true, false]));
-      await expect(comesOnline(clone)).resolves.toBe(true);
+    test('stays live without reconnect if siloed', async () => {
+      const clone = await genesis(mockRemotes(NEVER, [true, false]));
+      await expect(comesAlive(clone)).resolves.toBe(true);
+      await expect(clone.status()).resolves.toEqual({ online: true, outdated: false, ticks: 0 });
     });
 
     test('non-genesis fails to initialise if siloed', async () => {
-      await expect(genesisClone(mockRemotes(NEVER, [false],
-        TreeClock.GENESIS.forked().left), false)).rejects.toThrow();
+      await expect(genesis(mockRemotes(NEVER, [false],
+        TreeClock.GENESIS.forked().left), { genesis: false })).rejects.toThrow();
     });
   });
 
-  describe('as a silo m-ld store', () => {
-    let store: DatasetClone;
+  describe('as silo genesis', () => {
+    let silo: DatasetClone;
 
     beforeEach(async () => {
-      store = await genesisClone();
+      silo = new DatasetClone(memStore(), mockRemotes(), testConfig());
+      await silo.initialise();
     });
 
     test('not found is empty', async () => {
-      await expect(store.transact({
+      await expect(silo.transact({
         '@describe': 'http://test.m-ld.org/fred'
       } as Describe).toPromise()).resolves.toBeUndefined();
     });
 
     test('stores a JSON-LD object', async () => {
-      await expect(store.transact({
+      await expect(silo.transact({
         '@id': 'http://test.m-ld.org/fred',
         'http://test.m-ld.org/#name': 'Fred'
       } as Subject).toPromise())
@@ -59,11 +73,11 @@ describe('Dataset clone', () => {
     });
 
     test('retrieves a JSON-LD object', async () => {
-      await store.transact({
+      await silo.transact({
         '@id': 'http://test.m-ld.org/fred',
         'http://test.m-ld.org/#name': 'Fred'
       } as Subject).toPromise();
-      const fred = await store.transact({
+      const fred = await silo.transact({
         '@describe': 'http://test.m-ld.org/fred'
       } as Describe).toPromise();
       expect(fred['@id']).toBe('http://test.m-ld.org/fred');
@@ -71,35 +85,38 @@ describe('Dataset clone', () => {
     });
 
     test('has no ticks from genesis', async () => {
-      await expect(store.latest()).resolves.toBe(0);
+      await expect(silo.status()).resolves.toEqual({ online: true, outdated: false, ticks: 0 });
     });
 
     test('has ticks after update', async () => {
-      store.transact({
+      silo.transact({
         '@id': 'http://test.m-ld.org/fred',
         'http://test.m-ld.org/#name': 'Fred'
       } as Subject);
-      await store.follow().pipe(first()).toPromise();
-      await expect(store.latest()).resolves.toBe(1);
+      await silo.follow().pipe(first()).toPromise();
+      await expect(silo.status()).resolves.toEqual({ online: true, outdated: false, ticks: 1 });
     });
   });
 
-  describe('as a new clone', () => {
-    let store: DatasetClone;
+  describe('as genesis with remote clone', () => {
+    let clone: DatasetClone;
     let remoteTime: TreeClock;
     let remoteUpdates: Source<DeltaMessage> = new Source;
 
     beforeEach(async () => {
-      store = await genesisClone(mockRemotes(remoteUpdates.pipe(observeOn(asapScheduler))));
-      await comesOnline(store);
-      remoteTime = await store.newClock();
+      // Ensure that remote updates are async
+      clone = new DatasetClone(memStore(),
+        mockRemotes(remoteUpdates.pipe(observeOn(asapScheduler))), testConfig());
+      await clone.initialise();
+      await comesAlive(clone);
+      remoteTime = await clone.newClock();
     });
 
     test('ticks increase monotonically', async () => {
       // Edge case from compliance tests: a local transaction racing a remote
       // transaction could cause a clock reversal.
-      const updates = store.follow().pipe(map(next => next['@ticks']), take(2), toArray()).toPromise();
-      store.transact({
+      const updates = clone.follow().pipe(map(next => next['@ticks']), take(2), toArray()).toPromise();
+      clone.transact({
         '@id': 'http://test.m-ld.org/fred',
         'http://test.m-ld.org/#name': 'Fred'
       } as Subject);
@@ -109,6 +126,49 @@ describe('Dataset clone', () => {
         delete: '{}'
       }));
       await expect(updates).resolves.toEqual([1, 2]);
+    });
+  });
+
+  describe('as non-genesis clone', () => {
+    let ldb: AbstractLevelDOWN;
+
+    beforeEach(async () => {
+      ldb = new MemDown();
+      // Start a temporary genesis clone to initialise the store
+      let clone = new DatasetClone(memStore(ldb), mockRemotes(), testConfig());
+      await clone.initialise();
+      await clone.newClock(); // Forks the clock so no longer genesis
+      await clone.close();
+    });
+
+    test('is outdated while revving-up', async () => {
+      // Re-start on the same data, with a rev-up that never completes
+      const remotes = mockRemotes();
+      remotes.revupFrom = async () => NEVER;
+      const clone = new DatasetClone(memStore(ldb), remotes, testConfig());
+
+      // Check that we are never not outdated
+      const everNotOutdated = clone.status({ outdated: false });
+
+      await clone.initialise();
+
+      await expect(clone.status()).resolves.toEqual({ online: true, outdated: true, ticks: 0 });
+      await expect(Promise.race([everNotOutdated, Promise.resolve()])).resolves.toBeUndefined();
+    });
+
+    test('is not outdated when revved-up', async () => {
+      // Re-start on the same data, with a rev-up that never completes
+      const remotes = mockRemotes();
+      remotes.revupFrom = async () => EMPTY;
+      const clone = new DatasetClone(memStore(ldb), remotes, testConfig());
+
+      // Check that we do transition through an outdated state
+      const wasOutdated = clone.status({ outdated: true });
+
+      await clone.initialise();
+
+      await expect(wasOutdated).resolves.toEqual({ online: true, outdated: true, ticks: 0 });
+      await expect(clone.status()).resolves.toEqual({ online: true, outdated: false, ticks: 0 });
     });
   });
 });
