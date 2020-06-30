@@ -15,21 +15,21 @@ describe('Meld API', () => {
 
   test('retrieves a JSON-LD subject', async () => {
     const captureUpdate = api.follow().pipe(first()).toPromise();
-    await api.transact({ '@id': 'fred', name: 'Fred' } as Subject).toPromise();
+    await api.transact({ '@id': 'fred', name: 'Fred' } as Subject);
     await expect(captureUpdate).resolves.toEqual({
       '@ticks': 1,
       '@insert': [{ '@id': 'fred', name: 'Fred' }],
       '@delete': []
     });
-    await expect(api.get('fred').toPromise())
-      .resolves.toMatchObject({ '@id': 'fred', name: 'Fred' });
+    await expect(api.get('fred'))
+      .resolves.toEqual([{ '@id': 'fred', name: 'Fred' }]);
   });
 
   test('deletes a subject by path', async () => {
-    await api.transact({ '@id': 'fred', name: 'Fred' } as Subject).toPromise();
+    await api.transact({ '@id': 'fred', name: 'Fred' } as Subject);
     const captureUpdate = api.follow().pipe(first()).toPromise();
-    await api.delete('fred').toPromise();
-    await expect(api.get('fred').toPromise()).resolves.toBeUndefined();
+    await api.delete('fred');
+    await expect(api.get('fred')).resolves.toEqual([]);
     await expect(captureUpdate).resolves.toEqual({
       '@ticks': 2,
       '@delete': [{ '@id': 'fred', name: 'Fred' }],
@@ -38,51 +38,51 @@ describe('Meld API', () => {
   });
 
   test('deletes a property by path', async () => {
-    await api.transact({ '@id': 'fred', name: 'Fred', wife: { '@id': 'wilma' } } as Subject).toPromise();
-    await api.delete('wilma').toPromise();
-    await expect(api.get('fred').toPromise()).resolves.toEqual({ '@id': 'fred', name: 'Fred' });
+    await api.transact({ '@id': 'fred', name: 'Fred', wife: { '@id': 'wilma' } } as Subject);
+    await api.delete('wilma');
+    await expect(api.get('fred')).resolves.toEqual([{ '@id': 'fred', name: 'Fred' }]);
   });
 
   test('deletes an object by path', async () => {
-    await api.transact({ '@id': 'fred', wife: { '@id': 'wilma' } } as Subject).toPromise();
-    await api.delete('wilma').toPromise();
-    await expect(api.get('fred').toPromise()).resolves.toBeUndefined();
+    await api.transact({ '@id': 'fred', wife: { '@id': 'wilma' } } as Subject);
+    await api.delete('wilma');
+    await expect(api.get('fred')).resolves.toEqual([]);
   });
 
   test('selects where', async () => {
-    await api.transact({ '@id': 'fred', name: 'Fred' } as Subject).toPromise();
+    await api.transact({ '@id': 'fred', name: 'Fred' } as Subject);
     await expect(api.transact({
       '@select': '?f', '@where': { '@id': '?f', name: 'Fred' }
-    } as Select).toPromise())
-      .resolves.toMatchObject({ '?f': { '@id': 'fred' } });
+    } as Select))
+      .resolves.toMatchObject([{ '?f': { '@id': 'fred' } }]);
   });
 
   test('selects not found', async () => {
-    await api.transact({ '@id': 'fred', name: 'Fred' } as Subject).toPromise();
+    await api.transact({ '@id': 'fred', name: 'Fred' } as Subject);
     await expect(api.transact({
       '@select': '?w', '@where': { '@id': '?w', name: 'Wilma' }
-    } as Select).toPromise())
-      .resolves.toBeUndefined(); // toPromise undefined for empty Observable
+    } as Select))
+      .resolves.toEqual([]);
   });
 
   test('describes where', async () => {
-    await api.transact({ '@id': 'fred', name: 'Fred' } as Subject).toPromise();
+    await api.transact({ '@id': 'fred', name: 'Fred' } as Subject);
     await expect(api.transact({
       '@describe': '?f', '@where': { '@id': '?f', name: 'Fred' }
-    } as Describe).toPromise())
-      .resolves.toMatchObject({ '@id': 'fred', name: 'Fred' });
+    } as Describe))
+      .resolves.toEqual([{ '@id': 'fred', name: 'Fred' }]);
   });
 
   test('describes with boolean value', async () => {
-    await api.transact({ '@id': 'fred', married: true } as Subject).toPromise();
-    await expect(api.transact({ '@describe': 'fred' } as Describe).toPromise())
-      .resolves.toMatchObject({ '@id': 'fred', married: true });
+    await api.transact({ '@id': 'fred', married: true } as Subject);
+    await expect(api.transact({ '@describe': 'fred' } as Describe))
+      .resolves.toEqual([{ '@id': 'fred', married: true }]);
   });
 
   test('describes with double value', async () => {
-    await api.transact({ '@id': 'fred', name: 'Fred', age: 40.5 } as Subject).toPromise();
-    await expect(api.transact({ '@describe': 'fred' } as Describe).toPromise())
-      .resolves.toMatchObject({ '@id': 'fred', name: 'Fred', age: 40.5 });
+    await api.transact({ '@id': 'fred', name: 'Fred', age: 40.5 } as Subject);
+    await expect(api.transact({ '@describe': 'fred' } as Describe))
+      .resolves.toMatchObject([{ '@id': 'fred', name: 'Fred', age: 40.5 }]);
   });
 });
 
