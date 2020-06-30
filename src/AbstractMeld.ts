@@ -1,4 +1,4 @@
-import { Meld, Snapshot, DeltaMessage, ValueSource } from './m-ld';
+import { Meld, Snapshot, DeltaMessage, LiveValue } from './m-ld';
 import { TreeClock } from './clocks';
 import { Observable, Subject as Source, BehaviorSubject, asapScheduler } from 'rxjs';
 import { observeOn, tap, distinctUntilChanged, first, skip } from 'rxjs/operators';
@@ -32,7 +32,7 @@ export abstract class AbstractMeld implements Meld {
       this.log.debug('is', live ? 'live' : 'dead'));
   }
 
-  get live(): ValueSource<boolean | null> {
+  get live(): LiveValue<boolean | null> {
     // Live notifications are distinct, only transitions are notified
     const source = this.liveSource.pipe(distinctUntilChanged());
     return Object.defineProperty(source, 'value', { get: () => this.liveSource.value });

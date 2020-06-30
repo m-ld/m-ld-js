@@ -44,7 +44,7 @@ export class DeltaMessage implements Message<TreeClock, JsonDelta> {
 
 export type UUID = string;
 
-export type ValueSource<T> = Observable<T> & { readonly value: T };
+export type LiveValue<T> = Observable<T> & { readonly value: T };
 
 export interface Meld {
   /**
@@ -62,7 +62,7 @@ export interface Meld {
    * closed.
    * @see updates
    */
-  readonly live: ValueSource<boolean | null>;
+  readonly live: LiveValue<boolean | null>;
 
   newClock(): Promise<TreeClock>;
   snapshot(): Promise<Snapshot>;
@@ -117,14 +117,14 @@ export interface MeldUpdate extends DeleteInsert<Subject[]> {
   '@ticks': number;
 }
 
-export type GetStatus = ValueSource<MeldStatus> & {
+export type LiveStatus = LiveValue<MeldStatus> & {
   becomes: ((match?: Partial<MeldStatus>) => Promise<MeldStatus>);
 };
 
 export interface MeldStore {
   transact(request: Pattern): Observable<Subject>;
   follow(after?: number): Observable<MeldUpdate>;
-  readonly status: GetStatus;
+  readonly status: LiveStatus;
   close(err?: any): Promise<void>;
 }
 

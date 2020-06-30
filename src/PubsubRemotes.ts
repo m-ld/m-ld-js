@@ -46,7 +46,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
   private readonly recentlySentTo: Set<string> = new Set;
   private readonly consuming: { [address: string]: Source<any> } = {};
   private readonly sendTimeout: number;
-  private readonly activity: Set<Promise<void>> = new Set;
+  private readonly activity: Set<PromiseLike<void>> = new Set;
   private connected: boolean;
 
   constructor(config: MeldConfig) {

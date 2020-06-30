@@ -1,4 +1,4 @@
-import { DeltaMessage, MeldRemotes, ValueSource } from '../m-ld';
+import { DeltaMessage, MeldRemotes, LiveValue } from '../m-ld';
 import { Observable, Subject as Source, merge, NEVER, BehaviorSubject } from 'rxjs';
 import { switchAll } from 'rxjs/operators';
 import { delayUntil, Future, tapLast, onErrorNever } from '../util';
@@ -21,7 +21,7 @@ export class RemoteUpdates {
     this.receiving = this.remoteUpdates.pipe(switchAll());
   }
 
-  get state(): ValueSource<AttachStatus> {
+  get state(): LiveValue<AttachStatus> {
     return this.attachState;
   }
 

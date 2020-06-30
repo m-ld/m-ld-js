@@ -1,7 +1,7 @@
-import { MeldStore, MeldUpdate, DeleteInsert, MeldStatus, GetStatus } from '.';
+import { MeldStore, MeldUpdate, DeleteInsert, MeldStatus, LiveStatus } from '.';
 import { Context, Subject, Describe, Pattern, Update, Value, isValueObject, Reference } from '../dataset/jrql-support';
 import { Observable } from 'rxjs';
-import { map, flatMap } from 'rxjs/operators';
+import { map, flatMap, toArray as rxToArray } from 'rxjs/operators';
 import { flatten } from 'jsonld';
 import { toArray } from '../util';
 import { Iri } from 'jsonld/jsonld-spec';
@@ -21,11 +21,11 @@ export class MeldApi implements MeldStore {
     return this.store.close(err);
   }
 
-  get(path: string): Observable<Subject> {
+  get(path: string): Observable<Subject> & PromiseLike<Subject[]> {
     return this.transact({ '@describe': path } as Describe);
   }
 
-  delete(path: string): Observable<Subject> {
+  delete(path: string): PromiseLike<unknown> {
     return this.transact({
       '@delete': [
         { '@id': path },
@@ -39,18 +39,22 @@ export class MeldApi implements MeldStore {
 
   // TODO: post, put
 
-  transact(request: Pattern, implicitContext: Context = this.context): Observable<Subject> {
-    return (this.store.transact({
+  transact<P extends Pattern>(request: P, implicitContext: Context = this.context):
+    Observable<Subject> & PromiseLike<Subject[]> {
+    const subjects = this.store.transact({
       ...request,
       // Apply the given implicit context to the request, explicit context wins
       '@context': { ...implicitContext, ...request['@context'] || {} }
-    })).pipe(map((subject: Subject) => {
+    }).pipe(map((subject: Subject) => {
       // Strip the given implicit context from the request
       return this.stripImplicitContext(subject, implicitContext);
     }));
+    const then: PromiseLike<Subject[]>['then'] = (onfulfilled, onrejected) =>
+      subjects.pipe(rxToArray()).toPromise().then(onfulfilled, onrejected);
+    return Object.assign(subjects, { then });
   }
 
-  get status(): GetStatus {
+  get status(): LiveStatus {
     return this.store.status;
   }
 

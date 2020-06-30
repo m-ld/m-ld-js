@@ -1,4 +1,4 @@
-import { MeldClone, Snapshot, DeltaMessage, MeldRemotes, MeldUpdate, MeldStatus, GetStatus } from '../m-ld';
+import { MeldClone, Snapshot, DeltaMessage, MeldRemotes, MeldUpdate, MeldStatus, LiveStatus } from '../m-ld';
 import { Pattern, Subject, isRead, isSubject, isGroup, isUpdate } from './jrql-support';
 import {
   Observable, merge, from, defer, EMPTY,
@@ -316,7 +316,7 @@ export class DatasetClone extends AbstractMeld implements MeldClone {
     }
   }
 
-  get status(): GetStatus {
+  get status(): LiveStatus {
     const getValue: () => MeldStatus = () => ({
       online: this.remotes.live.value != null,
       outdated: this.remoteUpdates.state.value.outdated,
