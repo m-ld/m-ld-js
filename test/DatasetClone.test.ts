@@ -2,7 +2,7 @@ import { DatasetClone } from '../src/dataset/DatasetClone';
 import { Subject, Describe } from 'json-rql';
 import { memStore, mockRemotes, testConfig } from './testClones';
 import { NEVER, Subject as Source, asapScheduler, EMPTY } from 'rxjs';
-import { isLive, comesAlive } from '../src/AbstractMeld';
+import { comesAlive } from '../src/AbstractMeld';
 import { first, take, toArray, map, observeOn } from 'rxjs/operators';
 import { TreeClock } from '../src/clocks';
 import { DeltaMessage, MeldRemotes } from '../src/m-ld';
@@ -21,26 +21,26 @@ describe('Dataset clone', () => {
 
     test('starts offline with unknown remotes', async () => {
       const clone = await genesis(mockRemotes(NEVER, [null]));
-      await expect(isLive(clone)).resolves.toBe(false);
-      await expect(clone.status()).resolves.toEqual({ online: false, outdated: false, ticks: 0 });
+      expect(clone.live.value).toBe(false);
+      expect(clone.status.value).toEqual({ online: false, outdated: false, ticks: 0 });
     });
 
     test('connects if remotes live', async () => {
       const clone = await genesis(mockRemotes(NEVER, [true]));
       await expect(comesAlive(clone)).resolves.toBe(true);
-      await expect(clone.status()).resolves.toEqual({ online: true, outdated: false, ticks: 0 });
+      expect(clone.status.value).toEqual({ online: true, outdated: false, ticks: 0 });
     });
 
     test('comes alive if siloed', async () => {
       const clone = await genesis(mockRemotes(NEVER, [null, false]));
       await expect(comesAlive(clone)).resolves.toBe(true);
-      await expect(clone.status()).resolves.toEqual({ online: true, outdated: false, ticks: 0 });
+      expect(clone.status.value).toEqual({ online: true, outdated: false, ticks: 0 });
     });
 
     test('stays live without reconnect if siloed', async () => {
       const clone = await genesis(mockRemotes(NEVER, [true, false]));
       await expect(comesAlive(clone)).resolves.toBe(true);
-      await expect(clone.status()).resolves.toEqual({ online: true, outdated: false, ticks: 0 });
+      expect(clone.status.value).toEqual({ online: true, outdated: false, ticks: 0 });
     });
 
     test('non-genesis fails to initialise if siloed', async () => {
@@ -85,7 +85,7 @@ describe('Dataset clone', () => {
     });
 
     test('has no ticks from genesis', async () => {
-      await expect(silo.status()).resolves.toEqual({ online: true, outdated: false, ticks: 0 });
+      expect(silo.status.value).toEqual({ online: true, outdated: false, ticks: 0 });
     });
 
     test('has ticks after update', async () => {
@@ -94,7 +94,7 @@ describe('Dataset clone', () => {
         'http://test.m-ld.org/#name': 'Fred'
       } as Subject);
       await silo.follow().pipe(first()).toPromise();
-      await expect(silo.status()).resolves.toEqual({ online: true, outdated: false, ticks: 1 });
+      expect(silo.status.value).toEqual({ online: true, outdated: false, ticks: 1 });
     });
   });
 
@@ -148,11 +148,11 @@ describe('Dataset clone', () => {
       const clone = new DatasetClone(memStore(ldb), remotes, testConfig());
 
       // Check that we are never not outdated
-      const everNotOutdated = clone.status({ outdated: false });
+      const everNotOutdated = clone.status.becomes({ outdated: false });
 
       await clone.initialise();
 
-      await expect(clone.status()).resolves.toEqual({ online: true, outdated: true, ticks: 0 });
+      expect(clone.status.value).toEqual({ online: true, outdated: true, ticks: 0 });
       await expect(Promise.race([everNotOutdated, Promise.resolve()])).resolves.toBeUndefined();
     });
 
@@ -163,12 +163,12 @@ describe('Dataset clone', () => {
       const clone = new DatasetClone(memStore(ldb), remotes, testConfig());
 
       // Check that we do transition through an outdated state
-      const wasOutdated = clone.status({ outdated: true });
+      const wasOutdated = clone.status.becomes({ outdated: true });
 
       await clone.initialise();
 
-      await expect(wasOutdated).resolves.toEqual({ online: true, outdated: true, ticks: 0 });
-      await expect(clone.status()).resolves.toEqual({ online: true, outdated: false, ticks: 0 });
+      await expect(wasOutdated).resolves.toMatchObject({ online: true, outdated: true });
+      expect(clone.status.value).toEqual({ online: true, outdated: false, ticks: 0 });
     });
   });
 });

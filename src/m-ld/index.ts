@@ -44,6 +44,8 @@ export class DeltaMessage implements Message<TreeClock, JsonDelta> {
 
 export type UUID = string;
 
+export type ValueSource<T> = Observable<T> & { readonly value: T };
+
 export interface Meld {
   /**
    * Updates from this Meld. The stream is hot, continuous and multicast.
@@ -60,7 +62,7 @@ export interface Meld {
    * closed.
    * @see updates
    */
-  readonly live: Observable<boolean | null>;
+  readonly live: ValueSource<boolean | null>;
 
   newClock(): Promise<TreeClock>;
   snapshot(): Promise<Snapshot>;
@@ -115,10 +117,14 @@ export interface MeldUpdate extends DeleteInsert<Subject[]> {
   '@ticks': number;
 }
 
+export type GetStatus = ValueSource<MeldStatus> & {
+  becomes: ((match?: Partial<MeldStatus>) => Promise<MeldStatus>);
+};
+
 export interface MeldStore {
   transact(request: Pattern): Observable<Subject>;
-  status(match?: Partial<MeldStatus>): Promise<MeldStatus>;
   follow(after?: number): Observable<MeldUpdate>;
+  readonly status: GetStatus;
   close(err?: any): Promise<void>;
 }
 
@@ -136,8 +142,9 @@ export interface MeldStatus {
    */
   outdated: boolean;
   /**
-   * Current local clock ticks. This can be used in a subsequent call to
-   * {@link MeldStore.follow}, to ensure no updates are missed.
+   * Current local clock ticks at the time of the status change. This can be
+   * used in a subsequent call to {@link MeldStore.follow}, to ensure no updates
+   * are missed.
    */
   ticks: number;
 }

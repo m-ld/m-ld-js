@@ -1,6 +1,6 @@
-import { DeltaMessage, MeldRemotes, MeldStatus } from '../m-ld';
+import { DeltaMessage, MeldRemotes, ValueSource } from '../m-ld';
 import { Observable, Subject as Source, merge, NEVER, BehaviorSubject } from 'rxjs';
-import { filter, switchAll, first } from 'rxjs/operators';
+import { switchAll } from 'rxjs/operators';
 import { delayUntil, Future, tapLast, onErrorNever } from '../util';
 import { Logger } from 'loglevel';
 
@@ -17,29 +17,23 @@ export class RemoteUpdates {
   });
 
   constructor(
-    private readonly remotes: MeldRemotes,
-    log: Logger) {
+    private readonly remotes: MeldRemotes) {
     this.receiving = this.remoteUpdates.pipe(switchAll());
-    this.attachState.subscribe(state => log.debug(JSON.stringify(state)));
   }
 
-  get attached(): boolean {
-    return this.attachState.value.attached;
+  get state(): ValueSource<AttachStatus> {
+    return this.attachState;
   }
 
-  async status(match?: Partial<AttachStatus>): Promise<AttachStatus> {
-    if (match == null)
-      return this.attachState.value;
+  close(err?: any) {
+    if (err)
+      this.attachState.error(err);
     else
-      return this.attachState.pipe(
-        filter(state =>
-          (match.attached === undefined || state.attached === match.attached) &&
-          (match.outdated === undefined || state.outdated === match.outdated)),
-        first()).toPromise();
-  };
+      this.attachState.complete();
+  }
 
   setOutdated = () =>
-    this.attachState.next({ attached: this.attached, outdated: true });
+    this.attachState.next({ attached: this.state.value.attached, outdated: true });
 
   attach = () => {
     this.attachState.next({ attached: true, outdated: false });

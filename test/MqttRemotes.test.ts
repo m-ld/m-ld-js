@@ -6,7 +6,7 @@ import { TreeClock } from '../src/clocks';
 import { Subject as Source } from 'rxjs';
 import { mockLocal, MockMqtt, mockMqtt } from './testClones';
 import { take, toArray } from 'rxjs/operators';
-import { comesAlive, isLive } from '../src/AbstractMeld';
+import { comesAlive } from '../src/AbstractMeld';
 import { MeldErrorStatus } from '../src/m-ld/MeldError';
 
 /**
@@ -27,7 +27,7 @@ describe('New MQTT remotes', () => {
   });
 
   test('live starts unknown', async () => {
-    await expect(isLive(remotes)).resolves.toBe(null);
+    expect(remotes.live.value).toBe(null);
   });
 
   test('goes offline if no other clones', async () => {
@@ -127,7 +127,7 @@ describe('New MQTT remotes', () => {
 
     test('live goes unknown if mqtt closes', async () => {
       mqtt.emit('close');
-      await expect(isLive(remotes)).resolves.toBe(null);
+      expect(remotes.live.value).toBe(null);
     });
 
     test('closes with local clone', async () => {

@@ -7,7 +7,7 @@ import { Future, toJson } from './util';
 import { finalize, flatMap, reduce, toArray, first, concatMap, materialize, timeout } from 'rxjs/operators';
 import { toMeldJson, fromMeldJson } from './m-ld/MeldJson';
 import { MeldError, MeldErrorStatus } from './m-ld/MeldError';
-import { AbstractMeld, isLive } from './AbstractMeld';
+import { AbstractMeld } from './AbstractMeld';
 import { MeldConfig } from '.';
 
 // @see org.m_ld.json.MeldJacksonModule.NotificationDeserializer
@@ -68,7 +68,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
         next: async msg => {
           // If we are not live, we just ignore updates.
           // They will be replayed from the clone's journal on re-connection.
-          if (this.isLive()) {
+          if (this.live.value) {
             try {
               // Delta received from the local clone. Relay to the domain
               await this.publishDelta(msg.toJson());
@@ -166,7 +166,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
 
   protected async onConnect() {
     this.connected = true;
-    if (this.clone != null && await isLive(this.clone) === true)
+    if (this.clone != null && this.clone.live.value === true)
       return this.cloneLive(true);
   }
 

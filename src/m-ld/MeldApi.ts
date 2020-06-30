@@ -1,4 +1,4 @@
-import { MeldStore, MeldUpdate, DeleteInsert, MeldStatus } from '.';
+import { MeldStore, MeldUpdate, DeleteInsert, MeldStatus, GetStatus } from '.';
 import { Context, Subject, Describe, Pattern, Update, Value, isValueObject, Reference } from '../dataset/jrql-support';
 import { Observable } from 'rxjs';
 import { map, flatMap } from 'rxjs/operators';
@@ -50,8 +50,8 @@ export class MeldApi implements MeldStore {
     }));
   }
 
-  status(match?: Partial<MeldStatus>): Promise<MeldStatus> {
-    return this.store.status(match);
+  get status(): GetStatus {
+    return this.store.status;
   }
 
   follow(after?: number): Observable<MeldUpdate> {

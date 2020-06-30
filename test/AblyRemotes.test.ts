@@ -83,9 +83,9 @@ describe('Ably remotes', () => {
   test('joins presence if clone is live', async () => {
     const remotes = new AblyRemotes(config, connect);
     remotes.setLocal(mockLocal(NEVER, [true]));
-    connCallbacks.connected?.(mock<Ably.Types.ConnectionStateChange>());
     const joined = new Future<any | undefined>();
     operations.presence.update.mockImplementation(async data => joined.resolve(data));
+    connCallbacks.connected?.(mock<Ably.Types.ConnectionStateChange>());
     await expect(joined).resolves.toBe('__live');
   });
 
