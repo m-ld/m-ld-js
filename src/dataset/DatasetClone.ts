@@ -191,7 +191,7 @@ export class DatasetClone extends AbstractMeld implements MeldClone {
       this.remoteUpdates.injectRevups(revup).then(async lastRevup => {
         // Emit anything in our journal that post-dates the last revup
         const recent = lastRevup && await this.dataset.operationsSince(lastRevup.time);
-        recent && recent.subscribe(this.nextUpdate);
+        recent && recent.subscribe(this.nextUpdate, this.warnError);
         return lastRevup;
       }).catch(this.onRevupFailed);
     } else {
