@@ -36,16 +36,19 @@ export class TreeClockFork {
   }
 
   toJson(): any {
-    return { left: this.left.toJson(), right: this.right.toJson() };
+    return [this.left.toJson(), this.right.toJson()];
   }
 
   static fromJson(json: any): TreeClockFork | null {
-    if (json) {
-      const left = TreeClock.fromJson(json.left);
-      const right = TreeClock.fromJson(json.right);
-      return left && right ? new TreeClockFork(left, right) : null;
+    if (json == null) {
+      return null;
+    } else {
+      const compact = Array.isArray(json);
+      const leftClock = TreeClock.fromJson(compact ? json[0] : json.left);
+      const rightClock = TreeClock.fromJson(compact ? json[1] : json.right);
+      return leftClock && rightClock ?
+        new TreeClockFork(leftClock, rightClock) : null;
     }
-    return null;
   }
 }
 
@@ -241,21 +244,41 @@ export class TreeClock implements CausalClock<TreeClock> {
   }
 
   toString(): string {
-    return [this.isId ? 'ID' : null, this._ticks, this._fork].filter(p => p).join('');
+    return JSON.stringify(this.toJson());
   }
 
   // v8(chrome/nodejs) console
   [inspect] = () => this.toString();
 
   toJson(): any {
-    return {
-      isId: this.isId,
-      ticks: this._ticks,
-      fork: this._fork ? this._fork.toJson() : null
-    };
+    if (this.isId) // 0 or 1 element array for ID
+      return this._ticks > 0 ? [this._ticks] : [];
+    else if (this._fork == null) // Plain number for non-ID
+      return this._ticks;
+    else if (this._ticks == 0) // 2 element array for ticks and fork
+      return this._fork.toJson();
+    else // 3 element array for ticks and fork
+      return [this._ticks].concat(this._fork.toJson());
   }
 
   static fromJson(json: any): TreeClock | null {
-    return json ? new TreeClock(json.isId, json.ticks, TreeClockFork.fromJson(json.fork)) : null;
+    if (json == null) {
+      return null;
+    } else if (typeof json == 'number') {
+      return new TreeClock(false, json);
+    } else if (Array.isArray(json)) { // Compact tuple format
+      if (json.length == 0) // ID with zero ticks
+        return new TreeClock(true, 0);
+      else if (json.length == 1) // ID with given ticks
+        return new TreeClock(true, json[0]);
+      else if (json.length == 2) // Zero-tick with fork
+        return new TreeClock(false, 0, TreeClockFork.fromJson(json));
+      else if (json.length == 3) // Given ticks and fork
+        return new TreeClock(false, json[0], TreeClockFork.fromJson(json.slice(1)));
+      else
+        return null;
+    } else { // Fully expanded format
+      return new TreeClock(json.isId, json.ticks, TreeClockFork.fromJson(json.fork));
+    }
   }
 }

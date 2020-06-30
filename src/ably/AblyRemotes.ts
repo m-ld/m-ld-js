@@ -37,7 +37,7 @@ export class AblyRemotes extends PubsubRemotes {
       .subscribe(message => this.onDirectMessage(message).catch(this.warnError))
       .catch(err => this.close(err));
     // Ably has connection recovery with no message loss for 2min. During that
-    // time we treat the remotes as online. After that, the connection becomes
+    // time we treat the remotes as live. After that, the connection becomes
     // suspended and we are offline.
     this.client.connection.on('connected', () => this.onConnect().catch(this.warnError));
     this.client.connection.on(['suspended', 'failed', 'closing'], () => this.onDisconnect());
@@ -68,7 +68,7 @@ export class AblyRemotes extends PubsubRemotes {
 
   protected setPresent(present: boolean): Promise<unknown> {
     if (present)
-      return this.channel.presence.update('__online');
+      return this.channel.presence.update('__live');
     else
       return this.channel.presence.leave();
   }
@@ -80,7 +80,7 @@ export class AblyRemotes extends PubsubRemotes {
   protected present(): Observable<string> {
     return from(this.channel.presence.get()).pipe(
       flatMap(identity), // flatten the array of presence messages
-      filter(present => present.data === '__online'),
+      filter(present => present.data === '__live'),
       map(present => present.clientId));
   }
 

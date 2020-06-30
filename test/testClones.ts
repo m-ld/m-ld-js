@@ -8,42 +8,42 @@ import { TreeClock } from '../src/clocks';
 import { AsyncMqttClient, IPublishPacket } from 'async-mqtt';
 import { EventEmitter } from 'events';
 import { observeOn } from 'rxjs/operators';
+import { MeldConfig } from '../src';
+import { AbstractLevelDOWN } from 'abstract-leveldown';
 
-export async function genesisClone(remotes?: MeldRemotes, genesis = true) {
-  const clone = new DatasetClone(memStore(), remotes ?? mockRemotes(), {
-    '@id': 'test', '@domain': 'test.m-ld.org', genesis
-  });
-  await clone.initialise();
-  return clone;
+export function testConfig(config?: Partial<MeldConfig>): MeldConfig {
+  return { '@id': 'test', '@domain': 'test.m-ld.org', genesis: true, ...config };
 }
 
 export function mockRemotes(
   updates: Observable<DeltaMessage> = NEVER,
-  onlines: Array<boolean | null> = [true],
+  lives: Array<boolean | null> = [true],
   newClock: TreeClock = TreeClock.GENESIS): MeldRemotes {
+  // This weirdness is due to jest-mock-extended trying to mock arrays
   return {
     ...mock<MeldRemotes>(),
     setLocal: () => { },
-    updates, online: hotOnline(onlines),
+    updates,
+    live: hotLive(lives),
     newClock: () => Promise.resolve(newClock)
   };
 }
 
-function hotOnline(onlines: Array<boolean | null>) {
-  const online = new BehaviorSubject(onlines[0]);
-  from(onlines.slice(1)).pipe(observeOn(asapScheduler)).forEach(v => online.next(v));
-  return online;
+function hotLive(lives: Array<boolean | null>) {
+  const live = new BehaviorSubject(lives[0]);
+  from(lives.slice(1)).pipe(observeOn(asapScheduler)).forEach(v => live.next(v));
+  return live;
 }
 
-export function memStore(): Dataset {
-  return new QuadStoreDataset(new MemDown);
+export function memStore(leveldown: AbstractLevelDOWN = new MemDown): Dataset {
+  return new QuadStoreDataset(leveldown);
 }
 
 export function mockLocal(
   updates: Observable<DeltaMessage> = NEVER,
-  onlines: Array<boolean | null> = [true]): MeldLocal {
+  lives: Array<boolean | null> = [true]): MeldLocal {
   // This weirdness is due to jest-mock-extended trying to mock arrays
-  return { ...mock<MeldLocal>(), updates, online: hotOnline(onlines) };
+  return { ...mock<MeldLocal>(), updates, live: hotLive(lives) };
 }
 
 export interface MockMqtt extends AsyncMqttClient {

@@ -240,10 +240,24 @@ test('Get ticks for other ID', () => {
 });
 
 test('to string', () => {
-  expect(TreeClock.GENESIS.toString()).toBe('ID');
-  expect(TreeClock.GENESIS.forked().left.toString()).toBe('{ ID,  }');
-  expect(TreeClock.GENESIS.ticked().forked().left.toString()).toBe('1{ ID,  }');
-  expect(TreeClock.GENESIS.forked().left.ticked().toString()).toBe('{ ID1,  }');
+  expect(TreeClock.GENESIS.toString()).toBe('[]');
+  expect(TreeClock.GENESIS.forked().left.toString()).toBe('[[],0]');
+  expect(TreeClock.GENESIS.forked().left.ticked().toString()).toBe('[[1],0]');
+  expect(TreeClock.GENESIS.ticked().forked().left.toString()).toBe('[1,[],0]');
+});
+
+test('to JSON', () => {
+  expect(TreeClock.GENESIS.toJson()).toEqual([]);
+  expect(TreeClock.GENESIS.forked().left.toJson()).toEqual([[],0]);
+  expect(TreeClock.GENESIS.forked().left.ticked().toJson()).toEqual([[1],0]);
+  expect(TreeClock.GENESIS.ticked().forked().left.toJson()).toEqual([1, [], 0]);
+});
+
+test('from JSON', () => {
+  expect(TreeClock.fromJson([])?.equals(TreeClock.GENESIS)).toBe(true);
+  expect(TreeClock.fromJson([[], 0])?.equals(TreeClock.GENESIS.forked().left)).toBe(true);
+  expect(TreeClock.fromJson([[1], 0])?.equals(TreeClock.GENESIS.forked().left.ticked())).toBe(true);
+  expect(TreeClock.fromJson([1, [], 0])?.equals(TreeClock.GENESIS.ticked().forked().left)).toBe(true);
 });
 
 test('non-ID in fork with zero ticks is still lt', () => {

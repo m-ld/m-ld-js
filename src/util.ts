@@ -52,10 +52,7 @@ export class Future<T = void> implements PromiseLike<T> {
     this.subject.error(err);
   }
 
-  then<TResult1 = T, TResult2 = never>(
-    onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | null | undefined,
-    onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | null | undefined):
-    Promise<TResult1 | TResult2> {
+  then: PromiseLike<T>['then'] = (onfulfilled, onrejected) => {
     return this.subject.toPromise().then(onfulfilled, onrejected);
   }
 }

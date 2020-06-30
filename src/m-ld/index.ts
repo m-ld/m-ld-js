@@ -44,23 +44,25 @@ export class DeltaMessage implements Message<TreeClock, JsonDelta> {
 
 export type UUID = string;
 
+export type LiveValue<T> = Observable<T> & { readonly value: T };
+
 export interface Meld {
   /**
    * Updates from this Meld. The stream is hot, continuous and multicast.
    * Completion or an error means that this Meld has closed.
-   * @see online
+   * @see live
    */
   readonly updates: Observable<DeltaMessage>;
   /**
-   * Online-ness of this Meld. To be 'online' means that it is able
-   * to collaborate with newly starting clones via snapshot & rev-up.
-   * A value of null indicates unknown (e.g. starting or disconnected).
-   * The stream is hot, continuous and multicast, but will also always emit
-   * the current state to new subscribers (Rx BehaviourSubject).
-   * Completion or an error means that this Meld has closed.
+   * Liveness of this Meld. To be 'live' means that it is able to collaborate
+   * with newly starting clones via snapshot & rev-up. A value of null indicates
+   * unknown (e.g. starting or disconnected). The stream is hot, continuous and
+   * multicast, but will also always emit the current state to new subscribers
+   * (Rx BehaviourSubject). Completion or an error means that this Meld has
+   * closed.
    * @see updates
    */
-  readonly online: Observable<boolean | null>;
+  readonly live: LiveValue<boolean | null>;
 
   newClock(): Promise<TreeClock>;
   snapshot(): Promise<Snapshot>;
@@ -115,11 +117,34 @@ export interface MeldUpdate extends DeleteInsert<Subject[]> {
   '@ticks': number;
 }
 
+export type LiveStatus = LiveValue<MeldStatus> & {
+  becomes: ((match?: Partial<MeldStatus>) => Promise<MeldStatus>);
+};
+
 export interface MeldStore {
   transact(request: Pattern): Observable<Subject>;
-  latest(): Promise<number>;
   follow(after?: number): Observable<MeldUpdate>;
+  readonly status: LiveStatus;
   close(err?: any): Promise<void>;
 }
 
 export type MeldClone = MeldLocal & MeldStore;
+
+export interface MeldStatus {
+  /**
+   * Whether the clone is attached to the domain and able to receive updates.
+   * Strictly, this requires that the clone is attached to remotes of
+   * determinate liveness.
+   */
+  online: boolean;
+  /**
+   * Whether the clone needs to catch-up with the latest updates from the domain. 
+   */
+  outdated: boolean;
+  /**
+   * Current local clock ticks at the time of the status change. This can be
+   * used in a subsequent call to {@link MeldStore.follow}, to ensure no updates
+   * are missed.
+   */
+  ticks: number;
+}
