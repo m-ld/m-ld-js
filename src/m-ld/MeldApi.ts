@@ -39,17 +39,18 @@ export class MeldApi implements MeldStore {
 
   // TODO: post, put
 
-  transact<P extends Pattern>(request: P, implicitContext: Context = this.context):
-    Observable<Subject> & PromiseLike<Subject[]> {
-    const subjects = this.store.transact({
+  transact<P = Pattern, S = Subject>(
+    request: P & Pattern, implicitContext: Context = this.context):
+    Observable<Resource<S>> & PromiseLike<Resource<S>[]> {
+    const subjects: Observable<Resource<S>> = this.store.transact({
       ...request,
       // Apply the given implicit context to the request, explicit context wins
       '@context': { ...implicitContext, ...request['@context'] || {} }
     }).pipe(map((subject: Subject) => {
       // Strip the given implicit context from the request
-      return this.stripImplicitContext(subject, implicitContext);
+      return <Resource<S>>this.stripImplicitContext(subject, implicitContext);
     }));
-    const then: PromiseLike<Subject[]>['then'] = (onfulfilled, onrejected) =>
+    const then: PromiseLike<Resource<S>[]>['then'] = (onfulfilled, onrejected) =>
       subjects.pipe(rxToArray()).toPromise().then(onfulfilled, onrejected);
     return Object.assign(subjects, { then });
   }
