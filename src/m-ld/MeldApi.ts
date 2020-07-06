@@ -6,6 +6,8 @@ import { flatten } from 'jsonld';
 import { toArray } from '../util';
 import { Iri } from 'jsonld/jsonld-spec';
 
+export { MeldUpdate };
+
 export class MeldApi implements MeldStore {
   private readonly context: Context;
 
