@@ -1,7 +1,7 @@
-import { MeldStore, MeldUpdate, DeleteInsert, MeldStatus, LiveStatus } from '.';
+import { MeldStore, MeldUpdate, DeleteInsert, LiveStatus } from '.';
 import { Context, Subject, Describe, Pattern, Update, Value, isValueObject, Reference } from '../dataset/jrql-support';
 import { Observable } from 'rxjs';
-import { map, flatMap, toArray as rxToArray } from 'rxjs/operators';
+import { map, flatMap, toArray as rxToArray, take } from 'rxjs/operators';
 import { flatten } from 'jsonld';
 import { toArray } from '../util';
 import { Iri } from 'jsonld/jsonld-spec';
@@ -21,12 +21,12 @@ export class MeldApi implements MeldStore {
     return this.store.close(err);
   }
 
-  get(path: string): Observable<Subject> & PromiseLike<Subject[]> {
-    return this.transact({ '@describe': path } as Describe);
+  get(path: string): PromiseLike<Subject | undefined> {
+    return this.transact({ '@describe': path } as Describe).pipe(take(1)).toPromise();
   }
 
   delete(path: string): PromiseLike<unknown> {
-    return this.transact({
+    return this.transact<Update>({
       '@delete': [
         { '@id': path },
         // BUG: This is wrong, multiple patterns INTERSECT in BGP (not UNION)
@@ -34,7 +34,7 @@ export class MeldApi implements MeldStore {
         // Requires UNION, see m-ld-core/src/main/java/org/m_ld/MeldApi.java
         { '?': { '@id': path } }
       ]
-    } as Update);
+    });
   }
 
   // TODO: post, put

@@ -2,7 +2,6 @@ import { DeltaMessage, MeldRemotes, LiveValue } from '../m-ld';
 import { Observable, Subject as Source, merge, NEVER, BehaviorSubject } from 'rxjs';
 import { switchAll } from 'rxjs/operators';
 import { delayUntil, Future, tapLast, onErrorNever } from '../util';
-import { Logger } from 'loglevel';
 
 export interface AttachStatus {
   attached: boolean;

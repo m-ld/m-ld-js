@@ -22,14 +22,14 @@ describe('Meld API', () => {
       '@delete': []
     });
     await expect(api.get('fred'))
-      .resolves.toEqual([{ '@id': 'fred', name: 'Fred' }]);
+      .resolves.toEqual({ '@id': 'fred', name: 'Fred' });
   });
 
   test('deletes a subject by path', async () => {
     await api.transact({ '@id': 'fred', name: 'Fred' } as Subject);
     const captureUpdate = api.follow().pipe(first()).toPromise();
     await api.delete('fred');
-    await expect(api.get('fred')).resolves.toEqual([]);
+    await expect(api.get('fred')).resolves.toBeUndefined();
     await expect(captureUpdate).resolves.toEqual({
       '@ticks': 2,
       '@delete': [{ '@id': 'fred', name: 'Fred' }],
@@ -40,13 +40,13 @@ describe('Meld API', () => {
   test('deletes a property by path', async () => {
     await api.transact({ '@id': 'fred', name: 'Fred', wife: { '@id': 'wilma' } } as Subject);
     await api.delete('wilma');
-    await expect(api.get('fred')).resolves.toEqual([{ '@id': 'fred', name: 'Fred' }]);
+    await expect(api.get('fred')).resolves.toEqual({ '@id': 'fred', name: 'Fred' });
   });
 
   test('deletes an object by path', async () => {
     await api.transact({ '@id': 'fred', wife: { '@id': 'wilma' } } as Subject);
     await api.delete('wilma');
-    await expect(api.get('fred')).resolves.toEqual([]);
+    await expect(api.get('fred')).resolves.toBeUndefined();
   });
 
   test('selects where', async () => {
