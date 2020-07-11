@@ -4,6 +4,7 @@ import { concat, Observable, OperatorFunction, Subscription, throwError, AsyncSu
 import { publish, tap } from "rxjs/operators";
 import AsyncLock = require('async-lock');
 import { LogLevelDesc, getLogger, getLoggers } from 'loglevel';
+import * as performance from 'marky';
 
 export function flatten<T>(bumpy: T[][]): T[] {
   return ([] as T[]).concat(...bumpy);
@@ -204,5 +205,30 @@ export function checkWith<T, M extends (this: T, ...args: any[]) => any>(
       else
         return reject(otherwise());
     };
+  }
+}
+
+export class Stopwatch {
+  readonly name: string;
+  lap: Stopwatch;
+  laps: { [name: string]: Stopwatch } = {};
+  entry: PerformanceEntry | undefined;
+
+  constructor(
+    scope: string, name: string) {
+    performance.mark(this.name = `${scope}-${name}`);
+    this.lap = this;
+  }
+
+  next(name: string): Stopwatch {
+    this.lap.stop();
+    this.lap = this.laps[name] = new Stopwatch(this.name, name);
+    return this;
+  }
+
+  stop(): PerformanceEntry {
+    if (this.lap !== this)
+      this.lap.stop();
+    return this.entry = performance.stop(this.name);
   }
 }
