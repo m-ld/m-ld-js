@@ -200,7 +200,8 @@ export class SuSetDataset extends JrqlGraph {
         // Include journaling in final patch
         const allTidsPatch = await this.newTid(delta.tid);
         txc.sw.next('journal');
-        const { patch: journaling, deltaMsg, entry } = await this.journal.journal(delta, time);
+        const { patch: journaling, entry } = await this.journal.journal(delta, time);
+        const deltaMsg = new DeltaMessage(time, delta.json);
         deltaMsg.delivered.then(() => this.markDelivered(entry));
         return {
           patch: this.transactionPatch(time, patch, allTidsPatch, tidPatch, journaling),
@@ -236,7 +237,7 @@ export class SuSetDataset extends JrqlGraph {
           // Include journaling in final patch
           const allTidsPatch = await this.newTid(delta.tid);
           txc.sw.next('journal');
-          const journaling = await this.journal.journal(delta, localTime, msgTime);
+          const { patch: journaling } = await this.journal.journal(delta, localTime, msgTime);
           return {
             patch: this.transactionPatch(localTime, patch, allTidsPatch, tidPatch, journaling)
           };

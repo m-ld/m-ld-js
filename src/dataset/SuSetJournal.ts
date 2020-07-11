@@ -1,7 +1,7 @@
 import { Context, Subject } from './jrql-support';
 import { BASE_CONTEXT, toPrefixedId } from './SuSetGraph';
 import { Iri } from 'jsonld/jsonld-spec';
-import { UUID, DeltaMessage, MeldDelta } from '../m-ld';
+import { UUID, MeldDelta } from '../m-ld';
 import { fromTimeString, toTimeString, JsonDeltaBagBlock } from '../m-ld/MeldJson';
 import { TreeClock } from '../clocks';
 import { PatchQuads, Patch } from '.';
@@ -48,9 +48,8 @@ function safeTime(je: Journal | JournalEntry) {
   return fromTimeString(je.time) as TreeClock; // Safe after init
 }
 
-interface JournalLocalUpdate {
+interface JournalUpdate {
   patch: PatchQuads,
-  deltaMsg: DeltaMessage,
   entry: SuSetJournalEntry
 }
 
@@ -86,13 +85,11 @@ export class SuSetJournalEntry {
         await this.journal.graph.describe1<JournalEntry>(this.data.next));
   }
 
-  async createNext(delta: MeldDelta, localTime: TreeClock, remoteTime?: TreeClock): Promise<{
-    patch: PatchQuads,
-    entry: SuSetJournalEntry
-  }> {
+  async createNext(delta: MeldDelta, localTime: TreeClock, remoteTime?: TreeClock):
+    Promise<JournalUpdate> {
     const block = new JsonDeltaBagBlock(this.hash).next(delta.json);
     const entryId = toPrefixedId('entry', block.id.encode());
-    const linkFromPrev: Partial<JournalEntry> = { '@id': this.id, next: entryId };
+    const linkFromThis: Partial<JournalEntry> = { '@id': this.id, next: entryId };
     const newEntry: JournalEntry = {
       '@id': entryId,
       remote: remoteTime != null,
@@ -103,12 +100,13 @@ export class SuSetJournalEntry {
       delta: JSON.stringify(delta.json)
     };
     return {
-      patch: await this.journal.graph.insert([linkFromPrev, newEntry]),
+      patch: await this.journal.graph.insert([linkFromThis, newEntry]),
       entry: new SuSetJournalEntry(this.journal, newEntry)
     };
   }
 
   async markDelivered() {
+    // It's actually the journal that keeps track of the last delivered entry
     return (await this.journal.state()).markDelivered(this);
   }
 }
@@ -224,16 +222,8 @@ export class SuSetJournal {
     return new SuSetJournalState(this, await this.graph.describe1<Journal>('qs:journal'));
   }
 
-  async journal(delta: MeldDelta, localTime: TreeClock): Promise<JournalLocalUpdate>;
-  async journal(delta: MeldDelta, localTime: TreeClock, remoteTime: TreeClock): Promise<PatchQuads>;
-  async journal(delta: MeldDelta, localTime: TreeClock, remoteTime?: TreeClock): Promise<JournalLocalUpdate | PatchQuads> {
+  async journal(delta: MeldDelta, localTime: TreeClock, remoteTime?: TreeClock): Promise<JournalUpdate> {
     const journal = await this.state();
-    const nextEntry = await journal.nextEntry(delta, localTime, remoteTime);
-    if (remoteTime == null) { // This is a local transaction
-      // Create a DeltaMessage to be marked delivered later
-      return { ...nextEntry, deltaMsg: new DeltaMessage(localTime, delta.json) };
-    } else { // This is a remote transaction
-      return nextEntry.patch;
-    }
+    return journal.nextEntry(delta, localTime, remoteTime);
   };
 }
