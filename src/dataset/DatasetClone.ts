@@ -10,8 +10,7 @@ import { TreeClockMessageService } from '../messages';
 import { Dataset } from '.';
 import {
   publishReplay, refCount, filter, ignoreElements, takeUntil, tap,
-  isEmpty, finalize, flatMap, toArray, first, map, debounceTime, distinctUntilChanged, scan, takeWhile
-} from 'rxjs/operators';
+  isEmpty, finalize, flatMap, toArray, first, map, debounceTime, distinctUntilChanged, scan} from 'rxjs/operators';
 import { delayUntil, Future, tapComplete, tapCount, SharableLock } from '../util';
 import { levels } from 'loglevel';
 import { MeldError } from '../m-ld/MeldError';

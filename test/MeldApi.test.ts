@@ -8,7 +8,7 @@ describe('Meld API', () => {
   let api: MeldApi;
 
   beforeEach(async () => {
-    let clone = new DatasetClone(memStore(), mockRemotes(), testConfig());
+    let clone = new DatasetClone(await memStore(), mockRemotes(), testConfig());
     await clone.initialise();
     api = new MeldApi('test.m-ld.org', null, clone);
   });

@@ -65,5 +65,6 @@ function errorHandler(message) {
 }
 
 function sendError(requestId, err) {
+  LOG.error(err);
   return send(requestId, 'error', { err: `${err}` });
 }

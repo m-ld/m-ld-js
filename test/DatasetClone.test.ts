@@ -14,7 +14,7 @@ import { AbstractLevelDOWN } from 'abstract-leveldown';
 describe('Dataset clone', () => {
   describe('as genesis', () => {
     async function genesis(remotes: MeldRemotes, config?: Partial<MeldConfig>): Promise<DatasetClone> {
-      let clone = new DatasetClone(memStore(), remotes, testConfig(config));
+      let clone = new DatasetClone(await memStore(), remotes, testConfig(config));
       await clone.initialise();
       return clone;
     }
@@ -53,7 +53,7 @@ describe('Dataset clone', () => {
     let silo: DatasetClone;
 
     beforeEach(async () => {
-      silo = new DatasetClone(memStore(), mockRemotes(), testConfig());
+      silo = new DatasetClone(await memStore(), mockRemotes(), testConfig());
       await silo.initialise();
     });
 
@@ -105,7 +105,7 @@ describe('Dataset clone', () => {
 
     beforeEach(async () => {
       // Ensure that remote updates are async
-      clone = new DatasetClone(memStore(),
+      clone = new DatasetClone(await memStore(),
         mockRemotes(remoteUpdates.pipe(observeOn(asapScheduler))), testConfig());
       await clone.initialise();
       await comesAlive(clone);
@@ -131,11 +131,13 @@ describe('Dataset clone', () => {
 
   describe('as non-genesis clone', () => {
     let ldb: AbstractLevelDOWN;
+    let config: MeldConfig;
 
     beforeEach(async () => {
       ldb = new MemDown();
+      config = testConfig();
       // Start a temporary genesis clone to initialise the store
-      let clone = new DatasetClone(memStore(ldb), mockRemotes(), testConfig());
+      let clone = new DatasetClone(await memStore(ldb), mockRemotes(), config);
       await clone.initialise();
       await clone.newClock(); // Forks the clock so no longer genesis
       await clone.close();
@@ -145,7 +147,7 @@ describe('Dataset clone', () => {
       // Re-start on the same data, with a rev-up that never completes
       const remotes = mockRemotes();
       remotes.revupFrom = async () => NEVER;
-      const clone = new DatasetClone(memStore(ldb), remotes, testConfig());
+      const clone = new DatasetClone(await memStore(ldb), remotes, testConfig());
 
       // Check that we are never not outdated
       const everNotOutdated = clone.status.becomes({ outdated: false });
@@ -160,7 +162,7 @@ describe('Dataset clone', () => {
       // Re-start on the same data, with a rev-up that never completes
       const remotes = mockRemotes();
       remotes.revupFrom = async () => EMPTY;
-      const clone = new DatasetClone(memStore(ldb), remotes, testConfig());
+      const clone = new DatasetClone(await memStore(ldb), remotes, testConfig());
 
       // Check that we do transition through an outdated state
       const wasOutdated = clone.status.becomes({ outdated: true });

@@ -13,6 +13,7 @@
     "build-quick": "tsc",
     "build": "npm run clean && jest --silent && tsc && npm run doc",
     "dev": "jest --watch --silent",
+    "dev+log": "jest --watch",
     "compliance": "node compliance/test.js",
     "prepublishOnly": "npm run build && npm version $VERSION && git push",
     "doc": "npm pack && mv m-ld*.tgz doc/media/m-ld.tgz && dts-bundle-generator -o tmp.d.ts dist/index.d.ts --no-check && typedoc --options typedoc.js tmp.d.ts && rm tmp.d.ts",
@@ -29,7 +30,7 @@
   },
   "homepage": "https://github.com/m-ld/m-ld-js#readme",
   "devDependencies": {
-    "@m-ld/m-ld-spec": "^0.3.1",
+    "@m-ld/m-ld-spec": "^0.3.2",
     "@m-ld/typedoc-theme": "^0.1.0",
     "@types/jest": "^26.0.0",
     "@types/memdown": "^3.0.0",

@@ -5,7 +5,7 @@ import AsyncLock = require('async-lock');
 import { AbstractLevelDOWN, AbstractOpenOptions } from 'abstract-leveldown';
 import { Observable } from 'rxjs';
 import { generate as uuid } from 'short-uuid';
-import { check } from '../util';
+import { check, Stopwatch } from '../util';
 
 /**
  * Atomically-applied patch to a quad-store.
@@ -48,11 +48,30 @@ export interface Dataset {
    * Ensures that write transactions are executed serially against the store.
    * @param prepare prepares a write operation to be performed
    */
-  transact(prepare: () => Promise<Patch | undefined | void>): Promise<void>;
-  transact<T>(prepare: () => Promise<[Patch | undefined, T]>): Promise<T>;
+  transact(txn: TxnOptions<TxnResult>): Promise<void>;
+  transact<T>(txn: TxnOptions<TxnValueResult<T>>): Promise<T>;
 
   close(): Promise<void>;
   readonly closed: boolean;
+}
+
+export interface TxnResult {
+  patch?: Patch,
+  after?(): void | Promise<void>;
+  value?: unknown;
+}
+
+export interface TxnValueResult<T> extends TxnResult {
+  value: T
+}
+
+export interface TxnOptions<T extends TxnResult> extends Partial<TxnContext> {
+  prepare(txc: TxnContext): Promise<T>;
+}
+
+export interface TxnContext {
+  id: string,
+  sw: Stopwatch
 }
 
 const notClosed = check((d: Dataset) => !d.closed, () => new Error('Dataset closed'));
@@ -72,7 +91,9 @@ export class QuadStoreDataset implements Dataset {
   private readonly lock = new AsyncLock;
   private isClosed: boolean = false;
 
-  constructor(private readonly leveldown: AbstractLevelDOWN, opts?: AbstractOpenOptions) {
+  constructor(
+    private readonly leveldown: AbstractLevelDOWN,
+    opts?: AbstractOpenOptions) {
     this.store = new RdfStore(leveldown, opts);
     // Internal of level-js and leveldown
     this.location = (<any>leveldown).location ?? uuid();
@@ -83,19 +104,25 @@ export class QuadStoreDataset implements Dataset {
   }
 
   @notClosed.async
-  transact<T>(prepare: () => Promise<Patch | [Patch | undefined, T] | undefined | void>): Promise<T | void> {
+  transact<T, O extends TxnResult>(txn: TxnOptions<O>): Promise<T> {
+    const id = txn.id ?? uuid();
+    const sw = txn.sw ?? new Stopwatch('txn', id);
     // The transaction lock ensures that read operations that are part of a
     // transaction (e.g. evaluating the @where clause) are not affected by
     // concurrent transactions (fully serialiseable consistency). This is
     // particularly important for SU-Set operation.
     // TODO: This could be improved with snapshots
     // https://github.com/Level/leveldown/issues/486
+    sw.next('lock-wait');
     return this.lock.acquire('txn', async () => {
-      const prep = await prepare();
-      const [patch, rtn] = Array.isArray(prep) ? prep : [prep, undefined];
-      if (patch)
-        await this.store.patch(patch.oldQuads, patch.newQuads);
-      return rtn;
+      sw.next('prepare');
+      const result = await txn.prepare({ id, sw: sw.lap });
+      sw.next('apply');
+      if (result.patch != null)
+        await this.store.patch(result.patch.oldQuads, result.patch.newQuads);
+      sw.stop();
+      await result.after?.();
+      return <T>result.value;
     });
   }
 
