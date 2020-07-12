@@ -5,6 +5,7 @@ import { NamedNode } from 'rdf-js';
 export const SUSET_CONTEXT: Context = {
   qs: 'http://qs.m-ld.org/',
   tid: 'qs:#tid', // Property of journal entry AND triple hash
+  body: 'qs:#body', // Journal and journal entry body
   thash: 'qs:thash/', // Namespace for triple hashes
   tail: { '@id': 'qs:#tail', '@type': '@id' }, // Property of the journal
   lastDelivered: { '@id': 'qs:#lastDelivered', '@type': '@id' }, // Property of the journal

@@ -1,37 +1,42 @@
 import { Subject } from './jrql-support';
 import { toPrefixedId } from './SuSetGraph';
 import { Iri } from 'jsonld/jsonld-spec';
-import { UUID, MeldDelta } from '../m-ld';
-import { fromTimeString, toTimeString, JsonDeltaBagBlock } from '../m-ld/MeldJson';
+import { UUID, MeldDelta, JsonDelta } from '../m-ld';
+import { JsonDeltaBagBlock } from '../m-ld/MeldJson';
 import { TreeClock } from '../clocks';
 import { PatchQuads, Patch } from '.';
 import { JrqlGraph } from './JrqlGraph';
 import { isEmpty } from 'rxjs/operators';
 import { Hash } from '../hash';
 
-interface Journal extends Subject {
+interface Journal {
   '@id': 'qs:journal', // Singleton object
+  body: string; // JSON-encoded body
+}
+
+interface JournalBody {
   tail: JournalEntry['@id'];
   lastDelivered: JournalEntry['@id'];
-  time: string; // JSON-encoded TreeClock (the local clock)
+  time: any; // JSON-encoded TreeClock (the local clock)
 }
 
 /**
- * A journal entry includes a transaction Id
+ * Journal entries are queryable by ticks. Otherwise they bundle properties into
+ * a body for storage, to minimise triple count.
  */
-interface JournalEntry extends Subject {
+interface JournalEntry {
   '@id': Iri; // entry:<encoded block hash>
-  tid: UUID; // Transaction ID
-  hash: string; // Encoded Hash
-  delta: string; // JSON-encoded JsonDelta
-  remote: boolean;
-  time: string; // JSON-encoded TreeClock (the remote clock)
+  body: string; // JSON-encoded body
   ticks: number; // Local clock ticks on delivery
-  next?: JournalEntry['@id'];
 }
 
-function safeTime(je: Journal | JournalEntry) {
-  return fromTimeString(je.time) as TreeClock; // Safe after init
+interface JournalEntryBody {
+  tid: UUID; // Transaction ID
+  hash: string; // Encoded Hash
+  delta: JsonDelta; // JSON-encoded JsonDelta
+  remote: boolean;
+  time: any; // JSON-encoded TreeClock (the remote clock)
+  next?: JournalEntry['@id'];
 }
 
 interface JournalUpdate {
@@ -40,66 +45,79 @@ interface JournalUpdate {
 }
 
 export class SuSetJournalEntry {
+  private readonly body: JournalEntryBody;
+
   constructor(
     private readonly journal: SuSetJournal,
     private readonly data: JournalEntry) {
+    this.body = JSON.parse(data.body);
   }
 
-  get id() {
+  get id(): Iri {
     return this.data['@id'];
   }
 
-  get hash() {
-    return Hash.decode(this.data.hash);
+  get hash(): Hash {
+    return Hash.decode(this.body.hash);
   }
 
-  get remote() {
-    return this.data.remote;
+  get remote(): boolean {
+    return this.body.remote;
   }
 
-  get time() {
-    return safeTime(this.data);
+  get time(): TreeClock {
+    return TreeClock.fromJson(this.body.time) as TreeClock;
   }
 
-  get delta() {
-    return JSON.parse(this.data.delta);
+  get delta(): JsonDelta {
+    return this.body.delta;
   }
 
   async next(): Promise<SuSetJournalEntry | undefined> {
-    if (this.data.next)
+    if (this.body.next)
       return new SuSetJournalEntry(this.journal,
-        await this.journal.graph.describe1<JournalEntry>(this.data.next));
+        await this.journal.graph.describe1<JournalEntry>(this.body.next));
   }
 
-  static headEntry(startingHash: Hash, localTime?: TreeClock, startingTime?: TreeClock) {
+  static headEntry(startingHash: Hash, localTime?: TreeClock, startingTime?: TreeClock): Subject {
     const encodedHash = startingHash.encode();
     const headEntryId = toPrefixedId('entry', encodedHash);
+    const body: Partial<JournalEntryBody> = { hash: encodedHash };
+    if (startingTime != null)
+      body.time = startingTime.toJson();
     const entry: Partial<JournalEntry> = {
       '@id': headEntryId,
-      hash: encodedHash,
+      body: JSON.stringify(body),
       ticks: localTime?.ticks
     };
-    if (startingTime != null)
-      entry.time = toTimeString(startingTime);
     return entry;
   }
 
-  async createNext(delta: MeldDelta, localTime: TreeClock, remoteTime?: TreeClock):
-    Promise<JournalUpdate> {
+  async setHeadTime(localTime: TreeClock): Promise<PatchQuads> {
+    const patchBody = await this.updateBody({ time: localTime.toJson() });
+    const patchTicks = await this.journal.graph.insert({ '@id': this.id, ticks: localTime.ticks });
+    return patchBody.concat(patchTicks);
+  }
+
+  async createNext(
+    delta: MeldDelta, localTime: TreeClock, remoteTime?: TreeClock): Promise<JournalUpdate> {
     const block = new JsonDeltaBagBlock(this.hash).next(delta.json);
     const entryId = toPrefixedId('entry', block.id.encode());
-    const linkFromThis: Partial<JournalEntry> = { '@id': this.id, next: entryId };
-    const newEntry: JournalEntry = {
-      '@id': entryId,
+    const newBody: JournalEntryBody = {
       remote: remoteTime != null,
       hash: block.id.encode(),
       tid: delta.tid,
-      time: toTimeString(remoteTime ?? localTime),
-      ticks: localTime.ticks,
-      delta: JSON.stringify(delta.json)
+      time: (remoteTime ?? localTime).toJson(),
+      delta: delta.json
     };
+    const newEntry: JournalEntry & Subject = {
+      '@id': entryId,
+      body: JSON.stringify(newBody),
+      ticks: localTime.ticks
+    };
+    const patch = await this.updateBody({ next: entryId });
     return {
-      patch: await this.journal.graph.insert([linkFromThis, newEntry]),
+      patch: patch.concat(await this.journal.graph.insert(newEntry)),
       entry: new SuSetJournalEntry(this.journal, newEntry)
     };
   }
@@ -108,37 +126,44 @@ export class SuSetJournalEntry {
     // It's actually the journal that keeps track of the last delivered entry
     return (await this.journal.state()).markDelivered(this);
   }
+
+  private updateBody(update: Partial<JournalEntryBody>): Promise<PatchQuads> {
+    return this.journal.graph.write({
+      '@delete': { '@id': this.id, body: this.data.body },
+      '@insert': { '@id': this.id, body: JSON.stringify({ ...this.body, ...update }) }
+    });
+  }
 }
 
 export class SuSetJournalState {
+  private readonly body: JournalBody;
+
   constructor(
     private readonly journal: SuSetJournal,
     private readonly data: Journal) {
+    this.body = JSON.parse(data.body);
   }
 
   get maybeTime() {
-    return fromTimeString(this.data.time);
+    return this.body.time != null ? TreeClock.fromJson(this.body.time) : null;
   }
 
   get time() {
-    return safeTime(this.data);
+    return TreeClock.fromJson(this.body.time) as TreeClock;
   }
 
   async tail(): Promise<SuSetJournalEntry> {
-    if (this.data.tail == null)
+    if (this.body.tail == null)
       throw new Error('Journal has no tail yet');
-    return this.entry(this.data.tail);
+    return this.entry(this.body.tail);
   }
 
   async lastDelivered(): Promise<SuSetJournalEntry> {
-    return this.entry(this.data.lastDelivered);
+    return this.entry(this.body.lastDelivered);
   }
 
   async markDelivered(entry: SuSetJournalEntry) {
-    return this.journal.graph.write({
-      '@delete': { '@id': 'qs:journal', lastDelivered: this.data.lastDelivered } as Partial<Journal>,
-      '@insert': { '@id': 'qs:journal', lastDelivered: entry.id } as Partial<Journal>
-    });
+    return this.updateBody({ lastDelivered: entry.id });
   }
 
   async findEntry(ticks: number) {
@@ -147,43 +172,32 @@ export class SuSetJournalState {
   }
 
   async setLocalTime(localTime: TreeClock, newClone?: boolean): Promise<PatchQuads> {
-    const encodedTime = toTimeString(localTime);
-    const update = {
-      '@delete': { '@id': 'qs:journal', time: this.data.time } as Partial<Journal>,
-      '@insert': [{ '@id': 'qs:journal', time: encodedTime }] as Subject[]
-    };
+    const patch = await this.updateBody({ time: localTime.toJson() });
     if (newClone) {
-      // For a new clone, the journal's dummy tail does not already have a
-      // timestamp
-      const tailPatch: Partial<JournalEntry> = {
-        '@id': this.data.tail,
-        time: encodedTime,
-        ticks: localTime.ticks
-      };
-      update['@insert'].push(tailPatch);
+      // For a new clone, the journal's dummy tail does not have a timestamp
+      const tail = await this.tail();
+      return patch.concat(await tail.setHeadTime(localTime));
     }
-    return this.journal.graph.write(update);
+    return patch;
   }
 
-  static initState(headEntry: Partial<JournalEntry>, localTime?: TreeClock) {
-    const journal: Partial<Journal> = {
-      '@id': 'qs:journal',
+  static initState(headEntry: Partial<JournalEntry>, localTime?: TreeClock): Subject {
+    const body: Partial<JournalBody> = {
       lastDelivered: headEntry['@id'],
       tail: headEntry['@id']
     };
     if (localTime != null)
-      journal.time = toTimeString(localTime);
-    return journal;
+      body.time = localTime.toJson();
+    return { '@id': 'qs:journal', body: JSON.stringify(body) };
   }
 
-  async nextEntry(delta: MeldDelta, localTime: TreeClock, remoteTime?: TreeClock) {
+  async nextEntry(delta: MeldDelta, localTime: TreeClock, remoteTime?: TreeClock): Promise<JournalUpdate> {
     const oldTail = await this.tail();
     const { patch, entry } = await oldTail.createNext(delta, localTime, remoteTime);
     return {
-      patch: patch.concat(await this.journal.graph.write({
-        '@delete': { '@id': 'qs:journal', tail: oldTail.id } as Partial<Journal>,
-        '@insert': { '@id': 'qs:journal', tail: entry.id } as Partial<Journal>
-      })).concat(await this.setLocalTime(localTime)),
+      patch: patch.concat(await this.updateBody({
+        tail: entry.id, time: localTime.toJson()
+      })),
       entry
     };
   }
@@ -191,6 +205,13 @@ export class SuSetJournalState {
   private async entry(id: JournalEntry['@id']) {
     return new SuSetJournalEntry(this.journal,
       await this.journal.graph.describe1<JournalEntry>(id));
+  }
+
+  private updateBody(update: Partial<JournalBody>): Promise<PatchQuads> {
+    return this.journal.graph.write({
+      '@delete': { '@id': 'qs:journal', body: this.data.body },
+      '@insert': { '@id': 'qs:journal', body: JSON.stringify({ ...this.body, ...update }) }
+    });
   }
 }
 
@@ -218,7 +239,7 @@ export class SuSetJournal {
     return new SuSetJournalState(this, await this.graph.describe1<Journal>('qs:journal'));
   }
 
-  async journal(delta: MeldDelta, localTime: TreeClock, remoteTime?: TreeClock): Promise<JournalUpdate> {
+  async nextEntry(delta: MeldDelta, localTime: TreeClock, remoteTime?: TreeClock): Promise<JournalUpdate> {
     const journal = await this.state();
     return journal.nextEntry(delta, localTime, remoteTime);
   };

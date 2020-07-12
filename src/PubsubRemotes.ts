@@ -366,18 +366,18 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
   private produce<T>(data: Observable<T>, subAddress: string,
     datumToJson: (datum: T) => Promise<object> | T, type: string) {
     const notifier = this.notifier(subAddress);
-    const notify = async (notification: JsonNotification) => {
+    const notify = (notification: JsonNotification) => {
       if (notification.error)
         this.log.warn('Notifying error on', subAddress, notification.error);
       else if (notification.complete)
         this.log.debug('Completed production of', type);
-      await notifier.publish(notification)
+      notifier.publish(notification)
         // If notifications fail due to MQTT death, the recipient will find out
         // from the broker so here we make best efforts to notify an error and
         // then give up.
         .catch((error: any) => notifier.publish({ error: toJson(error) }))
         .catch(this.warnError);
-    }
+    };
     return data.pipe(
       // concatMap guarantees delivery ordering despite toJson promise ordering
       concatMap(async datum => await datumToJson(datum)),

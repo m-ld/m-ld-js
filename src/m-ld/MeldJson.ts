@@ -128,14 +128,3 @@ export async function toMeldJson(triples: Triple[]): Promise<any> {
 export async function fromMeldJson(json: any): Promise<Triple[]> {
   return await toRDF({ '@graph': json, '@context': DEFAULT_CONTEXT }) as Triple[];
 }
-
-export function toTimeString(time: TreeClock): string;
-export function toTimeString(time?: TreeClock): string | null;
-export function toTimeString(time: TreeClock | undefined): string | null {
-  return time ? JSON.stringify(time.toJson()) : null;
-}
-
-export function fromTimeString(timeString: string): TreeClock | null {
-  return timeString ? TreeClock.fromJson(JSON.parse(timeString)) : null;
-}
-

@@ -161,9 +161,9 @@ export class SuSetDataset extends JrqlGraph {
         const ticks = time.getTicks(journal.time);
         const found = ticks != null ? await journal.findEntry(ticks) : '';
         if (found) {
-          // Don't emit an entry if it's all less than the requested time
           return {
             value: new Observable(subs =>
+              // Don't emit an entry if it's all less than the requested time
               this.emitJournalFrom(found, subs, entry => time.anyLt(entry.time, 'includeIds')))
           };
         } else {
@@ -194,7 +194,7 @@ export class SuSetDataset extends JrqlGraph {
         // Include journaling in final patch
         const allTidsPatch = await this.newTid(delta.tid);
         txc.sw.next('journal');
-        const { patch: journaling, entry } = await this.journal.journal(delta, time);
+        const { patch: journaling, entry } = await this.journal.nextEntry(delta, time);
         const deltaMsg = new DeltaMessage(time, delta.json);
         deltaMsg.delivered.then(() => this.markDelivered(entry));
         return {
@@ -231,7 +231,7 @@ export class SuSetDataset extends JrqlGraph {
           // Include journaling in final patch
           const allTidsPatch = await this.newTid(delta.tid);
           txc.sw.next('journal');
-          const { patch: journaling } = await this.journal.journal(delta, localTime, msgTime);
+          const { patch: journaling } = await this.journal.nextEntry(delta, localTime, msgTime);
           return {
             patch: this.transactionPatch(localTime, patch, allTidsPatch, tidPatch, journaling)
           };
