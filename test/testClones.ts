@@ -1,7 +1,6 @@
-import { DatasetClone, datasetContext } from '../src/dataset/DatasetClone';
 import { MeldRemotes, DeltaMessage, MeldLocal } from '../src/m-ld';
 import { mock, MockProxy } from 'jest-mock-extended';
-import { Observable, of, NEVER, BehaviorSubject, from, asapScheduler } from 'rxjs';
+import { Observable, NEVER, BehaviorSubject, from, asapScheduler } from 'rxjs';
 import { Dataset, QuadStoreDataset } from '../src/dataset';
 import MemDown from 'memdown';
 import { TreeClock } from '../src/clocks';
@@ -36,9 +35,8 @@ function hotLive(lives: Array<boolean | null>) {
 }
 
 export async function memStore(
-  config: MeldConfig, leveldown: AbstractLevelDOWN = new MemDown): Promise<Dataset> {
-  const context = await datasetContext(config);
-  return new QuadStoreDataset(leveldown, context);
+  leveldown: AbstractLevelDOWN = new MemDown): Promise<Dataset> {
+  return new QuadStoreDataset(leveldown);
 }
 
 export function mockLocal(

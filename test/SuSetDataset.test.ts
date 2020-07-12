@@ -29,7 +29,7 @@ describe('SU-Set Dataset', () => {
   }
 
   beforeEach(async () => {
-    dataset = await memStore(testConfig());
+    dataset = await memStore();
     ssd = new SuSetDataset('test', dataset);
   });
 

@@ -10,28 +10,13 @@ import { TreeClockMessageService } from '../messages';
 import { Dataset } from '.';
 import {
   publishReplay, refCount, filter, ignoreElements, takeUntil, tap,
-  isEmpty, finalize, flatMap, toArray, first, map, debounceTime, distinctUntilChanged, scan, takeWhile
-} from 'rxjs/operators';
+  isEmpty, finalize, flatMap, toArray, first, map, debounceTime, distinctUntilChanged, scan} from 'rxjs/operators';
 import { delayUntil, Future, tapComplete, tapCount, SharableLock } from '../util';
 import { levels } from 'loglevel';
 import { MeldError } from '../m-ld/MeldError';
 import { AbstractMeld, comesAlive } from '../AbstractMeld';
 import { MeldConfig } from '..';
 import { RemoteUpdates } from './RemoteUpdates';
-import { SUSET_CONTEXT } from './SuSetGraph';
-import { ContextParser } from 'jsonld-context-parser';
-
-export async function datasetContext(config: MeldConfig) {
-  const contextParser = new ContextParser();
-  const base = `http://${config['@domain']}/`;
-  const context = await contextParser.parse({
-    ...SUSET_CONTEXT,
-    '@base': base,
-    '@vocab': new URL('/#', base).href,
-    xsd: 'http://www.w3.org/2001/XMLSchema#'
-  });
-  return context;
-}
 
 export class DatasetClone extends AbstractMeld implements MeldClone {
   private readonly dataset: SuSetDataset;

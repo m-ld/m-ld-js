@@ -6,7 +6,6 @@ import { AbstractLevelDOWN, AbstractOpenOptions } from 'abstract-leveldown';
 import { Observable } from 'rxjs';
 import { generate as uuid } from 'short-uuid';
 import { check, Stopwatch } from '../util';
-import { JsonLdContextNormalized } from 'jsonld-context-parser';
 
 /**
  * Atomically-applied patch to a quad-store.
@@ -94,9 +93,8 @@ export class QuadStoreDataset implements Dataset {
 
   constructor(
     private readonly leveldown: AbstractLevelDOWN,
-    context: JsonLdContextNormalized,
     opts?: AbstractOpenOptions) {
-    this.store = new RdfStore(leveldown, { ...opts, prefixes: context });
+    this.store = new RdfStore(leveldown, opts);
     // Internal of level-js and leveldown
     this.location = (<any>leveldown).location ?? uuid();
   }
