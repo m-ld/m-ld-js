@@ -74,6 +74,7 @@
     "detect-node": "^2.0.4",
     "json-rql": "^0.4.0-1",
     "jsonld": "^3.1.1",
+    "jsonld-context-parser": "^2.0.2",
     "local-storage": "^2.0.0",
     "loglevel": "^1.6.8",
     "marky": "^1.2.1",

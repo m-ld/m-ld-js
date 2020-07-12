@@ -1,5 +1,5 @@
-import { Context, Subject } from './jrql-support';
-import { BASE_CONTEXT, toPrefixedId } from './SuSetGraph';
+import { Subject } from './jrql-support';
+import { toPrefixedId } from './SuSetGraph';
 import { Iri } from 'jsonld/jsonld-spec';
 import { UUID, MeldDelta } from '../m-ld';
 import { fromTimeString, toTimeString, JsonDeltaBagBlock } from '../m-ld/MeldJson';
@@ -8,20 +8,6 @@ import { PatchQuads, Patch } from '.';
 import { JrqlGraph } from './JrqlGraph';
 import { isEmpty } from 'rxjs/operators';
 import { Hash } from '../hash';
-
-export const JOURNAL_CONTEXT: Context = {
-  ...BASE_CONTEXT,
-  tid: 'qs:#tid', // Property of journal entry
-  tail: { '@id': 'qs:#tail', '@type': '@id' }, // Property of the journal
-  lastDelivered: { '@id': 'qs:#lastDelivered', '@type': '@id' }, // Property of the journal
-  entry: 'qs:journal/entry/', // Namespace for journal entries
-  hash: 'qs:#hash', // Property of a journal entry
-  delta: 'qs:#delta', // Property of a journal entry
-  remote: 'qs:#remote', // Property of a journal entry
-  time: 'qs:#time', // Property of journal AND a journal entry
-  ticks: 'qs:#ticks', // Property of a journal entry
-  next: { '@id': 'qs:#next', '@type': '@id' } // Property of a journal entry
-};
 
 interface Journal extends Subject {
   '@id': 'qs:journal', // Singleton object
@@ -83,6 +69,19 @@ export class SuSetJournalEntry {
     if (this.data.next)
       return new SuSetJournalEntry(this.journal,
         await this.journal.graph.describe1<JournalEntry>(this.data.next));
+  }
+
+  static headEntry(startingHash: Hash, localTime?: TreeClock, startingTime?: TreeClock) {
+    const encodedHash = startingHash.encode();
+    const headEntryId = toPrefixedId('entry', encodedHash);
+    const entry: Partial<JournalEntry> = {
+      '@id': headEntryId,
+      hash: encodedHash,
+      ticks: localTime?.ticks
+    };
+    if (startingTime != null)
+      entry.time = toTimeString(startingTime);
+    return entry;
   }
 
   async createNext(delta: MeldDelta, localTime: TreeClock, remoteTime?: TreeClock):
@@ -166,6 +165,17 @@ export class SuSetJournalState {
     return this.journal.graph.write(update);
   }
 
+  static initState(headEntry: Partial<JournalEntry>, localTime?: TreeClock) {
+    const journal: Partial<Journal> = {
+      '@id': 'qs:journal',
+      lastDelivered: headEntry['@id'],
+      tail: headEntry['@id']
+    };
+    if (localTime != null)
+      journal.time = toTimeString(localTime);
+    return journal;
+  }
+
   async nextEntry(delta: MeldDelta, localTime: TreeClock, remoteTime?: TreeClock) {
     const oldTail = await this.tail();
     const { patch, entry } = await oldTail.createNext(delta, localTime, remoteTime);
@@ -197,22 +207,8 @@ export class SuSetJournal {
 
   async reset(startingHash: Hash,
     startingTime?: TreeClock, localTime?: TreeClock): Promise<Patch> {
-    const encodedHash = startingHash.encode();
-    const headEntryId = toPrefixedId('entry', encodedHash);
-    const journal: Partial<Journal> = {
-      '@id': 'qs:journal',
-      lastDelivered: headEntryId,
-      tail: headEntryId,
-    };
-    if (localTime != null)
-      journal.time = toTimeString(localTime);
-    const entry: Partial<JournalEntry> = {
-      '@id': headEntryId,
-      hash: encodedHash,
-      ticks: localTime?.ticks
-    };
-    if (startingTime != null)
-      entry.time = toTimeString(startingTime);
+    const entry = SuSetJournalEntry.headEntry(startingHash, localTime, startingTime);
+    const journal = SuSetJournalState.initState(entry, localTime);
     const insert = await this.graph.insert([journal, entry]);
     // Delete matches everything in all graphs
     return { oldQuads: {}, newQuads: insert.newQuads };

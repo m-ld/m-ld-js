@@ -1,5 +1,5 @@
 import { SuSetDataset } from '../src/dataset/SuSetDataset';
-import { memStore } from './testClones';
+import { memStore, testConfig } from './testClones';
 import { TreeClock } from '../src/clocks';
 import { Hash } from '../src/hash';
 import { first, toArray, isEmpty } from 'rxjs/operators';
@@ -28,8 +28,8 @@ describe('SU-Set Dataset', () => {
     return ssd.updates.pipe(first()).toPromise();
   }
 
-  beforeEach(() => {
-    dataset = memStore();
+  beforeEach(async () => {
+    dataset = await memStore(testConfig());
     ssd = new SuSetDataset('test', dataset);
   });
 

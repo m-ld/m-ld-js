@@ -2,7 +2,7 @@ import { JsonDelta, Snapshot, UUID, MeldUpdate, DeltaMessage, Triple } from '../
 import { Quad } from 'rdf-js';
 import { TreeClock } from '../clocks';
 import { Hash } from '../hash';
-import { Context, Subject } from './jrql-support';
+import { Subject } from './jrql-support';
 import { Dataset, PatchQuads, Patch } from '.';
 import { flatten as flatJsonLd } from 'jsonld';
 import { Iri } from 'jsonld/jsonld-spec';
@@ -15,14 +15,8 @@ import { generate as uuid } from 'short-uuid';
 import { LogLevelDesc, Logger } from 'loglevel';
 import { MeldError } from '../m-ld/MeldError';
 import { LocalLock } from '../local';
-import { BASE_CONTEXT, qsName, toPrefixedId } from './SuSetGraph';
-import { SuSetJournal, JOURNAL_CONTEXT, SuSetJournalEntry } from './SuSetJournal';
-
-const TIDS_CONTEXT: Context = {
-  ...BASE_CONTEXT,
-  tid: 'qs:#tid', // Property of triple hash
-  hash: 'qs:hash/' // Namespace for triple hashes
-};
+import { SUSET_CONTEXT, qsName, toPrefixedId } from './SuSetGraph';
+import { SuSetJournal, SuSetJournalEntry } from './SuSetJournal';
 
 interface HashTid extends Subject {
   '@id': Iri; // hash:<hashed triple id>
@@ -56,9 +50,9 @@ export class SuSetDataset extends JrqlGraph {
     super(dataset.graph());
     // Named graph for control quads e.g. Journal (note graph name is legacy)
     this.journal = new SuSetJournal(new JrqlGraph(
-      dataset.graph(qsName('control')), JOURNAL_CONTEXT));
+      dataset.graph(qsName('control')), SUSET_CONTEXT));
     this.tidsGraph = new JrqlGraph(
-      dataset.graph(qsName('tids')), TIDS_CONTEXT);
+      dataset.graph(qsName('tids')), SUSET_CONTEXT);
     // Update notifications are strictly ordered but don't hold up transactions
     this.updates = this.updateSource.pipe(observeOn(asapScheduler));
     this.datasetLock = new LocalLock(id, dataset.location);
@@ -405,5 +399,5 @@ export class SuSetDataset extends JrqlGraph {
 }
 
 function tripleId(triple: Triple): string {
-  return toPrefixedId('hash', hashTriple(triple).encode());
+  return toPrefixedId('thash', hashTriple(triple).encode());
 }

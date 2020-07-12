@@ -1,5 +1,5 @@
 import { QuadStoreDataset } from './dataset';
-import { DatasetClone } from './dataset/DatasetClone';
+import { DatasetClone, datasetContext } from './dataset/DatasetClone';
 import { AbstractLevelDOWN, AbstractOpenOptions } from 'abstract-leveldown';
 import { MeldApi } from './m-ld/MeldApi';
 import { Context } from './dataset/jrql-support';
@@ -85,7 +85,8 @@ export async function clone(
   ldb: AbstractLevelDOWN,
   remotes: dist.mqtt.MqttRemotes | dist.ably.AblyRemotes,
   config: MeldConfig): Promise<MeldApi> {
-  const dataset = new QuadStoreDataset(ldb, config.ldbOpts);
+  const context = await datasetContext(config);
+  const dataset = new QuadStoreDataset(ldb, context, config.ldbOpts);
   if (typeof remotes == 'function')
     remotes = new remotes(config);
   const clone = new DatasetClone(dataset, remotes, config);

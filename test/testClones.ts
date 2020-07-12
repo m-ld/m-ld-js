@@ -1,4 +1,4 @@
-import { DatasetClone } from '../src/dataset/DatasetClone';
+import { DatasetClone, datasetContext } from '../src/dataset/DatasetClone';
 import { MeldRemotes, DeltaMessage, MeldLocal } from '../src/m-ld';
 import { mock, MockProxy } from 'jest-mock-extended';
 import { Observable, of, NEVER, BehaviorSubject, from, asapScheduler } from 'rxjs';
@@ -35,8 +35,10 @@ function hotLive(lives: Array<boolean | null>) {
   return live;
 }
 
-export function memStore(leveldown: AbstractLevelDOWN = new MemDown): Dataset {
-  return new QuadStoreDataset(leveldown);
+export async function memStore(
+  config: MeldConfig, leveldown: AbstractLevelDOWN = new MemDown): Promise<Dataset> {
+  const context = await datasetContext(config);
+  return new QuadStoreDataset(leveldown, context);
 }
 
 export function mockLocal(
