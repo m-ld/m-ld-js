@@ -28,7 +28,7 @@ export function mockRemotes(
   };
 }
 
-function hotLive(lives: Array<boolean | null>) {
+export function hotLive(lives: Array<boolean | null>) {
   const live = new BehaviorSubject(lives[0]);
   from(lives.slice(1)).pipe(observeOn(asapScheduler)).forEach(v => live.next(v));
   return live;
@@ -40,10 +40,9 @@ export async function memStore(
 }
 
 export function mockLocal(
-  updates: Observable<DeltaMessage> = NEVER,
-  lives: Array<boolean | null> = [true]): MeldLocal {
+  impl?: Partial<MeldLocal>, lives: Array<boolean | null> = [true]): MeldLocal {
   // This weirdness is due to jest-mock-extended trying to mock arrays
-  return { ...mock<MeldLocal>(), updates, live: hotLive(lives) };
+  return { ...mock<MeldLocal>(), updates: NEVER, live: hotLive(lives), ...impl };
 }
 
 export interface MockMqtt extends AsyncMqttClient {

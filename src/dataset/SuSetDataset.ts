@@ -378,7 +378,7 @@ export class SuSetDataset extends JrqlGraph {
             lastHash: tail.hash,
             quads: this.graph.match().pipe(
               bufferCount(10), // TODO batch size config
-              flatMap(async (batch) => this.reify(await this.findTriplesTids(batch))),
+              flatMap(async batch => this.reify(await this.findTriplesTids(batch))),
               tapComplete(dataEmitted)),
             tids: this.tidsGraph.graph.match(qsName('all'), qsName('#tid')).pipe(
               map(tid => tid.object.value), bufferCount(10)) // TODO batch size config

@@ -3,11 +3,14 @@ import { MockProxy } from 'jest-mock-extended';
 import { AsyncMqttClient } from 'async-mqtt';
 import { DeltaMessage } from '../src/m-ld';
 import { TreeClock } from '../src/clocks';
-import { Subject as Source } from 'rxjs';
+import { Subject as Source, of } from 'rxjs';
 import { mockLocal, MockMqtt, mockMqtt } from './testClones';
 import { take, toArray } from 'rxjs/operators';
 import { comesAlive } from '../src/AbstractMeld';
 import { MeldErrorStatus } from '../src/m-ld/MeldError';
+import { Request, Response } from '../src/m-ld/ControlMessage';
+import { Future } from '../src/util';
+import { JsonNotification } from '../src/PubsubRemotes';
 
 /**
  * These tests also test the abstract base class, PubsubRemotes
@@ -113,7 +116,7 @@ describe('New MQTT remotes', () => {
         TreeClock.GENESIS.forked().left,
         { tid: 't1', insert: '{}', delete: '{}' });
       const updates = new Source<DeltaMessage>();
-      remotes.setLocal(mockLocal(updates));
+      remotes.setLocal(mockLocal({ updates }));
       // Setting retained presence on the channel
       expect(mqtt.publish).lastCalledWith(
         '__presence/test.m-ld.org/client1',
@@ -132,7 +135,7 @@ describe('New MQTT remotes', () => {
 
     test('closes with local clone', async () => {
       const updates = new Source<DeltaMessage>();
-      remotes.setLocal(mockLocal(updates));
+      remotes.setLocal(mockLocal({ updates }));
       updates.complete();
       remotes.setLocal(null);
 
@@ -143,10 +146,45 @@ describe('New MQTT remotes', () => {
     });
   });
 
-  describe('when not genesis', () => {
-    beforeEach(() => {
-      mqtt.mockConnect();
+  describe('as a collaborator', () => {
+    beforeEach(() => mqtt.mockConnect());
+
+    test('can provide revup', async () => {
+      // Local clone provides a rev-up on any request
+      const localTime = TreeClock.GENESIS.forked().left;
+      const local = mockLocal({ revupFrom: () => Promise.resolve(of(revupUpdate)) });
+      const revupUpdate = new DeltaMessage(
+        TreeClock.GENESIS.forked().left,
+        { tid: 't1', insert: '{}', delete: '{}' });
+      remotes.setLocal(local);
+
+      // Send a rev-up request from an imaginary client2
+      mqtt.mockPublish('__send/client1/client2/send1/test.m-ld.org/control',
+        JSON.stringify(new Request.Revup(localTime).toJson()));
+
+      let updatesAddress: string, firstRevupJson: any;
+      const complete = new Future;
+      mqtt.mockSubscribe((topic, json) => {
+        const [type, , , messageId] = topic.split('/');
+        if (type === '__reply' && json['@type'] === 'http://control.m-ld.org/response/revup') {
+          // Ack the rev-up response when it arrives
+          updatesAddress = (<Response.Revup>Response.fromJson(json)).updatesAddress;
+          mqtt.mockPublish('__reply/client1/client2/ack1/' + messageId, null);
+        } else if (topic == `test.m-ld.org/control/${updatesAddress}`) {
+          const notification = (<JsonNotification>json);
+          if (notification.next != null)
+            firstRevupJson = notification.next;
+          else if (notification.complete)
+            complete.resolve();
+        }
+      });
+      await complete;
+      expect(firstRevupJson).toEqual(revupUpdate.toJson());
     });
+  });
+
+  describe('when not genesis', () => {
+    beforeEach(() => mqtt.mockConnect());
 
     test('cannot get new clock if no peers', async () => {
       try {

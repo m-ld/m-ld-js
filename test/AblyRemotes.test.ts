@@ -82,7 +82,7 @@ describe('Ably remotes', () => {
 
   test('joins presence if clone is live', async () => {
     const remotes = new AblyRemotes(config, connect);
-    remotes.setLocal(mockLocal(NEVER, [true]));
+    remotes.setLocal(mockLocal({}, [true]));
     const joined = new Future<any | undefined>();
     operations.presence.update.mockImplementation(async data => joined.resolve(data));
     connCallbacks.connected?.(mock<Ably.Types.ConnectionStateChange>());
@@ -91,7 +91,7 @@ describe('Ably remotes', () => {
 
   test('joins presence if clone comes live', async () => {
     const remotes = new AblyRemotes(config, connect);
-    remotes.setLocal(mockLocal(NEVER, [false, true]));
+    remotes.setLocal(mockLocal({}, [false, true]));
     connCallbacks.connected?.(mock<Ably.Types.ConnectionStateChange>());
     const joined = new Future<any | undefined>();
     operations.presence.update.mockImplementation(async data => joined.resolve(data));
@@ -100,7 +100,7 @@ describe('Ably remotes', () => {
 
   test('leaves presence if clone goes offline', async () => {
     const remotes = new AblyRemotes(config, connect);
-    remotes.setLocal(mockLocal(NEVER, [true, false]));
+    remotes.setLocal(mockLocal({}, [true, false]));
     connCallbacks.connected?.(mock<Ably.Types.ConnectionStateChange>());
     const left = new Future;
     operations.presence.leave.mockImplementation(async () => left.resolve());
@@ -115,7 +115,7 @@ describe('Ably remotes', () => {
       TreeClock.GENESIS.forked().left,
       { tid: 't1', insert: '{}', delete: '{}' });
     const updates = new Source<DeltaMessage>();
-    remotes.setLocal(mockLocal(updates));
+    remotes.setLocal(mockLocal({ updates }));
     updates.next(entry);
     expect(operations.publish).toHaveBeenCalledWith('__delta', entry.toJson());
   });

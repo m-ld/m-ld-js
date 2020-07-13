@@ -371,12 +371,11 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
         this.log.warn('Notifying error on', subAddress, notification.error);
       else if (notification.complete)
         this.log.debug('Completed production of', type);
-      notifier.publish(notification)
-        // If notifications fail due to MQTT death, the recipient will find out
+      return notifier.publish(notification)
+        // If notifications fail due to channel death, the recipient will find out
         // from the broker so here we make best efforts to notify an error and
         // then give up.
-        .catch((error: any) => notifier.publish({ error: toJson(error) }))
-        .catch(this.warnError);
+        .catch((error: any) => notifier.publish({ error: toJson(error) }));
     };
     return data.pipe(
       // concatMap guarantees delivery ordering despite toJson promise ordering
