@@ -4,7 +4,7 @@ import { AblyRemotes, MeldAblyConfig } from '../src/ably';
 import { comesAlive } from '../src/AbstractMeld';
 import { DeltaMessage } from '../src/m-ld';
 import { mockLocal } from './testClones';
-import { NEVER, Subject as Source } from 'rxjs';
+import { Subject as Source, BehaviorSubject } from 'rxjs';
 import { Future } from '../src/util';
 import { TreeClock } from '../src/clocks';
 import { Request, Response } from '../src/m-ld/ControlMessage';
@@ -70,12 +70,14 @@ describe('Ably remotes', () => {
 
   test('goes offline with no-one present', async () => {
     const remotes = new AblyRemotes(config, connect);
+    connCallbacks.connected?.(mock<Ably.Types.ConnectionStateChange>());
     // We have not supplied a presence update, per Ably behaviour
     await expect(comesAlive(remotes, false)).resolves.toBe(false);
   });
 
   test('responds to presence', async () => {
     const remotes = new AblyRemotes(config, connect);
+    connCallbacks.connected?.(mock<Ably.Types.ConnectionStateChange>());
     otherPresent();
     await expect(comesAlive(remotes)).resolves.toBe(true);
   });
@@ -89,6 +91,29 @@ describe('Ably remotes', () => {
     await expect(joined).resolves.toBe('__live');
   });
 
+  test('does not join presence until subscribed', async () => {
+    control.subscribe.mockReturnValue(new Promise(() => { }));
+    const remotes = new AblyRemotes(config, connect);
+    remotes.setLocal(mockLocal({}, [true]));
+    const joined = new Future<any | undefined>();
+    operations.presence.update.mockImplementation(async data => joined.resolve(data));
+    connCallbacks.connected?.(mock<Ably.Types.ConnectionStateChange>());
+    // Push to immediate because connected handling is async
+    const now = new Promise(res => setImmediate(() => res('now')));
+    await expect(Promise.race([now, joined])).resolves.toBe('now');
+  });
+
+  test('does not go live until subscribed', async () => {
+    control.subscribe.mockReturnValue(new Promise(() => { }));
+    const remotes = new AblyRemotes(config, connect);
+    remotes.setLocal(mockLocal({}, [true]));
+    const goneLive = comesAlive(remotes, false); // No presence so false
+    connCallbacks.connected?.(mock<Ably.Types.ConnectionStateChange>());
+    // Push to immediate because connected handling is async
+    const now = new Promise(res => setImmediate(() => res('now')));
+    await expect(Promise.race([now, goneLive])).resolves.toBe('now');
+  });
+
   test('joins presence if clone comes live', async () => {
     const remotes = new AblyRemotes(config, connect);
     remotes.setLocal(mockLocal({}, [false, true]));
@@ -100,15 +125,19 @@ describe('Ably remotes', () => {
 
   test('leaves presence if clone goes offline', async () => {
     const remotes = new AblyRemotes(config, connect);
-    remotes.setLocal(mockLocal({}, [true, false]));
+    const live = new BehaviorSubject(true);
+    remotes.setLocal(mockLocal({ live }));
     connCallbacks.connected?.(mock<Ably.Types.ConnectionStateChange>());
     const left = new Future;
     operations.presence.leave.mockImplementation(async () => left.resolve());
+    // Push to immediate because connected handling is async
+    setImmediate(() => live.next(false));
     await expect(left).resolves.toBe(undefined);
   });
 
   test('publishes a delta', async () => {
     const remotes = new AblyRemotes(config, connect);
+    connCallbacks.connected?.(mock<Ably.Types.ConnectionStateChange>());
     otherPresent();
     await comesAlive(remotes);
     const entry = new DeltaMessage(
@@ -124,6 +153,7 @@ describe('Ably remotes', () => {
     const newClock = TreeClock.GENESIS.forked().left;
     // Grab the control channel subscriber
     const remotes = new AblyRemotes(config, connect);
+    connCallbacks.connected?.(mock<Ably.Types.ConnectionStateChange>());
     const [subscriber] = control.subscribe.mock.calls[0];
     if (typeof subscriber != 'function')
       return fail();

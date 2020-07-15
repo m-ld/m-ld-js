@@ -58,7 +58,7 @@ export interface Meld {
    * with newly starting clones via snapshot & rev-up. A value of null indicates
    * unknown (e.g. starting or disconnected). The stream is hot, continuous and
    * multicast, but will also always emit the current state to new subscribers
-   * (Rx BehaviourSubject). Completion or an error means that this Meld has
+   * (Rx BehaviorSubject). Completion or an error means that this Meld has
    * closed.
    * @see updates
    */

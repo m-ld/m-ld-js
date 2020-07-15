@@ -25,21 +25,26 @@ export class AblyRemotes extends PubsubRemotes {
     super(config);
     this.client = connect({ ...config.ably, echoMessages: false, clientId: config['@id'] });
     this.channel = this.client.channels.get(this.channelName('operations'));
-    this.channel
-      .subscribe(message => this.onRemoteUpdate(message.data))
-      .catch(err => this.close(err));
-    this.channel.presence
-      .subscribe(() => this.onPresenceChange())
-      .then(() => this.onPresenceChange()) // Ably does not notify if no-one around
-      .catch(err => this.close(err));
-    // Direct channel that is specific to us, for sending and replying to requests
-    this.client.channels.get(this.channelName(config['@id']))
-      .subscribe(message => this.onDirectMessage(message).catch(this.warnError))
-      .catch(err => this.close(err));
+    // Ensure we are fully subscribed before we make any presence claims
+    const subscribed = Promise.all([
+      this.channel
+        .subscribe(message => this.onRemoteUpdate(message.data)),
+      this.channel.presence
+        .subscribe(() => this.onPresenceChange())
+        .then(() => this.onPresenceChange()), // Ably does not notify if no-one around
+      // Direct channel that is specific to us, for sending and replying to requests
+      this.client.channels.get(this.channelName(config['@id']))
+        .subscribe(message => this.onDirectMessage(message).catch(this.warnError))
+    ]).catch(err => this.close(err));
+    
+    // Note that we wait for subscription before claiming to be connected.
+    // This is so we don't miss messages that are immediately sent to us.
+    // https://support.ably.com/support/solutions/articles/3000067435
+    this.client.connection.on('connected', () =>
+      subscribed.then(() => this.onConnect()).catch(this.warnError));
     // Ably has connection recovery with no message loss for 2min. During that
     // time we treat the remotes as live. After that, the connection becomes
     // suspended and we are offline.
-    this.client.connection.on('connected', () => this.onConnect().catch(this.warnError));
     this.client.connection.on(['suspended', 'failed', 'closing'], () => this.onDisconnect());
   }
 
