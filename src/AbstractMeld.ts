@@ -1,7 +1,7 @@
 import { Meld, Snapshot, DeltaMessage, LiveValue } from './m-ld';
 import { TreeClock } from './clocks';
-import { Observable, Subject as Source, BehaviorSubject, asapScheduler } from 'rxjs';
-import { observeOn, tap, distinctUntilChanged, first, skip } from 'rxjs/operators';
+import { Observable, Subject as Source, BehaviorSubject, asapScheduler, of } from 'rxjs';
+import { observeOn, tap, distinctUntilChanged, first, skip, catchError } from 'rxjs/operators';
 import { LogLevelDesc, Logger } from 'loglevel';
 import { getIdLogger, check } from './util';
 import { MeldError } from './m-ld/MeldError';
@@ -28,13 +28,14 @@ export abstract class AbstractMeld implements Meld {
       tap(msg => this.log.debug('has update', msg)));
 
     // Log liveness
-    this.live.pipe(skip(1)).subscribe(live =>
-      this.log.debug('is', live ? 'live' : 'dead'));
+    this.live.pipe(skip(1)).subscribe(
+      live => this.log.debug('is', live ? 'live' : 'dead'));
   }
 
   get live(): LiveValue<boolean | null> {
-    // Live notifications are distinct, only transitions are notified
-    const source = this.liveSource.pipe(distinctUntilChanged());
+    // Live notifications are distinct, only transitions are notified; an error
+    // indicates a return to undecided liveness followed by completion.
+    const source = this.liveSource.pipe(catchError(() => of(null)), distinctUntilChanged());
     return Object.defineProperty(source, 'value', { get: () => this.liveSource.value });
   }
 
@@ -61,6 +62,8 @@ export abstract class AbstractMeld implements Meld {
   }
 }
 
-export function comesAlive(meld: Pick<Meld, 'live'>, expected: boolean | null = true): Promise<boolean | null> {
-  return meld.live.pipe(first(live => live === expected)).toPromise();
+export function comesAlive(meld: Pick<Meld, 'live'>, expected: boolean | null | 'notNull' = true): Promise<boolean | null> {
+  const filter: (live: boolean | null) => boolean =
+    expected === 'notNull' ? (live => live != null) : (live => live === expected);
+  return meld.live.pipe(first(filter)).toPromise();
 };

@@ -24,6 +24,10 @@ export class RemoteUpdates {
     return this.attachState;
   }
 
+  private setState(state: Partial<AttachStatus>) {
+    this.attachState.next({ ...this.state.value, ...state });
+  }
+
   close(err?: any) {
     if (err)
       this.attachState.error(err);
@@ -31,23 +35,23 @@ export class RemoteUpdates {
       this.attachState.complete();
   }
 
-  setOutdated = () =>
-    this.attachState.next({ attached: this.state.value.attached, outdated: true });
+  maybeOutdated = (isGenesis: boolean) =>
+    this.setState({ outdated: !isGenesis });
 
   attach = () => {
-    this.attachState.next({ attached: true, outdated: false });
+    this.setState({ attached: true });
     return this.remoteUpdates.next(this.remotes.updates);
   };
 
   detach = (isGenesis: boolean) => {
-    // A genesis clone is always in date
-    this.attachState.next({ attached: false, outdated: !isGenesis });
+    // A genesis clone is always in date, otherwise we could be out of date
+    this.setState({ attached: false, outdated: !isGenesis });
     return this.remoteUpdates.next(NEVER);
   };
 
   injectRevups(revups: Observable<DeltaMessage>): Promise<DeltaMessage | undefined> {
     const lastRevup = new Future<DeltaMessage | undefined>();
-    this.attachState.next({ attached: true, outdated: true });
+    this.setState({ attached: true, outdated: true });
     // Updates must be paused during revups because the collaborator might
     // send an update while also sending revups of its own prior updates.
     // That would break the ordering guarantee.
@@ -61,9 +65,10 @@ export class RemoteUpdates {
         // the actual last revup might not yet have been applied to the dataset.
         if (lastRevup != null)
           await lastRevup.delivered;
-        this.attachState.next({ attached: true, outdated: false });
+        this.setState({ attached: true, outdated: false });
       },
-      () => this.attachState.next({ attached: false, outdated: false }));
+      // Rev-up failed - we are neither attached nor up-to-date
+      () => this.setState({ attached: false, outdated: true }));
     return Promise.resolve(lastRevup);
   }
 }

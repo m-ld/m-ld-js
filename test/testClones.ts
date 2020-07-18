@@ -1,4 +1,4 @@
-import { MeldRemotes, DeltaMessage, MeldLocal } from '../src/m-ld';
+import { MeldRemotes, DeltaMessage, MeldLocal, LiveValue } from '../src/m-ld';
 import { mock, MockProxy } from 'jest-mock-extended';
 import { Observable, NEVER, BehaviorSubject, from, asapScheduler } from 'rxjs';
 import { Dataset, QuadStoreDataset } from '../src/dataset';
@@ -16,19 +16,19 @@ export function testConfig(config?: Partial<MeldConfig>): MeldConfig {
 
 export function mockRemotes(
   updates: Observable<DeltaMessage> = NEVER,
-  lives: Array<boolean | null> = [true],
+  lives: Array<boolean | null> | LiveValue<boolean | null> = [true],
   newClock: TreeClock = TreeClock.GENESIS): MeldRemotes {
   // This weirdness is due to jest-mock-extended trying to mock arrays
   return {
     ...mock<MeldRemotes>(),
     setLocal: () => { },
     updates,
-    live: hotLive(lives),
+    live: Array.isArray(lives) ? hotLive(lives) : lives,
     newClock: () => Promise.resolve(newClock)
   };
 }
 
-export function hotLive(lives: Array<boolean | null>) {
+export function hotLive(lives: Array<boolean | null>): BehaviorSubject<boolean | null> {
   const live = new BehaviorSubject(lives[0]);
   from(lives.slice(1)).pipe(observeOn(asapScheduler)).forEach(v => live.next(v));
   return live;

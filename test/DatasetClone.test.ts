@@ -1,15 +1,16 @@
 import { DatasetClone } from '../src/dataset/DatasetClone';
 import { Subject, Describe } from 'json-rql';
-import { memStore, mockRemotes, testConfig } from './testClones';
-import { NEVER, Subject as Source, asapScheduler, EMPTY } from 'rxjs';
+import { memStore, mockRemotes, hotLive, testConfig } from './testClones';
+import { NEVER, Subject as Source, asapScheduler, EMPTY, throwError, Observable } from 'rxjs';
 import { comesAlive } from '../src/AbstractMeld';
 import { first, take, toArray, map, observeOn } from 'rxjs/operators';
 import { TreeClock } from '../src/clocks';
-import { DeltaMessage, MeldRemotes } from '../src/m-ld';
+import { DeltaMessage, MeldRemotes, Snapshot } from '../src/m-ld';
 import { uuid } from 'short-uuid';
 import { MeldConfig } from '../src';
 import MemDown from 'memdown';
 import { AbstractLevelDOWN } from 'abstract-leveldown';
+import { Hash } from '../src/hash';
 
 describe('Dataset clone', () => {
   describe('as genesis', () => {
@@ -129,7 +130,43 @@ describe('Dataset clone', () => {
     });
   });
 
-  describe('as non-genesis clone', () => {
+  describe('as new clone', () => {
+    let remotes: MeldRemotes;
+    let snapshot: jest.Mock<Promise<Snapshot>, void[]>;
+    const remotesLive = hotLive([true]);
+
+    beforeEach(async () => {
+      const { left: cloneClock, right: collabClock } = TreeClock.GENESIS.forked()
+      remotes = mockRemotes(NEVER, remotesLive, cloneClock);
+      snapshot = jest.fn().mockReturnValueOnce(Promise.resolve<Snapshot>({
+        lastHash: Hash.random(),
+        lastTime: collabClock.ticked(),
+        quads: EMPTY,
+        tids: EMPTY,
+        updates: EMPTY
+      }));
+      remotes.snapshot = snapshot;
+    });
+
+    test('initialises from snapshot', async () => {
+      const clone = new DatasetClone(await memStore(), remotes, testConfig({ genesis: false }));
+      await clone.initialise();
+      await expect(clone.status.becomes({ outdated: false })).resolves.toBeDefined();
+      expect(snapshot.mock.calls.length).toBe(1);
+    });
+
+    test('can become a silo', async () => {
+      const clone = new DatasetClone(await memStore(), remotes, testConfig({ genesis: false }));
+      await clone.initialise();
+      remotesLive.next(false);
+      // Being a silo involves no visible change of state. Just check that we're
+      // alive a few ticks hence.
+      await expect(new Promise(res => setTimeout(
+        () => res(clone.live.value), 1))).resolves.toBe(true);
+    });
+  });
+
+  describe('as post-genesis clone', () => {
     let ldb: AbstractLevelDOWN;
     let config: MeldConfig;
 
@@ -141,6 +178,7 @@ describe('Dataset clone', () => {
       await clone.initialise();
       await clone.newClock(); // Forks the clock so no longer genesis
       await clone.close();
+      // Now the ldb represents a former genesis clone
     });
 
     test('is outdated while revving-up', async () => {
@@ -171,6 +209,18 @@ describe('Dataset clone', () => {
 
       await expect(wasOutdated).resolves.toMatchObject({ online: true, outdated: true });
       expect(clone.status.value).toEqual({ online: true, outdated: false, ticks: 0 });
+    });
+
+    test('immediately re-connects if rev-up fails', async () => {
+      const remotes = mockRemotes();
+      const revupFrom = jest.fn()
+        .mockReturnValueOnce(Promise.resolve(throwError('boom')))
+        .mockReturnValueOnce(Promise.resolve(EMPTY));
+      remotes.revupFrom = revupFrom;
+      const clone = new DatasetClone(await memStore(ldb), remotes, testConfig());
+      await clone.initialise();
+      await expect(clone.status.becomes({ outdated: false })).resolves.toBeDefined();
+      expect(revupFrom.mock.calls.length).toBe(2);
     });
   });
 });
