@@ -1,7 +1,7 @@
 import { DatasetClone } from '../src/dataset/DatasetClone';
 import { Subject, Describe } from 'json-rql';
 import { memStore, mockRemotes, hotLive, testConfig } from './testClones';
-import { NEVER, Subject as Source, asapScheduler, EMPTY, throwError, Observable } from 'rxjs';
+import { NEVER, Subject as Source, asapScheduler, EMPTY, throwError } from 'rxjs';
 import { comesAlive } from '../src/AbstractMeld';
 import { first, take, toArray, map, observeOn } from 'rxjs/operators';
 import { TreeClock } from '../src/clocks';

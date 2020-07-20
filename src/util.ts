@@ -1,7 +1,10 @@
 import { Quad } from 'rdf-js';
 import { fromRDF } from 'jsonld';
-import { concat, Observable, OperatorFunction, Subscription, throwError, AsyncSubject, ObservableInput, onErrorResumeNext, NEVER } from "rxjs";
-import { publish, tap } from "rxjs/operators";
+import {
+  concat, Observable, OperatorFunction, Subscription, throwError,
+  AsyncSubject, ObservableInput, onErrorResumeNext, NEVER, from
+} from "rxjs";
+import { publish, tap, flatMap } from "rxjs/operators";
 import AsyncLock = require('async-lock');
 import { LogLevelDesc, getLogger, getLoggers } from 'loglevel';
 import * as performance from 'marky';
@@ -12,6 +15,11 @@ export function flatten<T>(bumpy: T[][]): T[] {
 
 export function toArray<T>(value?: T | T[]): T[] {
   return value == null ? [] : ([] as T[]).concat(value).filter(v => v != null);
+}
+
+export function fromArrayPromise<T>(reEmits: Promise<T[]>): Observable<T> {
+  // Rx weirdness exemplified in 26 characters
+  return from(reEmits).pipe(flatMap(from));
 }
 
 export function jsonFrom(payload: Buffer): any {

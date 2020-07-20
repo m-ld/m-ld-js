@@ -57,16 +57,17 @@ export function isSubject(p: Pattern): p is Subject {
 }
 
 export interface Group extends Pattern {
-  '@graph': Subject | Subject[];
+  '@graph'?: Subject | Subject[];
+  '@union'?: Subject[];
 }
 
 export function isGroup(p: Pattern): p is Group {
-  return '@graph' in p;
+  return '@graph' in p || '@union' in p;
 }
 
 export interface Query extends Pattern {
   // No support for @values
-  '@where'?: Subject | Subject[];
+  '@where'?: Subject | Subject[] | Group;
 }
 
 export function isQuery(p: Pattern): p is Query {

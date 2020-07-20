@@ -11,7 +11,7 @@ The configuration interface adds an `ably` key to the base
 [`MeldConfig`](interfaces/meldconfig.html). The content of this key is an Ably
 [client options
 object](https://www.ably.io/documentation/realtime/usage#client-options). It
-must not include the `echoMessages` and `clientId` options as these are set
+must not include the `echoMessages` and `clientId` options, as these are set
 internally.
 
 If using [token

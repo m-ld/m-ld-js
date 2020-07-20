@@ -1,12 +1,18 @@
 import { MeldStore, MeldUpdate, DeleteInsert, LiveStatus } from '.';
-import { Context, Subject, Describe, Pattern, Update, Value, isValueObject, Reference } from '../dataset/jrql-support';
+import {
+  Context, Subject, Describe, Pattern, Update, Value, isValueObject, Reference, Variable
+} from '../dataset/jrql-support';
 import { Observable } from 'rxjs';
 import { map, flatMap, toArray as rxToArray, take } from 'rxjs/operators';
 import { flatten } from 'jsonld';
-import { toArray } from '../util';
+import { toArray, shortId } from '../util';
 import { Iri } from 'jsonld/jsonld-spec';
 
 export { MeldUpdate };
+  
+export function any(): Variable {
+  return `?${shortId(4)}`;
+}
 
 export class MeldApi implements MeldStore {
   private readonly context: Context;
@@ -28,14 +34,11 @@ export class MeldApi implements MeldStore {
   }
 
   delete(path: string): PromiseLike<unknown> {
+    const asSubject: Subject = { '@id': path, [any()]: any() };
+    const asObject: Subject = { '@id': any(), [any()]: { '@id': path } };
     return this.transact<Update>({
-      '@delete': [
-        { '@id': path },
-        // BUG: This is wrong, multiple patterns INTERSECT in BGP (not UNION)
-        // https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#BGPsparql
-        // Requires UNION, see m-ld-core/src/main/java/org/m_ld/MeldApi.java
-        { '?': { '@id': path } }
-      ]
+      '@delete': [asSubject, asObject],
+      '@where': { '@union': [asSubject, asObject] }
     });
   }
 

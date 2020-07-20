@@ -1,6 +1,7 @@
-import { Quad, Quad_Object } from 'rdf-js'
+import { Quad, Quad_Object, Quad_Predicate } from 'rdf-js'
 
-type VarValues = { [name: string]: Quad_Object };
+export type VarValues = { [name: string]: Quad_Object | Quad_Predicate | Quad_Object };
+export type TriplePos = Exclude<keyof Quad, 'equals' | 'graph'>;
 
 export class QuadSolution {
   static EMPTY: QuadSolution = new QuadSolution({}, []);
@@ -20,7 +21,7 @@ export class QuadSolution {
 }
 
 function joinVar(pattern: Quad, actual: Quad,
-  pos: Exclude<keyof Quad, 'equals' | 'graph'>, vars: VarValues | null): VarValues | null {
+  pos: TriplePos, vars: VarValues | null): VarValues | null {
   if (vars && pattern[pos].termType == 'Variable') {
     if (vars[pattern[pos].value]) {
       if (!vars[pattern[pos].value].equals(actual[pos]))

@@ -12,7 +12,7 @@ import {
   publishReplay, refCount, filter, ignoreElements, takeUntil, tap,
   isEmpty, finalize, flatMap, toArray, first, map, debounceTime, distinctUntilChanged, scan, expand, delayWhen
 } from 'rxjs/operators';
-import { delayUntil, Future, tapComplete, tapCount, SharableLock } from '../util';
+import { delayUntil, Future, tapComplete, tapCount, SharableLock, fromArrayPromise } from '../util';
 import { levels } from 'loglevel';
 import { MeldError } from '../m-ld/MeldError';
 import { AbstractMeld, comesAlive } from '../AbstractMeld';
@@ -436,9 +436,4 @@ export class DatasetClone extends AbstractMeld implements MeldClone {
     super.close(err);
     await this.dataset.close(err);
   }
-}
-
-function fromArrayPromise(reEmits: Promise<DeltaMessage[]>): Observable<DeltaMessage> {
-  // Rx weirdness exemplified in 26 characters
-  return from(reEmits).pipe(flatMap(from));
 }

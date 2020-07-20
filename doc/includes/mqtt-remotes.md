@@ -9,14 +9,15 @@ can be imported or required from `'@m-ld/m-ld/dist/mqtt'`.
 
 The configuration interface adds an `mqtt` key to the base
 [`MeldConfig`](interfaces/meldconfig.html). The content of this key is a client
-options object from [MQTT.js](https://www.npmjs.com/package/mqtt#client). It
-must not include the `will` and `clientId` options as these are set internally.
-It must include a `hostname` _or_ a `host` and `port`.
+options object for [MQTT.js](https://www.npmjs.com/package/mqtt#client). It must
+not include the `will` and `clientId` options, as these are set internally. It
+must include a `hostname` _or_ a `host` and `port`.
 
 ### MQTT Broker Requirements
-1. MQTT 3.1 compliant
-1. QoS 0 and 1 must be supported
-1. Retained messages must be supported
-1. Last Will and Testament (LWT) messages must be supported
+`MqttRemotes` requires broker support for:
+1. MQTT 3.1
+1. QoS 0 and 1
+1. Retained messages
+1. Last Will and Testament (LWT) messages
 
 A good choice for local development is [Aedes](https://github.com/moscajs/aedes).

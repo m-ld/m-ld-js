@@ -3,14 +3,16 @@ import {
   Context, Read, Subject, Update, isDescribe, isGroup, isSubject, isUpdate,
   Group, isSelect, Result, Variable, Value, isValueObject, isReference
 } from './jrql-support';
-import { NamedNode, Quad, Term, Variable as VariableNode, Quad_Subject, Quad_Predicate, Quad_Object } from 'rdf-js';
+import {
+  NamedNode, Quad, Term, Variable as VariableNode, Quad_Subject, Quad_Predicate, Quad_Object
+} from 'rdf-js';
 import { compact, toRDF } from 'jsonld';
 import { namedNode, defaultGraph, variable, quad as createQuad, blankNode } from '@rdfjs/data-model';
 import { Graph, PatchQuads } from '.';
 import { toArray, flatMap, defaultIfEmpty, map, filter, distinct, first } from 'rxjs/operators';
 import { from, of, EMPTY, Observable, throwError } from 'rxjs';
 import { toArray as array, shortId, flatten, rdfToJson } from '../util';
-import { QuadSolution } from './QuadSolution';
+import { QuadSolution, VarValues, TriplePos } from './QuadSolution';
 
 /**
  * A graph wrapper that provides low-level json-rql handling for queries. The
@@ -34,39 +36,44 @@ export class JrqlGraph {
 
   async write(query: Subject | Group | Update,
     context: Context = query['@context'] || this.defaultContext): Promise<PatchQuads> {
-    if (isGroup(query)) {
+    // @unions not supported unless in a where clause
+    if (isGroup(query) && query['@graph'] != null && query['@union'] == null) {
       return this.write({ '@insert': query['@graph'] } as Update, context);
     } else if (isSubject(query)) {
       return this.write({ '@insert': query } as Update, context);
-    } else if (isUpdate(query) && !query['@where']) {
+    } else if (isUpdate(query)) {
       return this.update(query, context);
     }
     throw new Error('Write type not supported.');
   }
 
-  async update(query: Update, context: Context = query['@context'] || this.defaultContext): Promise<PatchQuads> {
-    let patch = new PatchQuads([], []);
-    if (query['@delete'])
-      patch = patch.concat(await this.delete(query['@delete'], context));
-    if (query['@insert'])
-      patch = patch.concat(await this.insert(query['@insert'], context));
-    return patch;
+  select(select: Result,
+    where: Subject | Subject[] | Group,
+    context: Context = this.defaultContext): Observable<Subject> {
+    return this.whereSolutions(where, context).pipe(
+      flatMap(solution => solutionSubject(select, solution, context)));
   }
 
-  select(select: Result, where: Subject | Subject[], context: Context = this.defaultContext): Observable<Subject> {
-    return from(this.quads(where, context).then(quads => this.matchSolutions(quads))).pipe(flatMap(solutions =>
-      from(solutions).pipe(flatMap(solution => solutionSubject(select, solution, context)))));
+  private whereSolutions(where: Subject | Subject[] | Group,
+    context: Context = this.defaultContext): Observable<QuadSolution> {
+    // Find a set of solutions for every union
+    return from(unions(where)).pipe(
+      flatMap(graph => this.quads(graph, context)
+        .then(quads => this.matchSolutions(quads))),
+      flatMap(solutions => from(solutions)));
   }
 
-  describe(describe: Iri | Variable, where?: Subject | Subject[], context: Context = this.defaultContext): Observable<Subject> {
+  describe(describe: Iri | Variable,
+    where?: Subject | Subject[] | Group,
+    context: Context = this.defaultContext): Observable<Subject> {
     const varName = matchVar(describe);
     if (varName) {
-      return from(this.quads(where || {}, context).then(quads => this.matchSolutions(quads))).pipe(flatMap(solutions =>
-        from(solutions).pipe(
-          map(solution => solution.vars[varName]?.value),
-          filter(iri => !!iri),
-          distinct(),
-          flatMap(iri => this.describe(iri, undefined, context)))));
+      // Find a set of solutions for every union
+      return this.whereSolutions(where ?? {}, context).pipe(
+        map(solution => solution.vars[varName]?.value),
+        filter(iri => !!iri),
+        distinct(),
+        flatMap(iri => this.describe(iri, undefined, context)));
     } else {
       return from(resolve(describe, context)).pipe(
         flatMap(iri => this.graph.match(iri)),
@@ -93,25 +100,71 @@ export class JrqlGraph {
     return this.matchQuads(await this.quads(jrqlPattern, context));
   }
 
-  async insert(insert: Subject | Subject[], context: Context = this.defaultContext): Promise<PatchQuads> {
+  async update(query: Update,
+    context: Context = query['@context'] || this.defaultContext): Promise<PatchQuads> {
+    let patch = new PatchQuads([], []);
+    // If there is a @where clause, use variable substitutions per solution.
+    if (query['@where'] != null) {
+      const varDelete = query['@delete'] != null ?
+        await this.hiddenVarQuads(query['@delete'], context) : null;
+      const varInsert = query['@insert'] != null ?
+        await this.hiddenVarQuads(query['@insert'], context) : null;
+      const solutions = await this.whereSolutions(query['@where'], context)
+        .pipe(toArray()).toPromise();
+      solutions.forEach(solution => {
+        function matchingQuads(hiddenVarQuads: Quad[] | null) {
+          // If there are variables in the update for which there is no value in the
+          // solution, or if the solution value is not compatible with the quad
+          // position, then this is treated as no-match, even if this is a
+          // `@delete` (i.e. DELETEWHERE does not apply).
+          return hiddenVarQuads != null ? unhideVars(hiddenVarQuads, solution.vars)
+            .filter(quad => !anyVarTerm(quad)) : [];
+        }
+        patch = patch.concat(new PatchQuads(
+          matchingQuads(varDelete), matchingQuads(varInsert)));
+      });
+    } else {
+      if (query['@delete'])
+        patch = patch.concat(await this.delete(query['@delete'], context));
+      if (query['@insert'])
+        patch = patch.concat(await this.insert(query['@insert'], context));
+    }
+    return patch;
+  }
+
+  /**
+   * This is shorthand for a `@insert` update with no `@where`. It requires no
+   * variables in the `@insert`.
+   */
+  async insert(insert: Subject | Subject[],
+    context: Context = this.defaultContext): Promise<PatchQuads> {
     const matches = await this.quads(insert, context);
     if (anyVarTerms(matches))
       throw new Error('Cannot insert with variable content');
     return new PatchQuads([], matches);
   }
 
-  async delete(dels: Subject | Subject[], context: Context = this.defaultContext): Promise<PatchQuads> {
+  /**
+   * This is shorthand for a `@delete` update with no `@where`. It supports
+   * SPARQL DELETEWHERE semantics, matching any variables against the data.
+   */
+  async delete(dels: Subject | Subject[],
+    context: Context = this.defaultContext): Promise<PatchQuads> {
     const patterns = await this.quads(dels, context);
     // If there are no variables in the delete, we don't need to find solutions
     return new PatchQuads(anyVarTerms(patterns) ? await this.matchQuads(patterns) : patterns, []);
   }
 
-  async quads(g: Subject | Subject[], context: Context = this.defaultContext): Promise<Quad[]> {
+  async quads(g: Subject | Subject[],
+    context: Context = this.defaultContext): Promise<Quad[]> {
+    return unhideVars(await this.hiddenVarQuads(g, context), {});
+  }
+
+  private async hiddenVarQuads(g: Subject | Subject[], context: Context): Promise<Quad[]> {
     const jsonld = { '@graph': g, '@context': context };
     hideVars(jsonld['@graph']);
     const quads = await toRDF(this.graph.name.termType !== 'DefaultGraph' ?
       { ...jsonld, '@id': this.graph.name.value } : jsonld) as Quad[];
-    unhideVars(quads);
     return quads;
   }
 
@@ -128,7 +181,6 @@ export class JrqlGraph {
         const solutions = await willSolve;
         // find matching quads for each pattern quad
         return this.graph.match(...asMatchTerms(pattern)).pipe(
-          defaultIfEmpty(), // BUG: Produces null if no quads, incorrect according to BGP
           // match each quad against already-found solutions
           flatMap(quad => from(solutions).pipe(flatMap(solution => {
             const matchingSolution = quad ? solution.join(pattern, quad) : solution;
@@ -143,7 +195,11 @@ export class JrqlGraph {
 }
 
 function anyVarTerms(patterns: Quad[]) {
-  return patterns.some(pattern => asMatchTerms(pattern).some(p => p == null));
+  return patterns.some(anyVarTerm);
+}
+
+function anyVarTerm(pattern: Quad): unknown {
+  return asMatchTerms(pattern).some(p => p == null);
 }
 
 async function solutionSubject(results: Result[] | Result, solution: QuadSolution, context: Context) {
@@ -216,6 +272,23 @@ function hideVars(values: Value | Value[], top: boolean = true) {
   });
 }
 
+function unions(where: Subject | Subject[] | Group): Subject[][] {
+  if (Array.isArray(where)) {
+    return [where];
+  } else if (isGroup(where)) {
+    // A Group can technically have both a @graph and a @union
+    const graph = array(where['@graph']);
+    if (where['@union'] != null) {
+      // Top-level graph intersects with each union
+      return where['@union'].map(subject => [subject].concat(graph))
+    } else {
+      return [graph];
+    }
+  } else {
+    return [[where]];
+  }
+}
+
 function hideVar(token: string): string {
   const name = matchVar(token);
   // Allow anonymous variables as '?'
@@ -228,22 +301,35 @@ function matchVar(token: string): string | undefined {
     return match[1];
 }
 
-function unhideVars(quads: Quad[]) {
-  quads.forEach(quad => {
-    quad.subject = unhideVar(quad.subject);
-    quad.predicate = unhideVar(quad.predicate);
-    quad.object = unhideVar(quad.object);
-  });
+function unhideVars(quads: Quad[], varValues: VarValues) {
+  return quads.map(quad => createQuad(
+    unhideVar('subject', quad.subject, varValues),
+    unhideVar('predicate', quad.predicate, varValues),
+    unhideVar('object', quad.object, varValues),
+    quad.graph));
 }
 
-function unhideVar<T extends Term>(term: T): T | VariableNode {
+function unhideVar<P extends TriplePos>(pos: P, term: Quad[P], varValues: VarValues): Quad[P] {
   switch (term.termType) {
     case 'NamedNode':
       const varName = matchHiddenVar(term.value);
-      if (varName)
-        return variable(varName);
+      if (varName) {
+        const value = varValues[varName];
+        return value != null && isPosAssignable(pos, value) ? value : variable(varName);
+      }
   }
   return term;
+}
+
+function isPosAssignable<P extends TriplePos>(
+  pos: P, value: Quad_Object | Quad_Predicate | Quad_Object): value is Quad[P] {
+  // Subjects and Predicate don't allow literals
+  if ((pos == 'subject' || pos == 'predicate') && value.termType == 'Literal')
+    return false;
+  // Predicates don't allow blank nodes
+  if (pos == 'predicate' && value.termType == 'BlankNode')
+    return false;
+  return true;
 }
 
 function matchHiddenVar(value: string): string | undefined {

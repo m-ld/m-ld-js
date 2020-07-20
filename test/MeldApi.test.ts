@@ -1,8 +1,8 @@
-import { MeldApi, Resource } from '../src/m-ld/MeldApi';
-import { Subject, Select, Describe, Reference } from 'json-rql';
+import { MeldApi, Resource, any } from '../src/m-ld/MeldApi';
 import { memStore, mockRemotes, testConfig } from './testClones';
 import { first } from 'rxjs/operators';
 import { DatasetClone } from '../src/dataset/DatasetClone';
+import { Group, Subject, Select, Describe, Reference, Update } from '../src/dataset/jrql-support';
 
 describe('Meld API', () => {
   let api: MeldApi;
@@ -15,7 +15,7 @@ describe('Meld API', () => {
 
   test('retrieves a JSON-LD subject', async () => {
     const captureUpdate = api.follow().pipe(first()).toPromise();
-    await api.transact({ '@id': 'fred', name: 'Fred' } as Subject);
+    await api.transact<Subject>({ '@id': 'fred', name: 'Fred' });
     await expect(captureUpdate).resolves.toEqual({
       '@ticks': 1,
       '@insert': [{ '@id': 'fred', name: 'Fred' }],
@@ -25,8 +25,76 @@ describe('Meld API', () => {
       .resolves.toEqual({ '@id': 'fred', name: 'Fred' });
   });
 
+  test('deletes a subject by update', async () => {
+    await api.transact<Subject>({ '@id': 'fred', name: 'Fred' });
+    const captureUpdate = api.follow().pipe(first()).toPromise();
+    await api.transact<Update>({ '@delete': { '@id': 'fred' } });
+    await expect(api.get('fred')).resolves.toBeUndefined();
+    await expect(captureUpdate).resolves.toEqual({
+      '@ticks': 2,
+      '@delete': [{ '@id': 'fred', name: 'Fred' }],
+      '@insert': []
+    });
+  });
+
+  test('deletes a property by update', async () => {
+    await api.transact<Subject>({ '@id': 'fred', name: 'Fred', height: 5 });
+    const captureUpdate = api.follow().pipe(first()).toPromise();
+    await api.transact<Update>({ '@delete': { '@id': 'fred', height: 5 } });
+    await expect(api.get('fred'))
+      .resolves.toEqual({ '@id': 'fred', name: 'Fred' });
+    await expect(captureUpdate).resolves.toEqual({
+      '@ticks': 2,
+      '@delete': [{ '@id': 'fred', height: 5 }],
+      '@insert': []
+    });
+  });
+
+  test('deletes where any', async () => {
+    await api.transact<Subject>({ '@id': 'fred', name: 'Fred', height: 5 });
+    await api.transact<Update>({ '@delete': { '@id': 'fred', height: any() } });
+    await expect(api.get('fred'))
+      .resolves.toEqual({ '@id': 'fred', name: 'Fred' });
+  });
+
+  test('updates a property', async () => {
+    await api.transact<Subject>({ '@id': 'fred', name: 'Fred', height: 5 });
+    const captureUpdate = api.follow().pipe(first()).toPromise();
+    await api.transact<Update>({
+      '@delete': { '@id': 'fred', height: 5 },
+      '@insert': { '@id': 'fred', height: 6 }
+    });
+    await expect(api.get('fred'))
+      .resolves.toEqual({ '@id': 'fred', name: 'Fred', height: 6 });
+    await expect(captureUpdate).resolves.toEqual({
+      '@ticks': 2,
+      '@delete': [{ '@id': 'fred', height: 5 }],
+      '@insert': [{ '@id': 'fred', height: 6 }]
+    });
+  });
+
+  test('delete where must match all', async () => {
+    await api.transact<Subject>({ '@id': 'fred', name: 'Fred', height: 5 });
+    await api.transact<Update>({
+      '@delete': [{ '@id': 'fred', height: 5 }, { '@id': 'bambam' }]
+    });
+    await expect(api.get('fred'))
+      .resolves.toEqual({ '@id': 'fred', name: 'Fred', height: 5 });
+  });
+
+  test('inserts a subject by update', async () => {
+    const captureUpdate = api.follow().pipe(first()).toPromise();
+    await api.transact<Update>({ '@insert': { '@id': 'fred', name: 'Fred' } });
+    await expect(api.get('fred')).resolves.toBeDefined();
+    await expect(captureUpdate).resolves.toEqual({
+      '@ticks': 1,
+      '@delete': [],
+      '@insert': [{ '@id': 'fred', name: 'Fred' }]
+    });
+  });
+
   test('deletes a subject by path', async () => {
-    await api.transact({ '@id': 'fred', name: 'Fred' } as Subject);
+    await api.transact<Subject>({ '@id': 'fred', name: 'Fred' });
     const captureUpdate = api.follow().pipe(first()).toPromise();
     await api.delete('fred');
     await expect(api.get('fred')).resolves.toBeUndefined();
@@ -38,31 +106,50 @@ describe('Meld API', () => {
   });
 
   test('deletes a property by path', async () => {
-    await api.transact({ '@id': 'fred', name: 'Fred', wife: { '@id': 'wilma' } } as Subject);
+    await api.transact<Subject>({ '@id': 'fred', name: 'Fred', wife: { '@id': 'wilma' } });
     await api.delete('wilma');
     await expect(api.get('fred')).resolves.toEqual({ '@id': 'fred', name: 'Fred' });
   });
 
   test('deletes an object by path', async () => {
-    await api.transact({ '@id': 'fred', wife: { '@id': 'wilma' } } as Subject);
+    await api.transact<Subject>({ '@id': 'fred', wife: { '@id': 'wilma' } });
     await api.delete('wilma');
     await expect(api.get('fred')).resolves.toBeUndefined();
   });
 
   test('selects where', async () => {
-    await api.transact({ '@id': 'fred', name: 'Fred' } as Subject);
+    await api.transact<Subject>({ '@id': 'fred', name: 'Fred' });
     await expect(api.transact({
       '@select': '?f', '@where': { '@id': '?f', name: 'Fred' }
     } as Select))
       .resolves.toMatchObject([{ '?f': { '@id': 'fred' } }]);
   });
 
+  test('selects where union', async () => {
+    await api.transact<Group>({
+      '@graph': [
+        { '@id': 'fred', name: 'Fred' },
+        { '@id': 'wilma', name: 'Wilma' }
+      ]
+    });
+    await expect(api.transact<Select>({
+      '@select': '?s', '@where': {
+        '@union': [
+          { '@id': '?s', name: 'Wilma' },
+          { '@id': '?s', name: 'Fred' }
+        ]
+      }
+    })).resolves.toEqual(expect.arrayContaining([
+      expect.objectContaining({ '?s': { '@id': 'fred' } }),
+      expect.objectContaining({ '?s': { '@id': 'wilma' } })
+    ]));
+  });
+
   test('selects not found', async () => {
     await api.transact({ '@id': 'fred', name: 'Fred' } as Subject);
-    await expect(api.transact({
+    await expect(api.transact<Select>({
       '@select': '?w', '@where': { '@id': '?w', name: 'Wilma' }
-    } as Select))
-      .resolves.toEqual([]);
+    })).resolves.toEqual([]);
   });
 
   test('describes where', async () => {
