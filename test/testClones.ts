@@ -1,4 +1,4 @@
-import { MeldRemotes, DeltaMessage, MeldLocal, LiveValue } from '../src/m-ld';
+import { MeldRemotes, DeltaMessage, MeldLocal } from '../src/m-ld';
 import { mock, MockProxy } from 'jest-mock-extended';
 import { Observable, NEVER, BehaviorSubject, from, asapScheduler } from 'rxjs';
 import { Dataset, QuadStoreDataset } from '../src/dataset';
@@ -9,6 +9,7 @@ import { EventEmitter } from 'events';
 import { observeOn } from 'rxjs/operators';
 import { MeldConfig } from '../src';
 import { AbstractLevelDOWN } from 'abstract-leveldown';
+import { LiveValue } from '../src/LiveValue';
 
 export function testConfig(config?: Partial<MeldConfig>): MeldConfig {
   return { '@id': 'test', '@domain': 'test.m-ld.org', genesis: true, ...config };
@@ -16,7 +17,7 @@ export function testConfig(config?: Partial<MeldConfig>): MeldConfig {
 
 export function mockRemotes(
   updates: Observable<DeltaMessage> = NEVER,
-  lives: Array<boolean | null> | LiveValue<boolean | null> = [true],
+  lives: Array<boolean | null> | LiveValue<boolean | null> = [false],
   newClock: TreeClock = TreeClock.GENESIS): MeldRemotes {
   // This weirdness is due to jest-mock-extended trying to mock arrays
   return {

@@ -1,4 +1,5 @@
 import { MeldClone, Snapshot, DeltaMessage, MeldRemotes, MeldUpdate, MeldStatus, LiveStatus } from '../m-ld';
+import { liveRollup } from "../LiveValue";
 import { Pattern, Subject, isRead, isSubject, isGroup, isUpdate } from './jrql-support';
 import {
   Observable, merge, from, defer, EMPTY,
@@ -10,7 +11,7 @@ import { TreeClockMessageService } from '../messages';
 import { Dataset } from '.';
 import {
   publishReplay, refCount, filter, ignoreElements, takeUntil, tap,
-  isEmpty, finalize, flatMap, toArray, first, map, debounceTime, distinctUntilChanged, scan, expand, delayWhen
+  isEmpty, finalize, flatMap, toArray, map, debounceTime, distinctUntilChanged, expand, delayWhen, take, skipWhile
 } from 'rxjs/operators';
 import { delayUntil, Future, tapComplete, tapCount, SharableLock, fromArrayPromise } from '../util';
 import { levels } from 'loglevel';
@@ -50,8 +51,6 @@ export class DatasetClone extends AbstractMeld implements MeldClone {
     this.remoteUpdates = new RemoteUpdates(remotes);
     this.networkTimeout = config.networkTimeout ?? 5000;
     this.genesisClaim = config.genesis;
-    this.subs.add(this.status
-      .subscribe(status => this.log.debug(JSON.stringify(status))));
   }
 
   /**
@@ -77,8 +76,11 @@ export class DatasetClone extends AbstractMeld implements MeldClone {
     }
     this.log.info(`has time ${time}`);
     this.messageService = new TreeClockMessageService(time);
-    this.remoteUpdates.maybeOutdated(this.isGenesis);
     this.latestTicks.next(time.ticks);
+
+    // Log status changes
+    this.subs.add(this.status
+      .subscribe(status => this.log.debug(JSON.stringify(status))));
 
     // Create a stream of 'opportunities' to decide our liveness.
     // Each opportunity is a ConnectStyle: HARD to force re-connect.
@@ -99,12 +101,21 @@ export class DatasetClone extends AbstractMeld implements MeldClone {
       error: err => this.close(err),
       complete: () => this.close()
     }));
+
     if (this.newClone)
       // For a new non-genesis clone, the first connect is essential.
       await comesAlive(this);
     else
       // For any other clone, just wait for decided liveness.
       await comesAlive(this, 'notNull');
+  }
+
+  private get isGenesis(): boolean {
+    return this.localTime.isId;
+  }
+
+  private get localTime() {
+    return this.messageService.peek();
   }
 
   /**
@@ -145,16 +156,12 @@ export class DatasetClone extends AbstractMeld implements MeldClone {
     });
   }
 
-  get isGenesis(): boolean {
-    return this.localTime.isId;
-  }
-
   setLive(live: boolean) {
-    // We may already be revving-up
-    if (live && !this.remoteUpdates.state.value.attached)
+    if (live)
       this.remoteUpdates.attach();
-    else if (!live)
-      this.remoteUpdates.detach(this.isGenesis);
+    else
+      this.remoteUpdates.detach();
+    
     super.setLive(live);
   }
 
@@ -171,18 +178,20 @@ export class DatasetClone extends AbstractMeld implements MeldClone {
       // liveness change.
       this.liveLock.acquire(this.id, async () => {
         const remotesLive = this.remotes.live.value;
-        if (remotesLive === false && this.newClone) {
-          throw new Error('New clone is siloed.');
-        } else if (remotesLive === true) {
+        if (remotesLive === true) {
+          if (this.isGenesis)
+            throw new Error('Genesis clone trying to join a live domain.');
           // Connect in the live lock
           this.connect(style, retrySubscriber);
+        } else if (remotesLive === false) {
+          if (this.newClone)
+            throw new Error('New clone is siloed.');
+          // We are a silo, the last survivor. Stay live for any newcomers.
+          this.setLive(true);
+          retrySubscriber.complete();
         } else if (remotesLive === null) {
           // We are partitioned from the domain.
           this.setLive(false);
-          retrySubscriber.complete();
-        } else if (remotesLive === false) {
-          // We are a silo, the last survivor. Stay live for any newcomers.
-          this.setLive(true);
           retrySubscriber.complete();
         }
       }).catch(err => retrySubscriber.error(err));
@@ -197,11 +206,10 @@ export class DatasetClone extends AbstractMeld implements MeldClone {
   private async connect(style: ConnectStyle, retrySubscriber: Subscriber<ConnectStyle>) {
     this.log.info('Connecting to remotes');
     try {
-      // At this point we are uncertain whether we will fully attach
-      this.remoteUpdates.maybeOutdated(this.isGenesis);
       await this.flushUndeliveredOperations();
-      // If silo (already live), or top-level is Id (never been forked), no rev-up to do
-      if ((style == ConnectStyle.SOFT && this.live.value) || this.isGenesis) {
+      // If silo (already live), no rev-up to do
+      if (style == ConnectStyle.SOFT && this.live.value) {
+        this.log.info('Silo attaching to domain');
         this.remoteUpdates.attach();
       } else if (this.newClone) {
         this.log.info('New clone requesting snapshot');
@@ -355,10 +363,6 @@ export class DatasetClone extends AbstractMeld implements MeldClone {
           this.log.debug('Sending update', msg)));
   }
 
-  private get localTime() {
-    return this.messageService.peek();
-  }
-
   @AbstractMeld.checkNotClosed.rx
   transact(request: Pattern): Observable<Subject> {
     if (isRead(request)) {
@@ -389,26 +393,38 @@ export class DatasetClone extends AbstractMeld implements MeldClone {
   }
 
   get status(): LiveStatus {
-    const getValue: () => MeldStatus = () => ({
-      online: this.remotes.live.value != null,
-      outdated: this.remoteUpdates.state.value.outdated,
-      ticks: this.latestTicks.value
+    const stateRollup = liveRollup({
+      live: this.live,
+      remotesLive: this.remotes.live,
+      remoteState: this.remoteUpdates.state,
+      ticks: this.latestTicks
     });
+    const toStatus = (state: typeof stateRollup['value']): MeldStatus => {
+      const silo = state.live === true && state.remotesLive === false;
+      return ({
+        online: state.remotesLive != null,
+        // If genesis, never outdated.
+        // If revving-up, always outdated.
+        // If detached, outdated if not silo.
+        outdated: !this.isGenesis &&
+          (state.remoteState.revvingUp ||
+            (!state.remoteState.attached && !silo)),
+        silo, ticks: state.ticks
+      });
+    };
     const matchStatus = (status: MeldStatus, match?: Partial<MeldStatus>) =>
-      (match?.online == null || match.online === status.online) &&
-      (match?.outdated == null || match.outdated === status.outdated);
-    // First value must be deferred until the observable is subscribed
-    const values = defer(() => merge(
-      this.remotes.live.pipe(map(live => ({ online: live != null }))),
-      this.remoteUpdates.state.pipe(map(state => ({ outdated: state.outdated })))
-    ).pipe(
-      scan((prev, next) => ({ ...prev, ...next, ticks: this.latestTicks.value }), getValue()),
-      distinctUntilChanged<MeldStatus>(matchStatus)));
+      (match?.online === undefined || match.online === status.online) &&
+      (match?.outdated === undefined || match.outdated === status.outdated) &&
+      (match?.silo === undefined || match.silo === status.silo);
+    const values = stateRollup.pipe(
+      skipWhile(() => this.messageService == null),
+      map(toStatus),
+      distinctUntilChanged<MeldStatus>(matchStatus));
     const becomes = async (match?: Partial<MeldStatus>) =>
-      values.pipe(first(status => matchStatus(status, match))).toPromise();
+      values.pipe(filter(status => matchStatus(status, match)), take(1)).toPromise();
     return Object.defineProperties(values, {
       becomes: { value: becomes },
-      value: { get: getValue }
+      value: { get: () => toStatus(stateRollup.value) }
     });
   }
 

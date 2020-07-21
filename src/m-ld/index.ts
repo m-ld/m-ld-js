@@ -8,6 +8,7 @@ import { Quad } from 'rdf-js';
 import { Hash } from '../hash';
 import { Pattern, Subject } from '../dataset/jrql-support';
 import { Future } from '../util';
+import { LiveValue } from '../LiveValue';
 const inspect = Symbol.for('nodejs.util.inspect.custom');
 
 /**
@@ -43,8 +44,6 @@ export class DeltaMessage implements Message<TreeClock, JsonDelta> {
 }
 
 export type UUID = string;
-
-export type LiveValue<T> = Observable<T> & { readonly value: T };
 
 export interface Meld {
   /**
@@ -118,7 +117,7 @@ export interface MeldUpdate extends DeleteInsert<Subject[]> {
 }
 
 export type LiveStatus = LiveValue<MeldStatus> & {
-  becomes: ((match?: Partial<MeldStatus>) => Promise<MeldStatus>);
+  becomes: ((match?: Partial<MeldStatus>) => Promise<MeldStatus | undefined>);
 };
 
 export interface MeldStore {
@@ -138,9 +137,18 @@ export interface MeldStatus {
    */
   online: boolean;
   /**
-   * Whether the clone needs to catch-up with the latest updates from the domain. 
+   * Whether the clone needs to catch-up with the latest updates from the
+   * domain. For convenience, this flag will have the value `false` in
+   * indeterminate scenarios such as if there are no other live clones on the
+   * domain (this is a "silo").
    */
   outdated: boolean;
+  /**
+   * Whether this clone is the only one attached to a domain. Being a silo may
+   * be a danger to data safety, as any changes made to a silo clone are not
+   * being backed-up on any other clone.
+   */
+  silo: boolean;
   /**
    * Current local clock ticks at the time of the status change. This can be
    * used in a subsequent call to {@link MeldStore.follow}, to ensure no updates

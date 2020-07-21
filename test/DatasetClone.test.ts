@@ -23,25 +23,19 @@ describe('Dataset clone', () => {
     test('starts offline with unknown remotes', async () => {
       const clone = await genesis(mockRemotes(NEVER, [null]));
       expect(clone.live.value).toBe(false);
-      expect(clone.status.value).toEqual({ online: false, outdated: false, ticks: 0 });
-    });
-
-    test('connects if remotes live', async () => {
-      const clone = await genesis(mockRemotes(NEVER, [true]));
-      await expect(comesAlive(clone)).resolves.toBe(true);
-      expect(clone.status.value).toEqual({ online: true, outdated: false, ticks: 0 });
+      expect(clone.status.value).toEqual({ online: false, outdated: false, silo: false, ticks: 0 });
     });
 
     test('comes alive if siloed', async () => {
       const clone = await genesis(mockRemotes(NEVER, [null, false]));
       await expect(comesAlive(clone)).resolves.toBe(true);
-      expect(clone.status.value).toEqual({ online: true, outdated: false, ticks: 0 });
+      expect(clone.status.value).toEqual({ online: true, outdated: false, silo: true, ticks: 0 });
     });
 
     test('stays live without reconnect if siloed', async () => {
       const clone = await genesis(mockRemotes(NEVER, [true, false]));
       await expect(comesAlive(clone)).resolves.toBe(true);
-      expect(clone.status.value).toEqual({ online: true, outdated: false, ticks: 0 });
+      expect(clone.status.value).toEqual({ online: true, outdated: false, silo: true, ticks: 0 });
     });
 
     test('non-genesis fails to initialise if siloed', async () => {
@@ -86,7 +80,7 @@ describe('Dataset clone', () => {
     });
 
     test('has no ticks from genesis', async () => {
-      expect(silo.status.value).toEqual({ online: true, outdated: false, ticks: 0 });
+      expect(silo.status.value).toEqual({ online: true, outdated: false, silo: true, ticks: 0 });
     });
 
     test('has ticks after update', async () => {
@@ -95,7 +89,7 @@ describe('Dataset clone', () => {
         'http://test.m-ld.org/#name': 'Fred'
       } as Subject);
       await silo.follow().pipe(first()).toPromise();
-      expect(silo.status.value).toEqual({ online: true, outdated: false, ticks: 1 });
+      expect(silo.status.value).toEqual({ online: true, outdated: false, silo: true, ticks: 1 });
     });
   });
 
@@ -105,12 +99,18 @@ describe('Dataset clone', () => {
     let remoteUpdates: Source<DeltaMessage> = new Source;
 
     beforeEach(async () => {
-      // Ensure that remote updates are async
+      const remotesLive = hotLive([false]);
       clone = new DatasetClone(await memStore(),
-        mockRemotes(remoteUpdates.pipe(observeOn(asapScheduler))), testConfig());
+        // Ensure that remote updates are async
+        mockRemotes(remoteUpdates.pipe(observeOn(asapScheduler)), remotesLive), testConfig());
       await clone.initialise();
-      await comesAlive(clone);
-      remoteTime = await clone.newClock();
+      await comesAlive(clone); // genesis is alive
+      remoteTime = await clone.newClock(); // no longer genesis
+      remotesLive.next(true); // remotes come alive
+    });
+
+    test('comes online as not silo', async () => {
+      await expect(clone.status.becomes({ online: true, silo: false })).resolves.toBeDefined();
     });
 
     test('ticks increase monotonically', async () => {
@@ -159,10 +159,7 @@ describe('Dataset clone', () => {
       const clone = new DatasetClone(await memStore(), remotes, testConfig({ genesis: false }));
       await clone.initialise();
       remotesLive.next(false);
-      // Being a silo involves no visible change of state. Just check that we're
-      // alive a few ticks hence.
-      await expect(new Promise(res => setTimeout(
-        () => res(clone.live.value), 1))).resolves.toBe(true);
+      await expect(clone.status.becomes({ silo: true })).resolves.toBeDefined();
     });
   });
 
@@ -183,7 +180,7 @@ describe('Dataset clone', () => {
 
     test('is outdated while revving-up', async () => {
       // Re-start on the same data, with a rev-up that never completes
-      const remotes = mockRemotes();
+      const remotes = mockRemotes(NEVER, [true]);
       remotes.revupFrom = async () => NEVER;
       const clone = new DatasetClone(await memStore(ldb), remotes, testConfig());
 
@@ -192,15 +189,15 @@ describe('Dataset clone', () => {
 
       await clone.initialise();
 
-      expect(clone.status.value).toEqual({ online: true, outdated: true, ticks: 0 });
+      expect(clone.status.value).toEqual({ online: true, outdated: true, silo: false, ticks: 0 });
       await expect(Promise.race([everNotOutdated, Promise.resolve()])).resolves.toBeUndefined();
     });
 
     test('is not outdated when revved-up', async () => {
       // Re-start on the same data, with a rev-up that never completes
-      const remotes = mockRemotes();
+      const remotes = mockRemotes(NEVER, [true]);
       remotes.revupFrom = async () => EMPTY;
-      const clone = new DatasetClone(await memStore(ldb), remotes, testConfig());
+      const clone = new DatasetClone(await memStore(ldb), remotes, testConfig({ logLevel: 'DEBUG' }));
 
       // Check that we do transition through an outdated state
       const wasOutdated = clone.status.becomes({ outdated: true });
@@ -208,11 +205,12 @@ describe('Dataset clone', () => {
       await clone.initialise();
 
       await expect(wasOutdated).resolves.toMatchObject({ online: true, outdated: true });
-      expect(clone.status.value).toEqual({ online: true, outdated: false, ticks: 0 });
+      await expect(clone.status.becomes({ outdated: false }))
+        .resolves.toEqual({ online: true, outdated: false, silo: false, ticks: 0 });
     });
 
     test('immediately re-connects if rev-up fails', async () => {
-      const remotes = mockRemotes();
+      const remotes = mockRemotes(NEVER, [true]);
       const revupFrom = jest.fn()
         .mockReturnValueOnce(Promise.resolve(throwError('boom')))
         .mockReturnValueOnce(Promise.resolve(EMPTY));

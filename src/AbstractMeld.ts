@@ -1,4 +1,5 @@
-import { Meld, Snapshot, DeltaMessage, LiveValue } from './m-ld';
+import { Meld, Snapshot, DeltaMessage } from './m-ld';
+import { LiveValue } from "./LiveValue";
 import { TreeClock } from './clocks';
 import { Observable, Subject as Source, BehaviorSubject, asapScheduler, of } from 'rxjs';
 import { observeOn, tap, distinctUntilChanged, first, skip, catchError } from 'rxjs/operators';
