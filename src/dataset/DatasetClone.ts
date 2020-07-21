@@ -11,7 +11,8 @@ import { TreeClockMessageService } from '../messages';
 import { Dataset } from '.';
 import {
   publishReplay, refCount, filter, ignoreElements, takeUntil, tap,
-  isEmpty, finalize, flatMap, toArray, map, debounceTime, distinctUntilChanged, expand, delayWhen, take, skipWhile
+  isEmpty, finalize, flatMap, toArray, map, debounceTime,
+  distinctUntilChanged, expand, delayWhen, take, skipWhile
 } from 'rxjs/operators';
 import { delayUntil, Future, tapComplete, tapCount, SharableLock, fromArrayPromise } from '../util';
 import { levels } from 'loglevel';
@@ -51,6 +52,7 @@ export class DatasetClone extends AbstractMeld implements MeldClone {
     this.remoteUpdates = new RemoteUpdates(remotes);
     this.networkTimeout = config.networkTimeout ?? 5000;
     this.genesisClaim = config.genesis;
+    this.subs.add(this.status.subscribe(status => this.log.debug(status)));
   }
 
   /**
@@ -78,9 +80,14 @@ export class DatasetClone extends AbstractMeld implements MeldClone {
     this.messageService = new TreeClockMessageService(time);
     this.latestTicks.next(time.ticks);
 
-    // Log status changes
-    this.subs.add(this.status
-      .subscribe(status => this.log.debug(JSON.stringify(status))));
+    // Revving-up will inject missed messages so the ordering buffer is
+    // redundant, even if the remotes were previously attached.
+    this.subs.add(this.remoteUpdates.state.subscribe(next => {
+      if (next.revvingUp && this.orderingBuffer.length > 0) {
+        this.log.info(`Discarding ${this.orderingBuffer.length} items from ordering buffer`);
+        this.orderingBuffer.length = 0;
+      }
+    }));
 
     // Create a stream of 'opportunities' to decide our liveness.
     // Each opportunity is a ConnectStyle: HARD to force re-connect.
@@ -132,7 +139,7 @@ export class DatasetClone extends AbstractMeld implements MeldClone {
       // After the debounce, check if still buffering
       filter(() => {
         if (this.orderingBuffer.length > 0) {
-          // We're missing messages that have been receieved by others.
+          // We're missing messages that have been received by others.
           // Let's re-connect to see if we can get back on track.
           this.log.warn('Messages are out of order and backing up. Re-connecting.');
           return true;
@@ -161,7 +168,7 @@ export class DatasetClone extends AbstractMeld implements MeldClone {
       this.remoteUpdates.attach();
     else
       this.remoteUpdates.detach();
-    
+
     super.setLive(live);
   }
 

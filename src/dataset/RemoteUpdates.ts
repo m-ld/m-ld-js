@@ -4,7 +4,7 @@ import { Observable, merge, NEVER, BehaviorSubject, defer } from 'rxjs';
 import { switchAll } from 'rxjs/operators';
 import { delayUntil, Future, tapLast, onErrorNever } from '../util';
 
-export interface AttachStatus {
+export interface AttachState {
   attached: boolean;
   revvingUp: boolean;
 }
@@ -14,7 +14,7 @@ export class RemoteUpdates {
   // Note this is a behaviour subject because the subscribe from the
   // DatasetClone happens after the remote updates are attached
   private readonly remoteUpdates = new BehaviorSubject<Observable<DeltaMessage>>(NEVER);
-  private readonly attachState = new BehaviorSubject<AttachStatus>({
+  private readonly attachState = new BehaviorSubject<AttachState>({
     attached: false, revvingUp: false
   });
 
@@ -23,7 +23,7 @@ export class RemoteUpdates {
     this.receiving = this.remoteUpdates.pipe(switchAll());
   }
 
-  get state(): LiveValue<AttachStatus> {
+  get state(): LiveValue<AttachState> {
     return this.attachState;
   }
 
