@@ -158,17 +158,14 @@ export class SuSetDataset extends JrqlGraph {
       id: 'suset-ops-since',
       prepare: async () => {
         const journal = await this.journal.state();
+        // How many ticks of mine has the requester seen?
         const ticks = time.getTicks(journal.time);
         const found = ticks != null ? await journal.findEntry(ticks) : '';
-        if (found) {
-          return {
-            value: new Observable(subs =>
-              // Don't emit an entry if it's all less than the requested time
-              this.emitJournalFrom(found, subs, entry => time.anyLt(entry.time, 'includeIds')))
-          };
-        } else {
-          return { value: undefined };
-        }
+        return {
+          value: found ? new Observable(subs =>
+            // Don't emit an entry if it's all less than the requested time
+            this.emitJournalFrom(found, subs, entry => time.anyLt(entry.time, 'includeIds'))) : undefined
+        };
       }
     });
   }

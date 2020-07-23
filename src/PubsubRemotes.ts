@@ -47,6 +47,10 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
   private readonly consuming: { [address: string]: Source<any> } = {};
   private readonly sendTimeout: number;
   private readonly activity: Set<PromiseLike<void>> = new Set;
+  /**
+   * This is separate to liveness because decided liveness requires presence,
+   * which happens after connection. Connected =/=> decided liveness.
+   */
   private connected = new BehaviorSubject<boolean>(false);
 
   constructor(config: MeldConfig) {
