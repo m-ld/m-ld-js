@@ -5,7 +5,6 @@ import { HashBagBlock } from '../blocks';
 import { Hash } from '../hash';
 import { compact, toRDF } from 'jsonld';
 import { rdfToJson } from '../util';
-import { TreeClock } from '../clocks';
 
 namespace meld {
   export const $id = 'http://m-ld.org';

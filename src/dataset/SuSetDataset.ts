@@ -114,17 +114,6 @@ export class SuSetDataset extends JrqlGraph {
     return tail.hash;
   }
 
-  @SuSetDataset.checkNotClosed.rx
-  undeliveredLocalOperations(): Observable<DeltaMessage> {
-    return new Observable(subs => {
-      this.journal.state()
-        .then(journal => journal.lastDelivered())
-        .then(last => last.next())
-        .then(next => this.emitJournalFrom(next, subs, entry => !entry.remote))
-        .catch(err => subs.error(err));
-    });
-  }
-
   private emitJournalFrom(entry: SuSetJournalEntry | undefined,
     subs: Observer<DeltaMessage>, filter: (entry: SuSetJournalEntry) => boolean) {
     if (subs.closed == null || !subs.closed) {
@@ -132,12 +121,9 @@ export class SuSetDataset extends JrqlGraph {
         if (this.dataset.closed) {
           subs.error(new MeldError('Clone has closed'));
         } else {
-          if (filter(entry)) {
-            const delta = new DeltaMessage(entry.time, entry.delta);
-            delta.delivered
-              .then(() => this.markDelivered(entry), err => subs.error(err));
-            subs.next(delta);
-          }
+          if (filter(entry))
+            subs.next(new DeltaMessage(entry.time, entry.delta));
+          
           entry.next().then(next => this.emitJournalFrom(next, subs, filter),
             err => subs.error(err));
         }
@@ -148,9 +134,8 @@ export class SuSetDataset extends JrqlGraph {
   }
 
   /**
-   * A revup requester will have just sent out any undelivered updates.
-   * To ensure we have processed those (relying on the message layer ordering)
-   * we always process a revup request in a transaction lock.
+   * To ensure we have processed any prior updates we always process a revup
+   * request in a transaction lock.
    */
   @SuSetDataset.checkNotClosed.async
   async operationsSince(time: TreeClock): Promise<Observable<DeltaMessage> | undefined> {
@@ -193,7 +178,6 @@ export class SuSetDataset extends JrqlGraph {
         txc.sw.next('journal');
         const { patch: journaling, entry } = await this.journal.nextEntry(delta, time);
         const deltaMsg = new DeltaMessage(time, delta.json);
-        deltaMsg.delivered.then(() => this.markDelivered(entry));
         return {
           patch: this.transactionPatch(time, patch, allTidsPatch, tidPatch, journaling),
           value: deltaMsg
@@ -384,13 +368,6 @@ export class SuSetDataset extends JrqlGraph {
           return {}; // No patch to apply
         }
       }).catch(reject);
-    });
-  }
-
-  private async markDelivered(entry: SuSetJournalEntry) {
-    this.dataset.transact({
-      id: 'delta-delivery',
-      prepare: async () => ({ patch: await entry.markDelivered() })
     });
   }
 }

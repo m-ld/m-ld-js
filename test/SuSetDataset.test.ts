@@ -49,10 +49,6 @@ describe('SU-Set Dataset', () => {
       expect(await ssd.loadClock()).toBeNull();
     });
 
-    test('has no unsent operations', async () => {
-      await expect(ssd.undeliveredLocalOperations().toPromise()).resolves.toBeUndefined();
-    });
-
     describe('with an initial time', () => {
       let { left: localTime, right: remoteTime } = TreeClock.GENESIS.forked();
 
@@ -134,10 +130,6 @@ describe('SU-Set Dataset', () => {
         test('answers the new time', async () => {
           const newTime = await ssd.loadClock();
           expect(newTime && newTime.equals(localTime)).toBe(true);
-        });
-
-        test('has an unsent operation', async () => {
-          await expect(ssd.undeliveredLocalOperations().toPromise()).resolves.toBeDefined();
         });
 
         test('answers a snapshot', async () => {

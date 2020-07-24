@@ -16,7 +16,6 @@ interface Journal {
 
 interface JournalBody {
   tail: JournalEntry['@id'];
-  lastDelivered: JournalEntry['@id'];
   time: any; // JSON-encoded TreeClock (the local clock)
 }
 
@@ -122,11 +121,6 @@ export class SuSetJournalEntry {
     };
   }
 
-  async markDelivered() {
-    // It's actually the journal that keeps track of the last delivered entry
-    return (await this.journal.state()).markDelivered(this);
-  }
-
   private updateBody(update: Partial<JournalEntryBody>): Promise<PatchQuads> {
     return this.journal.graph.write({
       '@delete': { '@id': this.id, body: this.data.body },
@@ -158,14 +152,6 @@ export class SuSetJournalState {
     return this.entry(this.body.tail);
   }
 
-  async lastDelivered(): Promise<SuSetJournalEntry> {
-    return this.entry(this.body.lastDelivered);
-  }
-
-  async markDelivered(entry: SuSetJournalEntry) {
-    return this.updateBody({ lastDelivered: entry.id });
-  }
-
   async findEntry(ticks: number) {
     const foundId = await this.journal.graph.find1<JournalEntry>({ ticks });
     return foundId ? this.entry(foundId) : null;
@@ -182,10 +168,7 @@ export class SuSetJournalState {
   }
 
   static initState(headEntry: Partial<JournalEntry>, localTime?: TreeClock): Subject {
-    const body: Partial<JournalBody> = {
-      lastDelivered: headEntry['@id'],
-      tail: headEntry['@id']
-    };
+    const body: Partial<JournalBody> = { tail: headEntry['@id'] };
     if (localTime != null)
       body.time = localTime.toJson();
     return { '@id': 'qs:journal', body: JSON.stringify(body) };

@@ -70,9 +70,9 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
       // Start sending updates from the local clone to the remotes
       clone.updates.subscribe({
         next: async msg => {
-          // If we are not live, we just ignore updates.
+          // If we are not connected, we just ignore updates.
           // They will be replayed from the clone's journal on re-connection.
-          if (this.live.value) {
+          if (this.connected.value) {
             try {
               // Delta received from the local clone. Relay to the domain
               await this.publishDelta(msg.toJson());
@@ -407,16 +407,19 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
   private produce<T>(data: Observable<T>, subAddress: string,
     datumToJson: (datum: T) => Promise<object> | T, type: string) {
     const notifier = this.notifier(subAddress);
-    const notify = (notification: JsonNotification) => {
+    const notify = async (notification: JsonNotification) => {
       if (notification.error)
         this.log.warn('Notifying error on', subAddress, notification.error);
       else if (notification.complete)
         this.log.debug('Completed production of', type);
-      return notifier.publish(notification)
-        // If notifications fail due to channel death, the recipient will find out
-        // from the broker so here we make best efforts to notify an error and
-        // then give up.
-        .catch((error: any) => notifier.publish({ error: toJson(error) }));
+      try {
+        return notifier.publish(notification);
+      } catch (error) {
+        // If notifications fail due to channel death, the recipient will find
+        // out from the broker so here we make best efforts to notify an error
+        // and then give up.
+        return notifier.publish({ error: toJson(error) });
+      }
     };
     return data.pipe(
       // concatMap guarantees delivery ordering despite toJson promise ordering
