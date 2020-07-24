@@ -5,7 +5,7 @@ import { generate as uuid } from 'short-uuid';
 import { Response, Request } from './m-ld/ControlMessage';
 import { Future, toJson, Stopwatch, shortId } from './util';
 import { finalize, flatMap, reduce, toArray, first, concatMap, materialize, timeout } from 'rxjs/operators';
-import { toMeldJson, fromMeldJson } from './m-ld/MeldJson';
+import { MeldJson } from './m-ld/MeldJson';
 import { MeldError, MeldErrorStatus } from './m-ld/MeldError';
 import { AbstractMeld } from './AbstractMeld';
 import { MeldConfig } from '.';
@@ -38,7 +38,7 @@ export interface SubPubsub extends SubPub {
 }
 
 export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes {
-  protected readonly domain: string;
+  protected readonly meldJson: MeldJson;
   private readonly localClone = new BehaviorSubject<MeldLocal | null>(null);
   private readonly replyResolvers: {
     [messageId: string]: [(res: Response | null) => void, PromiseLike<void> | null]
@@ -55,7 +55,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
 
   constructor(config: MeldConfig) {
     super(config['@id'], config.logLevel ?? 'info');
-    this.domain = config['@domain'];
+    this.meldJson = new MeldJson(config['@domain']);
     this.sendTimeout = config.networkTimeout ?? 5000;
   }
 
@@ -149,7 +149,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     sw.next('consume');
     // Subscribe in parallel (subscription can be slow)
     const [quads, tids, updates] = await Promise.all([
-      this.consume(res.quadsAddress, fromMeldJson, 'failIfSlow'),
+      this.consume(res.quadsAddress, this.meldJson.fromMeldJson, 'failIfSlow'),
       this.consume<UUID[]>(res.tidsAddress, identity, 'failIfSlow'),
       this.consume(res.updatesAddress, deltaFromJson)
     ]);
@@ -302,7 +302,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     const sender = await this.nextSender(messageId);
     if (sender == null) {
       throw new MeldError('No visible clones',
-        `No-one present on ${this.domain} to send message to`);
+        `No-one present on ${this.meldJson.domain} to send message to`);
     } else if (sender.id in tried) {
       // If we have already tried this address, we've tried everyone; return
       // whatever the last response was.
@@ -369,7 +369,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     ), 'expectAck');
     // Ack has been sent, start streaming the data and updates concurrently
     await Promise.all([
-      this.produce(quads, quadsAddress, toMeldJson, 'snapshot'),
+      this.produce(quads, quadsAddress, this.meldJson.toMeldJson, 'snapshot'),
       this.produce(tids, tidsAddress, identity, 'tids'),
       this.produce(updates, updatesAddress, jsonFromDelta, 'updates')
     ]);

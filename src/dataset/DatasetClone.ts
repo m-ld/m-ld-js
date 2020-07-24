@@ -43,7 +43,7 @@ export class DatasetClone extends AbstractMeld implements MeldClone {
     remotes: MeldRemotes,
     config: MeldConfig) {
     super(config['@id'], config.logLevel);
-    this.dataset = new SuSetDataset(config['@id'], dataset, config.logLevel);
+    this.dataset = new SuSetDataset(dataset, config);
     this.subs.add(this.dataset.updates
       .pipe(map(update => update['@ticks']))
       .subscribe(this.latestTicks));

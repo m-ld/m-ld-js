@@ -8,8 +8,21 @@ import { PubsubRemotes, SubPubsub, SubPub, DirectParams, ReplyParams } from '../
 import { Observable, from, identity } from 'rxjs';
 import { flatMap, filter, map } from 'rxjs/operators';
 
+export interface AblyMeldConfig extends Omit<Ably.Types.ClientOptions, 'echoMessages' | 'clientId'> {
+  /**
+   * Max message rate in Hertz. Default is 35 for the free tier.
+   * @see https://support.ably.com/support/solutions/articles/3000079684
+   */
+  maxRate?: number;
+  /**
+   * Max message size in bytes. Default is 16K for the free tier.
+   * @see https://support.ably.com/support/solutions/articles/3000035792
+   */
+  maxSize?: number;
+}
+
 export interface MeldAblyConfig extends MeldConfig {
-  ably: Omit<Ably.Types.ClientOptions, 'echoMessages' | 'clientId'>;
+  ably: AblyMeldConfig;
 }
 
 interface SendTypeParams extends DirectParams { type: '__send'; }
@@ -55,7 +68,7 @@ export class AblyRemotes extends PubsubRemotes {
 
   private channelName(id: string) {
     // https://www.ably.io/documentation/realtime/channels#channel-namespaces
-    return `${this.domain}:${id}`;
+    return `${this.meldJson.domain}:${id}`;
   }
 
   private async onDirectMessage(message: Ably.Types.Message): Promise<void> {

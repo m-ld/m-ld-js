@@ -7,6 +7,7 @@ import { map, flatMap, toArray as rxToArray, take } from 'rxjs/operators';
 import { flatten } from 'jsonld';
 import { toArray, shortId } from '../util';
 import { Iri } from 'jsonld/jsonld-spec';
+import { DomainContext } from './MeldJson';
 
 export { MeldUpdate };
   
@@ -20,9 +21,7 @@ export class MeldApi implements MeldStore {
   constructor(domain: string, context: Context | null, readonly store: MeldStore) {
     if (!/^[a-z0-9_]+([\-.][a-z0-9_]+)*\.[a-z]{2,6}$/.test(domain))
       throw new Error('Domain not specified or not valid');
-
-    this.context = { '@base': `http://${domain}/`, ...context };
-    this.context['@vocab'] = this.context['@vocab'] || new URL('/#', this.context['@base']).href;
+    this.context = new DomainContext(domain, context);
   }
 
   close(err?: any): Promise<void> {
