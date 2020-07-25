@@ -42,6 +42,7 @@ describe('Ably remotes', () => {
     operations = mock<Ably.Types.RealtimeChannelPromise>();
     client.channels.get.calledWith('test.m-ld.org:operations').mockReturnValue(operations);
     operations.subscribe.mockReturnValue(Promise.resolve());
+    operations.publish.mockReturnValue(Promise.resolve());
     operations.presence.subscribe.mockReturnValue(Promise.resolve());
     operations.presence.get.mockReturnValue(Promise.resolve([]));
 
