@@ -5,7 +5,7 @@ import { generate as uuid } from 'short-uuid';
 import { Response, Request } from './m-ld/ControlMessage';
 import { Future, toJson, Stopwatch, shortId } from './util';
 import { finalize, flatMap, reduce, toArray, first, concatMap, materialize, timeout } from 'rxjs/operators';
-import { toMeldJson, fromMeldJson } from './m-ld/MeldJson';
+import { MeldJson } from './m-ld/MeldJson';
 import { MeldError, MeldErrorStatus } from './m-ld/MeldError';
 import { AbstractMeld } from './AbstractMeld';
 import { MeldConfig } from '.';
@@ -38,7 +38,7 @@ export interface SubPubsub extends SubPub {
 }
 
 export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes {
-  protected readonly domain: string;
+  protected readonly meldJson: MeldJson;
   private readonly localClone = new BehaviorSubject<MeldLocal | null>(null);
   private readonly replyResolvers: {
     [messageId: string]: [(res: Response | null) => void, PromiseLike<void> | null]
@@ -47,11 +47,15 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
   private readonly consuming: { [address: string]: Source<any> } = {};
   private readonly sendTimeout: number;
   private readonly activity: Set<PromiseLike<void>> = new Set;
+  /**
+   * This is separate to liveness because decided liveness requires presence,
+   * which happens after connection. Connected =/=> decided liveness.
+   */
   private connected = new BehaviorSubject<boolean>(false);
 
   constructor(config: MeldConfig) {
     super(config['@id'], config.logLevel ?? 'info');
-    this.domain = config['@domain'];
+    this.meldJson = new MeldJson(config['@domain']);
     this.sendTimeout = config.networkTimeout ?? 5000;
   }
 
@@ -66,9 +70,9 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
       // Start sending updates from the local clone to the remotes
       clone.updates.subscribe({
         next: async msg => {
-          // If we are not live, we just ignore updates.
+          // If we are not connected, we just ignore updates.
           // They will be replayed from the clone's journal on re-connection.
-          if (this.live.value) {
+          if (this.connected.value) {
             try {
               // Delta received from the local clone. Relay to the domain
               await this.publishDelta(msg.toJson());
@@ -145,7 +149,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     sw.next('consume');
     // Subscribe in parallel (subscription can be slow)
     const [quads, tids, updates] = await Promise.all([
-      this.consume(res.quadsAddress, fromMeldJson, 'failIfSlow'),
+      this.consume(res.quadsAddress, this.meldJson.fromMeldJson, 'failIfSlow'),
       this.consume<UUID[]>(res.tidsAddress, identity, 'failIfSlow'),
       this.consume(res.updatesAddress, deltaFromJson)
     ]);
@@ -298,7 +302,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     const sender = await this.nextSender(messageId);
     if (sender == null) {
       throw new MeldError('No visible clones',
-        `No-one present on ${this.domain} to send message to`);
+        `No-one present on ${this.meldJson.domain} to send message to`);
     } else if (sender.id in tried) {
       // If we have already tried this address, we've tried everyone; return
       // whatever the last response was.
@@ -365,7 +369,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     ), 'expectAck');
     // Ack has been sent, start streaming the data and updates concurrently
     await Promise.all([
-      this.produce(quads, quadsAddress, toMeldJson, 'snapshot'),
+      this.produce(quads, quadsAddress, this.meldJson.toMeldJson, 'snapshot'),
       this.produce(tids, tidsAddress, identity, 'tids'),
       this.produce(updates, updatesAddress, jsonFromDelta, 'updates')
     ]);
@@ -403,16 +407,19 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
   private produce<T>(data: Observable<T>, subAddress: string,
     datumToJson: (datum: T) => Promise<object> | T, type: string) {
     const notifier = this.notifier(subAddress);
-    const notify = (notification: JsonNotification) => {
+    const notify = async (notification: JsonNotification) => {
       if (notification.error)
         this.log.warn('Notifying error on', subAddress, notification.error);
       else if (notification.complete)
         this.log.debug('Completed production of', type);
-      return notifier.publish(notification)
-        // If notifications fail due to channel death, the recipient will find out
-        // from the broker so here we make best efforts to notify an error and
-        // then give up.
-        .catch((error: any) => notifier.publish({ error: toJson(error) }));
+      try {
+        return notifier.publish(notification);
+      } catch (error) {
+        // If notifications fail due to channel death, the recipient will find
+        // out from the broker so here we make best efforts to notify an error
+        // and then give up.
+        return notifier.publish({ error: toJson(error) });
+      }
     };
     return data.pipe(
       // concatMap guarantees delivery ordering despite toJson promise ordering

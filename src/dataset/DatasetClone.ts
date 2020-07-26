@@ -43,7 +43,7 @@ export class DatasetClone extends AbstractMeld implements MeldClone {
     remotes: MeldRemotes,
     config: MeldConfig) {
     super(config['@id'], config.logLevel);
-    this.dataset = new SuSetDataset(config['@id'], dataset, config.logLevel);
+    this.dataset = new SuSetDataset(dataset, config);
     this.subs.add(this.dataset.updates
       .pipe(map(update => update['@ticks']))
       .subscribe(this.latestTicks));
@@ -213,7 +213,6 @@ export class DatasetClone extends AbstractMeld implements MeldClone {
   private async connect(style: ConnectStyle, retrySubscriber: Subscriber<ConnectStyle>) {
     this.log.info('Connecting to remotes');
     try {
-      await this.flushUndeliveredOperations();
       // If silo (already live), no rev-up to do
       if (style == ConnectStyle.SOFT && this.live.value) {
         this.log.info('Silo attaching to domain');
@@ -268,10 +267,6 @@ export class DatasetClone extends AbstractMeld implements MeldClone {
    * @see decideLive return value
    */
   private async requestSnapshot(retrySubscriber: Subscriber<ConnectStyle>) {
-    // If there are unsent operations, we would lose data
-    if (!(await this.dataset.undeliveredLocalOperations().pipe(isEmpty()).toPromise()))
-      throw new MeldError('Unsent updates');
-
     const snapshot = await this.remotes.snapshot();
     // We contractually have to subscribe to the snapshot streams on this tick,
     // so no awaits allowed intil we injectRevups below.
@@ -309,15 +304,6 @@ export class DatasetClone extends AbstractMeld implements MeldClone {
     retrySubscriber.next(ConnectStyle.HARD); // Force re-connect
     retrySubscriber.complete();
   };
-
-  private flushUndeliveredOperations() {
-    return new Promise<void>((resolve, reject) => {
-      const counted = new Future<number>();
-      counted.then(n => n && this.log.info(`Emitted ${n} undelivered operations`));
-      this.dataset.undeliveredLocalOperations().pipe(tapCount(counted))
-        .subscribe(this.nextUpdate, reject, resolve);
-    });
-  }
 
   @AbstractMeld.checkNotClosed.async
   async newClock(): Promise<TreeClock> {

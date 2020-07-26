@@ -30,14 +30,14 @@ describe('SU-Set Dataset', () => {
 
   beforeEach(async () => {
     dataset = await memStore();
-    ssd = new SuSetDataset('test', dataset);
+    ssd = new SuSetDataset(dataset, { '@id': 'test', '@domain': 'test.m-ld.org', genesis: true });
   });
 
   describe('when initialised', () => {
     beforeEach(async () => ssd.initialise());
 
     test('cannot share a dataset', async () => {
-      const otherSsd = new SuSetDataset('boom', dataset);
+      const otherSsd = new SuSetDataset(dataset, { '@id': 'boom', '@domain': 'test.m-ld.org', genesis: true });
       await expect(otherSsd.initialise()).rejects.toThrow();
     });
 
@@ -47,10 +47,6 @@ describe('SU-Set Dataset', () => {
 
     test('does not have a time', async () => {
       expect(await ssd.loadClock()).toBeNull();
-    });
-
-    test('has no unsent operations', async () => {
-      await expect(ssd.undeliveredLocalOperations().toPromise()).resolves.toBeUndefined();
     });
 
     describe('with an initial time', () => {
@@ -92,7 +88,7 @@ describe('SU-Set Dataset', () => {
         expect(msg.data.tid).toBeTruthy();
 
         const insertedJsonLd = JSON.parse(msg.data.insert);
-        expect(insertedJsonLd).toEqual(fred);
+        expect(insertedJsonLd).toEqual({ '@id': 'fred', 'name': 'Fred' });
 
         expect(JSON.parse(msg.data.delete)).toEqual({});
 
@@ -104,7 +100,7 @@ describe('SU-Set Dataset', () => {
 
         await ssd.apply({
           tid: 'B6FVbHGtFxXhdLKEVmkcd',
-          insert: '{"@id":"http://test.m-ld.org/fred","http://test.m-ld.org/#name":"Fred"}',
+          insert: '{"@id":"fred","name":"Fred"}',
           delete: '{}'
         }, remoteTime = remoteTime.ticked(), localTime = localTime.update(remoteTime).ticked());
 
@@ -134,10 +130,6 @@ describe('SU-Set Dataset', () => {
         test('answers the new time', async () => {
           const newTime = await ssd.loadClock();
           expect(newTime && newTime.equals(localTime)).toBe(true);
-        });
-
-        test('has an unsent operation', async () => {
-          await expect(ssd.undeliveredLocalOperations().toPromise()).resolves.toBeDefined();
         });
 
         test('answers a snapshot', async () => {
@@ -179,8 +171,8 @@ describe('SU-Set Dataset', () => {
           expect(deletedJsonLd).toMatchObject({
             '@type': 'rdf:Statement',
             'tid': firstTid,
-            's': 'http://test.m-ld.org/fred',
-            'p': 'http://test.m-ld.org/#name',
+            's': 'fred',
+            'p': '#name',
             'o': 'Fred'
           });
 
@@ -194,9 +186,9 @@ describe('SU-Set Dataset', () => {
             tid: 'uSX1mPGhuWAEH56RLwYmvG',
             insert: '{}',
             // Deleting the triple based on the inserted Transaction ID
-            delete: `{"@id":"b4vMkTurWFf6qjBuhkRvjX","@type":"rdf:Statement",
-              "tid":"${firstTid}","o":"Fred","p":"http://test.m-ld.org/#name",
-              "s":"http://test.m-ld.org/fred"}`
+            delete: `{"@type":"rdf:Statement",
+              "tid":"${firstTid}","o":"Fred","p":"#name",
+              "s":"fred"}`
           }, remoteTime = remoteTime.ticked(), localTime = localTime.update(remoteTime).ticked());
 
           await expect(ssd.find1({ '@id': 'http://test.m-ld.org/fred' })).resolves.toEqual('');
@@ -220,7 +212,7 @@ describe('SU-Set Dataset', () => {
           ]);
           await ssd.apply({
             tid: firstTid,
-            insert: '{"@id":"http://test.m-ld.org/fred","http://test.m-ld.org/#name":"Fred"}',
+            insert: '{"@id":"fred","name":"Fred"}',
             delete: '{}'
           }, remoteTime = remoteTime.ticked(), localTime = localTime.update(remoteTime).ticked());
 
@@ -241,7 +233,7 @@ describe('SU-Set Dataset', () => {
           }, localTime = localTime.ticked());
           await ssd.apply({
             tid: firstTid,
-            insert: '{"@id":"http://test.m-ld.org/fred","http://test.m-ld.org/#name":"Fred"}',
+            insert: '{"@id":"fred","name":"Fred"}',
             delete: '{}'
           }, remoteTime = remoteTime.ticked(), localTime = localTime.update(remoteTime).ticked());
 
@@ -273,9 +265,9 @@ describe('SU-Set Dataset', () => {
           await ssd.apply({
             tid: 'uSX1mPGhuWAEH56RLwYmvG',
             insert: '{}',
-            delete: `{"@id":"b4vMkTurWFf6qjBuhkRvjX","@type":"rdf:Statement",
-              "tid":"${firstTid}","o":"Fred","p":"http://test.m-ld.org/#name",
-              "s":"http://test.m-ld.org/fred"}`
+            delete: `{"@type":"rdf:Statement",
+              "tid":"${firstTid}","o":"Fred","p":"#name",
+              "s":"fred"}`
           }, thirdTime, localTime = localTime.update(thirdTime).ticked());
 
           const ops = await ssd.operationsSince(remoteTime);
@@ -334,7 +326,7 @@ describe('SU-Set Dataset', () => {
         test('accepts own unpersisted update', async () => {
           await ssd.apply({
             tid: 'uSX1mPGhuWAEH56RLwYmvG',
-            insert: '{"@id":"http://test.m-ld.org/wilma","http://test.m-ld.org/#name":"Wilma"}',
+            insert: '{"@id":"wilma","name":"Wilma"}',
             delete: '{}'
           }, localTime = localTime.ticked(), localTime);
 
@@ -351,9 +343,9 @@ describe('SU-Set Dataset', () => {
           await ssd.apply({
             tid: 'uSX1mPGhuWAEH56RLwYmvG',
             insert: '{}',
-            delete: `{"@id":"b4vMkTurWFf6qjBuhkRvjX","@type":"rdf:Statement",
-              "tid":"${firstTid}","o":"Fred","p":"http://test.m-ld.org/#name",
-              "s":"http://test.m-ld.org/fred"}`
+            delete: `{"@type":"rdf:Statement",
+              "tid":"${firstTid}","o":"Fred","p":"#name",
+              "s":"fred"}`
           }, unpersistedTime, localTime = localTime.update(unpersistedTime).ticked());
 
           const ops = await ssd.operationsSince(remoteTime);

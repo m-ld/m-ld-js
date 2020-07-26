@@ -5,7 +5,23 @@ import { HashBagBlock } from '../blocks';
 import { Hash } from '../hash';
 import { compact, toRDF } from 'jsonld';
 import { rdfToJson } from '../util';
-import { TreeClock } from '../clocks';
+import { Context } from '../dataset/jrql-support';
+import { ExpandedTermDef } from 'json-rql';
+import { Iri } from 'jsonld/jsonld-spec';
+
+export class DomainContext implements Context {
+  '@base': Iri;
+  '@vocab': Iri;
+  [key: string]: string | ExpandedTermDef;
+
+  constructor(domain: string, context: Context | null) {
+    Object.assign(this, context);
+    if (this['@base'] == null)
+      this['@base'] = `http://${domain}/`;
+    if (this['@vocab'] == null)
+      this['@vocab'] = new URL('/#', this['@base']).href
+  }
+}
 
 namespace meld {
   export const $id = 'http://m-ld.org';
@@ -80,10 +96,10 @@ export class JsonDeltaBagBlock extends HashBagBlock<JsonDelta> {
 }
 
 /**
+ * TODO: re-sync with Java
  * @see m-ld/m-ld-core/src/main/java/org/m_ld/MeldResource.java
  */
 const DEFAULT_CONTEXT = {
-  '@base': meld.$id,
   rdf: rdf.$id,
   xs: 'http://www.w3.org/2001/XMLSchema#',
   tid: meld.tid.value,
@@ -92,39 +108,42 @@ const DEFAULT_CONTEXT = {
   o: 'rdf:object'
 };
 
-export async function newDelta(delta: Omit<MeldDelta, 'json'>): Promise<MeldDelta> {
-  return {
+export class MeldJson {
+  context: DomainContext;
+
+  constructor(readonly domain: string) {
+    this.context = new DomainContext(domain, DEFAULT_CONTEXT);
+  }
+
+  newDelta = async (delta: Omit<MeldDelta, 'json'>): Promise<MeldDelta> => ({
     ...delta,
     json: {
       tid: delta.tid,
-      insert: JSON.stringify(await toMeldJson(delta.insert)),
-      delete: JSON.stringify(await toMeldJson(delta.delete))
+      insert: JSON.stringify(await this.toMeldJson(delta.insert)),
+      delete: JSON.stringify(await this.toMeldJson(delta.delete))
     }
-  };
-}
+  })
 
-export async function asMeldDelta(delta: JsonDelta): Promise<MeldDelta> {
-  return {
+  asMeldDelta = async (delta: JsonDelta): Promise<MeldDelta> => ({
     tid: delta.tid,
-    insert: await fromMeldJson(JSON.parse(delta.insert)),
-    delete: await fromMeldJson(JSON.parse(delta.delete)),
+    insert: await this.fromMeldJson(JSON.parse(delta.insert)),
+    delete: await this.fromMeldJson(JSON.parse(delta.delete)),
     json: delta,
-    toString: () => `${this.tid}: ${JSON.stringify(this.json)}`
+    toString: () => `${delta.tid}: ${JSON.stringify(delta)}`
+  })
+
+  toMeldJson = async (triples: Triple[]): Promise<any> => {
+    const jsonld = await rdfToJson(triples.map(toDomainQuad));
+    const graph: any = await compact(jsonld, this.context);
+    // The jsonld processor may create a top-level @graph with @context
+    delete graph['@context'];
+    return '@graph' in graph ? graph['@graph'] : graph;
   }
+
+  fromMeldJson = async (json: any): Promise<Triple[]> =>
+    await toRDF({ '@graph': json, '@context': this.context }) as Triple[]
 }
 
 export function toDomainQuad(triple: any): Quad {
   return { ...triple, graph: defaultGraph() };
-}
-
-export async function toMeldJson(triples: Triple[]): Promise<any> {
-  const jsonld = await rdfToJson(triples.map(toDomainQuad));
-  const graph: any = await compact(jsonld, DEFAULT_CONTEXT);
-  // The jsonld processor may create a top-level @graph with @context
-  delete graph['@context'];
-  return '@graph' in graph ? graph['@graph'] : graph;
-}
-
-export async function fromMeldJson(json: any): Promise<Triple[]> {
-  return await toRDF({ '@graph': json, '@context': DEFAULT_CONTEXT }) as Triple[];
 }

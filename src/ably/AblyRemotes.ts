@@ -7,9 +7,15 @@ import { MeldConfig } from '..';
 import { PubsubRemotes, SubPubsub, SubPub, DirectParams, ReplyParams } from '../PubsubRemotes';
 import { Observable, from, identity } from 'rxjs';
 import { flatMap, filter, map } from 'rxjs/operators';
+import { AblyTraffic, AblyTrafficConfig } from './AblyTraffic';
+
+export interface AblyMeldConfig extends
+  Omit<Ably.Types.ClientOptions, 'echoMessages' | 'clientId'>,
+  AblyTrafficConfig {
+}
 
 export interface MeldAblyConfig extends MeldConfig {
-  ably: Omit<Ably.Types.ClientOptions, 'echoMessages' | 'clientId'>;
+  ably: AblyMeldConfig;
 }
 
 interface SendTypeParams extends DirectParams { type: '__send'; }
@@ -17,26 +23,29 @@ interface ReplyTypeParams extends ReplyParams { type: '__reply'; }
 
 export class AblyRemotes extends PubsubRemotes {
   private readonly client: Ably.Types.RealtimePromise;
-  private readonly channel: Ably.Types.RealtimeChannelPromise;
+  private readonly operations: Ably.Types.RealtimeChannelPromise;
+  private readonly traffic: AblyTraffic;
 
   constructor(config: MeldAblyConfig,
     connect: (opts: Ably.Types.ClientOptions) => Ably.Types.RealtimePromise
       = opts => new Ably.Realtime.Promise(opts)) {
     super(config);
     this.client = connect({ ...config.ably, echoMessages: false, clientId: config['@id'] });
-    this.channel = this.client.channels.get(this.channelName('operations'));
+    this.operations = this.client.channels.get(this.channelName('operations'));
+    this.traffic = new AblyTraffic(config.ably);
     // Ensure we are fully subscribed before we make any presence claims
     const subscribed = Promise.all([
-      this.channel
-        .subscribe(message => this.onRemoteUpdate(message.data)),
-      this.channel.presence
+      this.traffic.subscribe(
+        this.operations, data => this.onRemoteUpdate(data)),
+      this.operations.presence
         .subscribe(() => this.onPresenceChange())
         .then(() => this.onPresenceChange()), // Ably does not notify if no-one around
-      // Direct channel that is specific to us, for sending and replying to requests
-      this.client.channels.get(this.channelName(config['@id']))
-        .subscribe(message => this.onDirectMessage(message).catch(this.warnError))
+      // Direct channel that is specific to us, for sending and replying to
+      // requests
+      this.traffic.subscribe(
+        this.client.channels.get(this.channelName(config['@id'])), this.onDirectMessage)
     ]).catch(err => this.close(err));
-    
+
     // Note that we wait for subscription before claiming to be connected.
     // This is so we don't miss messages that are immediately sent to us.
     // https://support.ably.com/support/solutions/articles/3000067435
@@ -55,17 +64,24 @@ export class AblyRemotes extends PubsubRemotes {
 
   private channelName(id: string) {
     // https://www.ably.io/documentation/realtime/channels#channel-namespaces
-    return `${this.domain}:${id}`;
+    return `${this.meldJson.domain}:${id}`;
   }
 
-  private async onDirectMessage(message: Ably.Types.Message): Promise<void> {
-    // Message name is concatenated type:messageId:sentMessageId, where id is type-specific info
-    const params = this.getParams(message);
-    switch (params?.type) {
-      case '__send': return this.onSent(message.data, params);
-      case '__reply': return this.onReply(message.data, params);
+  private onDirectMessage = async (data: any, name: string, clientId: string) => {
+    try {
+      // Message name is concatenated type:messageId:sentMessageId, where id is type-specific info
+      const params = this.getParams(name, clientId);
+      switch (params?.type) {
+        case '__send':
+          await this.onSent(data, params);
+          break;
+        case '__reply':
+          await this.onReply(data, params);
+      }
+    } catch (err) {
+      this.warnError(err);
     }
-  }
+  };
 
   protected reconnect(): void {
     throw new Error('Method not implemented.'); // TODO
@@ -73,17 +89,17 @@ export class AblyRemotes extends PubsubRemotes {
 
   protected setPresent(present: boolean): Promise<unknown> {
     if (present)
-      return this.channel.presence.update('__live');
+      return this.operations.presence.update('__live');
     else
-      return this.channel.presence.leave();
+      return this.operations.presence.leave();
   }
 
   protected publishDelta(msg: object): Promise<unknown> {
-    return this.channel.publish('__delta', msg);
+    return this.traffic.publish(this.operations, '__delta', msg);
   }
 
   protected present(): Observable<string> {
-    return from(this.channel.presence.get()).pipe(
+    return from(this.operations.presence.get()).pipe(
       flatMap(identity), // flatten the array of presence messages
       filter(present => present.data === '__live'),
       map(present => present.clientId));
@@ -92,8 +108,8 @@ export class AblyRemotes extends PubsubRemotes {
   protected notifier(id: string): SubPubsub {
     const channel = this.client.channels.get(this.channelName(id));
     return {
-      id, publish: notification => channel.publish('__notify', notification),
-      subscribe: () => channel.subscribe(message => this.onNotify(id, message.data)),
+      id, publish: notification => this.traffic.publish(channel, '__notify', notification),
+      subscribe: () => this.traffic.subscribe(channel, data => this.onNotify(id, data)),
       unsubscribe: async () => channel.unsubscribe()
     };
   }
@@ -110,9 +126,9 @@ export class AblyRemotes extends PubsubRemotes {
     return false; // Echo is disabled in the config
   }
 
-  private getParams(message: Ably.Types.Message): SendTypeParams | ReplyTypeParams | undefined {
-    const [type, messageId, sentMessageId] = message.name.split(':');
-    const params = { fromId: message.clientId, toId: this.id };
+  private getParams(name: string, clientId: string): SendTypeParams | ReplyTypeParams | undefined {
+    const [type, messageId, sentMessageId] = name.split(':');
+    const params = { fromId: clientId, toId: this.id };
     switch (type) {
       case '__send': return { type, messageId, ...params }
       case '__reply': return { type, messageId, sentMessageId, ...params }
@@ -124,7 +140,7 @@ export class AblyRemotes extends PubsubRemotes {
     const channel = this.client.channels.get(channelName);
     return {
       id: channelName,
-      publish: msg => channel.publish(name.type === '__send' ?
+      publish: msg => this.traffic.publish(channel, name.type === '__send' ?
         `__send:${name.messageId}` :
         `__reply:${name.messageId}:${name.sentMessageId}`, msg)
     };

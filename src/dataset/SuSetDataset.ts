@@ -7,16 +7,17 @@ import { Dataset, PatchQuads, Patch } from '.';
 import { flatten as flatJsonLd } from 'jsonld';
 import { Iri } from 'jsonld/jsonld-spec';
 import { JrqlGraph } from './JrqlGraph';
-import { newDelta, asMeldDelta, reify, unreify, hashTriple, toDomainQuad } from '../m-ld/MeldJson';
+import { MeldJson, reify, unreify, hashTriple, toDomainQuad } from '../m-ld/MeldJson';
 import { Observable, from, Subject as Source, asapScheduler, Observer } from 'rxjs';
 import { toArray, bufferCount, flatMap, reduce, observeOn, map } from 'rxjs/operators';
 import { flatten, Future, tapComplete, getIdLogger, check, rdfToJson } from '../util';
 import { generate as uuid } from 'short-uuid';
-import { LogLevelDesc, Logger } from 'loglevel';
+import { Logger } from 'loglevel';
 import { MeldError } from '../m-ld/MeldError';
 import { LocalLock } from '../local';
 import { SUSET_CONTEXT, qsName, toPrefixedId } from './SuSetGraph';
 import { SuSetJournal, SuSetJournalEntry } from './SuSetJournal';
+import { MeldConfig } from '..';
 
 interface HashTid extends Subject {
   '@id': Iri; // hash:<hashed triple id>
@@ -38,6 +39,7 @@ export class SuSetDataset extends JrqlGraph {
   private static checkNotClosed =
     check((d: SuSetDataset) => !d.dataset.closed, () => new MeldError('Clone has closed'));
 
+  private readonly meldJson: MeldJson;
   private readonly tidsGraph: JrqlGraph;
   private readonly journal: SuSetJournal;
   private readonly updateSource: Source<MeldUpdate> = new Source;
@@ -45,9 +47,9 @@ export class SuSetDataset extends JrqlGraph {
   private readonly datasetLock: LocalLock;
   private readonly log: Logger;
 
-  constructor(id: string,
-    private readonly dataset: Dataset, logLevel: LogLevelDesc = 'info') {
+  constructor(private readonly dataset: Dataset, config: MeldConfig) {
     super(dataset.graph());
+    this.meldJson = new MeldJson(config['@domain']);
     // Named graph for control quads e.g. Journal (note graph name is legacy)
     this.journal = new SuSetJournal(new JrqlGraph(
       dataset.graph(qsName('control')), SUSET_CONTEXT));
@@ -55,8 +57,8 @@ export class SuSetDataset extends JrqlGraph {
       dataset.graph(qsName('tids')), SUSET_CONTEXT);
     // Update notifications are strictly ordered but don't hold up transactions
     this.updates = this.updateSource.pipe(observeOn(asapScheduler));
-    this.datasetLock = new LocalLock(id, dataset.location);
-    this.log = getIdLogger(this.constructor, id, logLevel);
+    this.datasetLock = new LocalLock(config['@id'], dataset.location);
+    this.log = getIdLogger(this.constructor, config['@id'], config.logLevel);
   }
 
   @SuSetDataset.checkNotClosed.async
@@ -114,17 +116,6 @@ export class SuSetDataset extends JrqlGraph {
     return tail.hash;
   }
 
-  @SuSetDataset.checkNotClosed.rx
-  undeliveredLocalOperations(): Observable<DeltaMessage> {
-    return new Observable(subs => {
-      this.journal.state()
-        .then(journal => journal.lastDelivered())
-        .then(last => last.next())
-        .then(next => this.emitJournalFrom(next, subs, entry => !entry.remote))
-        .catch(err => subs.error(err));
-    });
-  }
-
   private emitJournalFrom(entry: SuSetJournalEntry | undefined,
     subs: Observer<DeltaMessage>, filter: (entry: SuSetJournalEntry) => boolean) {
     if (subs.closed == null || !subs.closed) {
@@ -132,12 +123,9 @@ export class SuSetDataset extends JrqlGraph {
         if (this.dataset.closed) {
           subs.error(new MeldError('Clone has closed'));
         } else {
-          if (filter(entry)) {
-            const delta = new DeltaMessage(entry.time, entry.delta);
-            delta.delivered
-              .then(() => this.markDelivered(entry), err => subs.error(err));
-            subs.next(delta);
-          }
+          if (filter(entry))
+            subs.next(new DeltaMessage(entry.time, entry.delta));
+          
           entry.next().then(next => this.emitJournalFrom(next, subs, filter),
             err => subs.error(err));
         }
@@ -148,9 +136,8 @@ export class SuSetDataset extends JrqlGraph {
   }
 
   /**
-   * A revup requester will have just sent out any undelivered updates.
-   * To ensure we have processed those (relying on the message layer ordering)
-   * we always process a revup request in a transaction lock.
+   * To ensure we have processed any prior updates we always process a revup
+   * request in a transaction lock.
    */
   @SuSetDataset.checkNotClosed.async
   async operationsSince(time: TreeClock): Promise<Observable<DeltaMessage> | undefined> {
@@ -158,17 +145,14 @@ export class SuSetDataset extends JrqlGraph {
       id: 'suset-ops-since',
       prepare: async () => {
         const journal = await this.journal.state();
+        // How many ticks of mine has the requester seen?
         const ticks = time.getTicks(journal.time);
         const found = ticks != null ? await journal.findEntry(ticks) : '';
-        if (found) {
-          return {
-            value: new Observable(subs =>
-              // Don't emit an entry if it's all less than the requested time
-              this.emitJournalFrom(found, subs, entry => time.anyLt(entry.time, 'includeIds')))
-          };
-        } else {
-          return { value: undefined };
-        }
+        return {
+          value: found ? new Observable(subs =>
+            // Don't emit an entry if it's all less than the requested time
+            this.emitJournalFrom(found, subs, entry => time.anyLt(entry.time, 'includeIds'))) : undefined
+        };
       }
     });
   }
@@ -182,7 +166,7 @@ export class SuSetDataset extends JrqlGraph {
         txc.sw.next('find-tids');
         const deletedTriplesTids = await this.findTriplesTids(patch.oldQuads);
         txc.sw.next('new-tids');
-        const delta = await newDelta({
+        const delta = await this.meldJson.newDelta({
           tid: txc.id,
           insert: patch.newQuads,
           // Delta has reifications of old quads, which we infer from found triple tids
@@ -194,9 +178,8 @@ export class SuSetDataset extends JrqlGraph {
         // Include journaling in final patch
         const allTidsPatch = await this.newTid(delta.tid);
         txc.sw.next('journal');
-        const { patch: journaling, entry } = await this.journal.nextEntry(delta, time);
+        const { patch: journaling } = await this.journal.nextEntry(delta, time);
         const deltaMsg = new DeltaMessage(time, delta.json);
-        deltaMsg.delivered.then(() => this.markDelivered(entry));
         return {
           patch: this.transactionPatch(time, patch, allTidsPatch, tidPatch, journaling),
           value: deltaMsg
@@ -215,7 +198,7 @@ export class SuSetDataset extends JrqlGraph {
         if (!(await this.tidsGraph.find1<AllTids>({ '@id': 'qs:all', tid: [txc.id] }))) {
           this.log.debug(`Applying tid: ${txc.id}`);
           txc.sw.next('unreify');
-          const delta = await asMeldDelta(msgData);
+          const delta = await this.meldJson.asMeldDelta(msgData);
           const patch = new PatchQuads([], delta.insert.map(toDomainQuad));
           // The delta's delete contains reifications of deleted triples
           const tidPatch = await unreify(delta.delete)
@@ -387,13 +370,6 @@ export class SuSetDataset extends JrqlGraph {
           return {}; // No patch to apply
         }
       }).catch(reject);
-    });
-  }
-
-  private async markDelivered(entry: SuSetJournalEntry) {
-    this.dataset.transact({
-      id: 'delta-delivery',
-      prepare: async () => ({ patch: await entry.markDelivered() })
     });
   }
 }
