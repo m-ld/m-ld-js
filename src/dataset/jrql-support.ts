@@ -13,6 +13,10 @@ import { Iri } from 'jsonld/jsonld-spec';
  * - {@link Select}
  * - {@link Group} or {@link Subject} (the shorthand way to insert data)
  * - {@link Update} (the longhand way to insert or delete data)
+ * 
+ * > 🚧 *If you have a requirement for an unsupported pattern, please
+ * > [contact&nbsp;us](mailto:info@m-ld.io) to discuss your use-case.*
+ * 
  * @see https://json-rql.org/interfaces/pattern.html
  */
 export type Pattern = jrql.Pattern;
@@ -41,12 +45,19 @@ export type Context = jrql.Context;
  * @see https://json-rql.org/#variable
  */
 export type Variable = jrql.Variable;
+/**
+ * @see https://json-rql.org/#value
+ */
 export type Value = jrql.Value;
 // Utility functions
 export { isValueObject, isReference } from 'json-rql';
 
 export type Result = '*' | Variable | Variable[];
 
+/**
+ * > 🚧 *Subjects need not be identified with an `@id`, but the data of such
+ * > Subjects cannot be retrieved with a simple {@link Describe} query.*
+ */
 export interface Subject extends jrql.Subject {
   // No support for inline filters, @lists or @sets
   [key: string]: Value | Value[] | Context | undefined;

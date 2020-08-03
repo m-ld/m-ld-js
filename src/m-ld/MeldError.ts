@@ -1,17 +1,7 @@
-// TODO: Fix the constants in the spec
-export enum MeldErrorStatus {
-  'No error' = 1,
-  'Unknown error',
-  'Pattern is not read or writeable',
-  'No visible clones',
-  'Bad Update',
-  'Bad response',
-  'Request rejected',
-  'Unsent updates',
-  'Clone has closed',
-  'Meld is offline',
-  'Clone data is locked'
-}
+import { MeldErrorStatus } from '@m-ld/m-ld-spec';
+
+// Errors are used unchanged form m-ld-spec
+export { MeldErrorStatus };
 
 export class MeldError extends Error {
   readonly status: MeldErrorStatus;

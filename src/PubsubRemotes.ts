@@ -207,7 +207,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
         this.nextUpdate(update);
       else
         // This is extremely bad - may indicate a bad actor
-        this.close(new MeldError('Bad Update'));
+        this.close(new MeldError('Bad update'));
     }
   }
 

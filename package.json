@@ -8,7 +8,7 @@
     "./": "./dist/"
   },
   "scripts": {
-    "link-locals": "sudo npm link ../m-ld-spec ../json-rql",
+    "link-locals": "sudo npm link ../m-ld-spec ../json-rql ../typedoc-theme",
     "clean": "rm -rf dist _site",
     "build-quick": "tsc",
     "build": "npm run clean && jest --silent && tsc && npm run doc",
@@ -30,8 +30,7 @@
   },
   "homepage": "https://github.com/m-ld/m-ld-js#readme",
   "devDependencies": {
-    "@m-ld/m-ld-spec": "^0.3.4",
-    "@m-ld/typedoc-theme": "^0.1.0",
+    "@m-ld/typedoc-theme": "^0.1.1",
     "@types/jest": "^26.0.0",
     "@types/memdown": "^3.0.0",
     "@types/readable-stream": "2.3.5",
@@ -62,6 +61,7 @@
     }
   },
   "dependencies": {
+    "@m-ld/m-ld-spec": "^0.3.6",
     "@types/abstract-leveldown": "^5.0.1",
     "@types/async-lock": "^1.1.2",
     "@types/bn.js": "^4.11.6",

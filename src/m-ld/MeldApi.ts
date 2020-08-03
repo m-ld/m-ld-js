@@ -1,4 +1,4 @@
-import { MeldStore, MeldUpdate, DeleteInsert, LiveStatus } from '.';
+import { MeldClone, MeldUpdate, LiveStatus, MeldStatus } from '.';
 import {
   Context, Subject, Describe, Pattern, Update, Value, isValueObject, Reference, Variable
 } from '../dataset/jrql-support';
@@ -10,15 +10,20 @@ import { Iri } from 'jsonld/jsonld-spec';
 import { DomainContext } from './MeldJson';
 
 export { MeldUpdate };
-  
+
+export interface DeleteInsert<T> {
+  '@delete': T;
+  '@insert': T;
+}
+
 export function any(): Variable {
   return `?${shortId(4)}`;
 }
 
-export class MeldApi implements MeldStore {
+export class MeldApi implements MeldClone {
   private readonly context: Context;
 
-  constructor(domain: string, context: Context | null, readonly store: MeldStore) {
+  constructor(domain: string, context: Context | null, private readonly store: MeldClone) {
     if (!/^[a-z0-9_]+([\-.][a-z0-9_]+)*\.[a-z]{2,6}$/.test(domain))
       throw new Error('Domain not specified or not valid');
     this.context = new DomainContext(domain, context);
@@ -59,7 +64,7 @@ export class MeldApi implements MeldStore {
     return Object.assign(subjects, { then });
   }
 
-  get status(): LiveStatus {
+  get status(): Observable<MeldStatus> & LiveStatus {
     return this.store.status;
   }
 

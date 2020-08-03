@@ -1,4 +1,4 @@
-import { MeldClone, Snapshot, DeltaMessage, MeldRemotes, MeldUpdate, MeldStatus, LiveStatus } from '../m-ld';
+import { Snapshot, DeltaMessage, MeldRemotes, MeldUpdate, MeldLocal, MeldClone, LiveStatus, MeldStatus } from '../m-ld';
 import { liveRollup } from "../LiveValue";
 import { Pattern, Subject, isRead, isSubject, isGroup, isUpdate } from './jrql-support';
 import {
@@ -11,10 +11,10 @@ import { TreeClockMessageService } from '../messages';
 import { Dataset } from '.';
 import {
   publishReplay, refCount, filter, ignoreElements, takeUntil, tap,
-  isEmpty, finalize, flatMap, toArray, map, debounceTime,
+  finalize, flatMap, toArray, map, debounceTime,
   distinctUntilChanged, expand, delayWhen, take, skipWhile
 } from 'rxjs/operators';
-import { delayUntil, Future, tapComplete, tapCount, SharableLock, fromArrayPromise } from '../util';
+import { delayUntil, Future, tapComplete, SharableLock, fromArrayPromise } from '../util';
 import { levels } from 'loglevel';
 import { MeldError } from '../m-ld/MeldError';
 import { AbstractMeld, comesAlive } from '../AbstractMeld';
@@ -25,7 +25,7 @@ enum ConnectStyle {
   SOFT, HARD
 }
 
-export class DatasetClone extends AbstractMeld implements MeldClone {
+export class DatasetClone extends AbstractMeld implements MeldClone, MeldLocal {
   private readonly dataset: SuSetDataset;
   private messageService: TreeClockMessageService;
   private readonly orderingBuffer: DeltaMessage[] = [];
@@ -385,7 +385,7 @@ export class DatasetClone extends AbstractMeld implements MeldClone {
     }
   }
 
-  get status(): LiveStatus {
+  get status(): Observable<MeldStatus> & LiveStatus {
     const stateRollup = liveRollup({
       live: this.live,
       remotesLive: this.remotes.live,

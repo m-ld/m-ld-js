@@ -9,8 +9,12 @@ import { Hash } from '../hash';
 import { Pattern, Subject } from '../dataset/jrql-support';
 import { Future } from '../util';
 import { LiveValue } from '../LiveValue';
+import { LiveStatus, MeldUpdate as BaseUpdate, MeldStatus } from '@m-ld/m-ld-spec';
 const inspect = Symbol.for('nodejs.util.inspect.custom');
 
+// Unchanged from m-ld-spec
+export { LiveStatus, MeldStatus };
+  
 /**
  * The graph is implicit in m-ld operations.
  */
@@ -107,52 +111,14 @@ export interface MeldLocal extends Meld {
   readonly id: string;
 }
 
-export interface DeleteInsert<T> {
-  '@delete': T;
-  '@insert': T;
+export interface MeldUpdate extends BaseUpdate {
+  '@delete': Subject[];
+  '@insert': Subject[];
 }
 
-export interface MeldUpdate extends DeleteInsert<Subject[]> {
-  '@ticks': number;
-}
-
-export type LiveStatus = LiveValue<MeldStatus> & {
-  becomes: ((match?: Partial<MeldStatus>) => Promise<MeldStatus | undefined>);
-};
-
-export interface MeldStore {
+export interface MeldClone {
   transact(request: Pattern): Observable<Subject>;
   follow(after?: number): Observable<MeldUpdate>;
-  readonly status: LiveStatus;
+  readonly status: Observable<MeldStatus> & LiveStatus;
   close(err?: any): Promise<void>;
-}
-
-export type MeldClone = MeldLocal & MeldStore;
-
-export interface MeldStatus {
-  /**
-   * Whether the clone is attached to the domain and able to receive updates.
-   * Strictly, this requires that the clone is attached to remotes of
-   * determinate liveness.
-   */
-  online: boolean;
-  /**
-   * Whether the clone needs to catch-up with the latest updates from the
-   * domain. For convenience, this flag will have the value `false` in
-   * indeterminate scenarios such as if there are no other live clones on the
-   * domain (this is a "silo").
-   */
-  outdated: boolean;
-  /**
-   * Whether this clone is the only one attached to a domain. Being a silo may
-   * be a danger to data safety, as any changes made to a silo clone are not
-   * being backed-up on any other clone.
-   */
-  silo: boolean;
-  /**
-   * Current local clock ticks at the time of the status change. This can be
-   * used in a subsequent call to {@link MeldStore.follow}, to ensure no updates
-   * are missed.
-   */
-  ticks: number;
 }
