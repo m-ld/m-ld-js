@@ -2,8 +2,8 @@ import { JsonDelta, Snapshot, UUID, MeldUpdate, DeltaMessage, Triple, MeldConstr
 import { Quad } from 'rdf-js';
 import { TreeClock } from '../clocks';
 import { Hash } from '../hash';
-import { Subject, Update } from './jrql-support';
-import { Dataset, PatchQuads, Patch, TxnContext } from '.';
+import { Subject } from './jrql-support';
+import { Dataset, PatchQuads } from '.';
 import { flatten as flatJsonLd } from 'jsonld';
 import { Iri } from 'jsonld/jsonld-spec';
 import { JrqlGraph } from './JrqlGraph';

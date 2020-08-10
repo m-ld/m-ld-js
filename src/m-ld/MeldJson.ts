@@ -1,10 +1,10 @@
 import { MeldDelta, JsonDelta, UUID, Triple } from '.';
 import { NamedNode, Quad } from 'rdf-js';
-import { literal, namedNode, blankNode, triple as newTriple, defaultGraph } from '@rdfjs/data-model';
+import { literal, namedNode, blankNode, triple as newTriple, defaultGraph, quad as newQuad } from '@rdfjs/data-model';
 import { HashBagBlock } from '../blocks';
 import { Hash } from '../hash';
 import { compact, toRDF } from 'jsonld';
-import { rdfToJson, flatten } from '../util';
+import { rdfToJson, flatten, jsonToRdf } from '../util';
 import { Context } from '../dataset/jrql-support';
 import { ExpandedTermDef } from 'json-rql';
 import { Iri } from 'jsonld/jsonld-spec';
@@ -152,9 +152,9 @@ export class MeldJson {
   }
 
   fromMeldJson = async (json: any): Promise<Triple[]> =>
-    await toRDF({ '@graph': json, '@context': this.context }) as Triple[]
+    await jsonToRdf({ '@graph': json, '@context': this.context }) as Triple[]
 }
 
-export function toDomainQuad(triple: any): Quad {
-  return { ...triple, graph: defaultGraph() };
+export function toDomainQuad(triple: Triple): Quad {
+  return newQuad(triple.subject, triple.predicate, triple.object, defaultGraph());
 }

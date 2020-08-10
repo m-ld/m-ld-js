@@ -4,7 +4,7 @@ import { Subject, Select } from '..';
 import { MeldApi, DeleteInsert } from '../m-ld/MeldApi';
 import { map, filter, take, reduce } from 'rxjs/operators';
 import { Reference, Update, Value, isValueObject } from '../dataset/jrql-support';
-import { Observable, EMPTY, concat, defer, from } from 'rxjs';
+import { Observable, EMPTY, concat, defer, from, pairs } from 'rxjs';
 
 function isMultiValued(value: Subject['any']): value is Array<Value> {
   return Array.isArray(value) && value.length > 1;
@@ -35,7 +35,10 @@ export class SingleValued implements MeldConstraint {
         if (isMultiValued(values)) {
           const resolvedValue = await this.resolve(values);
           const pattern = await accPattern ?? { '@insert': [], '@delete': [] };
-          pattern['@delete'].push({ '@id': subject['@id'], [this.property]: resolvedValue });
+          pattern['@delete'].push({
+            '@id': subject['@id'],
+            [this.property]: values.filter(v => v !== resolvedValue)
+          });
           return pattern;
         }
         return accPattern;
@@ -54,7 +57,7 @@ export class SingleValued implements MeldConstraint {
           '@delete': update['@delete'].filter(hasProperty),
           '@insert': propertyInserts
         });
-        return read<Select>({
+        return concat(read<Select>({
           '@select': ['?s', '?o'],
           '@where': {
             '@union': Object.keys(subjectUpdates).map(sid => [
@@ -66,12 +69,19 @@ export class SingleValued implements MeldConstraint {
         }).pipe(map(select => {
           // Validate the final value of the property
           const subject = <Subject & Reference>select['?s'];
+          const sid = subject['@id'];
           // Weirdness to construct a subject from the select result
           // TODO: Support `@construct`
           Object.assign(subject, { [this.property]: select['?o'] });
-          MeldApi.update(subject, subjectUpdates[subject['@id']]);
+          MeldApi.update(subject, subjectUpdates[sid]);
+          // Side-effect to prevent duplicate processing
+          delete subjectUpdates[sid];
           return subject;
-        }))
+        })), from(pairs(subjectUpdates)).pipe(map(([sid, update]) => {
+          const subject: Subject = { '@id': sid };
+          MeldApi.update(subject, <DeleteInsert<Subject>>update);
+          return subject;
+        })));
       }));
     } else {
       return EMPTY;

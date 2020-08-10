@@ -34,7 +34,8 @@ export class PatchQuads implements Patch {
   removeAll(key: keyof Patch, quads: Quad[]): Quad[] {
     const removed: Quad[] = [];
     for (let i = 0; i < this[key].length;) {
-      if (quads.some(quad => quad.equals(this[key][i])))
+      const myQuad = this[key][i];
+      if (quads.some(quad => quad.equals(myQuad)))
         this[key].splice(i, 1);
       else
         i++;
