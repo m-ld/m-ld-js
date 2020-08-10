@@ -157,8 +157,14 @@ export class DatasetClone extends AbstractMeld implements MeldClone, MeldLocal {
     // If we buffer a message, return true to signal we might need a re-connect
     return this.messageService.receive(delta, this.orderingBuffer, msg => {
       this.log.debug('Accepting', logBody);
-      this.dataset.apply(msg.data, msg.time, this.localTime)
-        .then(msg.delivered.resolve)
+      const arrivalTime = this.localTime;
+      this.messageService.event(); // Making space for constraint application
+      this.dataset.apply(msg.data, msg.time, arrivalTime, this.localTime)
+        .then(cxUpdate => {
+          if (cxUpdate != null)
+            this.nextUpdate(cxUpdate);
+          msg.delivered.resolve();
+        })
         .catch(err => this.close(err));
     });
   }

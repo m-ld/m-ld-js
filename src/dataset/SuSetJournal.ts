@@ -174,15 +174,8 @@ export class SuSetJournalState {
     return { '@id': 'qs:journal', body: JSON.stringify(body) };
   }
 
-  async nextEntry(delta: MeldDelta, localTime: TreeClock, remoteTime?: TreeClock): Promise<JournalUpdate> {
-    const oldTail = await this.tail();
-    const { patch, entry } = await oldTail.createNext(delta, localTime, remoteTime);
-    return {
-      patch: patch.concat(await this.updateBody({
-        tail: entry.id, time: localTime.toJson()
-      })),
-      entry
-    };
+  async setNext(entry: SuSetJournalEntry, localTime: TreeClock): Promise<PatchQuads> {
+    return this.updateBody({ tail: entry.id, time: localTime.toJson() });
   }
 
   private async entry(id: JournalEntry['@id']) {
@@ -221,9 +214,4 @@ export class SuSetJournal {
   async state(): Promise<SuSetJournalState> {
     return new SuSetJournalState(this, await this.graph.describe1<Journal>('qs:journal'));
   }
-
-  async nextEntry(delta: MeldDelta, localTime: TreeClock, remoteTime?: TreeClock): Promise<JournalUpdate> {
-    const journal = await this.state();
-    return journal.nextEntry(delta, localTime, remoteTime);
-  };
 }

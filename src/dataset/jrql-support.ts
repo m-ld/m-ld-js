@@ -69,7 +69,7 @@ export function isSubject(p: Pattern): p is Subject {
 
 export interface Group extends Pattern {
   '@graph'?: Subject | Subject[];
-  '@union'?: Subject[];
+  '@union'?: (Subject | Subject[])[];
 }
 
 export function isGroup(p: Pattern): p is Group {

@@ -29,7 +29,7 @@ export class MeldApi implements MeldClone {
     this.context = new DomainContext(domain, context);
   }
 
-  close(err?: any): Promise<void> {
+  close(err?: any): Promise<unknown> {
     return this.store.close(err);
   }
 

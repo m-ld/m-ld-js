@@ -21,14 +21,25 @@ export interface Patch {
  */
 export class PatchQuads implements Patch {
   constructor(
-    readonly oldQuads: Quad[],
-    readonly newQuads: Quad[]) {
+    readonly oldQuads: Quad[] = [],
+    readonly newQuads: Quad[] = []) {
   }
 
   concat({ oldQuads, newQuads }: { oldQuads?: Quad[], newQuads?: Quad[] }) {
     return new PatchQuads(
       oldQuads ? this.oldQuads.concat(oldQuads) : this.oldQuads,
       newQuads ? this.newQuads.concat(newQuads) : this.newQuads);
+  }
+
+  removeAll(key: keyof Patch, quads: Quad[]): Quad[] {
+    const removed: Quad[] = [];
+    for (let i = 0; i < this[key].length;) {
+      if (quads.some(quad => quad.equals(this[key][i])))
+        this[key].splice(i, 1);
+      else
+        i++;
+    }
+    return removed;
   }
 }
 

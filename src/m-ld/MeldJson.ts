@@ -4,7 +4,7 @@ import { literal, namedNode, blankNode, triple as newTriple, defaultGraph } from
 import { HashBagBlock } from '../blocks';
 import { Hash } from '../hash';
 import { compact, toRDF } from 'jsonld';
-import { rdfToJson } from '../util';
+import { rdfToJson, flatten } from '../util';
 import { Context } from '../dataset/jrql-support';
 import { ExpandedTermDef } from 'json-rql';
 import { Iri } from 'jsonld/jsonld-spec';
@@ -53,15 +53,26 @@ export function hashTriple(triple: Triple): Hash {
   }
 }
 
-// See https://jena.apache.org/documentation/notes/reification.html
-export function reify(triple: Triple, tids: UUID[]): Triple[] {
-  const rid = blankNode();
-  return [
-    newTriple(rid, rdf.type, rdf.Statement),
-    newTriple(rid, rdf.subject, triple.subject),
-    newTriple(rid, rdf.predicate, triple.predicate),
-    newTriple(rid, rdf.object, triple.object)
-  ].concat(tids.map(tid => newTriple(rid, meld.tid, literal(tid))));
+export class TripleTids {
+  constructor(
+    readonly triple: Triple,
+    readonly tids: UUID[]) {
+  }
+
+  // See https://jena.apache.org/documentation/notes/reification.html
+  reify(): Triple[] {
+    const rid = blankNode();
+    return [
+      newTriple(rid, rdf.type, rdf.Statement),
+      newTriple(rid, rdf.subject, this.triple.subject),
+      newTriple(rid, rdf.predicate, this.triple.predicate),
+      newTriple(rid, rdf.object, this.triple.object)
+    ].concat(this.tids.map(tid => newTriple(rid, meld.tid, literal(tid))));
+  }
+
+  static reify(triplesTids: TripleTids[]): Triple[] {
+    return flatten(triplesTids.map(tripleTids => tripleTids.reify()));
+  }
 }
 
 export function unreify(reifications: Triple[]): [Triple, UUID[]][] {

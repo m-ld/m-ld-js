@@ -5,6 +5,7 @@ import { MeldApi } from './m-ld/MeldApi';
 import { Context } from './dataset/jrql-support';
 import { LogLevelDesc } from 'loglevel';
 import { generate } from 'short-uuid';
+import { MeldConstraint } from './m-ld';
 
 export * from './m-ld/MeldApi';
 export { shortId } from './util';
@@ -35,6 +36,10 @@ export interface MeldConfig {
    * * `@vocab` defaults to the resolution of `/#` against the base
    */
   '@context'?: Context;
+  /**
+   * A constraints to apply to the domain data, usually a composite.
+   */
+  constraint?: MeldConstraint;
   /**
    * Set to `true` to indicate that this clone will be 'genesis'; that is, the
    * first new clone on a new domain. This flag will be ignored if the clone is
