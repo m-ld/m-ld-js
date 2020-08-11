@@ -104,7 +104,7 @@ export namespace MeldApi {
       ({ ...byId, [subject['@id'] ?? '*']: { ...byId[subject['@id'] ?? '*'], [key]: subject } }), bySubject);
   }
 
-  export function update<T>(msg: Resource<T>, update: DeleteInsert<Subject>): void {
+  export function update<T>(msg: Resource<T>, update: DeleteInsert<Subject>): Resource<T> {
     // Allow for undefined/null ids
     const inserts = update['@insert'] && msg['@id'] == update['@insert']['@id'] ? update['@insert'] : {};
     const deletes = update['@delete'] && msg['@id'] == update['@delete']['@id'] ? update['@delete'] : {};
@@ -115,6 +115,7 @@ export namespace MeldApi {
           updateProperty(msg[key], inserts[key], deletes[key]);
       }
     });
+    return msg;
   }
 
   function updateProperty(value: any, insertVal: any, deleteVal: any): any {

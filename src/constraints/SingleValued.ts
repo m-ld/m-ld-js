@@ -57,31 +57,31 @@ export class SingleValued implements MeldConstraint {
           '@delete': update['@delete'].filter(hasProperty),
           '@insert': propertyInserts
         });
-        return concat(read<Select>({
-          '@select': ['?s', '?o'],
-          '@where': {
-            '@union': Object.keys(subjectUpdates).map(sid => [
-              // Slight weirdness to say "subject id is both ?s and sid"
-              // TODO: Support InlineFilters
-              { '@id': '?s' }, { '@id': sid, [this.property]: '?o' }
-            ])
-          }
-        }).pipe(map(select => {
-          // Validate the final value of the property
-          const subject = <Subject & Reference>select['?s'];
-          const sid = subject['@id'];
-          // Weirdness to construct a subject from the select result
-          // TODO: Support `@construct`
-          Object.assign(subject, { [this.property]: select['?o'] });
-          MeldApi.update(subject, subjectUpdates[sid]);
-          // Side-effect to prevent duplicate processing
-          delete subjectUpdates[sid];
-          return subject;
-        })), from(pairs(subjectUpdates)).pipe(map(([sid, update]) => {
-          const subject: Subject = { '@id': sid };
-          MeldApi.update(subject, <DeleteInsert<Subject>>update);
-          return subject;
-        })));
+        return concat(
+          read<Select>({
+            '@select': ['?s', '?o'],
+            '@where': {
+              '@union': Object.keys(subjectUpdates).map(sid => [
+                // Slight weirdness to say "subject id is both ?s and sid"
+                // TODO: Support InlineFilters
+                { '@id': '?s' }, { '@id': sid, [this.property]: '?o' }
+              ])
+            }
+          }).pipe(map(select => {
+            // Validate the final value of the property
+            const subject = <Subject & Reference>select['?s'];
+            const sid = subject['@id'];
+            // Weirdness to construct a subject from the select result
+            // TODO: Support `@construct`
+            Object.assign(subject, { [this.property]: select['?o'] });
+            MeldApi.update(subject, subjectUpdates[sid]);
+            // Side-effect to prevent duplicate processing
+            delete subjectUpdates[sid];
+            return subject;
+          })),
+          from(pairs(subjectUpdates)).pipe(
+            map(([sid, update]: [Iri, DeleteInsert<Subject>]) =>
+              MeldApi.update({ '@id': sid }, update))));
       }));
     } else {
       return EMPTY;

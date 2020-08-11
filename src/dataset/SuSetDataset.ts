@@ -44,7 +44,6 @@ class TripleTidQuads {
 
 interface ConstraintTxn {
   delta: MeldDelta;
-  update: MeldUpdate;
   patch: PatchQuads;
   allTidsPatch: PatchQuads;
   tidPatch: PatchQuads;
@@ -262,7 +261,7 @@ export class SuSetDataset extends JrqlGraph {
           const update = await this.asUpdate(arrivalTime, patch);
           // Only apply the constraint if we have a tick for it
           const cxn = !arrivalTime.equals(localTime) ?
-            await this.applyConstraint({ patch, update, tid: txc.id }, localTime) : null;
+            await this.applyConstraint({ patch, update, tid: txc.id }) : null;
           // After applying the constraint, patch new quads might have changed
           tidPatch = tidPatch.concat(await this.newTriplesTid(patch.newQuads, delta.tid));
 
@@ -308,13 +307,11 @@ export class SuSetDataset extends JrqlGraph {
    * @param localTime local clock time
    */
   async applyConstraint(
-    to: { patch: PatchQuads, update: MeldUpdate, tid: string },
-    localTime: TreeClock): Promise<ConstraintTxn | null> {
+    to: { patch: PatchQuads, update: MeldUpdate, tid: string }): Promise<ConstraintTxn | null> {
     const result = await this.constraint.apply(to.update, query => this.read(query));
     if (result != null) {
       const tid = uuid();
       const patch = await this.write(result);
-      const update = await this.asUpdate(localTime, patch);
 
       const deletedExistingTidQuads = await this.findTriplesTids(patch.oldQuads);
       // Triples that were inserted in the applied transaction may now be
@@ -327,7 +324,7 @@ export class SuSetDataset extends JrqlGraph {
 
       const { allTidsPatch, tidPatch } =
         await this.txnTidPatches(tid, patch.newQuads, deletedExistingTidQuads);
-      return { delta, update, patch, allTidsPatch, tidPatch };
+      return { delta, patch, allTidsPatch, tidPatch };
     }
     return null;
   }
