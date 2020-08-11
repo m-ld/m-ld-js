@@ -1,13 +1,17 @@
 import { Subject } from '../src';
 import { DatasetClone } from '../src/dataset/DatasetClone';
 import { memStore, mockRemotes, testConfig } from './testClones';
-import { SingleValued } from '../src/constraints/SingleValued'; 
+import { SingleValued } from '../src/constraints/SingleValued';
 
 describe('Single-valued constraint', () => {
   let data: DatasetClone;
 
   beforeEach(async () => {
-    data = new DatasetClone(await memStore(), mockRemotes(), testConfig());
+    data = new DatasetClone({
+      dataset: await memStore(),
+      remotes: mockRemotes(),
+      config: testConfig()
+    });
     await data.initialise();
   });
 

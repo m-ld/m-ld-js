@@ -21,12 +21,10 @@ export function any(): Variable {
 }
 
 export class MeldApi implements MeldClone {
-  private readonly context: Context;
 
-  constructor(domain: string, context: Context | null, private readonly store: MeldClone) {
-    if (!/^[a-z0-9_]+([\-.][a-z0-9_]+)*\.[a-z]{2,6}$/.test(domain))
-      throw new Error('Domain not specified or not valid');
-    this.context = new DomainContext(domain, context);
+  constructor(
+    private readonly context: Context,
+    private readonly store: MeldClone) {
   }
 
   close(err?: any): Promise<unknown> {

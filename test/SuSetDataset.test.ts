@@ -9,6 +9,7 @@ import { JsonDelta, MeldConstraint, MeldUpdate, MeldReader } from '../src/m-ld';
 import { Dataset } from '../src/dataset';
 import { from } from 'rxjs';
 import { Update, Describe } from '../src';
+import { NO_CONSTRAINT } from '../src/constraints';
 
 const fred = {
   '@id': 'http://test.m-ld.org/fred',
@@ -28,23 +29,19 @@ describe('SU-Set Dataset', () => {
     return ssd.updates.pipe(first()).toPromise();
   }
 
-  function captureUpdates(count: number) {
-    return ssd.updates.pipe(take(count), toArray()).toPromise();
-  }
-
   describe('with basic config', () => {
     let dataset: Dataset;
 
     beforeEach(async () => {
       dataset = await memStore();
-      ssd = new SuSetDataset(dataset, {
+      ssd = new SuSetDataset(dataset, NO_CONSTRAINT, {
         '@id': 'test', '@domain': 'test.m-ld.org', genesis: true
       });
       await ssd.initialise();
     });
 
     test('cannot share a dataset', async () => {
-      const otherSsd = new SuSetDataset(dataset, {
+      const otherSsd = new SuSetDataset(dataset, NO_CONSTRAINT, {
         '@id': 'boom', '@domain': 'test.m-ld.org', genesis: true
       });
       await expect(otherSsd.initialise()).rejects.toThrow();
@@ -408,8 +405,8 @@ describe('SU-Set Dataset', () => {
         check: () => Promise.resolve(),
         apply: () => Promise.resolve(null)
       };
-      ssd = new SuSetDataset(await memStore(), {
-        '@id': 'test', '@domain': 'test.m-ld.org', genesis: true, constraint
+      ssd = new SuSetDataset(await memStore(), constraint, {
+        '@id': 'test', '@domain': 'test.m-ld.org', genesis: true
       });
       await ssd.initialise();
       await ssd.saveClock(localTime = localTime.ticked(), true);
@@ -441,7 +438,7 @@ describe('SU-Set Dataset', () => {
 
     test('applies an inserting constraint', async () => {
       constraint.apply = async () => ({ '@insert': wilma });
-      const updates = captureUpdates(2);
+      const willUpdate = captureUpdate();
       const msg = await ssd.apply(
         {
           tid: 'B6FVbHGtFxXhdLKEVmkcd',
@@ -462,10 +459,29 @@ describe('SU-Set Dataset', () => {
 
       expect((<TreeClock>await ssd.loadClock()).equals(localTime)).toBe(true);
 
-      await expect(updates).resolves.toMatchObject([
-        expect.objectContaining({ '@insert': [fred] }),
-        expect.objectContaining({ '@insert': [wilma] })
-      ]);
+      await expect(willUpdate).resolves.toEqual(
+        { '@delete': [], '@insert': [fred, wilma], '@ticks': localTime.ticks });
+    });
+
+    test('does not apply a constraint if suppressed', async () => {
+      constraint.apply = async () => ({ '@insert': wilma });
+      const willUpdate = captureUpdate();
+      await ssd.apply(
+        {
+          tid: 'B6FVbHGtFxXhdLKEVmkcd',
+          insert: '{"@id":"fred","name":"Fred"}',
+          delete: '{}'
+        },
+        remoteTime = remoteTime.ticked(),
+        localTime = localTime.update(remoteTime).ticked(),
+        // No tick provided for constraint
+        localTime);
+
+      await expect(ssd.find1({ '@id': 'http://test.m-ld.org/wilma' }))
+        .resolves.toBeFalsy();
+
+      await expect(willUpdate).resolves.toEqual(
+        { '@delete': [], '@insert': [fred], '@ticks': localTime.ticks });
     });
 
     test('applies a deleting constraint', async () => {
@@ -476,7 +492,7 @@ describe('SU-Set Dataset', () => {
         await ssd.insert(wilma)
       ]);
 
-      const updates = captureUpdates(2);
+      const willUpdate = captureUpdate();
       await ssd.apply(
         {
           tid: 'B6FVbHGtFxXhdLKEVmkcd',
@@ -490,17 +506,15 @@ describe('SU-Set Dataset', () => {
       await expect(ssd.find1({ '@id': 'http://test.m-ld.org/wilma' }))
         .resolves.toBeFalsy();
 
-      await expect(updates).resolves.toMatchObject([
-        expect.objectContaining({ '@insert': [fred] }),
-        expect.objectContaining({ '@delete': [wilma] })
-      ]);
+      await expect(willUpdate).resolves.toEqual(
+        { '@insert': [fred], '@delete': [wilma], '@ticks': localTime.ticks });
     });
 
     test('applies a self-deleting constraint', async () => {
       // Constraint is going to delete the data we're inserting
       constraint.apply = async () => ({ '@delete': wilma });
 
-      const updates = captureUpdates(2);
+      const willUpdate = captureUpdate();
       await ssd.apply(
         {
           tid: 'B6FVbHGtFxXhdLKEVmkcd',
@@ -514,10 +528,8 @@ describe('SU-Set Dataset', () => {
       await expect(ssd.find1({ '@id': 'http://test.m-ld.org/wilma' }))
         .resolves.toBeFalsy();
 
-      await expect(updates).resolves.toMatchObject([
-        expect.objectContaining({ '@insert': [wilma] }),
-        expect.objectContaining({ '@delete': [wilma] })
-      ]);
+      await expect(willUpdate).resolves.toEqual(
+        { '@insert': [], '@delete': [wilma], '@ticks': localTime.ticks });
     });
   });
 });

@@ -1,4 +1,4 @@
-import { Snapshot, DeltaMessage, MeldRemotes, MeldUpdate, MeldLocal, MeldClone, LiveStatus, MeldStatus } from '../m-ld';
+import { Snapshot, DeltaMessage, MeldRemotes, MeldUpdate, MeldLocal, MeldClone, LiveStatus, MeldStatus, MeldConstraint } from '../m-ld';
 import { liveRollup } from "../LiveValue";
 import { Pattern, Subject, isRead, isSubject, isGroup, isUpdate } from './jrql-support';
 import {
@@ -20,6 +20,7 @@ import { MeldError } from '../m-ld/MeldError';
 import { AbstractMeld, comesAlive } from '../AbstractMeld';
 import { MeldConfig } from '..';
 import { RemoteUpdates } from './RemoteUpdates';
+import { NO_CONSTRAINT } from '../constraints';
 
 enum ConnectStyle {
   SOFT, HARD
@@ -38,12 +39,14 @@ export class DatasetClone extends AbstractMeld implements MeldClone, MeldLocal {
   private readonly networkTimeout: number;
   private readonly genesisClaim: boolean;
 
-  constructor(
-    dataset: Dataset,
-    remotes: MeldRemotes,
-    config: MeldConfig) {
+  constructor({ dataset, remotes, constraint, config }: {
+    dataset: Dataset;
+    remotes: MeldRemotes;
+    constraint?: MeldConstraint;
+    config: MeldConfig;
+  }) {
     super(config['@id'], config.logLevel);
-    this.dataset = new SuSetDataset(dataset, config);
+    this.dataset = new SuSetDataset(dataset, constraint ?? NO_CONSTRAINT, config);
     this.subs.add(this.dataset.updates
       .pipe(map(update => update['@ticks']))
       .subscribe(this.latestTicks));
@@ -154,11 +157,14 @@ export class DatasetClone extends AbstractMeld implements MeldClone, MeldLocal {
   private acceptRemoteDelta(delta: DeltaMessage) {
     const logBody = this.log.getLevel() < levels.DEBUG ? delta : `tid: ${delta.data.tid}`;
     this.log.debug('Receiving', logBody, '@', this.localTime);
-    // If we buffer a message, return true to signal we might need a re-connect
+    // If we buffer a message, return false to signal we might need a re-connect
     return this.messageService.receive(delta, this.orderingBuffer, msg => {
       this.log.debug('Accepting', logBody);
       const arrivalTime = this.localTime;
-      this.messageService.event(); // Making space for constraint application
+      // Constraints should be applied if we are not revving-up. This is
+      // signalled to the dataset by making an extra clock tick available.
+      if (!this.remoteUpdates.state.value.revvingUp)
+        this.messageService.event();
       this.dataset.apply(msg.data, msg.time, arrivalTime, this.localTime)
         .then(cxUpdate => {
           if (cxUpdate != null)

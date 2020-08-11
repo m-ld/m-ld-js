@@ -18,7 +18,6 @@ import { LocalLock } from '../local';
 import { SUSET_CONTEXT, qsName, toPrefixedId } from './SuSetGraph';
 import { SuSetJournal, SuSetJournalEntry } from './SuSetJournal';
 import { MeldConfig } from '..';
-import { CheckList } from '../constraints/CheckList';
 
 interface HashTid extends Subject {
   '@id': Iri; // hash:<hashed triple id>
@@ -66,9 +65,11 @@ export class SuSetDataset extends JrqlGraph {
   readonly updates: Observable<MeldUpdate>
   private readonly datasetLock: LocalLock;
   private readonly log: Logger;
-  private readonly constraint: MeldConstraint;
 
-  constructor(private readonly dataset: Dataset, config: MeldConfig) {
+  constructor(
+    private readonly dataset: Dataset,
+    private readonly constraint: MeldConstraint,
+    config: MeldConfig) {
     super(dataset.graph());
     this.meldJson = new MeldJson(config['@domain']);
     // Named graph for control quads e.g. Journal (note graph name is legacy)
@@ -80,7 +81,6 @@ export class SuSetDataset extends JrqlGraph {
     this.updates = this.updateSource.pipe(observeOn(asapScheduler));
     this.datasetLock = new LocalLock(config['@id'], dataset.location);
     this.log = getIdLogger(this.constructor, config['@id'], config.logLevel);
-    this.constraint = config.constraint ?? new CheckList([]);
   }
 
   @SuSetDataset.checkNotClosed.async
@@ -260,7 +260,9 @@ export class SuSetDataset extends JrqlGraph {
 
           txc.sw.next('apply-cx'); // "cx" = constraint
           const update = await this.asUpdate(arrivalTime, patch);
-          const cxn = await this.applyConstraint({ patch, update, tid: txc.id }, localTime);
+          // Only apply the constraint if we have a tick for it
+          const cxn = !arrivalTime.equals(localTime) ?
+            await this.applyConstraint({ patch, update, tid: txc.id }, localTime) : null;
           // After applying the constraint, patch new quads might have changed
           tidPatch = tidPatch.concat(await this.newTriplesTid(patch.newQuads, delta.tid));
 
@@ -276,15 +278,16 @@ export class SuSetDataset extends JrqlGraph {
           }
           journaling = journaling.concat(await journal.setNext(entry, localTime));
 
-          // Notify the update (will be pushed to immediate)
-          this.updateSource.next(update);
-          // If the constraint has done anything, we need to merge its work into
-          // ours and notify its update too
+          // If the constraint has done anything, we need to merge its work
           if (cxn != null) {
             allTidsPatch = allTidsPatch.concat(cxn.allTidsPatch);
             tidPatch = tidPatch.concat(cxn.tidPatch);
             patch = patch.concat(cxn.patch);
-            this.updateSource.next(cxn.update);
+            // Re-create the update with the constraint resolution included
+            this.updateSource.next(await this.asUpdate(localTime, patch));
+          } else {
+            // No constraint resolution, use existing update
+            this.updateSource.next(update);
           }
           return {
             patch: this.transactionPatch(patch, allTidsPatch, tidPatch, journaling),

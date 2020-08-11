@@ -14,7 +14,9 @@ export class DomainContext implements Context {
   '@vocab': Iri;
   [key: string]: string | ExpandedTermDef;
 
-  constructor(domain: string, context: Context | null) {
+  constructor(domain: string, context?: Context) {
+    if (!/^[a-z0-9_]+([\-.][a-z0-9_]+)*\.[a-z]{2,6}$/.test(domain))
+      throw new Error('Domain not specified or not valid');
     Object.assign(this, context);
     if (this['@base'] == null)
       this['@base'] = `http://${domain}/`;

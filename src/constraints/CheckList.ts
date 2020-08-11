@@ -1,6 +1,5 @@
 import { MeldConstraint, MeldUpdate, MeldReader } from '../m-ld';
 import { Update, DeleteInsert, Subject } from '..';
-import { toArray as array } from '../util';
 
 export class CheckList implements MeldConstraint {
   constructor(

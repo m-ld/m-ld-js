@@ -79,9 +79,25 @@ function start(req, res, next) {
 
     const mqttPort = mqttServer.address().port;
     LOG.debug(`${cloneId}: Clone MQTT port is ${mqttPort}`);
+
+    const config = Object.assign({
+      '@id': cloneId,
+      '@domain': domain,
+      genesis,
+      mqtt: {
+        host: 'localhost',
+        port: mqttPort,
+        // Short timeouts as everything is local
+        connectTimeout: 100,
+        keepalive: 1
+      },
+      networkTimeout: 1000,
+      logLevel: LOG.getLevel()
+    }, req.body);
+
     clones[cloneId] = {
       process: fork(join(__dirname, 'clone.js'),
-        [cloneId, domain, genesis, tmpDir.name, req.id(), mqttPort, LOG.getLevel()],
+        [JSON.stringify(config), tmpDir.name, req.id()],
         { execArgv: inspector.url() ? [`--inspect-brk=${global.nextDebugPort++}`] : [] }),
       tmpDir,
       mqtt: { server: mqttServer, port: mqttPort }
