@@ -6,7 +6,7 @@ import { Observable } from 'rxjs';
 import { Message } from '../messages';
 import { Quad } from 'rdf-js';
 import { Hash } from '../hash';
-import { Pattern, Subject } from '../dataset/jrql-support';
+import { Pattern, Subject, Read, Update } from '../dataset/jrql-support';
 import { Future } from '../util';
 import { LiveValue } from '../LiveValue';
 import { LiveStatus, MeldUpdate as BaseUpdate, MeldStatus } from '@m-ld/m-ld-spec';
@@ -120,5 +120,12 @@ export interface MeldClone {
   transact(request: Pattern): Observable<Subject>;
   follow(after?: number): Observable<MeldUpdate>;
   readonly status: Observable<MeldStatus> & LiveStatus;
-  close(err?: any): Promise<void>;
+  close(err?: any): Promise<unknown>;
+}
+
+export type MeldReader = <R extends Read>(request: R) => Observable<Subject>;
+
+export interface MeldConstraint {
+  check(update: MeldUpdate, read: MeldReader): Promise<unknown>;
+  apply(update: MeldUpdate, read: MeldReader): Promise<Update | null>;
 }

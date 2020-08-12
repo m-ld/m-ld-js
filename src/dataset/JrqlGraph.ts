@@ -4,14 +4,14 @@ import {
   Group, isSelect, Result, Variable, Value, isValueObject, isReference
 } from './jrql-support';
 import {
-  NamedNode, Quad, Term, Variable as VariableNode, Quad_Subject, Quad_Predicate, Quad_Object
+  NamedNode, Quad, Term, Quad_Subject, Quad_Predicate, Quad_Object
 } from 'rdf-js';
 import { compact, toRDF } from 'jsonld';
 import { namedNode, defaultGraph, variable, quad as createQuad, blankNode } from '@rdfjs/data-model';
 import { Graph, PatchQuads } from '.';
-import { toArray, flatMap, defaultIfEmpty, map, filter, distinct, first } from 'rxjs/operators';
+import { toArray, flatMap, map, filter, distinct, first } from 'rxjs/operators';
 import { from, of, EMPTY, Observable, throwError } from 'rxjs';
-import { toArray as array, shortId, flatten, rdfToJson } from '../util';
+import { toArray as array, shortId, flatten, rdfToJson, jsonToRdf } from '../util';
 import { QuadSolution, VarValues, TriplePos } from './QuadSolution';
 
 /**
@@ -163,7 +163,7 @@ export class JrqlGraph {
   private async hiddenVarQuads(g: Subject | Subject[], context: Context): Promise<Quad[]> {
     const jsonld = { '@graph': g, '@context': context };
     hideVars(jsonld['@graph']);
-    const quads = await toRDF(this.graph.name.termType !== 'DefaultGraph' ?
+    const quads = await jsonToRdf(this.graph.name.termType !== 'DefaultGraph' ?
       { ...jsonld, '@id': this.graph.name.value } : jsonld) as Quad[];
     return quads;
   }
@@ -280,7 +280,7 @@ function unions(where: Subject | Subject[] | Group): Subject[][] {
     const graph = array(where['@graph']);
     if (where['@union'] != null) {
       // Top-level graph intersects with each union
-      return where['@union'].map(subject => [subject].concat(graph))
+      return where['@union'].map(subject => array(subject).concat(graph))
     } else {
       return [graph];
     }

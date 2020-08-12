@@ -1,13 +1,13 @@
-import { JsonDelta, Snapshot, UUID, MeldUpdate, DeltaMessage, Triple } from '../m-ld';
+import { JsonDelta, Snapshot, UUID, MeldUpdate, DeltaMessage, Triple, MeldConstraint, MeldDelta } from '../m-ld';
 import { Quad } from 'rdf-js';
 import { TreeClock } from '../clocks';
 import { Hash } from '../hash';
 import { Subject } from './jrql-support';
-import { Dataset, PatchQuads, Patch } from '.';
+import { Dataset, PatchQuads } from '.';
 import { flatten as flatJsonLd } from 'jsonld';
 import { Iri } from 'jsonld/jsonld-spec';
 import { JrqlGraph } from './JrqlGraph';
-import { MeldJson, reify, unreify, hashTriple, toDomainQuad } from '../m-ld/MeldJson';
+import { MeldJson, unreify, hashTriple, toDomainQuad, TripleTids } from '../m-ld/MeldJson';
 import { Observable, from, Subject as Source, asapScheduler, Observer } from 'rxjs';
 import { toArray, bufferCount, flatMap, reduce, observeOn, map } from 'rxjs/operators';
 import { flatten, Future, tapComplete, getIdLogger, check, rdfToJson } from '../util';
@@ -31,6 +31,24 @@ interface AllTids extends Subject {
 
 type DatasetSnapshot = Omit<Snapshot, 'updates'>;
 
+class TripleTidQuads {
+  constructor(
+    readonly triple: Triple,
+    readonly tids: Quad[]) {
+  }
+
+  asTripleTids(): TripleTids {
+    return new TripleTids(this.triple, this.tids.map(tidQuad => tidQuad.object.value));
+  }
+}
+
+interface ConstraintTxn {
+  delta: MeldDelta;
+  patch: PatchQuads;
+  allTidsPatch: PatchQuads;
+  tidPatch: PatchQuads;
+}
+
 /**
  * Writeable Graph, similar to a Dataset, but with a slightly different transaction API.
  * Journals every transaction and creates m-ld compliant deltas.
@@ -47,7 +65,10 @@ export class SuSetDataset extends JrqlGraph {
   private readonly datasetLock: LocalLock;
   private readonly log: Logger;
 
-  constructor(private readonly dataset: Dataset, config: MeldConfig) {
+  constructor(
+    private readonly dataset: Dataset,
+    private readonly constraint: MeldConstraint,
+    config: MeldConfig) {
     super(dataset.graph());
     this.meldJson = new MeldJson(config['@domain']);
     // Named graph for control quads e.g. Journal (note graph name is legacy)
@@ -125,7 +146,7 @@ export class SuSetDataset extends JrqlGraph {
         } else {
           if (filter(entry))
             subs.next(new DeltaMessage(entry.time, entry.delta));
-          
+
           entry.next().then(next => this.emitJournalFrom(next, subs, filter),
             err => subs.error(err));
         }
@@ -163,45 +184,69 @@ export class SuSetDataset extends JrqlGraph {
       id: uuid(), // New transaction ID
       prepare: async txc => {
         const [time, patch] = await prepare();
+        const update = await this.asUpdate(time, patch);
+
+        txc.sw.next('check-constraints');
+        await this.constraint.check(update, query => this.read(query));
+
         txc.sw.next('find-tids');
         const deletedTriplesTids = await this.findTriplesTids(patch.oldQuads);
-        txc.sw.next('new-tids');
-        const delta = await this.meldJson.newDelta({
-          tid: txc.id,
-          insert: patch.newQuads,
-          // Delta has reifications of old quads, which we infer from found triple tids
-          delete: this.reify(deletedTriplesTids)
-        });
+        const delta = await this.txnDelta(txc.id, patch.newQuads,
+          deletedTriplesTids.map(tt => tt.asTripleTids()));
+
         // Include tid changes in final patch
-        const tidPatch = (await this.newTriplesTid(delta.insert, delta.tid))
-          .concat({ oldQuads: flatten(deletedTriplesTids.map(tripleTids => tripleTids.tids)) });
+        txc.sw.next('new-tids');
+        const { allTidsPatch, tidPatch } =
+          await this.txnTidPatches(txc.id, patch.newQuads, deletedTriplesTids);
+
         // Include journaling in final patch
-        const allTidsPatch = await this.newTid(delta.tid);
         txc.sw.next('journal');
-        const { patch: journaling } = await this.journal.nextEntry(delta, time);
-        const deltaMsg = new DeltaMessage(time, delta.json);
+        const journal = await this.journal.state(), tail = await journal.tail();
+        let { patch: journaling, tailId } = await tail.createNext({ delta, localTime: time });
+        journaling = journaling.concat(await journal.setTail(tailId, time));
+        // Notify the update (will be pushed to immediate)
+        this.updateSource.next(update);
         return {
-          patch: this.transactionPatch(time, patch, allTidsPatch, tidPatch, journaling),
-          value: deltaMsg
+          patch: this.transactionPatch(patch, allTidsPatch, tidPatch, journaling),
+          value: new DeltaMessage(time, delta.json)
         };
       }
     });
   }
 
+  private async txnTidPatches(tid: string, insert: Quad[], deletedTriplesTids: TripleTidQuads[]) {
+    const allTidsPatch = await this.newTid(tid);
+    const tidPatch = (await this.newTriplesTid(insert, tid))
+      .concat({ oldQuads: flatten(deletedTriplesTids.map(tripleTids => tripleTids.tids)) });
+    return { allTidsPatch, tidPatch };
+  }
+
+  private txnDelta(tid: string, insert: Quad[], deletedTriplesTids: TripleTids[]) {
+    return this.meldJson.newDelta({
+      tid, insert,
+      // Delta has reifications of old quads, which we infer from found triple tids
+      delete: TripleTids.reify(deletedTriplesTids)
+    });
+  }
+
   @SuSetDataset.checkNotClosed.async
-  async apply(msgData: JsonDelta, msgTime: TreeClock, localTime: TreeClock): Promise<void> {
-    return this.dataset.transact({
+  async apply(
+    msgData: JsonDelta, msgTime: TreeClock,
+    arrivalTime: TreeClock, localTime: TreeClock): Promise<DeltaMessage | null> {
+    return this.dataset.transact<DeltaMessage | null>({
       id: msgData.tid,
       prepare: async txc => {
         // Check we haven't seen this transaction before in the journal
         txc.sw.next('find-tids');
         if (!(await this.tidsGraph.find1<AllTids>({ '@id': 'qs:all', tid: [txc.id] }))) {
           this.log.debug(`Applying tid: ${txc.id}`);
+
           txc.sw.next('unreify');
           const delta = await this.meldJson.asMeldDelta(msgData);
-          const patch = new PatchQuads([], delta.insert.map(toDomainQuad));
+          let patch = new PatchQuads([], delta.insert.map(toDomainQuad));
+          let allTidsPatch = await this.newTid(delta.tid);
           // The delta's delete contains reifications of deleted triples
-          const tidPatch = await unreify(delta.delete)
+          let tidPatch = await unreify(delta.delete)
             .reduce(async (tripleTidPatch, [triple, theirTids]) => {
               // For each unique deleted triple, subtract the claimed tids from the tids we have
               const ourTripleTids = await this.findTripleTids(tripleId(triple));
@@ -210,27 +255,82 @@ export class SuSetDataset extends JrqlGraph {
               if (toRemove.length == ourTripleTids.length)
                 patch.oldQuads.push(toDomainQuad(triple));
               return (await tripleTidPatch).concat({ oldQuads: toRemove });
-            }, this.newTriplesTid(delta.insert, delta.tid));
+            }, Promise.resolve(new PatchQuads()));
+
+          txc.sw.next('apply-cx'); // "cx" = constraint
+          const update = await this.asUpdate(arrivalTime, patch);
+          // Only apply the constraint if we have a tick for it
+          const cxn = !arrivalTime.equals(localTime) ?
+            await this.applyConstraint({ patch, update, tid: txc.id }) : null;
+          // After applying the constraint, patch new quads might have changed
+          tidPatch = tidPatch.concat(await this.newTriplesTid(patch.newQuads, delta.tid));
+
           // Include journaling in final patch
-          const allTidsPatch = await this.newTid(delta.tid);
           txc.sw.next('journal');
-          const { patch: journaling } = await this.journal.nextEntry(delta, localTime, msgTime);
+          const journal = await this.journal.state(), tail = await journal.tail();
+          const mainEntryDetails = { delta, localTime: arrivalTime, remoteTime: msgTime };
+          let { patch: journaling, tailId } = await (cxn == null ?
+            tail.createNext(mainEntryDetails) :
+            // Also create an entry for the constraint "transaction"
+            tail.createNext(mainEntryDetails, { delta: cxn.delta, localTime }));
+          journaling = journaling.concat(await journal.setTail(tailId, localTime));
+
+          // If the constraint has done anything, we need to merge its work
+          if (cxn != null) {
+            allTidsPatch = allTidsPatch.concat(cxn.allTidsPatch);
+            tidPatch = tidPatch.concat(cxn.tidPatch);
+            patch = patch.concat(cxn.patch);
+            // Re-create the update with the constraint resolution included
+            this.updateSource.next(await this.asUpdate(localTime, patch));
+          } else {
+            // No constraint resolution, use existing update
+            this.updateSource.next(update);
+          }
           return {
-            patch: this.transactionPatch(localTime, patch, allTidsPatch, tidPatch, journaling)
+            patch: this.transactionPatch(patch, allTidsPatch, tidPatch, journaling),
+            value: cxn != null ? new DeltaMessage(localTime, cxn.delta.json) : null
           };
         } else {
           this.log.debug(`Rejecting tid: ${txc.id} as duplicate`);
           // We don't have to save the new local clock time, nothing's happened
-          return {};
+          return { value: null };
         }
       }
     });
   }
 
   /**
-   * Rolls up the given transaction details into a single patch and notifies
-   * data observers. Mostly this method is just a type convenience for ensuring
-   * everything needed for a transaction is present.
+   * Caution: mutates to.patch
+   * @param to transaction details to apply the patch to
+   * @param localTime local clock time
+   */
+  async applyConstraint(
+    to: { patch: PatchQuads, update: MeldUpdate, tid: string }): Promise<ConstraintTxn | null> {
+    const result = await this.constraint.apply(to.update, query => this.read(query));
+    if (result != null) {
+      const tid = uuid();
+      const patch = await this.write(result);
+
+      const deletedExistingTidQuads = await this.findTriplesTids(patch.oldQuads);
+      // Triples that were inserted in the applied transaction may now be
+      // deleted - these need to be removed from the applied transaction
+      // patch but still published in the delta
+      const deleted = to.patch.removeAll('newQuads', patch.oldQuads);
+      const deletedTriplesTids = deletedExistingTidQuads.map(tt => tt.asTripleTids())
+        .concat(deleted.map(delQuad => new TripleTids(delQuad, [to.tid])));
+      const delta = await this.txnDelta(tid, patch.newQuads, deletedTriplesTids);
+
+      const { allTidsPatch, tidPatch } =
+        await this.txnTidPatches(tid, patch.newQuads, deletedExistingTidQuads);
+      return { delta, patch, allTidsPatch, tidPatch };
+    }
+    return null;
+  }
+
+  /**
+   * Rolls up the given transaction details into a single patch. This method is
+   * just a type convenience for ensuring everything needed for a transaction is
+   * present.
    * @param time the local time of the transaction
    * @param dataPatch the transaction data patch
    * @param allTidsPatch insertion to qs:all TIDs in TID graph
@@ -238,22 +338,19 @@ export class SuSetDataset extends JrqlGraph {
    * @param journaling transaction journaling patch
    */
   private transactionPatch(
-    time: TreeClock,
     dataPatch: PatchQuads,
     allTidsPatch: PatchQuads,
     tripleTidPatch: PatchQuads,
-    journaling: PatchQuads): Patch {
-    // Notify the update (we don't have to wait for this)
-    this.notifyUpdate(dataPatch, time);
+    journaling: PatchQuads): PatchQuads {
     return dataPatch.concat(allTidsPatch).concat(tripleTidPatch).concat(journaling);
   }
 
-  private async notifyUpdate(patch: PatchQuads, time: TreeClock) {
-    this.updateSource.next({
+  private async asUpdate(time: TreeClock, patch: PatchQuads): Promise<MeldUpdate> {
+    return {
       '@ticks': time.ticks,
       '@delete': await this.toSubjects(patch.oldQuads),
       '@insert': await this.toSubjects(patch.newQuads)
-    });
+    };
   }
 
   /**
@@ -271,32 +368,25 @@ export class SuSetDataset extends JrqlGraph {
   }
 
   private newTriplesTid(triples: Triple[], tid: UUID): Promise<PatchQuads> {
-    return this.tidsGraph.insert(triples.map(triple =>
-      ({ '@id': tripleId(triple), tid } as HashTid)));
+    return this.tidsGraph.insert(triples.map<HashTid>(
+      triple => ({ '@id': tripleId(triple), tid })));
   }
 
   private newTripleTids(triple: Triple, tids: UUID[]): Promise<PatchQuads> {
     const theTripleId = tripleId(triple);
-    return this.tidsGraph.insert(tids.map(tid =>
-      ({ '@id': theTripleId, tid } as HashTid)));
+    return this.tidsGraph.insert(tids.map<HashTid>(
+      tid => ({ '@id': theTripleId, tid })));
   }
 
-  private async findTriplesTids(quads: Triple[]): Promise<{ triple: Triple, tids: Quad[] }[]> {
+  private async findTriplesTids(quads: Triple[]): Promise<TripleTidQuads[]> {
     return from(quads).pipe(
-      flatMap(async quad => ({
-        triple: quad,
-        tids: await this.findTripleTids(tripleId(quad))
-      })),
+      flatMap(async quad =>
+        new TripleTidQuads(quad, await this.findTripleTids(tripleId(quad)))),
       toArray()).toPromise();
   }
 
   private findTripleTids(tripleId: string): Promise<Quad[]> {
     return this.tidsGraph.findQuads({ '@id': tripleId } as Partial<HashTid>);
-  }
-
-  private reify(triplesTids: { triple: Triple, tids: Quad[] }[]): Triple[] {
-    return flatten(triplesTids.map(tripleTids =>
-      reify(tripleTids.triple, tripleTids.tids.map(tidQuad => tidQuad.object.value))));
   }
 
   /**
@@ -361,7 +451,8 @@ export class SuSetDataset extends JrqlGraph {
             lastHash: tail.hash,
             quads: this.graph.match().pipe(
               bufferCount(10), // TODO batch size config
-              flatMap(async batch => this.reify(await this.findTriplesTids(batch))),
+              flatMap(async batch => TripleTids.reify(
+                (await this.findTriplesTids(batch)).map(tt => tt.asTripleTids()))),
               tapComplete(dataEmitted)),
             tids: this.tidsGraph.graph.match(qsName('all'), qsName('#tid')).pipe(
               map(tid => tid.object.value), bufferCount(10)) // TODO batch size config

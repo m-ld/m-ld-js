@@ -60,6 +60,8 @@ export type Result = '*' | Variable | Variable[];
  */
 export interface Subject extends jrql.Subject {
   // No support for inline filters, @lists or @sets
+  '@id'?: Iri | Variable;
+  '@type'?: Iri | Variable | Iri[] | Variable[];
   [key: string]: Value | Value[] | Context | undefined;
 }
 
@@ -69,7 +71,7 @@ export function isSubject(p: Pattern): p is Subject {
 
 export interface Group extends Pattern {
   '@graph'?: Subject | Subject[];
-  '@union'?: Subject[];
+  '@union'?: (Subject | Subject[])[];
 }
 
 export function isGroup(p: Pattern): p is Group {

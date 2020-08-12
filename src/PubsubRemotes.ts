@@ -407,10 +407,12 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
   private produce<T>(data: Observable<T>, subAddress: string,
     datumToJson: (datum: T) => Promise<object> | T, type: string) {
     const notifier = this.notifier(subAddress);
-    const notify = async (notification: JsonNotification) => {
-      if (notification.error)
-        this.log.warn('Notifying error on', subAddress, notification.error);
-      else if (notification.complete)
+    const notifyError: (error: any) => Promise<unknown> = error => {
+      this.log.warn('Notifying error on', subAddress, error);
+      return notify({ error: toJson(error) });
+    }
+    const notify: (notification: JsonNotification) => Promise<unknown> = notification => {
+      if (notification.complete)
         this.log.debug('Completed production of', type);
       try {
         return notifier.publish(notification);
@@ -418,16 +420,16 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
         // If notifications fail due to channel death, the recipient will find
         // out from the broker so here we make best efforts to notify an error
         // and then give up.
-        return notifier.publish({ error: toJson(error) });
+        return notifyError(error);
       }
-    };
+    }
     return data.pipe(
       // concatMap guarantees delivery ordering despite toJson promise ordering
       concatMap(async datum => await datumToJson(datum)),
       materialize(),
       flatMap(notification => notification.do(
         next => notify({ next }),
-        error => notify({ error: toJson(error) }),
+        error => notifyError(error),
         () => notify({ complete: true }))))
       .toPromise();
   }

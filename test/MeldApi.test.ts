@@ -3,14 +3,15 @@ import { memStore, mockRemotes, testConfig } from './testClones';
 import { first } from 'rxjs/operators';
 import { DatasetClone } from '../src/dataset/DatasetClone';
 import { Group, Subject, Select, Describe, Reference, Update } from '../src/dataset/jrql-support';
+import { DomainContext } from '../src/m-ld/MeldJson';
 
 describe('Meld API', () => {
   let api: MeldApi;
 
   beforeEach(async () => {
-    let clone = new DatasetClone(await memStore(), mockRemotes(), testConfig());
+    let clone = new DatasetClone({ dataset: await memStore(), remotes: mockRemotes(), config: testConfig() });
     await clone.initialise();
-    api = new MeldApi('test.m-ld.org', null, clone);
+    api = new MeldApi(new DomainContext('test.m-ld.org'), clone);
   });
 
   test('retrieves a JSON-LD subject', async () => {

@@ -1,10 +1,10 @@
 import { MeldDelta, JsonDelta, UUID, Triple } from '.';
 import { NamedNode, Quad } from 'rdf-js';
-import { literal, namedNode, blankNode, triple as newTriple, defaultGraph } from '@rdfjs/data-model';
+import { literal, namedNode, blankNode, triple as newTriple, defaultGraph, quad as newQuad } from '@rdfjs/data-model';
 import { HashBagBlock } from '../blocks';
 import { Hash } from '../hash';
 import { compact, toRDF } from 'jsonld';
-import { rdfToJson } from '../util';
+import { rdfToJson, flatten, jsonToRdf } from '../util';
 import { Context } from '../dataset/jrql-support';
 import { ExpandedTermDef } from 'json-rql';
 import { Iri } from 'jsonld/jsonld-spec';
@@ -14,7 +14,9 @@ export class DomainContext implements Context {
   '@vocab': Iri;
   [key: string]: string | ExpandedTermDef;
 
-  constructor(domain: string, context: Context | null) {
+  constructor(domain: string, context?: Context) {
+    if (!/^[a-z0-9_]+([\-.][a-z0-9_]+)*\.[a-z]{2,6}$/.test(domain))
+      throw new Error('Domain not specified or not valid');
     Object.assign(this, context);
     if (this['@base'] == null)
       this['@base'] = `http://${domain}/`;
@@ -53,15 +55,26 @@ export function hashTriple(triple: Triple): Hash {
   }
 }
 
-// See https://jena.apache.org/documentation/notes/reification.html
-export function reify(triple: Triple, tids: UUID[]): Triple[] {
-  const rid = blankNode();
-  return [
-    newTriple(rid, rdf.type, rdf.Statement),
-    newTriple(rid, rdf.subject, triple.subject),
-    newTriple(rid, rdf.predicate, triple.predicate),
-    newTriple(rid, rdf.object, triple.object)
-  ].concat(tids.map(tid => newTriple(rid, meld.tid, literal(tid))));
+export class TripleTids {
+  constructor(
+    readonly triple: Triple,
+    readonly tids: UUID[]) {
+  }
+
+  // See https://jena.apache.org/documentation/notes/reification.html
+  reify(): Triple[] {
+    const rid = blankNode();
+    return [
+      newTriple(rid, rdf.type, rdf.Statement),
+      newTriple(rid, rdf.subject, this.triple.subject),
+      newTriple(rid, rdf.predicate, this.triple.predicate),
+      newTriple(rid, rdf.object, this.triple.object)
+    ].concat(this.tids.map(tid => newTriple(rid, meld.tid, literal(tid))));
+  }
+
+  static reify(triplesTids: TripleTids[]): Triple[] {
+    return flatten(triplesTids.map(tripleTids => tripleTids.reify()));
+  }
 }
 
 export function unreify(reifications: Triple[]): [Triple, UUID[]][] {
@@ -141,9 +154,9 @@ export class MeldJson {
   }
 
   fromMeldJson = async (json: any): Promise<Triple[]> =>
-    await toRDF({ '@graph': json, '@context': this.context }) as Triple[]
+    await jsonToRdf({ '@graph': json, '@context': this.context }) as Triple[]
 }
 
-export function toDomainQuad(triple: any): Quad {
-  return { ...triple, graph: defaultGraph() };
+export function toDomainQuad(triple: Triple): Quad {
+  return newQuad(triple.subject, triple.predicate, triple.object, defaultGraph());
 }

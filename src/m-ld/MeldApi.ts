@@ -21,15 +21,13 @@ export function any(): Variable {
 }
 
 export class MeldApi implements MeldClone {
-  private readonly context: Context;
 
-  constructor(domain: string, context: Context | null, private readonly store: MeldClone) {
-    if (!/^[a-z0-9_]+([\-.][a-z0-9_]+)*\.[a-z]{2,6}$/.test(domain))
-      throw new Error('Domain not specified or not valid');
-    this.context = new DomainContext(domain, context);
+  constructor(
+    private readonly context: Context,
+    private readonly store: MeldClone) {
   }
 
-  close(err?: any): Promise<void> {
+  close(err?: any): Promise<unknown> {
     return this.store.close(err);
   }
 
@@ -106,7 +104,7 @@ export namespace MeldApi {
       ({ ...byId, [subject['@id'] ?? '*']: { ...byId[subject['@id'] ?? '*'], [key]: subject } }), bySubject);
   }
 
-  export function update<T>(msg: Resource<T>, update: DeleteInsert<Subject>): void {
+  export function update<T>(msg: Resource<T>, update: DeleteInsert<Subject>): Resource<T> {
     // Allow for undefined/null ids
     const inserts = update['@insert'] && msg['@id'] == update['@insert']['@id'] ? update['@insert'] : {};
     const deletes = update['@delete'] && msg['@id'] == update['@delete']['@id'] ? update['@delete'] : {};
@@ -117,6 +115,7 @@ export namespace MeldApi {
           updateProperty(msg[key], inserts[key], deletes[key]);
       }
     });
+    return msg;
   }
 
   function updateProperty(value: any, insertVal: any, deleteVal: any): any {

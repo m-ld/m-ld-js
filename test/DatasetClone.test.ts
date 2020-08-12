@@ -15,7 +15,7 @@ import { Hash } from '../src/hash';
 describe('Dataset clone', () => {
   describe('as genesis', () => {
     async function genesis(remotes: MeldRemotes, config?: Partial<MeldConfig>): Promise<DatasetClone> {
-      let clone = new DatasetClone(await memStore(), remotes, testConfig(config));
+      let clone = new DatasetClone({ dataset: await memStore(), remotes, config: testConfig(config) });
       await clone.initialise();
       return clone;
     }
@@ -48,7 +48,7 @@ describe('Dataset clone', () => {
     let silo: DatasetClone;
 
     beforeEach(async () => {
-      silo = new DatasetClone(await memStore(), mockRemotes(), testConfig());
+      silo = new DatasetClone({ dataset: await memStore(), remotes: mockRemotes(), config: testConfig() });
       await silo.initialise();
     });
 
@@ -100,9 +100,12 @@ describe('Dataset clone', () => {
 
     beforeEach(async () => {
       const remotesLive = hotLive([false]);
-      clone = new DatasetClone(await memStore(),
+      clone = new DatasetClone({
+        dataset: await memStore(),
         // Ensure that remote updates are async
-        mockRemotes(remoteUpdates.pipe(observeOn(asapScheduler)), remotesLive), testConfig());
+        remotes: mockRemotes(remoteUpdates.pipe(observeOn(asapScheduler)), remotesLive),
+        config: testConfig()
+      });
       await clone.initialise();
       await comesAlive(clone); // genesis is alive
       remoteTime = await clone.newClock(); // no longer genesis
@@ -149,14 +152,14 @@ describe('Dataset clone', () => {
     });
 
     test('initialises from snapshot', async () => {
-      const clone = new DatasetClone(await memStore(), remotes, testConfig({ genesis: false }));
+      const clone = new DatasetClone({ dataset: await memStore(), remotes, config: testConfig({ genesis: false }) });
       await clone.initialise();
       await expect(clone.status.becomes({ outdated: false })).resolves.toBeDefined();
       expect(snapshot.mock.calls.length).toBe(1);
     });
 
     test('can become a silo', async () => {
-      const clone = new DatasetClone(await memStore(), remotes, testConfig({ genesis: false }));
+      const clone = new DatasetClone({ dataset: await memStore(), remotes, config: testConfig({ genesis: false }) });
       await clone.initialise();
       remotesLive.next(false);
       await expect(clone.status.becomes({ silo: true })).resolves.toBeDefined();
@@ -171,7 +174,7 @@ describe('Dataset clone', () => {
       ldb = new MemDown();
       config = testConfig();
       // Start a temporary genesis clone to initialise the store
-      let clone = new DatasetClone(await memStore(ldb), mockRemotes(), config);
+      let clone = new DatasetClone({ dataset: await memStore(ldb), remotes: mockRemotes(), config });
       await clone.initialise();
       await clone.newClock(); // Forks the clock so no longer genesis
       await clone.close();
@@ -182,7 +185,7 @@ describe('Dataset clone', () => {
       // Re-start on the same data, with a rev-up that never completes
       const remotes = mockRemotes(NEVER, [true]);
       remotes.revupFrom = async () => NEVER;
-      const clone = new DatasetClone(await memStore(ldb), remotes, testConfig());
+      const clone = new DatasetClone({ dataset: await memStore(ldb), remotes, config: testConfig() });
 
       // Check that we are never not outdated
       const everNotOutdated = clone.status.becomes({ outdated: false });
@@ -197,7 +200,7 @@ describe('Dataset clone', () => {
       // Re-start on the same data, with a rev-up that never completes
       const remotes = mockRemotes(NEVER, [true]);
       remotes.revupFrom = async () => EMPTY;
-      const clone = new DatasetClone(await memStore(ldb), remotes, testConfig({ logLevel: 'DEBUG' }));
+      const clone = new DatasetClone({ dataset: await memStore(ldb), remotes, config: testConfig() });
 
       // Check that we do transition through an outdated state
       const wasOutdated = clone.status.becomes({ outdated: true });
@@ -215,7 +218,7 @@ describe('Dataset clone', () => {
         .mockReturnValueOnce(Promise.resolve(throwError('boom')))
         .mockReturnValueOnce(Promise.resolve(EMPTY));
       remotes.revupFrom = revupFrom;
-      const clone = new DatasetClone(await memStore(ldb), remotes, testConfig());
+      const clone = new DatasetClone({ dataset: await memStore(ldb), remotes, config: testConfig() });
       await clone.initialise();
       await expect(clone.status.becomes({ outdated: false })).resolves.toBeDefined();
       expect(revupFrom.mock.calls.length).toBe(2);
