@@ -2,9 +2,9 @@ import { MeldConstraint, MeldUpdate, MeldReader } from '../m-ld';
 import { Iri } from 'jsonld/jsonld-spec';
 import { Subject, Select } from '..';
 import { MeldApi, DeleteInsert } from '../m-ld/MeldApi';
-import { map, filter, take, reduce } from 'rxjs/operators';
-import { Reference, Update, Value, isValueObject } from '../dataset/jrql-support';
-import { Observable, EMPTY, concat, defer, from, pairs } from 'rxjs';
+import { map, filter, take, reduce, flatMap, defaultIfEmpty } from 'rxjs/operators';
+import { Update, Value, isValueObject } from '../dataset/jrql-support';
+import { Observable, EMPTY, concat, defer, from } from 'rxjs';
 
 function isMultiValued(value: Subject['any']): value is Array<Value> {
   return Array.isArray(value) && value.length > 1;
@@ -48,48 +48,35 @@ export class SingleValued implements MeldConstraint {
   private affected(update: MeldUpdate, read: MeldReader, failEarly?: 'failEarly'): Observable<Subject> {
     const hasProperty = (subject: Subject): boolean => subject[this.property] != null;
     const propertyInserts = update['@insert'].filter(hasProperty);
-    if (propertyInserts.length) {
-      // 'Fail early' means we pipe the raw inserts through the filter first,
-      // in case they trivially contain an array for the property
-      return concat(failEarly ? from(propertyInserts) : EMPTY, defer(() => {
+    // 'Fail early' means we pipe the raw inserts through the filter first,
+    // in case they trivially contain an array for the property
+    return !propertyInserts.length ? EMPTY :
+      concat(failEarly ? from(propertyInserts) : EMPTY, defer(() => {
         // Reformulate the update per-(subject with the target property)
         const subjectUpdates = MeldApi.asSubjectUpdates({
           '@delete': update['@delete'].filter(hasProperty),
           '@insert': propertyInserts
         });
-        return concat(
-          read<Select>({
-            '@select': ['?s', '?o'],
-            '@where': {
-              '@union': Object.keys(subjectUpdates).map(sid => [
-                // Slight weirdness to say "subject id is both ?s and sid"
-                // TODO: Support InlineFilters
-                { '@id': '?s' }, { '@id': sid, [this.property]: '?o' }
-              ])
-            }
-          }).pipe(map(select => {
-            // Validate the final value of the property
-            const subject = <Subject & Reference>select['?s'];
-            const sid = subject['@id'];
-            // Weirdness to construct a subject from the select result
-            // TODO: Support `@construct`
-            Object.assign(subject, { [this.property]: select['?o'] });
-            MeldApi.update(subject, subjectUpdates[sid]);
-            // Side-effect to prevent duplicate processing
-            delete subjectUpdates[sid];
-            return subject;
-          })),
-          from(pairs(subjectUpdates)).pipe(
-            map(([sid, update]: [Iri, DeleteInsert<Subject>]) =>
-              MeldApi.update({ '@id': sid }, update))));
+        return from(Object.keys(subjectUpdates)).pipe(
+          flatMap(sid => read<Select>({
+            '@select': '?o', '@where': { '@id': sid, [this.property]: '?o' }
+          }).pipe(
+            defaultIfEmpty({ '?o': undefined }),
+            map(selectResult => {
+              // Weirdness to construct a subject from the select result
+              // TODO: Support `@construct`
+              const subject = { '@id': sid, [this.property]: selectResult['?o'] };
+              MeldApi.update(subject, subjectUpdates[sid]);
+              // Side-effect to prevent duplicate processing
+              delete subjectUpdates[sid];
+              return subject;
+            }))));
       }));
-    } else {
-      return EMPTY;
-    }
   }
 
   private failure(subject: Subject) {
-    return `Multiple values for ${subject['@id']}: ${this.property}`;
+    return `Multiple values for ${subject['@id']}: ${this.property}
+    ${subject[this.property]}`;
   }
 }
 

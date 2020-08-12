@@ -1,4 +1,4 @@
-import { Subject } from '../src';
+import { Subject, Describe } from '../src';
 import { DatasetClone } from '../src/dataset/DatasetClone';
 import { memStore, mockRemotes, testConfig } from './testClones';
 import { SingleValued } from '../src/constraints/SingleValued';
@@ -99,5 +99,27 @@ describe('Single-valued constraint', () => {
       '@delete': [{ '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': ['Flintstone'] }],
       '@insert': []
     });
+  });
+
+  test('applies selectively to existing data', async () => {
+    // Test case arose from compliance tests
+    await data.transact(<Subject>{
+      '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Fred'
+    }).toPromise();
+    await data.transact(<Subject>{
+      '@id': 'http://test.m-ld.org/wilma', 'http://test.m-ld.org/#name': 'Wilma'
+    }).toPromise();
+
+    const constraint = new SingleValued('http://test.m-ld.org/#name');
+    await constraint.apply({
+      '@ticks': 0,
+      '@delete': [],
+      '@insert': [{ '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Flintstone' }]
+    }, query => data.transact(query));
+
+    await expect(data.transact(<Describe>{ '@describe': 'http://test.m-ld.org/fred' }).toPromise())
+      .resolves.toMatchObject({ 'http://test.m-ld.org/#name': 'Fred' });
+    await expect(data.transact(<Describe>{ '@describe': 'http://test.m-ld.org/wilma' }).toPromise())
+      .resolves.toMatchObject({ 'http://test.m-ld.org/#name': 'Wilma' });
   });
 });

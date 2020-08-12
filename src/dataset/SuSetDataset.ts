@@ -202,8 +202,8 @@ export class SuSetDataset extends JrqlGraph {
         // Include journaling in final patch
         txc.sw.next('journal');
         const journal = await this.journal.state(), tail = await journal.tail();
-        let { patch: journaling, entry } = await tail.createNext(delta, time);
-        journaling = journaling.concat(await journal.setNext(entry, time));
+        let { patch: journaling, tailId } = await tail.createNext({ delta, localTime: time });
+        journaling = journaling.concat(await journal.setTail(tailId, time));
         // Notify the update (will be pushed to immediate)
         this.updateSource.next(update);
         return {
@@ -268,14 +268,12 @@ export class SuSetDataset extends JrqlGraph {
           // Include journaling in final patch
           txc.sw.next('journal');
           const journal = await this.journal.state(), tail = await journal.tail();
-          let { patch: journaling, entry } = await tail.createNext(delta, arrivalTime, msgTime);
-          if (cxn != null) {
-            // Create a follow-on entry for the constraint "transaction"
-            let { patch: cxJournaling, entry: cxEntry } = await entry.createNext(cxn.delta, localTime);
-            journaling = journaling.concat(cxJournaling);
-            entry = cxEntry; // Skip original entry
-          }
-          journaling = journaling.concat(await journal.setNext(entry, localTime));
+          const mainEntryDetails = { delta, localTime: arrivalTime, remoteTime: msgTime };
+          let { patch: journaling, tailId } = await (cxn == null ?
+            tail.createNext(mainEntryDetails) :
+            // Also create an entry for the constraint "transaction"
+            tail.createNext(mainEntryDetails, { delta: cxn.delta, localTime }));
+          journaling = journaling.concat(await journal.setTail(tailId, localTime));
 
           // If the constraint has done anything, we need to merge its work
           if (cxn != null) {

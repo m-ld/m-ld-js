@@ -38,9 +38,10 @@ interface JournalEntryBody {
   next?: JournalEntry['@id'];
 }
 
-interface JournalUpdate {
-  patch: PatchQuads,
-  entry: SuSetJournalEntry
+export interface EntryCreateDetails {
+  delta: MeldDelta;
+  localTime: TreeClock;
+  remoteTime?: TreeClock;
 }
 
 export class SuSetJournalEntry {
@@ -80,7 +81,7 @@ export class SuSetJournalEntry {
 
   static headEntry(startingHash: Hash, localTime?: TreeClock, startingTime?: TreeClock): Subject {
     const encodedHash = startingHash.encode();
-    const headEntryId = toPrefixedId('entry', encodedHash);
+    const headEntryId = SuSetJournalEntry.id(encodedHash);
     const body: Partial<JournalEntryBody> = { hash: encodedHash };
     if (startingTime != null)
       body.time = startingTime.toJson();
@@ -92,32 +93,54 @@ export class SuSetJournalEntry {
     return entry;
   }
 
+  private static createEntry(
+    hash: Hash, delta: MeldDelta, localTime: TreeClock, remoteTime?: TreeClock, nextHash?: Hash) {
+    const encodedHash = hash.encode();
+    const body: JournalEntryBody = {
+      remote: remoteTime != null,
+      hash: encodedHash,
+      tid: delta.tid,
+      time: (remoteTime ?? localTime).toJson(),
+      delta: delta.json,
+      next: nextHash != null ? SuSetJournalEntry.id(nextHash.encode()) : undefined
+    };
+    return {
+      '@id': SuSetJournalEntry.id(encodedHash),
+      body: JSON.stringify(body),
+      ticks: localTime.ticks
+    };
+  }
+
+  private static id(encodedHash: string) {
+    return toPrefixedId('entry', encodedHash);
+  }
+
+  private static nextHash(prevHash: Hash, delta: MeldDelta) {
+    return new JsonDeltaBagBlock(prevHash).next(delta.json).id;
+  }
+
   async setHeadTime(localTime: TreeClock): Promise<PatchQuads> {
     const patchBody = await this.updateBody({ time: localTime.toJson() });
     const patchTicks = await this.journal.graph.insert({ '@id': this.id, ticks: localTime.ticks });
     return patchBody.concat(patchTicks);
   }
 
-  async createNext(
-    delta: MeldDelta, localTime: TreeClock, remoteTime?: TreeClock): Promise<JournalUpdate> {
-    const block = new JsonDeltaBagBlock(this.hash).next(delta.json);
-    const entryId = toPrefixedId('entry', block.id.encode());
-    const newBody: JournalEntryBody = {
-      remote: remoteTime != null,
-      hash: block.id.encode(),
-      tid: delta.tid,
-      time: (remoteTime ?? localTime).toJson(),
-      delta: delta.json
-    };
-    const newEntry: JournalEntry & Subject = {
-      '@id': entryId,
-      body: JSON.stringify(newBody),
-      ticks: localTime.ticks
-    };
-    const patch = await this.updateBody({ next: entryId });
+  async createNext(...next: EntryCreateDetails[]): Promise<{ patch: PatchQuads, tailId: Iri }> {
+    if (!next.length)
+      throw new Error('next required');
+    // First create the hashes from previous or this
+    const hashes = next.reduce<Hash[]>((hashes, next) =>
+      hashes.concat(SuSetJournalEntry.nextHash(
+        hashes.length ? hashes.slice(-1)[0] : this.hash, next.delta)), []);
+    // Then create the entries
+    const entries = next.map((next, i) =>
+      SuSetJournalEntry.createEntry(
+        hashes[i], next.delta, next.localTime, next.remoteTime, hashes[i + 1]));
+
+    const patch = await this.journal.graph.insert(entries);
     return {
-      patch: patch.concat(await this.journal.graph.insert(newEntry)),
-      entry: new SuSetJournalEntry(this.journal, newEntry)
+      patch: patch.concat(await this.updateBody({ next: entries[0]['@id'] })),
+      tailId: entries.slice(-1)[0]['@id']
     };
   }
 
@@ -174,8 +197,8 @@ export class SuSetJournalState {
     return { '@id': 'qs:journal', body: JSON.stringify(body) };
   }
 
-  async setNext(entry: SuSetJournalEntry, localTime: TreeClock): Promise<PatchQuads> {
-    return this.updateBody({ tail: entry.id, time: localTime.toJson() });
+  async setTail(tailId: Iri, localTime: TreeClock): Promise<PatchQuads> {
+    return this.updateBody({ tail: tailId, time: localTime.toJson() });
   }
 
   private async entry(id: JournalEntry['@id']) {

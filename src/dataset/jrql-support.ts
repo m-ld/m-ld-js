@@ -60,6 +60,8 @@ export type Result = '*' | Variable | Variable[];
  */
 export interface Subject extends jrql.Subject {
   // No support for inline filters, @lists or @sets
+  '@id'?: Iri | Variable;
+  '@type'?: Iri | Variable | Iri[] | Variable[];
   [key: string]: Value | Value[] | Context | undefined;
 }
 

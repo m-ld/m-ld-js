@@ -445,7 +445,7 @@ describe('SU-Set Dataset', () => {
           insert: '{"@id":"fred","name":"Fred"}',
           delete: '{}'
         },
-        remoteTime = remoteTime.ticked(),
+        remoteTime = remoteTime.update(localTime).ticked(),
         localTime = localTime.update(remoteTime).ticked(),
         localTime = localTime.ticked());
 
@@ -461,6 +461,16 @@ describe('SU-Set Dataset', () => {
 
       await expect(willUpdate).resolves.toEqual(
         { '@delete': [], '@insert': [fred, wilma], '@ticks': localTime.ticks });
+      
+      // Check that we have a valid journal
+      const ops = await ssd.operationsSince(remoteTime);
+      if (ops == null)
+        fail();
+      const entries = await ops.pipe(toArray()).toPromise();
+      expect(entries.length).toBe(1);
+      expect(entries[0].time.equals(localTime)).toBe(true);
+      expect(entries[0].data.delete).toBe('{}');
+      expect(entries[0].data.insert).toBe('{\"@id\":\"wilma\",\"name\":\"Wilma\"}');
     });
 
     test('does not apply a constraint if suppressed', async () => {
