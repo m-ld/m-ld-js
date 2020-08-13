@@ -263,12 +263,6 @@ describe('Node utility', () => {
     expect(box).toEqual({ '@id': 'foo', size: 10, label: 'My box' });
   });
 
-  test('updates a value on anonymous node', () => {
-    const box: Resource<Box> = { size: 10, label: 'My box' };
-    MeldApi.update(box, { '@insert': { size: 20 }, '@delete': { size: 10 } });
-    expect(box).toEqual({ size: 20, label: 'My box' });
-  });
-
   // FIXME This breaks the Node type, but not possible to prevent at runtime
   test('adds a singleton reference as a singleton if array property undefined', () => {
     const box: Resource<Box> = { '@id': 'foo', size: 10 };

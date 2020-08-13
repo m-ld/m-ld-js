@@ -91,6 +91,58 @@ describe('Dataset clone', () => {
       await silo.follow().pipe(first()).toPromise();
       expect(silo.status.value).toEqual({ online: true, outdated: false, silo: true, ticks: 1 });
     });
+
+    test('follow after initial ticks', async () => {
+      const after = silo.status.value.ticks;
+      expect(after).toBe(0);
+      const firstUpdate = silo.follow(after).pipe(first()).toPromise();
+      silo.transact({
+        '@id': 'http://test.m-ld.org/fred',
+        'http://test.m-ld.org/#name': 'Fred'
+      } as Subject);
+      await expect(firstUpdate).resolves.toHaveProperty('@ticks', after + 1);
+    });
+
+    test('follow after current tick', async () => {
+      await silo.transact({
+        '@id': 'http://test.m-ld.org/fred',
+        'http://test.m-ld.org/#name': 'Fred'
+      } as Subject).toPromise();
+      const after = silo.status.value.ticks;
+      expect(after).toBe(1);
+      const firstUpdate = silo.follow(after).pipe(first()).toPromise();
+      silo.transact({
+        '@id': 'http://test.m-ld.org/wilma',
+        'http://test.m-ld.org/#name': 'Wilma'
+      } as Subject);
+      await expect(firstUpdate).resolves.toHaveProperty('@ticks', after + 1);
+    });
+
+    test('follow after future tick', async () => {
+      const after = silo.status.value.ticks + 1;
+      expect(after).toBe(1);
+      const firstUpdate = silo.follow(after).pipe(first()).toPromise();
+      silo.transact({
+        '@id': 'http://test.m-ld.org/fred',
+        'http://test.m-ld.org/#name': 'Fred'
+      } as Subject);
+      silo.transact({
+        '@id': 'http://test.m-ld.org/wilma',
+        'http://test.m-ld.org/#name': 'Wilma'
+      } as Subject);
+      await expect(firstUpdate).resolves.toHaveProperty('@ticks', after + 1);
+    });
+
+    test('follow after previous tick', async () => {
+      const after = silo.status.value.ticks;
+      expect(after).toBe(0);
+      await silo.transact({
+        '@id': 'http://test.m-ld.org/fred',
+        'http://test.m-ld.org/#name': 'Fred'
+      } as Subject).toPromise();
+      const firstUpdate = silo.follow(after).pipe(first()).toPromise();
+      await expect(firstUpdate).resolves.toHaveProperty('@ticks', after + 1);
+    });
   });
 
   describe('as genesis with remote clone', () => {

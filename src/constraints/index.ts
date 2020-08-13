@@ -4,6 +4,16 @@ import { Context, Reference } from '../dataset/jrql-support';
 import { MeldConstraint } from '../m-ld';
 import { compact } from 'jsonld';
 
+/**
+ * Configuration of the clone data constraint. The supported constraints are:
+ * - `checklist`: a list of constraints executed sequentially
+ * - `single-valued`: the given property should have only one value. The
+ *   property can be given in unexpanded form, as it appears in JSON subjects
+ *   when using the API, or as its full IRI reference.
+ *
+ * > 🚧 *Please [contact&nbsp;us](mailto:info@m-ld.io) to discuss data
+ * > constraints required for your use-case.*
+ */
 export type ConstraintConfig = {
   '@type': 'checklist';
   list: ConstraintConfig[];

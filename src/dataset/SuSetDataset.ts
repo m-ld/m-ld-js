@@ -8,8 +8,8 @@ import { flatten as flatJsonLd } from 'jsonld';
 import { Iri } from 'jsonld/jsonld-spec';
 import { JrqlGraph } from './JrqlGraph';
 import { MeldJson, unreify, hashTriple, toDomainQuad, TripleTids } from '../m-ld/MeldJson';
-import { Observable, from, Subject as Source, asapScheduler, Observer } from 'rxjs';
-import { toArray, bufferCount, flatMap, reduce, observeOn, map } from 'rxjs/operators';
+import { Observable, from, Subject as Source, asapScheduler, Observer, EMPTY } from 'rxjs';
+import { toArray, bufferCount, flatMap, reduce, observeOn, map, filter, takeWhile, expand } from 'rxjs/operators';
 import { flatten, Future, tapComplete, getIdLogger, check, rdfToJson } from '../util';
 import { generate as uuid } from 'short-uuid';
 import { Logger } from 'loglevel';
@@ -40,13 +40,6 @@ class TripleTidQuads {
   asTripleTids(): TripleTids {
     return new TripleTids(this.triple, this.tids.map(tidQuad => tidQuad.object.value));
   }
-}
-
-interface ConstraintTxn {
-  delta: MeldDelta;
-  patch: PatchQuads;
-  allTidsPatch: PatchQuads;
-  tidPatch: PatchQuads;
 }
 
 /**
@@ -137,28 +130,18 @@ export class SuSetDataset extends JrqlGraph {
     return tail.hash;
   }
 
-  private emitJournalFrom(entry: SuSetJournalEntry | undefined,
-    subs: Observer<DeltaMessage>, filter: (entry: SuSetJournalEntry) => boolean) {
-    if (subs.closed == null || !subs.closed) {
-      if (entry != null) {
-        if (this.dataset.closed) {
-          subs.error(new MeldError('Clone has closed'));
-        } else {
-          if (filter(entry))
-            subs.next(new DeltaMessage(entry.time, entry.delta));
-
-          entry.next().then(next => this.emitJournalFrom(next, subs, filter),
-            err => subs.error(err));
-        }
-      } else {
-        subs.complete();
-      }
-    }
-  }
-
   /**
-   * To ensure we have processed any prior updates we always process a revup
-   * request in a transaction lock.
+   * Emits entries from the journal since a time given as a clock or a tick.
+   * The clock variant accepts a remote or local clock and provides operations
+   * since the last tick of this dataset that the given clock has 'seen'.
+   *
+   * The ticks variant accepts a local clock tick, as recorded in the journal.
+   *
+   * To ensure we have processed any prior updates we always process an
+   * operations request in a transaction lock.
+   *
+   * @returns entries from the journal since the given time (exclusive), or
+   * `undefined` if the given time is not found in the journal
    */
   @SuSetDataset.checkNotClosed.async
   async operationsSince(time: TreeClock): Promise<Observable<DeltaMessage> | undefined> {
@@ -166,13 +149,22 @@ export class SuSetDataset extends JrqlGraph {
       id: 'suset-ops-since',
       prepare: async () => {
         const journal = await this.journal.state();
-        // How many ticks of mine has the requester seen?
-        const ticks = time.getTicks(journal.time);
-        const found = ticks != null ? await journal.findEntry(ticks) : '';
+        const tick = typeof time == 'number' ? time :
+          // How many ticks of mine has the requester seen?
+          time.getTicks(journal.time);
+
+        const found = tick != null ? await journal.findEntry(tick) : '';
         return {
-          value: found ? new Observable(subs =>
+          value: !found ? undefined : from(found.next()).pipe(
+            expand(entry => {
+              if (this.dataset.closed)
+                throw new MeldError('Clone has closed');
+              return entry != null ? entry.next() : EMPTY;
+            }),
+            takeWhile<SuSetJournalEntry>(entry => entry != null),
             // Don't emit an entry if it's all less than the requested time
-            this.emitJournalFrom(found, subs, entry => time.anyLt(entry.time, 'includeIds'))) : undefined
+            filter(entry => typeof time == 'number' || time.anyLt(entry.time, 'includeIds')),
+            map(entry => new DeltaMessage(entry.time, entry.delta)))
         };
       }
     });
@@ -305,7 +297,7 @@ export class SuSetDataset extends JrqlGraph {
    * @param localTime local clock time
    */
   async applyConstraint(
-    to: { patch: PatchQuads, update: MeldUpdate, tid: string }): Promise<ConstraintTxn | null> {
+    to: { patch: PatchQuads, update: MeldUpdate, tid: string }) {
     const result = await this.constraint.apply(to.update, query => this.read(query));
     if (result != null) {
       const tid = uuid();

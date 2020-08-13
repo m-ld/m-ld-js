@@ -11,7 +11,7 @@ import { namedNode, defaultGraph, variable, quad as createQuad, blankNode } from
 import { Graph, PatchQuads } from '.';
 import { toArray, flatMap, map, filter, distinct, first } from 'rxjs/operators';
 import { from, of, EMPTY, Observable, throwError } from 'rxjs';
-import { toArray as array, shortId, flatten, rdfToJson, jsonToRdf } from '../util';
+import { array, shortId, flatten, rdfToJson, jsonToRdf } from '../util';
 import { QuadSolution, VarValues, TriplePos } from './QuadSolution';
 
 /**

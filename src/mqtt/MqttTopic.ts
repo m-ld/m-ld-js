@@ -1,5 +1,5 @@
 import { exec, TopicParams } from 'mqtt-pattern';
-import { flatten, toArray } from '../util';
+import { flatten, array } from '../util';
 import { DirectParams, ReplyParams } from '../PubsubRemotes';
 
 type TopicPart<P> = string | { '+': keyof P; } | { '#': keyof P; };
@@ -23,8 +23,8 @@ export class MqttTopic<P extends TopicParams = TopicParams> {
 
   with(params: Partial<P>) {
     return new MqttTopic<P>(...flatten<TopicPart<P>>(this.parts.map(part => typeof part === 'string' ?
-      [part] : '+' in part ? toArray<TopicPart<P>>(params[part['+']] || part) :
-        toArray<TopicPart<P>>(params[part['#']] || part))));
+      [part] : '+' in part ? array<TopicPart<P>>(params[part['+']] || part) :
+        array<TopicPart<P>>(params[part['#']] || part))));
   }
 
   get address(): string {

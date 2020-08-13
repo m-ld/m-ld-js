@@ -13,14 +13,19 @@ import { Iri } from 'jsonld/jsonld-spec';
  * - {@link Select}
  * - {@link Group} or {@link Subject} (the shorthand way to insert data)
  * - {@link Update} (the longhand way to insert or delete data)
- * 
+ *
  * > 🚧 *If you have a requirement for an unsupported pattern, please
- * > [contact&nbsp;us](mailto:info@m-ld.io) to discuss your use-case.*
- * 
+ * > [contact&nbsp;us](mailto:info@m-ld.io) to discuss your use-case.* You can
+ * > browse the full **json-rql** syntax at
+ * > [json-rql.org](http://json-rql.org/).
+ *
  * @see https://json-rql.org/interfaces/pattern.html
  */
 export type Pattern = jrql.Pattern;
 /**
+ * A reference to a Subject. Used to disambiguate an IRI from a plain string.
+ * Unless a custom [Context](#context) is used for the clone, all references
+ * will use this format.
  * @see https://json-rql.org/#reference
  */
 export type Reference = jrql.Reference;

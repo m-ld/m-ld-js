@@ -57,6 +57,10 @@ export class SuSetJournalEntry {
     return this.data['@id'];
   }
 
+  get ticks(): number {
+    return this.data.ticks;
+  }
+
   get hash(): Hash {
     return Hash.decode(this.body.hash);
   }

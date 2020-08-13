@@ -14,7 +14,7 @@ export function flatten<T>(bumpy: T[][]): T[] {
   return ([] as T[]).concat(...bumpy);
 }
 
-export function toArray<T>(value?: T | T[]): T[] {
+export function array<T>(value?: T | T[]): T[] {
   return value == null ? [] : ([] as T[]).concat(value).filter(v => v != null);
 }
 

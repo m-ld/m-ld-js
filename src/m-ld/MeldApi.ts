@@ -5,11 +5,9 @@ import {
 import { Observable } from 'rxjs';
 import { map, flatMap, toArray as rxToArray, take } from 'rxjs/operators';
 import { flatten } from 'jsonld';
-import { toArray, shortId } from '../util';
-import { Iri } from 'jsonld/jsonld-spec';
-import { DomainContext } from './MeldJson';
+import { array, shortId } from '../util';
 
-export { MeldUpdate };
+export { MeldUpdate, array };
 
 export interface DeleteInsert<T> {
   '@delete': T;
@@ -87,8 +85,14 @@ export class MeldApi implements MeldClone {
   }
 }
 
-export type Resource<T> = Subject & {
-  [P in keyof T]: T extends '@id' ? Iri : T[P] extends Array<unknown> ? T[P] : T[P] | T[P][];
+/**
+ * Concrete, e.g. no variables or filters
+ * [], undefined and null are equivalent
+ * m-ld never outputs null
+ * Use `array`
+ */
+export type Resource<T> = Subject & Reference & {
+  [P in keyof T]: T[P] extends Array<unknown> ? T[P] | undefined : T[P] | T[P][] | undefined;
 };
 
 export namespace MeldApi {
@@ -119,8 +123,8 @@ export namespace MeldApi {
   }
 
   function updateProperty(value: any, insertVal: any, deleteVal: any): any {
-    let rtn = toArray(value).filter(v => !includesValue(toArray(deleteVal), v));
-    rtn = rtn.concat(toArray(insertVal).filter(v => !includesValue(rtn, v)));
+    let rtn = array(value).filter(v => !includesValue(array(deleteVal), v));
+    rtn = rtn.concat(array(insertVal).filter(v => !includesValue(rtn, v)));
     return rtn.length == 1 && !Array.isArray(value) ? rtn[0] : rtn;
   }
 
