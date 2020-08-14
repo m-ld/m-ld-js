@@ -178,12 +178,10 @@ export interface MeldClone {
    * This method will include the notification of 'rev-up' updates after a
    * connect to the domain. To change this behaviour, also subscribe to `status`
    * changes and ignore updates while the status is marked as `outdated`.
-   * 
-   * This engine maintains a strictly limited number of prior updates
    *
    * @returns an observable stream of updates from the domain.
    */
-  follow(after?: number): Observable<MeldUpdate>;
+  follow(): Observable<MeldUpdate>;
   /**
    * The current and future status of a clone. This stream is hot and
    * continuous, terminating when the clone closes (and can therefore be used to

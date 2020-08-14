@@ -65,8 +65,8 @@ export class MeldApi implements MeldClone {
     return this.store.status;
   }
 
-  follow(after?: number): Observable<MeldUpdate> {
-    return this.store.follow(after).pipe(flatMap(async update => ({
+  follow(): Observable<MeldUpdate> {
+    return this.store.follow().pipe(flatMap(async update => ({
       '@ticks': update['@ticks'],
       '@delete': await this.regroup(update['@delete']),
       '@insert': await this.regroup(update['@insert'])

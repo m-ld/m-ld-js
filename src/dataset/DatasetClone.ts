@@ -11,8 +11,8 @@ import { TreeClockMessageService } from '../messages';
 import { Dataset } from '.';
 import {
   publishReplay, refCount, filter, ignoreElements, takeUntil, tap,
-  finalize, flatMap, toArray, map, debounceTime,
-  distinctUntilChanged, expand, delayWhen, take, skipWhile, first, share
+  finalize, toArray, map, debounceTime,
+  distinctUntilChanged, expand, delayWhen, take, skipWhile, share
 } from 'rxjs/operators';
 import { delayUntil, Future, tapComplete, SharableLock, fromArrayPromise } from '../util';
 import { levels } from 'loglevel';
@@ -32,7 +32,6 @@ export class DatasetClone extends AbstractMeld implements MeldClone, MeldLocal {
   private readonly orderingBuffer: DeltaMessage[] = [];
   private readonly remotes: Omit<MeldRemotes, 'updates'>;
   private readonly remoteUpdates: RemoteUpdates;
-  private readonly recentUpdates: ConnectableObservable<MeldUpdate>;
   private subs = new Subscription;
   private readonly liveLock = new SharableLock;
   private newClone: boolean = false;
@@ -55,11 +54,6 @@ export class DatasetClone extends AbstractMeld implements MeldClone, MeldLocal {
     this.remotes.setLocal(this);
     this.remoteUpdates = new RemoteUpdates(remotes);
     this.networkTimeout = config.networkTimeout ?? 5000;
-    // Downcast due to https://github.com/ReactiveX/rxjs/issues/2972
-    this.recentUpdates = <ConnectableObservable<MeldUpdate>>
-      // TODO: replay buffer should probably be more configurable
-      this.dataset.updates.pipe(publishReplay(undefined, this.networkTimeout));
-    this.subs.add(this.recentUpdates.connect());
     this.genesisClaim = config.genesis;
     this.subs.add(this.status.subscribe(status => this.log.debug(status)));
   }
@@ -444,17 +438,8 @@ export class DatasetClone extends AbstractMeld implements MeldClone, MeldLocal {
     });
   }
 
-  follow(after?: number): Observable<MeldUpdate> {
-    // `after` might be in the past or the future
-    if (after == null) {
-      return this.dataset.updates;
-    } else {
-      return concat(
-        // If we don't history going back far enough, throw
-        this.recentUpdates.pipe(first(), flatMap(first => first['@ticks'] > after + 1 ?
-          throwError(new MeldError('Updates unavailable')) : EMPTY)),
-        this.recentUpdates.pipe(skipWhile(update => update['@ticks'] <= after)));
-    }
+  follow(): Observable<MeldUpdate> {
+    return this.dataset.updates;
   }
 
   @AbstractMeld.checkNotClosed.async
