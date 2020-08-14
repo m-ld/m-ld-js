@@ -117,6 +117,22 @@ export interface MeldUpdate extends BaseUpdate {
 }
 
 /**
+ * A means to access the local clock tick of a transaction response.
+ */
+export interface HasExecTick {
+  /**
+   * The promise will be resolved with the local clone clock tick of the
+   * transaction. For a read, this will be the tick from which the results were
+   * obtained. For a write, this is the tick of the transaction completion. In
+   * both cases, the promise resolution is a microtask in the event loop
+   * iteration corresponding to the given clone clock tick. Therefore, `follow`
+   * can be immediately called and the result subscribed, to be notified of
+   * strictly subsequent updates.
+   */
+  readonly tick: Promise<number>;
+}
+
+/**
  * A **m-ld** clone represents domain data to an app.
  *
  * The Javascript clone engine uses a database engine, for which in-memory,
@@ -130,13 +146,24 @@ export interface MeldUpdate extends BaseUpdate {
  */
 export interface MeldClone {
   /**
-   * Actively reads data from, or writes data to, the domain.
+   * Actively writes data to, or reads data from, the domain.
+   *
+   * The transaction executes once, asynchronously, and the results are notified
+   * to subscribers of the returned stream.
+   *
+   * For write requests, the query executes as soon as possible. The result is
+   * only completion or error of the returned observable stream – no Subjects
+   * are signalled.
+   *
+   * For read requests, the query executes in response to the first subscription
+   * to the returned stream, and subsequent subscribers will share the same
+   * results stream.
    *
    * @param request the declarative transaction description
    * @returns an observable stream of subjects. For a write transaction, this is
    * empty, but indicates final completion or error of the transaction.
    */
-  transact(request: Pattern): Observable<Subject>;
+  transact(request: Pattern): Observable<Subject> & HasExecTick;
   /**
    * Follow updates from the domain. All data changes are signalled through the
    * returned stream, strictly ordered according to the clone's logical clock.

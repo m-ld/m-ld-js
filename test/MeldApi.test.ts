@@ -16,7 +16,9 @@ describe('Meld API', () => {
 
   test('retrieves a JSON-LD subject', async () => {
     const captureUpdate = api.follow().pipe(first()).toPromise();
-    await api.transact<Subject>({ '@id': 'fred', name: 'Fred' });
+    const result = api.transact<Subject>({ '@id': 'fred', name: 'Fred' });
+    await expect(result.tick).resolves.toBe(1);
+    await result;
     await expect(captureUpdate).resolves.toEqual({
       '@ticks': 1,
       '@insert': [{ '@id': 'fred', name: 'Fred' }],
@@ -120,6 +122,7 @@ describe('Meld API', () => {
 
   test('selects where', async () => {
     await api.transact<Subject>({ '@id': 'fred', name: 'Fred' });
+    await api.transact<Subject>({ '@id': 'wilma', name: 'Wilma' });
     await expect(api.transact({
       '@select': '?f', '@where': { '@id': '?f', name: 'Fred' }
     } as Select))
@@ -154,7 +157,8 @@ describe('Meld API', () => {
   });
 
   test('describes where', async () => {
-    await api.transact({ '@id': 'fred', name: 'Fred' } as Subject);
+    await api.transact<Subject>({ '@id': 'fred', name: 'Fred' });
+    await api.transact<Subject>({ '@id': 'wilma', name: 'Wilma' });
     await expect(api.transact({
       '@describe': '?f', '@where': { '@id': '?f', name: 'Fred' }
     } as Describe))

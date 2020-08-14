@@ -59,12 +59,13 @@ describe('Dataset clone', () => {
     });
 
     test('stores a JSON-LD object', async () => {
-      await expect(silo.transact({
+      const result = silo.transact({
         '@id': 'http://test.m-ld.org/fred',
         'http://test.m-ld.org/#name': 'Fred'
-      } as Subject).toPromise())
-        // Expecting nothing to be emitted for an insert
-        .resolves.toBeUndefined();
+      } as Subject);
+      // Expecting nothing to be emitted for an insert
+      await expect(result.toPromise()).resolves.toBeUndefined();
+      await expect(result.tick).resolves.toBe(1);
     });
 
     test('retrieves a JSON-LD object', async () => {
@@ -72,11 +73,13 @@ describe('Dataset clone', () => {
         '@id': 'http://test.m-ld.org/fred',
         'http://test.m-ld.org/#name': 'Fred'
       } as Subject).toPromise();
-      const fred = await silo.transact({
+      const result = silo.transact({
         '@describe': 'http://test.m-ld.org/fred'
-      } as Describe).toPromise();
+      } as Describe);
+      const fred = await result.toPromise();
       expect(fred['@id']).toBe('http://test.m-ld.org/fred');
       expect(fred['http://test.m-ld.org/#name']).toBe('Fred');
+      await expect(result.tick).resolves.toBe(1);
     });
 
     test('has no ticks from genesis', async () => {
@@ -104,17 +107,19 @@ describe('Dataset clone', () => {
     });
 
     test('follow after current tick', async () => {
-      await silo.transact({
+      const insertFred = silo.transact({
         '@id': 'http://test.m-ld.org/fred',
         'http://test.m-ld.org/#name': 'Fred'
-      } as Subject).toPromise();
-      const after = silo.status.value.ticks;
+      } as Subject);
+      await insertFred.toPromise();
+      const after = await insertFred.tick;
+      expect(silo.status.value.ticks).toBe(1);
       expect(after).toBe(1);
       const firstUpdate = silo.follow(after).pipe(first()).toPromise();
-      silo.transact({
+      await expect(silo.transact({
         '@id': 'http://test.m-ld.org/wilma',
         'http://test.m-ld.org/#name': 'Wilma'
-      } as Subject);
+      } as Subject).tick).resolves.toBe(after + 1);
       await expect(firstUpdate).resolves.toHaveProperty('@ticks', after + 1);
     });
 

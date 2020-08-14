@@ -1,4 +1,4 @@
-import { MeldClone, MeldUpdate, LiveStatus, MeldStatus } from '.';
+import { MeldClone, MeldUpdate, LiveStatus, MeldStatus, HasExecTick } from '.';
 import {
   Context, Subject, Describe, Pattern, Update, Value, isValueObject, Reference, Variable
 } from '../dataset/jrql-support';
@@ -29,11 +29,12 @@ export class MeldApi implements MeldClone {
     return this.store.close(err);
   }
 
-  get(path: string): PromiseLike<Subject | undefined> {
-    return this.transact({ '@describe': path } as Describe).pipe(take(1)).toPromise();
+  get(path: string): Promise<Subject | undefined> & HasExecTick {
+    const result = this.transact<Describe>({ '@describe': path });
+    return Object.assign(result.pipe(take(1)).toPromise(), { tick: result.tick });
   }
 
-  delete(path: string): PromiseLike<unknown> {
+  delete(path: string): PromiseLike<unknown> & HasExecTick {
     const asSubject: Subject = { '@id': path, [any()]: any() };
     const asObject: Subject = { '@id': any(), [any()]: { '@id': path } };
     return this.transact<Update>({
@@ -44,20 +45,20 @@ export class MeldApi implements MeldClone {
 
   // TODO: post, put
 
-  transact<P = Pattern, S = Subject>(
-    request: P & Pattern, implicitContext: Context = this.context):
-    Observable<Resource<S>> & PromiseLike<Resource<S>[]> {
-    const subjects: Observable<Resource<S>> = this.store.transact({
+  transact<P = Pattern, S = Subject>(request: P & Pattern):
+    Observable<Resource<S>> & PromiseLike<Resource<S>[]> & HasExecTick {
+    const result = this.store.transact({
       ...request,
-      // Apply the given implicit context to the request, explicit context wins
-      '@context': { ...implicitContext, ...request['@context'] || {} }
-    }).pipe(map((subject: Subject) => {
-      // Strip the given implicit context from the request
-      return <Resource<S>>this.stripImplicitContext(subject, implicitContext);
+      // Apply the domain context to the request, explicit context wins
+      '@context': { ...this.context, ...request['@context'] || {} }
+    });
+    const subjects: Observable<Resource<S>> = result.pipe(map((subject: Subject) => {
+      // Strip the domain context from the request
+      return <Resource<S>>this.stripDomainContext(subject);
     }));
     const then: PromiseLike<Resource<S>[]>['then'] = (onfulfilled, onrejected) =>
       subjects.pipe(rxToArray()).toPromise().then(onfulfilled, onrejected);
-    return Object.assign(subjects, { then });
+    return Object.assign(subjects, { then, tick: result.tick });
   }
 
   get status(): Observable<MeldStatus> & LiveStatus {
@@ -77,10 +78,10 @@ export class MeldApi implements MeldClone {
     return graph['@graph'];
   }
 
-  private stripImplicitContext(jsonld: Subject, implicitContext: Context): Subject {
+  private stripDomainContext(jsonld: Subject): Subject {
     const { '@context': context, ...rtn } = jsonld;
-    if (implicitContext && context)
-      Object.keys(implicitContext).forEach((k: keyof Context) => delete context[k]);
+    if (context)
+      Object.keys(this.context).forEach((k: keyof Context) => delete context[k]);
     return context && Object.keys(context).length ? { ...rtn, '@context': context } : rtn;
   }
 }

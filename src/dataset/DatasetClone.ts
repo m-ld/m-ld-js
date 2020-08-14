@@ -1,8 +1,8 @@
-import { Snapshot, DeltaMessage, MeldRemotes, MeldUpdate, MeldLocal, MeldClone, LiveStatus, MeldStatus, MeldConstraint } from '../m-ld';
+import { Snapshot, DeltaMessage, MeldRemotes, MeldUpdate, MeldLocal, MeldClone, LiveStatus, MeldStatus, MeldConstraint, HasExecTick } from '../m-ld';
 import { liveRollup } from "../LiveValue";
 import { Pattern, Subject, isRead, isSubject, isGroup, isUpdate } from './jrql-support';
 import {
-  Observable, merge, from, defer, EMPTY,
+  Observable, merge, from, EMPTY,
   concat, BehaviorSubject, Subscription, throwError, identity, interval, of, Subscriber, ConnectableObservable
 } from 'rxjs';
 import { TreeClock } from '../clocks';
@@ -12,7 +12,7 @@ import { Dataset } from '.';
 import {
   publishReplay, refCount, filter, ignoreElements, takeUntil, tap,
   finalize, flatMap, toArray, map, debounceTime,
-  distinctUntilChanged, expand, delayWhen, take, skipWhile, concatMap, shareReplay, first
+  distinctUntilChanged, expand, delayWhen, take, skipWhile, first, share
 } from 'rxjs/operators';
 import { delayUntil, Future, tapComplete, SharableLock, fromArrayPromise } from '../util';
 import { levels } from 'loglevel';
@@ -375,31 +375,36 @@ export class DatasetClone extends AbstractMeld implements MeldClone, MeldLocal {
   }
 
   @AbstractMeld.checkNotClosed.rx
-  transact(request: Pattern): Observable<Subject> {
+  transact(request: Pattern): Observable<Subject> & HasExecTick {
     if (isRead(request)) {
-      // For a read, every subscriber re-runs the query
-      // TODO: Wire up unsubscribe (cancel cursor)
-      return defer(() => this.liveLock.enter(this.id))
-        .pipe(flatMap(() => this.dataset.read(request)),
-          finalize(() => this.liveLock.leave(this.id)));
+      // Run the query once and share the result
+      const exec = new Future;
+      const results = new Observable<Subject>(subs => {
+        this.liveLock.enter(this.id)
+          .then(() => this.dataset.read(subs, request))
+          .then(exec.resolve, exec.reject);
+      }).pipe(
+        // Only leave the live-lock when the results have been fully streamed
+        finalize(() => this.liveLock.leave(this.id)), share());
+      const tick = Promise.resolve(exec.then(() => this.latestTicks.value));
+      return Object.assign(results, { tick });
     } else if (isSubject(request) || isGroup(request) || isUpdate(request)) {
       // For a write, execute immediately.
-      return from(this.liveLock.enter(this.id)
+      const tick = this.liveLock.enter(this.id)
         .then(() => {
           // Take the send timestamp just before enqueuing the transaction. This
           // ensures that transaction stamps increase monotonically.
           const sendTime = this.messageService.send();
-          return this.dataset.transact(async () => {
-            const patch = await this.dataset.write(request);
-            return [sendTime, patch];
-          });
+          return this.dataset.transact(async () => [sendTime, await this.dataset.write(request)]);
         })
         // Publish the delta
         .then(this.nextUpdate)
-        .finally(() => this.liveLock.leave(this.id)))
-        .pipe(ignoreElements()); // Ignores the void promise result
+        .then(() => this.latestTicks.value)
+        .finally(() => this.liveLock.leave(this.id));
+      return Object.assign(from(tick).pipe(ignoreElements()), { tick });
     } else {
-      return throwError(new MeldError('Pattern is not read or writeable'));
+      const error = new MeldError('Pattern is not read or writeable');
+      return Object.assign(throwError(error), { tick: Promise.reject(error) });
     }
   }
 
