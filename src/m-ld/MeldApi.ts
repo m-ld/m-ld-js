@@ -20,11 +20,13 @@ export function any(): Variable {
 
 export class MeldApi implements MeldClone {
 
+  /** @internal */
   constructor(
     private readonly context: Context,
     private readonly store: MeldClone) {
   }
 
+  /** @inheritDoc */
   close(err?: any): Promise<unknown> {
     return this.store.close(err);
   }
@@ -45,6 +47,28 @@ export class MeldApi implements MeldClone {
 
   // TODO: post, put
 
+  // @inheritDoc for this method is broken
+  // https://github.com/TypeStrong/typedoc/issues/793
+  /**
+   * Actively writes data to, or reads data from, the domain.
+   *
+   * The transaction executes once, asynchronously, and the results are notified
+   * to subscribers of the returned stream.
+   *
+   * For write requests, the query executes as soon as possible. The result is
+   * only completion or error of the returned observable stream – no Subjects
+   * are signalled.
+   *
+   * For read requests, the query executes in response to the first subscription
+   * to the returned stream, and subsequent subscribers will share the same
+   * results stream.
+   *
+   * @param request the declarative transaction description
+   * @returns an observable stream of subjects. For a write transaction, this is
+   * empty, but indicates final completion or error of the transaction. The
+   * return value is also a promise of the stream materialised as an array, for
+   * convenience.
+   */
   transact<P = Pattern, S = Subject>(request: P & Pattern):
     Observable<Resource<S>> & PromiseLike<Resource<S>[]> & HasExecTick {
     const result = this.store.transact({
@@ -65,6 +89,7 @@ export class MeldApi implements MeldClone {
     return this.store.status;
   }
 
+  /** @inheritDoc */
   follow(): Observable<MeldUpdate> {
     return this.store.follow().pipe(flatMap(async update => ({
       '@ticks': update['@ticks'],

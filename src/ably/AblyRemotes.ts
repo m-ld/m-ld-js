@@ -1,6 +1,7 @@
 /**
  * [[include:ably-remotes.md]]
  * @packageDocumentation
+ * @internal
  */
 import * as Ably from 'ably';
 import { MeldConfig } from '..';

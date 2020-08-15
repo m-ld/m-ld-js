@@ -3,10 +3,9 @@ import { NamedNode, Quad } from 'rdf-js';
 import { literal, namedNode, blankNode, triple as newTriple, defaultGraph, quad as newQuad } from '@rdfjs/data-model';
 import { HashBagBlock } from '../blocks';
 import { Hash } from '../hash';
-import { compact, toRDF } from 'jsonld';
+import { compact } from 'jsonld';
 import { rdfToJson, flatten, jsonToRdf } from '../util';
-import { Context } from '../dataset/jrql-support';
-import { ExpandedTermDef } from 'json-rql';
+import { Context, ExpandedTermDef } from '../dataset/jrql-support';
 import { Iri } from 'jsonld/jsonld-spec';
 
 export class DomainContext implements Context {

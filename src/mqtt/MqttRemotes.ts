@@ -1,5 +1,5 @@
 /**
- * [[include:ably-remotes.md]]
+ * [[include:mqtt-remotes.md]]
  * @packageDocumentation
  */
 import { Observable } from 'rxjs';

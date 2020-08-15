@@ -9,11 +9,12 @@ import { Hash } from '../hash';
 import { Pattern, Subject, Read, Update } from '../dataset/jrql-support';
 import { Future } from '../util';
 import { LiveValue } from '../LiveValue';
-import { LiveStatus, MeldUpdate as BaseUpdate, MeldStatus } from '@m-ld/m-ld-spec';
+import * as spec from '@m-ld/m-ld-spec';
 const inspect = Symbol.for('nodejs.util.inspect.custom');
 
 // Unchanged from m-ld-spec
-export { LiveStatus, MeldStatus };
+export type LiveStatus = spec.LiveStatus;
+export type MeldStatus = spec.MeldStatus;
 
 /**
  * The graph is implicit in m-ld operations.
@@ -111,7 +112,7 @@ export interface MeldLocal extends Meld {
   readonly id: string;
 }
 
-export interface MeldUpdate extends BaseUpdate {
+export interface MeldUpdate extends spec.MeldUpdate {
   '@delete': Subject[];
   '@insert': Subject[];
 }
@@ -128,6 +129,9 @@ export interface HasExecTick {
    * iteration corresponding to the given clone clock tick. Therefore, `follow`
    * can be immediately called and the result subscribed, to be notified of
    * strictly subsequent updates.
+   *
+   * Note that this means the actual tick value is typically redundant, for this
+   * engine. It's provided for consistency and in case of future use.
    */
   readonly tick: Promise<number>;
 }

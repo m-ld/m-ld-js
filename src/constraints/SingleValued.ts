@@ -1,9 +1,8 @@
 import { MeldConstraint, MeldUpdate, MeldReader } from '../m-ld';
 import { Iri } from 'jsonld/jsonld-spec';
-import { Subject, Select } from '..';
 import { MeldApi, DeleteInsert } from '../m-ld/MeldApi';
 import { map, filter, take, reduce, flatMap, defaultIfEmpty } from 'rxjs/operators';
-import { Update, Value, isValueObject } from '../dataset/jrql-support';
+import { Subject, Select, Update, Value, isValueObject } from '../dataset/jrql-support';
 import { Observable, EMPTY, concat, defer, from } from 'rxjs';
 
 function isMultiValued(value: Subject['any']): value is Array<Value> {

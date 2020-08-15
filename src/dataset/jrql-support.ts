@@ -38,6 +38,8 @@ export type Reference = jrql.Reference;
  * @see https://json-rql.org/interfaces/context.html
  */
 export type Context = jrql.Context;
+
+export type ExpandedTermDef = jrql.ExpandedTermDef;
 /**
  * A query variable, prefixed with "?", used as a placeholder for some value in
  * a query, for example:
@@ -55,7 +57,8 @@ export type Variable = jrql.Variable;
  */
 export type Value = jrql.Value;
 // Utility functions
-export { isValueObject, isReference } from 'json-rql';
+export const isValueObject = jrql.isValueObject;
+export const isReference = jrql.isReference;
 
 export type Result = '*' | Variable | Variable[];
 

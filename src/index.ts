@@ -17,19 +17,21 @@ export {
 } from './dataset/jrql-support';
 
 /**
- * m-ld clone configuration
+ * **m-ld** clone configuration, used to initialise a {@link clone} for use.
  */
 export interface MeldConfig {
   /**
-   * The local identity of the m-ld clone, used for message bus identity and
-   * logging. Must be unique among the clones for the domain. For convenience,
-   * you can use the {@link uuid} function.
+   * The local identity of the m-ld clone session, used for message bus identity
+   * and logging. This identity does not need to be the same across re-starts of
+   * a clone with persistent data. It must be unique among the clones for the
+   * domain. For convenience, you can use the {@link uuid} function.
    */
   '@id': string;
   /**
    * A URI domain name, which defines the universal identity of the dataset
    * being manipulated by a set of clones (for example, on the configured
-   * message bus).
+   * message bus). For a clone with persistent data from a prior session, this
+   * *must not* be different to the previous session.
    */
   '@domain': string;
   /**
@@ -48,8 +50,7 @@ export interface MeldConfig {
    * not new. If `false`, and this clone is new, successful clone initialisation
    * is dependent on the availability of another clone. If set to true, and
    * subsequently another non-new clone appears on the same domain, either or
-   * both clones will become permanently 'siloed', that is, unable to
-   * participate further in the domain.
+   * both clones will immediately close to preserve their data integrity.
    */
   genesis: boolean;
   /**
@@ -81,7 +82,7 @@ export function uuid() {
  * database already exists. This function returns as soon as it is safe to begin
  * transactions against the clone; this may be before the clone has received all
  * updates from the domain. To await latest updates, await a call to the
- * {@link MeldApi.latest} method.
+ * {@link MeldApi} `latest` method.
  * @param ldb an instance of a leveldb backend
  * @param remotes a driver for connecting to remote m-ld clones on the domain.
  * This can be a configured object (e.g. `new MqttRemotes(config)`) or just the
