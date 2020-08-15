@@ -1,14 +1,14 @@
-import { SuSetDataset } from '../src/dataset/SuSetDataset';
+import { SuSetDataset } from '../src/engine/dataset/SuSetDataset';
 import { memStore } from './testClones';
-import { TreeClock } from '../src/clocks';
-import { Hash } from '../src/hash';
-import { first, toArray, isEmpty, take } from 'rxjs/operators';
+import { TreeClock } from '../src/engine/clocks';
+import { Hash } from '../src/engine/hash';
+import { first, toArray, isEmpty } from 'rxjs/operators';
 import { uuid } from 'short-uuid';
 import { Subject } from 'json-rql';
-import { JsonDelta, MeldConstraint, MeldUpdate, MeldReader } from '../src/m-ld';
-import { Dataset } from '../src/dataset';
+import { JsonDelta } from '../src/engine';
+import { Dataset } from '../src/engine/dataset';
 import { from } from 'rxjs';
-import { Update, Describe } from '../src';
+import { Describe, MeldConstraint } from '../src';
 import { NO_CONSTRAINT } from '../src/constraints';
 
 const fred = {

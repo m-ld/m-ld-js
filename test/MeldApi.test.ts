@@ -1,9 +1,9 @@
-import { MeldApi, Resource, any } from '../src/m-ld/MeldApi';
+import { MeldApi, Resource, any } from '../src/MeldApi';
 import { memStore, mockRemotes, testConfig } from './testClones';
 import { first } from 'rxjs/operators';
-import { DatasetClone } from '../src/dataset/DatasetClone';
-import { Group, Subject, Select, Describe, Reference, Update } from '../src/dataset/jrql-support';
-import { DomainContext } from '../src/m-ld/MeldJson';
+import { DatasetClone } from '../src/engine/dataset/DatasetClone';
+import { Group, Subject, Select, Describe, Reference, Update } from '../src/jrql-support';
+import { DomainContext } from '../src/engine/MeldJson';
 
 describe('Meld API', () => {
   let api: MeldApi;

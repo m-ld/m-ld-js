@@ -1,15 +1,15 @@
-import { MeldRemotes, DeltaMessage, MeldLocal } from '../src/m-ld';
+import { MeldRemotes, DeltaMessage, MeldLocal } from '../src/engine';
 import { mock, MockProxy } from 'jest-mock-extended';
 import { Observable, NEVER, BehaviorSubject, from, asapScheduler } from 'rxjs';
-import { Dataset, QuadStoreDataset } from '../src/dataset';
+import { Dataset, QuadStoreDataset } from '../src/engine/dataset';
 import MemDown from 'memdown';
-import { TreeClock } from '../src/clocks';
+import { TreeClock } from '../src/engine/clocks';
 import { AsyncMqttClient, IPublishPacket } from 'async-mqtt';
 import { EventEmitter } from 'events';
 import { observeOn } from 'rxjs/operators';
 import { MeldConfig } from '../src';
 import { AbstractLevelDOWN } from 'abstract-leveldown';
-import { LiveValue } from '../src/LiveValue';
+import { LiveValue } from '../src/engine/LiveValue';
 
 export function testConfig(config?: Partial<MeldConfig>): MeldConfig {
   return { '@id': 'test', '@domain': 'test.m-ld.org', genesis: true, ...config };

@@ -1,14 +1,15 @@
-import { MeldConstraint, MeldUpdate, MeldReader } from '../m-ld';
+import { MeldConstraint, MeldUpdate, MeldReader } from '..';
 import { Iri } from 'jsonld/jsonld-spec';
-import { MeldApi, DeleteInsert } from '../m-ld/MeldApi';
+import { MeldApi, DeleteInsert } from '../MeldApi';
 import { map, filter, take, reduce, flatMap, defaultIfEmpty } from 'rxjs/operators';
-import { Subject, Select, Update, Value, isValueObject } from '../dataset/jrql-support';
+import { Subject, Select, Update, Value, isValueObject } from '../jrql-support';
 import { Observable, EMPTY, concat, defer, from } from 'rxjs';
 
 function isMultiValued(value: Subject['any']): value is Array<Value> {
   return Array.isArray(value) && value.length > 1;
 }
 
+/** @internal */
 export class SingleValued implements MeldConstraint {
   constructor(
     readonly property: Iri) {

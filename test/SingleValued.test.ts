@@ -1,5 +1,5 @@
 import { Subject, Describe } from '../src';
-import { DatasetClone } from '../src/dataset/DatasetClone';
+import { DatasetClone } from '../src/engine/dataset/DatasetClone';
 import { memStore, mockRemotes, testConfig } from './testClones';
 import { SingleValued } from '../src/constraints/SingleValued';
 

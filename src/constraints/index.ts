@@ -1,7 +1,7 @@
 import { CheckList } from './CheckList';
 import { SingleValued } from './SingleValued';
-import { Context, Reference } from '../dataset/jrql-support';
-import { MeldConstraint } from '../m-ld';
+import { Context, Reference } from '../jrql-support';
+import { MeldConstraint } from '..';
 import { compact } from 'jsonld';
 
 /**
@@ -24,11 +24,13 @@ export type ConstraintConfig = {
 
 export const NO_CONSTRAINT = new CheckList([]);
 
+/** @internal */
 const PROPERTY_CONTEXT = {
   'mld:#property': { '@type': '@vocab' },
   property: { '@id': 'mld:#property', '@type': '@vocab' }
 }
 
+/** @internal */
 export async function constraintFromConfig(config: ConstraintConfig, context: Context): Promise<MeldConstraint> {
   switch (config['@type']) {
     case 'checklist':

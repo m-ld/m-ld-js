@@ -1,6 +1,7 @@
-import { Snapshot, DeltaMessage, MeldRemotes, MeldUpdate, MeldLocal, MeldClone, LiveStatus, MeldStatus, MeldConstraint, HasExecTick } from '../m-ld';
+import { MeldUpdate, MeldClone, LiveStatus, MeldStatus, MeldConstraint, HasExecTick } from '../..';
+import { Snapshot, DeltaMessage, MeldRemotes, MeldLocal } from '..';
 import { liveRollup } from "../LiveValue";
-import { Pattern, Subject, isRead, isSubject, isGroup, isUpdate } from './jrql-support';
+import { Pattern, Subject, isRead, isSubject, isGroup, isUpdate } from '../../jrql-support';
 import {
   Observable, merge, from, EMPTY,
   concat, BehaviorSubject, Subscription, throwError, identity, interval, of, Subscriber, ConnectableObservable
@@ -16,11 +17,11 @@ import {
 } from 'rxjs/operators';
 import { delayUntil, Future, tapComplete, SharableLock, fromArrayPromise } from '../util';
 import { levels } from 'loglevel';
-import { MeldError } from '../m-ld/MeldError';
+import { MeldError } from '../MeldError';
 import { AbstractMeld, comesAlive } from '../AbstractMeld';
-import { MeldConfig } from '..';
+import { MeldConfig } from '../..';
 import { RemoteUpdates } from './RemoteUpdates';
-import { NO_CONSTRAINT } from '../constraints';
+import { NO_CONSTRAINT } from '../../constraints';
 
 enum ConnectStyle {
   SOFT, HARD

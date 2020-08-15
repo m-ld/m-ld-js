@@ -8,7 +8,9 @@ module.exports = {
   includes: './doc/includes',
   media: './doc/media',
   exclude: [
-    './src/ably/**'
+    './src/engine/**',
+    './src/ably/**',
+    './src/mqtt/**'
   ],
   excludePrivate: true,
   excludeProtected: true,

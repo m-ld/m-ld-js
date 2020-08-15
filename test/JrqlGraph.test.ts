@@ -1,5 +1,5 @@
-import { JrqlGraph } from '../src/dataset/JrqlGraph';
-import { Graph } from '../src/dataset';
+import { JrqlGraph } from '../src/engine/dataset/JrqlGraph';
+import { Graph } from '../src/engine/dataset';
 import { mock } from 'jest-mock-extended';
 import { defaultGraph, namedNode, literal } from '@rdfjs/data-model';
 

@@ -1,23 +1,24 @@
-import { JsonDelta, Snapshot, UUID, MeldUpdate, DeltaMessage, Triple, MeldConstraint } from '../m-ld';
+import { MeldUpdate, MeldConstraint } from '../..';
+import { JsonDelta, Snapshot, UUID, DeltaMessage, Triple } from '..';
 import { Quad } from 'rdf-js';
 import { TreeClock } from '../clocks';
 import { Hash } from '../hash';
-import { Subject } from './jrql-support';
+import { Subject } from '../../jrql-support';
 import { Dataset, PatchQuads } from '.';
 import { flatten as flatJsonLd } from 'jsonld';
 import { Iri } from 'jsonld/jsonld-spec';
 import { JrqlGraph } from './JrqlGraph';
-import { MeldJson, unreify, hashTriple, toDomainQuad, TripleTids } from '../m-ld/MeldJson';
+import { MeldJson, unreify, hashTriple, toDomainQuad, TripleTids } from '../MeldJson';
 import { Observable, from, Subject as Source, EMPTY } from 'rxjs';
 import { toArray, bufferCount, flatMap, reduce, map, filter, takeWhile, expand } from 'rxjs/operators';
 import { flatten, Future, tapComplete, getIdLogger, check, rdfToJson } from '../util';
 import { generate as uuid } from 'short-uuid';
 import { Logger } from 'loglevel';
-import { MeldError } from '../m-ld/MeldError';
+import { MeldError } from '../MeldError';
 import { LocalLock } from '../local';
 import { SUSET_CONTEXT, qsName, toPrefixedId } from './SuSetGraph';
 import { SuSetJournal, SuSetJournalEntry } from './SuSetJournal';
-import { MeldConfig } from '..';
+import { MeldConfig } from '../..';
 
 interface HashTid extends Subject {
   '@id': Iri; // hash:<hashed triple id>

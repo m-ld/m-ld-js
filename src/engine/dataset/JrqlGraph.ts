@@ -2,7 +2,7 @@ import { Iri } from 'jsonld/jsonld-spec';
 import {
   Context, Read, Subject, Update, isDescribe, isGroup, isSubject, isUpdate,
   Group, isSelect, Result, Variable, Value, isValueObject, isReference
-} from './jrql-support';
+} from '../../jrql-support';
 import {
   NamedNode, Quad, Term, Quad_Subject, Quad_Predicate, Quad_Object
 } from 'rdf-js';

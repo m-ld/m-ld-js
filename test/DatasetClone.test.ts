@@ -1,16 +1,16 @@
-import { DatasetClone } from '../src/dataset/DatasetClone';
+import { DatasetClone } from '../src/engine/dataset/DatasetClone';
 import { Subject, Describe } from 'json-rql';
 import { memStore, mockRemotes, hotLive, testConfig } from './testClones';
 import { NEVER, Subject as Source, asapScheduler, EMPTY, throwError } from 'rxjs';
-import { comesAlive } from '../src/AbstractMeld';
+import { comesAlive } from '../src/engine/AbstractMeld';
 import { first, take, toArray, map, observeOn } from 'rxjs/operators';
-import { TreeClock } from '../src/clocks';
-import { DeltaMessage, MeldRemotes, Snapshot } from '../src/m-ld';
+import { TreeClock } from '../src/engine/clocks';
+import { DeltaMessage, MeldRemotes, Snapshot } from '../src/engine';
 import { uuid } from 'short-uuid';
 import { MeldConfig } from '../src';
 import MemDown from 'memdown';
 import { AbstractLevelDOWN } from 'abstract-leveldown';
-import { Hash } from '../src/hash';
+import { Hash } from '../src/engine/hash';
 
 describe('Dataset clone', () => {
   describe('as genesis', () => {

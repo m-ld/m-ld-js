@@ -1,11 +1,11 @@
-import { Meld, Snapshot, DeltaMessage } from './m-ld';
+import { Meld, Snapshot, DeltaMessage } from '.';
 import { LiveValue } from "./LiveValue";
 import { TreeClock } from './clocks';
 import { Observable, Subject as Source, BehaviorSubject, asapScheduler, of } from 'rxjs';
 import { observeOn, tap, distinctUntilChanged, first, skip, catchError } from 'rxjs/operators';
 import { LogLevelDesc, Logger } from 'loglevel';
 import { getIdLogger, check } from './util';
-import { MeldError } from './m-ld/MeldError';
+import { MeldError } from './MeldError';
 
 export abstract class AbstractMeld implements Meld {
   protected static checkLive =

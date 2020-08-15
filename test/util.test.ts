@@ -1,4 +1,4 @@
-import { Future, array, shortId } from '../src/util';
+import { Future, array, shortId } from '../src/engine/util';
 
 test('Future can be resolved', async () => {
   const f = new Future<string>();

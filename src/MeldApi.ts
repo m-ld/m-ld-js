@@ -1,11 +1,11 @@
 import { MeldClone, MeldUpdate, LiveStatus, MeldStatus, HasExecTick } from '.';
 import {
   Context, Subject, Describe, Pattern, Update, Value, isValueObject, Reference, Variable
-} from '../dataset/jrql-support';
+} from './jrql-support';
 import { Observable } from 'rxjs';
 import { map, flatMap, toArray as rxToArray, take } from 'rxjs/operators';
 import { flatten } from 'jsonld';
-import { array, shortId } from '../util';
+import { array, shortId } from './engine/util';
 
 export { MeldUpdate, array };
 

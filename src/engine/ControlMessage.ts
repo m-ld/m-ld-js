@@ -1,5 +1,5 @@
-import { Hash } from '../hash';
-import { TreeClock } from '../clocks';
+import { Hash } from './hash';
+import { TreeClock } from './clocks';
 import { MeldError, MeldErrorStatus } from './MeldError';
 const inspect = Symbol.for('nodejs.util.inspect.custom');
 

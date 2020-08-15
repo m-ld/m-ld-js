@@ -1,13 +1,13 @@
 import * as Ably from 'ably';
 import { mockDeep as mock, MockProxy } from 'jest-mock-extended';
 import { AblyRemotes, MeldAblyConfig } from '../src/ably';
-import { comesAlive } from '../src/AbstractMeld';
-import { DeltaMessage } from '../src/m-ld';
+import { comesAlive } from '../src/engine/AbstractMeld';
+import { DeltaMessage } from '../src/engine';
 import { mockLocal } from './testClones';
 import { Subject as Source, BehaviorSubject } from 'rxjs';
-import { Future } from '../src/util';
-import { TreeClock } from '../src/clocks';
-import { Request, Response } from '../src/m-ld/ControlMessage';
+import { Future } from '../src/engine/util';
+import { TreeClock } from '../src/engine/clocks';
+import { Request, Response } from '../src/engine/ControlMessage';
 
 /**
  * These tests use a fully mocked Ably to avoid incurring costs. The behaviour

@@ -1,8 +1,8 @@
-import { Subject } from './jrql-support';
+import { Subject } from '../../jrql-support';
 import { toPrefixedId } from './SuSetGraph';
 import { Iri } from 'jsonld/jsonld-spec';
-import { UUID, MeldDelta, JsonDelta } from '../m-ld';
-import { JsonDeltaBagBlock } from '../m-ld/MeldJson';
+import { UUID, MeldDelta, JsonDelta } from '..';
+import { JsonDeltaBagBlock } from '../MeldJson';
 import { TreeClock } from '../clocks';
 import { PatchQuads, Patch } from '.';
 import { JrqlGraph } from './JrqlGraph';

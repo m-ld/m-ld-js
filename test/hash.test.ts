@@ -1,4 +1,4 @@
-import { Hash } from '../src/hash'
+import { Hash } from '../src/engine/hash'
 
 test('Hash is equal to itself', () => {
   const hash = Hash.random();

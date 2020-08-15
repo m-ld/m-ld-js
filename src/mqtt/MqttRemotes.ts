@@ -7,9 +7,9 @@ import { AsyncMqttClient, IClientOptions, ISubscriptionMap, connect as defaultCo
 import { MqttTopic, SEND_TOPIC, REPLY_TOPIC, SendParams, } from './MqttTopic';
 import { TopicParams } from 'mqtt-pattern';
 import { MqttPresence } from './MqttPresence';
-import { jsonFrom } from '../util';
+import { jsonFrom } from '../engine/util';
 import { MeldConfig } from '..';
-import { ReplyParams, PubsubRemotes, SubPubsub, SubPub } from '../PubsubRemotes';
+import { ReplyParams, PubsubRemotes, SubPubsub, SubPub } from '../engine/PubsubRemotes';
 
 export interface MeldMqttConfig extends MeldConfig {
   mqtt?: Omit<IClientOptions, 'will' | 'clientId'> & ({ hostname: string } | { host: string, port: number })
