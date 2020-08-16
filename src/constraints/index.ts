@@ -22,6 +22,7 @@ export type ConstraintConfig = {
   property: string;
 }
 
+/** @internal */
 export const NO_CONSTRAINT = new CheckList([]);
 
 /** @internal */

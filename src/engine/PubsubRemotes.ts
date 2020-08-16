@@ -3,12 +3,12 @@ import { Observable, Subject as Source, BehaviorSubject, identity } from 'rxjs';
 import { TreeClock } from './clocks';
 import { generate as uuid } from 'short-uuid';
 import { Response, Request } from './ControlMessage';
-import { Future, toJson, Stopwatch, shortId } from './util';
+import { Future, toJson, Stopwatch } from './util';
 import { finalize, flatMap, reduce, toArray, first, concatMap, materialize, timeout } from 'rxjs/operators';
 import { MeldJson } from './MeldJson';
 import { MeldError, MeldErrorStatus } from './MeldError';
 import { AbstractMeld } from './AbstractMeld';
-import { MeldConfig } from '..';
+import { MeldConfig, shortId } from '..';
 
 // @see org.m_ld.json.MeldJacksonModule.NotificationDeserializer
 export interface JsonNotification {

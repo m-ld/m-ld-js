@@ -11,13 +11,13 @@
     "link-locals": "sudo npm link ../m-ld-spec ../json-rql ../typedoc-theme",
     "clean": "rm -rf dist _site",
     "build-quick": "tsc",
-    "build": "npm run clean && jest --silent && tsc && npm run doc",
+    "build": "npm run clean && jest --silent && tsc && npm run bundle && typedoc",
     "dev": "jest --watch --silent",
     "dev+log": "jest --watch",
     "compliance": "node compliance/test.js",
     "prepublishOnly": "npm run build && npm version $VERSION && git push",
-    "doc": "npm pack && mv m-ld*.tgz doc/media/m-ld.tgz && typedoc",
-    "doc-dev": "tsc-watch --onSuccess \"npm run doc\" & browser-sync start --server _site --files _site"
+    "bundle": "npm pack && mv m-ld*.tgz doc/media/m-ld.tgz",
+    "doc-dev": "tsc-watch --onSuccess \"typedoc\" & browser-sync start --server _site --files _site"
   },
   "repository": {
     "type": "git",

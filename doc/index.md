@@ -55,9 +55,9 @@ await meld.status.becomes({ online: true, outdated: false });
 
 ### Transactions
 As soon as the [clone](#clone) function's return promise has resolved, it is
-safe to make data transactions. See the
-[**m-ld**&nbsp;specification](https://spec.m-ld.org/#transactions) for a
-walk-through of the **m-ld** transaction syntax.
+safe to make data transactions. See the **m-ld**
+[specification](https://spec.m-ld.org/#transactions) for a walk-through of the
+**m-ld** transaction syntax.
 
 The [MeldApi](/classes/meldapi.html) object returned by the `clone` function
 also augments the basic clone API with convenience methods to simplify common

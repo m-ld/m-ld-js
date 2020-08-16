@@ -11,8 +11,9 @@ import { namedNode, defaultGraph, variable, quad as createQuad, blankNode } from
 import { Graph, PatchQuads } from '.';
 import { toArray, flatMap, map, filter, distinct } from 'rxjs/operators';
 import { from, of, EMPTY, Subscriber } from 'rxjs';
-import { array, shortId, flatten, rdfToJson, jsonToRdf, fromArrayPromise } from '../util';
+import { flatten, rdfToJson, jsonToRdf, fromArrayPromise } from '../util';
 import { QuadSolution, VarValues, TriplePos } from './QuadSolution';
+import { array, shortId } from '../..';
 
 /**
  * A graph wrapper that provides low-level json-rql handling for queries. The

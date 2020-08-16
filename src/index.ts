@@ -11,7 +11,6 @@ import { DomainContext } from './engine/MeldJson';
 import { Observable } from 'rxjs';
 
 export * from './MeldApi';
-export { shortId } from './engine/util';
 export {
   Pattern, Reference, Context, Variable, Value, Describe,
   Group, Query, Read, Result, Select, Subject, Update
@@ -70,14 +69,6 @@ export interface MeldConfig {
   logLevel?: LogLevelDesc;
 }
 
-/** 
- * Utility to generate a unique UUID for use in a MeldConfig
- */
-export function uuid() {
-  // This is indirected for documentation (do not just re-export generate)
-  return generate();
-}
-
 /**
  * Create or initialise a local clone, depending on whether the given LevelDB
  * database already exists. This function returns as soon as it is safe to begin
@@ -90,7 +81,7 @@ export function uuid() {
  * class (`MqttRemotes`).
  * @param config the clone configuration
  * @param constraint a constraint implementation, overrides config constraint.
- * Experimental: use with caution.
+ * 🚧 Experimental: use with caution.
  */
 export async function clone(
   ldb: AbstractLevelDOWN,
@@ -115,14 +106,30 @@ export async function clone(
 // The m-ld remotes API is not yet public, so here we just declare the available
 // modules for documentation purposes.
 declare module dist {
-  module mqtt { export type MqttRemotes = any; }
-  module ably { export type AblyRemotes = any; }
+  module mqtt {
+    /**
+     * MQTT remotes implementation, see [MQTT Remotes](/#mqtt-remotes)
+     */
+    export type MqttRemotes = any;
+  }
+  module ably {
+    /**
+     * Ably remotes implementation, see [Ably Remotes](/#ably-remotes)
+     */
+    export type AblyRemotes = any;
+  }
 }
 
 // Unchanged from m-ld-spec
+/** @see m-ld [specification](http://spec.m-ld.org/interfaces/livestatus.html) */
 export type LiveStatus = spec.LiveStatus;
+/** @see m-ld [specification](http://spec.m-ld.org/interfaces/meldstatus.html) */
 export type MeldStatus = spec.MeldStatus;
-
+/**
+ * An update event signalling a write operation, which may have been transacted
+ * locally in this clone, or remotely on another clone.
+ * @see m-ld [specification](http://spec.m-ld.org/interfaces/meldupdate.html)
+ */
 export interface MeldUpdate extends spec.MeldUpdate {
   '@delete': Subject[];
   '@insert': Subject[];
@@ -260,4 +267,46 @@ export interface MeldConstraint {
    * the violation so that the constraint invariant is upheld.
    */
   apply(update: MeldUpdate, read: MeldReader): Promise<Update | null>;
+}
+
+/**
+ * Utility to normalise a property value according to **m-ld**
+ * [data&nbsp;semantics](http://spec.m-ld.org/#data-semantics), from a missing
+ * value (`null` or `undefined`), a single value, or an array of values, to an
+ * array of values (empty for missing values). This can simplify processing of
+ * property values in common cases.
+ * @param value the value to normalise to an array
+ */
+export function array<T>(value?: T | T[]): T[] {
+  return value == null ? [] : ([] as T[]).concat(value).filter(v => v != null);
+}
+
+/**
+ * Utility to generate a short Id according to the given spec.
+ * @param spec If a number, a random Id will be generated with the given length.
+ * If a string, an obfuscated Id will be deterministically generated for the
+ * string (passing the same spec again will generate the same Id).
+ * @return a string identifier that is safe to use as an HTML (& XML) element Id
+ */
+export function shortId(spec: number | string = 8) {
+  let genChar: () => number, len: number;
+  if (typeof spec == 'number') {
+    let d = new Date().getTime();
+    genChar = () => (d + Math.random() * 16);
+    len = spec;
+  } else {
+    let i = 0;
+    genChar = () => spec.charCodeAt(i++);
+    len = spec.length;
+  }
+  return ('a' + 'x'.repeat(len - 1)).replace(/[ax]/g, c =>
+    (genChar() % (c == 'a' ? 6 : 16) + (c == 'a' ? 10 : 0) | 0).toString(16));
+}
+
+/**
+ * Utility to generate a unique UUID for use in a MeldConfig
+ */
+export function uuid() {
+  // This is indirected for documentation (do not just re-export generate)
+  return generate();
 }

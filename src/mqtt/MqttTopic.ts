@@ -1,6 +1,7 @@
 import { exec, TopicParams } from 'mqtt-pattern';
-import { flatten, array } from '../engine/util';
+import { flatten } from '../engine/util';
 import { DirectParams, ReplyParams } from '../engine/PubsubRemotes';
+import { array } from '..';
 
 type TopicPart<P> = string | { '+': keyof P; } | { '#': keyof P; };
 
