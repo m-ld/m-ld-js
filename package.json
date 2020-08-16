@@ -30,7 +30,7 @@
   },
   "homepage": "https://github.com/m-ld/m-ld-js#readme",
   "devDependencies": {
-    "@m-ld/typedoc-theme": "^0.1.2",
+    "@m-ld/typedoc-theme": "^0.1.3",
     "@types/jest": "^26.0.0",
     "@types/memdown": "^3.0.0",
     "@types/readable-stream": "2.3.5",

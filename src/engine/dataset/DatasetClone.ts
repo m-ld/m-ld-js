@@ -1,10 +1,10 @@
-import { MeldUpdate, MeldClone, LiveStatus, MeldStatus, MeldConstraint, HasExecTick } from '../..';
+import { MeldUpdate, MeldClone, LiveStatus, MeldStatus, MeldConstraint, HasExecTick } from '../../MeldApi';
 import { Snapshot, DeltaMessage, MeldRemotes, MeldLocal } from '..';
 import { liveRollup } from "../LiveValue";
 import { Pattern, Subject, isRead, isSubject, isGroup, isUpdate } from '../../jrql-support';
 import {
   Observable, merge, from, EMPTY,
-  concat, BehaviorSubject, Subscription, throwError, identity, interval, of, Subscriber, ConnectableObservable
+  concat, BehaviorSubject, Subscription, throwError, identity, interval, of, Subscriber
 } from 'rxjs';
 import { TreeClock } from '../clocks';
 import { SuSetDataset } from './SuSetDataset';

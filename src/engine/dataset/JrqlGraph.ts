@@ -13,7 +13,7 @@ import { toArray, flatMap, map, filter, distinct } from 'rxjs/operators';
 import { from, of, EMPTY, Subscriber } from 'rxjs';
 import { flatten, rdfToJson, jsonToRdf, fromArrayPromise } from '../util';
 import { QuadSolution, VarValues, TriplePos } from './QuadSolution';
-import { array, shortId } from '../..';
+import { array, shortId } from '../../MeldApi';
 
 /**
  * A graph wrapper that provides low-level json-rql handling for queries. The

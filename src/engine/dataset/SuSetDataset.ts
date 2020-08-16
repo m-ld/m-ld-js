@@ -1,4 +1,4 @@
-import { MeldUpdate, MeldConstraint } from '../..';
+import { MeldUpdate, MeldConstraint } from '../../MeldApi';
 import { JsonDelta, Snapshot, UUID, DeltaMessage, Triple } from '..';
 import { Quad } from 'rdf-js';
 import { TreeClock } from '../clocks';

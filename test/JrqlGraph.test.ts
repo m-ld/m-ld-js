@@ -1,7 +1,7 @@
 import { JrqlGraph } from '../src/engine/dataset/JrqlGraph';
 import { Graph } from '../src/engine/dataset';
 import { mock } from 'jest-mock-extended';
-import { defaultGraph, namedNode, literal } from '@rdfjs/data-model';
+import { defaultGraph, namedNode } from '@rdfjs/data-model';
 
 describe('json-rql Graph handler', () => {
   let jrqlGraph: JrqlGraph;
