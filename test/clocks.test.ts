@@ -1,4 +1,4 @@
-import { TreeClock } from '../src/clocks'
+import { TreeClock } from '../src/engine/clocks'
 
 test('Genesis has no ticks', () => {
   expect(TreeClock.GENESIS.ticks).toBe(0);

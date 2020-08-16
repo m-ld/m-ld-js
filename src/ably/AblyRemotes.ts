@@ -1,10 +1,11 @@
 /**
  * [[include:ably-remotes.md]]
  * @packageDocumentation
+ * @internal
  */
 import * as Ably from 'ably';
 import { MeldConfig } from '..';
-import { PubsubRemotes, SubPubsub, SubPub, DirectParams, ReplyParams } from '../PubsubRemotes';
+import { PubsubRemotes, SubPubsub, SubPub, DirectParams, ReplyParams } from '../engine/PubsubRemotes';
 import { Observable, from, identity } from 'rxjs';
 import { flatMap, filter, map } from 'rxjs/operators';
 import { AblyTraffic, AblyTrafficConfig } from './AblyTraffic';

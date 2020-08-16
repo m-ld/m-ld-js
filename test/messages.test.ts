@@ -1,5 +1,5 @@
-import { TreeClockMessageService, Message } from '../src/messages'
-import { TreeClock } from '../src/clocks';
+import { TreeClockMessageService, Message } from '../src/engine/messages'
+import { TreeClock } from '../src/engine/clocks';
 
 test('First message send', () => {
   const p1 = new TreeClockMessageService(TreeClock.GENESIS);

@@ -1,9 +1,19 @@
 import { CheckList } from './CheckList';
 import { SingleValued } from './SingleValued';
-import { Context, Reference } from '../dataset/jrql-support';
-import { MeldConstraint } from '../m-ld';
+import { Context, Reference } from '../jrql-support';
+import { MeldConstraint } from '..';
 import { compact } from 'jsonld';
 
+/**
+ * Configuration of the clone data constraint. The supported constraints are:
+ * - `checklist`: a list of constraints executed sequentially
+ * - `single-valued`: the given property should have only one value. The
+ *   property can be given in unexpanded form, as it appears in JSON subjects
+ *   when using the API, or as its full IRI reference.
+ *
+ * > 🚧 *Please [contact&nbsp;us](mailto:info@m-ld.io) to discuss data
+ * > constraints required for your use-case.*
+ */
 export type ConstraintConfig = {
   '@type': 'checklist';
   list: ConstraintConfig[];
@@ -12,13 +22,16 @@ export type ConstraintConfig = {
   property: string;
 }
 
+/** @internal */
 export const NO_CONSTRAINT = new CheckList([]);
 
+/** @internal */
 const PROPERTY_CONTEXT = {
   'mld:#property': { '@type': '@vocab' },
   property: { '@id': 'mld:#property', '@type': '@vocab' }
 }
 
+/** @internal */
 export async function constraintFromConfig(config: ConstraintConfig, context: Context): Promise<MeldConstraint> {
   switch (config['@type']) {
     case 'checklist':

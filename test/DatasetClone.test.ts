@@ -1,16 +1,16 @@
-import { DatasetClone } from '../src/dataset/DatasetClone';
+import { DatasetClone } from '../src/engine/dataset/DatasetClone';
 import { Subject, Describe } from 'json-rql';
 import { memStore, mockRemotes, hotLive, testConfig } from './testClones';
 import { NEVER, Subject as Source, asapScheduler, EMPTY, throwError } from 'rxjs';
-import { comesAlive } from '../src/AbstractMeld';
+import { comesAlive } from '../src/engine/AbstractMeld';
 import { first, take, toArray, map, observeOn } from 'rxjs/operators';
-import { TreeClock } from '../src/clocks';
-import { DeltaMessage, MeldRemotes, Snapshot } from '../src/m-ld';
+import { TreeClock } from '../src/engine/clocks';
+import { DeltaMessage, MeldRemotes, Snapshot } from '../src/engine';
 import { uuid } from 'short-uuid';
 import { MeldConfig } from '../src';
 import MemDown from 'memdown';
 import { AbstractLevelDOWN } from 'abstract-leveldown';
-import { Hash } from '../src/hash';
+import { Hash } from '../src/engine/hash';
 
 describe('Dataset clone', () => {
   describe('as genesis', () => {
@@ -59,12 +59,13 @@ describe('Dataset clone', () => {
     });
 
     test('stores a JSON-LD object', async () => {
-      await expect(silo.transact({
+      const result = silo.transact({
         '@id': 'http://test.m-ld.org/fred',
         'http://test.m-ld.org/#name': 'Fred'
-      } as Subject).toPromise())
-        // Expecting nothing to be emitted for an insert
-        .resolves.toBeUndefined();
+      } as Subject);
+      // Expecting nothing to be emitted for an insert
+      await expect(result.toPromise()).resolves.toBeUndefined();
+      await expect(result.tick).resolves.toBe(1);
     });
 
     test('retrieves a JSON-LD object', async () => {
@@ -72,11 +73,13 @@ describe('Dataset clone', () => {
         '@id': 'http://test.m-ld.org/fred',
         'http://test.m-ld.org/#name': 'Fred'
       } as Subject).toPromise();
-      const fred = await silo.transact({
+      const result = silo.transact({
         '@describe': 'http://test.m-ld.org/fred'
-      } as Describe).toPromise();
+      } as Describe);
+      const fred = await result.toPromise();
       expect(fred['@id']).toBe('http://test.m-ld.org/fred');
       expect(fred['http://test.m-ld.org/#name']).toBe('Fred');
+      await expect(result.tick).resolves.toBe(1);
     });
 
     test('has no ticks from genesis', async () => {
@@ -90,6 +93,31 @@ describe('Dataset clone', () => {
       } as Subject);
       await silo.follow().pipe(first()).toPromise();
       expect(silo.status.value).toEqual({ online: true, outdated: false, silo: true, ticks: 1 });
+    });
+
+    test('follow after initial ticks', async () => {
+      const firstUpdate = silo.follow().pipe(first()).toPromise();
+      silo.transact({
+        '@id': 'http://test.m-ld.org/fred',
+        'http://test.m-ld.org/#name': 'Fred'
+      } as Subject);
+      await expect(firstUpdate).resolves.toHaveProperty('@ticks', 1);
+    });
+
+    test('follow after current tick', async () => {
+      const insertFred = silo.transact({
+        '@id': 'http://test.m-ld.org/fred',
+        'http://test.m-ld.org/#name': 'Fred'
+      } as Subject);
+      await insertFred.toPromise();
+      await expect(insertFred.tick).resolves.toBe(1);
+      expect(silo.status.value.ticks).toBe(1);
+      const firstUpdate = silo.follow().pipe(first()).toPromise();
+      await expect(silo.transact({
+        '@id': 'http://test.m-ld.org/wilma',
+        'http://test.m-ld.org/#name': 'Wilma'
+      } as Subject).tick).resolves.toBe(2);
+      await expect(firstUpdate).resolves.toHaveProperty('@ticks', 2);
     });
   });
 

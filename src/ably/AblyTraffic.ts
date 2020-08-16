@@ -1,4 +1,4 @@
-import { Future } from '../util';
+import { Future } from '../engine/util';
 import * as Ably from 'ably';
 import { Subject, Observable, asyncScheduler, of, SchedulerLike } from 'rxjs';
 import { concatMap, delay } from 'rxjs/operators';

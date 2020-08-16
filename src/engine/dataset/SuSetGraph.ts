@@ -1,4 +1,4 @@
-import { Context } from './jrql-support';
+import { Context } from '../../jrql-support';
 import { namedNode } from '@rdfjs/data-model';
 import { NamedNode } from 'rdf-js';
 

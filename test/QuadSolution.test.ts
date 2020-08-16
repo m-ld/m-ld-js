@@ -1,4 +1,4 @@
-import { QuadSolution } from '../src/dataset/QuadSolution';
+import { QuadSolution } from '../src/engine/dataset/QuadSolution';
 import { quad, namedNode, literal, variable } from '@rdfjs/data-model';
 
 describe('Quad solution', () => {

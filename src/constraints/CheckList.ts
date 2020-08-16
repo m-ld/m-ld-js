@@ -1,6 +1,8 @@
-import { MeldConstraint, MeldUpdate, MeldReader } from '../m-ld';
-import { Update, DeleteInsert, Subject } from '..';
+import { MeldConstraint, MeldUpdate, MeldReader } from '..';
+import { Update, Subject } from '../jrql-support';
+import { DeleteInsert } from '../MeldApi';
 
+/** @internal */
 export class CheckList implements MeldConstraint {
   constructor(
     readonly list: MeldConstraint[]) {

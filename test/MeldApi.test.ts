@@ -1,9 +1,9 @@
-import { MeldApi, Resource, any } from '../src/m-ld/MeldApi';
+import { MeldApi, Resource, any } from '../src/MeldApi';
 import { memStore, mockRemotes, testConfig } from './testClones';
 import { first } from 'rxjs/operators';
-import { DatasetClone } from '../src/dataset/DatasetClone';
-import { Group, Subject, Select, Describe, Reference, Update } from '../src/dataset/jrql-support';
-import { DomainContext } from '../src/m-ld/MeldJson';
+import { DatasetClone } from '../src/engine/dataset/DatasetClone';
+import { Group, Subject, Select, Describe, Reference, Update } from '../src/jrql-support';
+import { DomainContext } from '../src/engine/MeldJson';
 
 describe('Meld API', () => {
   let api: MeldApi;
@@ -16,7 +16,9 @@ describe('Meld API', () => {
 
   test('retrieves a JSON-LD subject', async () => {
     const captureUpdate = api.follow().pipe(first()).toPromise();
-    await api.transact<Subject>({ '@id': 'fred', name: 'Fred' });
+    const result = api.transact<Subject>({ '@id': 'fred', name: 'Fred' });
+    await expect(result.tick).resolves.toBe(1);
+    await result;
     await expect(captureUpdate).resolves.toEqual({
       '@ticks': 1,
       '@insert': [{ '@id': 'fred', name: 'Fred' }],
@@ -120,6 +122,7 @@ describe('Meld API', () => {
 
   test('selects where', async () => {
     await api.transact<Subject>({ '@id': 'fred', name: 'Fred' });
+    await api.transact<Subject>({ '@id': 'wilma', name: 'Wilma' });
     await expect(api.transact({
       '@select': '?f', '@where': { '@id': '?f', name: 'Fred' }
     } as Select))
@@ -154,7 +157,8 @@ describe('Meld API', () => {
   });
 
   test('describes where', async () => {
-    await api.transact({ '@id': 'fred', name: 'Fred' } as Subject);
+    await api.transact<Subject>({ '@id': 'fred', name: 'Fred' });
+    await api.transact<Subject>({ '@id': 'wilma', name: 'Wilma' });
     await expect(api.transact({
       '@describe': '?f', '@where': { '@id': '?f', name: 'Fred' }
     } as Describe))
@@ -261,12 +265,6 @@ describe('Node utility', () => {
     const box: Resource<Box> = { '@id': 'foo', size: 10, label: 'My box' };
     MeldApi.update(box, { '@insert': { '@id': 'foo', size: 10 }, '@delete': { '@id': 'foo', size: 10 } });
     expect(box).toEqual({ '@id': 'foo', size: 10, label: 'My box' });
-  });
-
-  test('updates a value on anonymous node', () => {
-    const box: Resource<Box> = { size: 10, label: 'My box' };
-    MeldApi.update(box, { '@insert': { size: 20 }, '@delete': { size: 10 } });
-    expect(box).toEqual({ size: 20, label: 'My box' });
   });
 
   // FIXME This breaks the Node type, but not possible to prevent at runtime

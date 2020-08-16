@@ -1,16 +1,16 @@
 import { MqttRemotes } from '../src/mqtt/MqttRemotes';
 import { MockProxy } from 'jest-mock-extended';
 import { AsyncMqttClient } from 'async-mqtt';
-import { DeltaMessage } from '../src/m-ld';
-import { TreeClock } from '../src/clocks';
+import { DeltaMessage } from '../src/engine';
+import { TreeClock } from '../src/engine/clocks';
 import { Subject as Source, of } from 'rxjs';
 import { mockLocal, MockMqtt, mockMqtt } from './testClones';
 import { take, toArray } from 'rxjs/operators';
-import { comesAlive } from '../src/AbstractMeld';
-import { MeldErrorStatus } from '../src/m-ld/MeldError';
-import { Request, Response } from '../src/m-ld/ControlMessage';
-import { Future } from '../src/util';
-import { JsonNotification } from '../src/PubsubRemotes';
+import { comesAlive } from '../src/engine/AbstractMeld';
+import { MeldErrorStatus } from '../src/engine/MeldError';
+import { Request, Response } from '../src/engine/ControlMessage';
+import { Future } from '../src/engine/util';
+import { JsonNotification } from '../src/engine/PubsubRemotes';
 
 /**
  * These tests also test the abstract base class, PubsubRemotes

@@ -1,4 +1,5 @@
-import { Future, toArray, shortId } from '../src/util';
+import { Future } from '../src/engine/util';
+import { array, shortId } from '../src';
 
 test('Future can be resolved', async () => {
   const f = new Future<string>();
@@ -46,15 +47,15 @@ test('Unhandled future does not cause UnhandledPromiseRejectionWarning', () => {
 });
 
 test('graphy to array', () => {
-  expect(toArray()).toEqual([]);
-  expect(toArray(null)).toEqual([]);
-  expect(toArray('')).toEqual(['']);
-  expect(toArray(0)).toEqual([0]);
-  expect(toArray([0])).toEqual([0]);
-  expect(toArray([0, 0])).toEqual([0, 0]);
-  expect(toArray([0, 1])).toEqual([0, 1]);
-  expect(toArray([0, null])).toEqual([0]);
-  expect(toArray([0, undefined])).toEqual([0]);
+  expect(array()).toEqual([]);
+  expect(array(null)).toEqual([]);
+  expect(array('')).toEqual(['']);
+  expect(array(0)).toEqual([0]);
+  expect(array([0])).toEqual([0]);
+  expect(array([0, 0])).toEqual([0, 0]);
+  expect(array([0, 1])).toEqual([0, 1]);
+  expect(array([0, null])).toEqual([0]);
+  expect(array([0, undefined])).toEqual([0]);
 });
 
 test('short id is valid XML local name', () => {

@@ -2,17 +2,18 @@ import { Iri } from 'jsonld/jsonld-spec';
 import {
   Context, Read, Subject, Update, isDescribe, isGroup, isSubject, isUpdate,
   Group, isSelect, Result, Variable, Value, isValueObject, isReference
-} from './jrql-support';
+} from '../../jrql-support';
 import {
   NamedNode, Quad, Term, Quad_Subject, Quad_Predicate, Quad_Object
 } from 'rdf-js';
-import { compact, toRDF } from 'jsonld';
+import { compact } from 'jsonld';
 import { namedNode, defaultGraph, variable, quad as createQuad, blankNode } from '@rdfjs/data-model';
 import { Graph, PatchQuads } from '.';
-import { toArray, flatMap, map, filter, distinct, first } from 'rxjs/operators';
-import { from, of, EMPTY, Observable, throwError } from 'rxjs';
-import { toArray as array, shortId, flatten, rdfToJson, jsonToRdf } from '../util';
+import { toArray, flatMap, map, filter, distinct } from 'rxjs/operators';
+import { from, of, EMPTY, Subscriber } from 'rxjs';
+import { flatten, rdfToJson, jsonToRdf, fromArrayPromise } from '../util';
 import { QuadSolution, VarValues, TriplePos } from './QuadSolution';
+import { array, shortId } from '../../MeldApi';
 
 /**
  * A graph wrapper that provides low-level json-rql handling for queries. The
@@ -25,13 +26,14 @@ export class JrqlGraph {
     readonly defaultContext: Context = {}) {
   }
 
-  read(query: Read, context: Context = query['@context'] || this.defaultContext): Observable<Subject> {
+  async read(subs: Subscriber<Subject>, query: Read,
+    context: Context = query['@context'] || this.defaultContext): Promise<unknown> {
     if (isDescribe(query) && !Array.isArray(query['@describe'])) {
-      return this.describe(query['@describe'], query['@where'], context);
+      return this.describe(subs, query['@describe'], query['@where'], context);
     } else if (isSelect(query) && query['@where'] != null) {
-      return this.select(query['@select'], query['@where'], context);
+      return this.select(subs, query['@select'], query['@where'], context);
     }
-    return throwError(new Error('Read type not supported.'));
+    throw new Error('Read type not supported.');
   }
 
   async write(query: Subject | Group | Update,
@@ -47,46 +49,50 @@ export class JrqlGraph {
     throw new Error('Write type not supported.');
   }
 
-  select(select: Result,
+  select(subs: Subscriber<Subject>, select: Result,
     where: Subject | Subject[] | Group,
-    context: Context = this.defaultContext): Observable<Subject> {
-    return this.whereSolutions(where, context).pipe(
-      flatMap(solution => solutionSubject(select, solution, context)));
+    context: Context = this.defaultContext): Promise<unknown> {
+    const solutions = this.whereSolutions(where, context);
+    fromArrayPromise(solutions).pipe(
+      flatMap(solution => solutionSubject(select, solution, context)))
+      .subscribe(subs);
+    return solutions;
   }
 
-  private whereSolutions(where: Subject | Subject[] | Group,
-    context: Context = this.defaultContext): Observable<QuadSolution> {
+  private async whereSolutions(where: Subject | Subject[] | Group,
+    context: Context): Promise<QuadSolution[]> {
     // Find a set of solutions for every union
-    return from(unions(where)).pipe(
-      flatMap(graph => this.quads(graph, context)
-        .then(quads => this.matchSolutions(quads))),
-      flatMap(solutions => from(solutions)));
+    return flatten(await Promise.all(unions(where).map(
+      graph => this.quads(graph, context).then(quads => this.matchSolutions(quads)))));
   }
 
-  describe(describe: Iri | Variable,
+  describe(subs: Subscriber<Subject>,
+    describe: Iri | Variable,
     where?: Subject | Subject[] | Group,
-    context: Context = this.defaultContext): Observable<Subject> {
+    context: Context = this.defaultContext): Promise<unknown> {
     const varName = matchVar(describe);
     if (varName) {
+      const solutions = this.whereSolutions(where ?? {}, context);
       // Find a set of solutions for every union
-      return this.whereSolutions(where ?? {}, context).pipe(
+      fromArrayPromise(solutions).pipe(
         map(solution => solution.vars[varName]?.value),
-        filter(iri => !!iri),
-        distinct(),
-        flatMap(iri => this.describe(iri, undefined, context)));
+        filter(iri => !!iri), distinct(),
+        // FIXME: This could obtain more recent data than the solution
+        flatMap(iri => this.describe1(iri, context)))
+        .subscribe(subs);
+      return solutions;
     } else {
-      return from(resolve(describe, context)).pipe(
-        flatMap(iri => this.graph.match(iri)),
-        toArray(),
-        flatMap(quads => {
-          quads.forEach(quad => quad.graph = defaultGraph());
-          return quads.length ? from(toSubject(quads, context)) : EMPTY;
-        }));
+      const subject = this.describe1(describe, context);
+      from(subject).pipe(filter(subject => subject != null)).subscribe(subs);
+      return subject;
     }
   }
 
-  async describe1<T>(describe: Iri, context: Context = this.defaultContext): Promise<T> {
-    return this.describe(describe, undefined, context).pipe(first<T & Subject>()).toPromise();
+  async describe1<T extends object>(describe: Iri, context: Context = this.defaultContext): Promise<T | undefined> {
+    const iri = await resolve(describe, context);
+    const quads = await this.graph.match(iri).pipe(toArray()).toPromise();
+    quads.forEach(quad => quad.graph = defaultGraph());
+    return quads.length ? <T>await toSubject(quads, context) : undefined;
   }
 
   async find1<T>(jrqlPattern: Partial<T> & Subject,
@@ -109,8 +115,7 @@ export class JrqlGraph {
         await this.hiddenVarQuads(query['@delete'], context) : null;
       const varInsert = query['@insert'] != null ?
         await this.hiddenVarQuads(query['@insert'], context) : null;
-      const solutions = await this.whereSolutions(query['@where'], context)
-        .pipe(toArray()).toPromise();
+      const solutions = await this.whereSolutions(query['@where'], context);
       solutions.forEach(solution => {
         function matchingQuads(hiddenVarQuads: Quad[] | null) {
           // If there are variables in the update for which there is no value in the
@@ -174,19 +179,17 @@ export class JrqlGraph {
   }
 
   private async matchSolutions(patterns: Quad[]): Promise<QuadSolution[]> {
-    // TODO: return Observable<QuadSolution>. The last pattern results can be streamed.
+    // TODO: The last pattern results can be streamed.
     // reduce async from a single empty solution
     const solutions = await patterns.reduce(
-      async (willSolve, pattern) => {
-        const solutions = await willSolve;
-        // find matching quads for each pattern quad
-        return this.graph.match(...asMatchTerms(pattern)).pipe(
+      // find matching quads for each pattern quad
+      async (solutions, pattern) =>
+        this.graph.match(...asMatchTerms(pattern)).pipe(
           // match each quad against already-found solutions
-          flatMap(quad => from(solutions).pipe(flatMap(solution => {
+          flatMap(quad => fromArrayPromise(solutions).pipe(flatMap(solution => {
             const matchingSolution = quad ? solution.join(pattern, quad) : solution;
             return matchingSolution ? of(matchingSolution) : EMPTY;
-          }))), toArray()).toPromise();
-      },
+          }))), toArray()).toPromise(),
       // Start the reduction with an empty quad solution
       Promise.resolve([QuadSolution.EMPTY]));
     // Remove the initial empty quad solution if it's still there
@@ -218,7 +221,7 @@ async function solutionSubject(results: Result[] | Result, solution: QuadSolutio
 /**
  * @returns a single subject compacted against the given context
  */
-export async function toSubject(quads: Quad[], context: Context): Promise<Subject> {
+export async function toSubject(quads: Quad[], context: Context): Promise<object> {
   return compact(await rdfToJson(quads), context || {}) as unknown as Subject;
 }
 

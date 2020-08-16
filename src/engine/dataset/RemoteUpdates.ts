@@ -1,4 +1,4 @@
-import { DeltaMessage, MeldRemotes } from '../m-ld';
+import { DeltaMessage, MeldRemotes } from '..';
 import { LiveValue } from "../LiveValue";
 import { Observable, merge, NEVER, BehaviorSubject, defer } from 'rxjs';
 import { switchAll } from 'rxjs/operators';

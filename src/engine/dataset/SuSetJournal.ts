@@ -1,12 +1,11 @@
-import { Subject } from './jrql-support';
+import { Subject } from '../../jrql-support';
 import { toPrefixedId } from './SuSetGraph';
 import { Iri } from 'jsonld/jsonld-spec';
-import { UUID, MeldDelta, JsonDelta } from '../m-ld';
-import { JsonDeltaBagBlock } from '../m-ld/MeldJson';
+import { UUID, MeldDelta, JsonDelta } from '..';
+import { JsonDeltaBagBlock } from '../MeldJson';
 import { TreeClock } from '../clocks';
 import { PatchQuads, Patch } from '.';
 import { JrqlGraph } from './JrqlGraph';
-import { isEmpty } from 'rxjs/operators';
 import { Hash } from '../hash';
 
 interface Journal {
@@ -57,6 +56,10 @@ export class SuSetJournalEntry {
     return this.data['@id'];
   }
 
+  get ticks(): number {
+    return this.data.ticks;
+  }
+
   get hash(): Hash {
     return Hash.decode(this.body.hash);
   }
@@ -75,8 +78,7 @@ export class SuSetJournalEntry {
 
   async next(): Promise<SuSetJournalEntry | undefined> {
     if (this.body.next)
-      return new SuSetJournalEntry(this.journal,
-        await this.journal.graph.describe1<JournalEntry>(this.body.next));
+      return this.journal.entry(this.body.next);
   }
 
   static headEntry(startingHash: Hash, localTime?: TreeClock, startingTime?: TreeClock): Subject {
@@ -172,12 +174,12 @@ export class SuSetJournalState {
   async tail(): Promise<SuSetJournalEntry> {
     if (this.body.tail == null)
       throw new Error('Journal has no tail yet');
-    return this.entry(this.body.tail);
+    return this.journal.entry(this.body.tail);
   }
 
   async findEntry(ticks: number) {
     const foundId = await this.journal.graph.find1<JournalEntry>({ ticks });
-    return foundId ? this.entry(foundId) : null;
+    return foundId ? this.journal.entry(foundId) : null;
   }
 
   async setLocalTime(localTime: TreeClock, newClone?: boolean): Promise<PatchQuads> {
@@ -201,11 +203,6 @@ export class SuSetJournalState {
     return this.updateBody({ tail: tailId, time: localTime.toJson() });
   }
 
-  private async entry(id: JournalEntry['@id']) {
-    return new SuSetJournalEntry(this.journal,
-      await this.journal.graph.describe1<JournalEntry>(id));
-  }
-
   private updateBody(update: Partial<JournalBody>): Promise<PatchQuads> {
     return this.journal.graph.write({
       '@delete': { '@id': 'qs:journal', body: this.data.body },
@@ -221,7 +218,8 @@ export class SuSetJournal {
 
   async initialise(): Promise<Patch | undefined> {
     // Create the Journal if not exists
-    if (await this.graph.describe('qs:journal').pipe(isEmpty()).toPromise())
+    const journal = await this.graph.describe1<Journal>('qs:journal');
+    if (journal == null)
       return this.reset(Hash.random());
   }
 
@@ -234,7 +232,17 @@ export class SuSetJournal {
     return { oldQuads: {}, newQuads: insert.newQuads };
   }
 
-  async state(): Promise<SuSetJournalState> {
-    return new SuSetJournalState(this, await this.graph.describe1<Journal>('qs:journal'));
+  async state() {
+    const journal = await this.graph.describe1<Journal>('qs:journal');
+    if (journal == null)
+      throw new Error('Missing journal');
+    return new SuSetJournalState(this, journal);
+  }
+
+  async entry(id: JournalEntry['@id']) {
+    const entry = await this.graph.describe1<JournalEntry>(id);
+    if (entry == null)
+      throw new Error('Missing entry');
+    return new SuSetJournalEntry(this, entry);
   }
 }

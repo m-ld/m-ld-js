@@ -1,4 +1,4 @@
-import { HashStringBagBlock } from '../src/blocks'
+import { HashStringBagBlock } from '../src/engine/blocks'
 
 test('Genesis block has ID and no data', () => {
   expect(HashStringBagBlock.genesis().id).toBeTruthy();

@@ -1,23 +1,24 @@
-import { JsonDelta, Snapshot, UUID, MeldUpdate, DeltaMessage, Triple, MeldConstraint, MeldDelta } from '../m-ld';
+import { MeldUpdate, MeldConstraint } from '../../MeldApi';
+import { JsonDelta, Snapshot, UUID, DeltaMessage, Triple } from '..';
 import { Quad } from 'rdf-js';
 import { TreeClock } from '../clocks';
 import { Hash } from '../hash';
-import { Subject } from './jrql-support';
+import { Subject } from '../../jrql-support';
 import { Dataset, PatchQuads } from '.';
 import { flatten as flatJsonLd } from 'jsonld';
 import { Iri } from 'jsonld/jsonld-spec';
 import { JrqlGraph } from './JrqlGraph';
-import { MeldJson, unreify, hashTriple, toDomainQuad, TripleTids } from '../m-ld/MeldJson';
-import { Observable, from, Subject as Source, asapScheduler, Observer } from 'rxjs';
-import { toArray, bufferCount, flatMap, reduce, observeOn, map } from 'rxjs/operators';
+import { MeldJson, unreify, hashTriple, toDomainQuad, TripleTids } from '../MeldJson';
+import { Observable, from, Subject as Source, EMPTY } from 'rxjs';
+import { toArray, bufferCount, flatMap, reduce, map, filter, takeWhile, expand } from 'rxjs/operators';
 import { flatten, Future, tapComplete, getIdLogger, check, rdfToJson } from '../util';
 import { generate as uuid } from 'short-uuid';
 import { Logger } from 'loglevel';
-import { MeldError } from '../m-ld/MeldError';
+import { MeldError } from '../MeldError';
 import { LocalLock } from '../local';
 import { SUSET_CONTEXT, qsName, toPrefixedId } from './SuSetGraph';
 import { SuSetJournal, SuSetJournalEntry } from './SuSetJournal';
-import { MeldConfig } from '..';
+import { MeldConfig } from '../..';
 
 interface HashTid extends Subject {
   '@id': Iri; // hash:<hashed triple id>
@@ -42,13 +43,6 @@ class TripleTidQuads {
   }
 }
 
-interface ConstraintTxn {
-  delta: MeldDelta;
-  patch: PatchQuads;
-  allTidsPatch: PatchQuads;
-  tidPatch: PatchQuads;
-}
-
 /**
  * Writeable Graph, similar to a Dataset, but with a slightly different transaction API.
  * Journals every transaction and creates m-ld compliant deltas.
@@ -61,7 +55,7 @@ export class SuSetDataset extends JrqlGraph {
   private readonly tidsGraph: JrqlGraph;
   private readonly journal: SuSetJournal;
   private readonly updateSource: Source<MeldUpdate> = new Source;
-  readonly updates: Observable<MeldUpdate>
+  readonly updates: Observable<MeldUpdate> = this.updateSource;
   private readonly datasetLock: LocalLock;
   private readonly log: Logger;
 
@@ -77,7 +71,6 @@ export class SuSetDataset extends JrqlGraph {
     this.tidsGraph = new JrqlGraph(
       dataset.graph(qsName('tids')), SUSET_CONTEXT);
     // Update notifications are strictly ordered but don't hold up transactions
-    this.updates = this.updateSource.pipe(observeOn(asapScheduler));
     this.datasetLock = new LocalLock(config['@id'], dataset.location);
     this.log = getIdLogger(this.constructor, config['@id'], config.logLevel);
   }
@@ -137,28 +130,18 @@ export class SuSetDataset extends JrqlGraph {
     return tail.hash;
   }
 
-  private emitJournalFrom(entry: SuSetJournalEntry | undefined,
-    subs: Observer<DeltaMessage>, filter: (entry: SuSetJournalEntry) => boolean) {
-    if (subs.closed == null || !subs.closed) {
-      if (entry != null) {
-        if (this.dataset.closed) {
-          subs.error(new MeldError('Clone has closed'));
-        } else {
-          if (filter(entry))
-            subs.next(new DeltaMessage(entry.time, entry.delta));
-
-          entry.next().then(next => this.emitJournalFrom(next, subs, filter),
-            err => subs.error(err));
-        }
-      } else {
-        subs.complete();
-      }
-    }
-  }
-
   /**
-   * To ensure we have processed any prior updates we always process a revup
-   * request in a transaction lock.
+   * Emits entries from the journal since a time given as a clock or a tick.
+   * The clock variant accepts a remote or local clock and provides operations
+   * since the last tick of this dataset that the given clock has 'seen'.
+   *
+   * The ticks variant accepts a local clock tick, as recorded in the journal.
+   *
+   * To ensure we have processed any prior updates we always process an
+   * operations request in a transaction lock.
+   *
+   * @returns entries from the journal since the given time (exclusive), or
+   * `undefined` if the given time is not found in the journal
    */
   @SuSetDataset.checkNotClosed.async
   async operationsSince(time: TreeClock): Promise<Observable<DeltaMessage> | undefined> {
@@ -166,13 +149,22 @@ export class SuSetDataset extends JrqlGraph {
       id: 'suset-ops-since',
       prepare: async () => {
         const journal = await this.journal.state();
-        // How many ticks of mine has the requester seen?
-        const ticks = time.getTicks(journal.time);
-        const found = ticks != null ? await journal.findEntry(ticks) : '';
+        const tick = typeof time == 'number' ? time :
+          // How many ticks of mine has the requester seen?
+          time.getTicks(journal.time);
+
+        const found = tick != null ? await journal.findEntry(tick) : '';
         return {
-          value: found ? new Observable(subs =>
+          value: !found ? undefined : from(found.next()).pipe(
+            expand(entry => {
+              if (this.dataset.closed)
+                throw new MeldError('Clone has closed');
+              return entry != null ? entry.next() : EMPTY;
+            }),
+            takeWhile<SuSetJournalEntry>(entry => entry != null),
             // Don't emit an entry if it's all less than the requested time
-            this.emitJournalFrom(found, subs, entry => time.anyLt(entry.time, 'includeIds'))) : undefined
+            filter(entry => typeof time == 'number' || time.anyLt(entry.time, 'includeIds')),
+            map(entry => new DeltaMessage(entry.time, entry.delta)))
         };
       }
     });
@@ -187,7 +179,7 @@ export class SuSetDataset extends JrqlGraph {
         const update = await this.asUpdate(time, patch);
 
         txc.sw.next('check-constraints');
-        await this.constraint.check(update, query => this.read(query));
+        await this.constraint.check(update, this.reader);
 
         txc.sw.next('find-tids');
         const deletedTriplesTids = await this.findTriplesTids(patch.oldQuads);
@@ -204,11 +196,10 @@ export class SuSetDataset extends JrqlGraph {
         const journal = await this.journal.state(), tail = await journal.tail();
         let { patch: journaling, tailId } = await tail.createNext({ delta, localTime: time });
         journaling = journaling.concat(await journal.setTail(tailId, time));
-        // Notify the update (will be pushed to immediate)
-        this.updateSource.next(update);
         return {
           patch: this.transactionPatch(patch, allTidsPatch, tidPatch, journaling),
-          value: new DeltaMessage(time, delta.json)
+          value: new DeltaMessage(time, delta.json),
+          after: () => this.updateSource.next(update)
         };
       }
     });
@@ -258,7 +249,7 @@ export class SuSetDataset extends JrqlGraph {
             }, Promise.resolve(new PatchQuads()));
 
           txc.sw.next('apply-cx'); // "cx" = constraint
-          const update = await this.asUpdate(arrivalTime, patch);
+          let update = await this.asUpdate(arrivalTime, patch);
           // Only apply the constraint if we have a tick for it
           const cxn = !arrivalTime.equals(localTime) ?
             await this.applyConstraint({ patch, update, tid: txc.id }) : null;
@@ -281,14 +272,12 @@ export class SuSetDataset extends JrqlGraph {
             tidPatch = tidPatch.concat(cxn.tidPatch);
             patch = patch.concat(cxn.patch);
             // Re-create the update with the constraint resolution included
-            this.updateSource.next(await this.asUpdate(localTime, patch));
-          } else {
-            // No constraint resolution, use existing update
-            this.updateSource.next(update);
+            update = await this.asUpdate(localTime, patch)
           }
           return {
             patch: this.transactionPatch(patch, allTidsPatch, tidPatch, journaling),
-            value: cxn != null ? new DeltaMessage(localTime, cxn.delta.json) : null
+            value: cxn != null ? new DeltaMessage(localTime, cxn.delta.json) : null,
+            after: () => this.updateSource.next(update)
           };
         } else {
           this.log.debug(`Rejecting tid: ${txc.id} as duplicate`);
@@ -305,8 +294,8 @@ export class SuSetDataset extends JrqlGraph {
    * @param localTime local clock time
    */
   async applyConstraint(
-    to: { patch: PatchQuads, update: MeldUpdate, tid: string }): Promise<ConstraintTxn | null> {
-    const result = await this.constraint.apply(to.update, query => this.read(query));
+    to: { patch: PatchQuads, update: MeldUpdate, tid: string }) {
+    const result = await this.constraint.apply(to.update, this.reader);
     if (result != null) {
       const tid = uuid();
       const patch = await this.write(result);
@@ -387,6 +376,10 @@ export class SuSetDataset extends JrqlGraph {
 
   private findTripleTids(tripleId: string): Promise<Quad[]> {
     return this.tidsGraph.findQuads({ '@id': tripleId } as Partial<HashTid>);
+  }
+
+  private reader = <R>(query: R) => {
+    return new Observable<Subject>(subs => { this.read(subs, query); });
   }
 
   /**

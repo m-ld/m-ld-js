@@ -1,7 +1,7 @@
 import { TopicParams, matches } from 'mqtt-pattern';
 import { MqttTopic } from './MqttTopic';
 import { AsyncMqttClient, IClientOptions, IClientPublishOptions, ISubscriptionMap } from 'async-mqtt';
-import { jsonFrom } from '../util';
+import { jsonFrom } from '../engine/util';
 import { EventEmitter } from 'events';
 import { BehaviorSubject, identity, Observable } from 'rxjs';
 import { first, filter, flatMap } from 'rxjs/operators';

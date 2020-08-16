@@ -1,20 +1,16 @@
 /**
  * Primary interfaces involved in a m-ld engine
  */
-import { TreeClock } from '../clocks';
+import { TreeClock } from './clocks';
 import { Observable } from 'rxjs';
-import { Message } from '../messages';
+import { Message } from './messages';
 import { Quad } from 'rdf-js';
-import { Hash } from '../hash';
-import { Pattern, Subject, Read, Update } from '../dataset/jrql-support';
-import { Future } from '../util';
-import { LiveValue } from '../LiveValue';
-import { LiveStatus, MeldUpdate as BaseUpdate, MeldStatus } from '@m-ld/m-ld-spec';
+import { Hash } from './hash';
+import { Pattern, Subject, Read, Update } from '../jrql-support';
+import { Future } from './util';
+import { LiveValue } from './LiveValue';
 const inspect = Symbol.for('nodejs.util.inspect.custom');
 
-// Unchanged from m-ld-spec
-export { LiveStatus, MeldStatus };
-  
 /**
  * The graph is implicit in m-ld operations.
  */
@@ -109,23 +105,4 @@ export interface MeldRemotes extends Meld {
 
 export interface MeldLocal extends Meld {
   readonly id: string;
-}
-
-export interface MeldUpdate extends BaseUpdate {
-  '@delete': Subject[];
-  '@insert': Subject[];
-}
-
-export interface MeldClone {
-  transact(request: Pattern): Observable<Subject>;
-  follow(after?: number): Observable<MeldUpdate>;
-  readonly status: Observable<MeldStatus> & LiveStatus;
-  close(err?: any): Promise<unknown>;
-}
-
-export type MeldReader = <R extends Read>(request: R) => Observable<Subject>;
-
-export interface MeldConstraint {
-  check(update: MeldUpdate, read: MeldReader): Promise<unknown>;
-  apply(update: MeldUpdate, read: MeldReader): Promise<Update | null>;
 }

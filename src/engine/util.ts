@@ -14,10 +14,6 @@ export function flatten<T>(bumpy: T[][]): T[] {
   return ([] as T[]).concat(...bumpy);
 }
 
-export function toArray<T>(value?: T | T[]): T[] {
-  return value == null ? [] : ([] as T[]).concat(value).filter(v => v != null);
-}
-
 export function fromArrayPromise<T>(reEmits: Promise<T[]>): Observable<T> {
   // Rx weirdness exemplified in 26 characters
   return from(reEmits).pipe(flatMap(from));
@@ -94,23 +90,6 @@ export class Future<T = void> implements PromiseLike<T> {
   then: PromiseLike<T>['then'] = (onfulfilled, onrejected) => {
     return this.subject.toPromise().then(onfulfilled, onrejected);
   }
-}
-
-export function shortId(based: number | string = 8) {
-  let genChar: () => number, len: number;
-  if (typeof based == 'number') {
-    let d = new Date().getTime();
-    genChar = () => (d + Math.random() * 16);
-    len = based;
-  } else {
-    let i = 0;
-    genChar = () => based.charCodeAt(i++);
-    len = based.length;
-  }
-
-  return ('a' + 'x'.repeat(len - 1)).replace(/[ax]/g, function (c) {
-    return (genChar() % (c == 'a' ? 6 : 16) + (c == 'a' ? 10 : 0) | 0).toString(16);
-  });
 }
 
 export function tapCount<T>(done: Future<number>): OperatorFunction<T, T> {

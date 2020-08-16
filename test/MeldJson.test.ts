@@ -1,4 +1,4 @@
-import { hashTriple } from '../src/m-ld/MeldJson';
+import { hashTriple } from '../src/engine/MeldJson';
 import { namedNode, triple, literal } from '@rdfjs/data-model';
 import { Quad } from 'rdf-js';
 

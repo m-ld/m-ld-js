@@ -10,5 +10,9 @@
   {
     "url": "#ably-remotes",
     "title": "Ably Remotes"
+  },
+  {
+    "url": "#concurrency",
+    "title": "Concurrency"
   }
 ]
