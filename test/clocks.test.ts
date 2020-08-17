@@ -239,6 +239,12 @@ test('Get ticks for other ID', () => {
   expect(right.getTicks(left)).toBe(1);
 });
 
+test('Get ticks for other just forked ID', () => {
+  let { left, right } = TreeClock.GENESIS.forked();
+  right = right.ticked();
+  expect(right.getTicks(left)).toBe(0);
+});
+
 test('to string', () => {
   expect(TreeClock.GENESIS.toString()).toBe('[]');
   expect(TreeClock.GENESIS.forked().left.toString()).toBe('[[],0]');

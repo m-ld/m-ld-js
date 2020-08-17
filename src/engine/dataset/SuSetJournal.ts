@@ -23,15 +23,22 @@ interface JournalBody {
  * a body for storage, to minimise triple count.
  */
 interface JournalEntry {
-  '@id': Iri; // entry:<encoded block hash>
-  body: string; // JSON-encoded body
-  ticks: number; // Local clock ticks on delivery
+  /** entry:<encoded block hash> */
+  '@id': Iri;
+  /** JSON-encoded body */
+  body: string;
+  /**
+   * Local clock ticks for which this entry was the Journal tail. This includes
+   * any tick that has been exposed to the outside world, NOT ticks that were
+   * only ever seen internally.
+   */
+  ticks: number | number[];
 }
 
 interface JournalEntryBody {
   tid: UUID; // Transaction ID
   hash: string; // Encoded Hash
-  delta: JsonDelta; // JSON-encoded JsonDelta
+  delta: JsonDelta; // Raw JsonDelta
   remote: boolean;
   time: any; // JSON-encoded TreeClock (the remote clock)
   next?: JournalEntry['@id'];
@@ -54,10 +61,6 @@ export class SuSetJournalEntry {
 
   get id(): Iri {
     return this.data['@id'];
-  }
-
-  get ticks(): number {
-    return this.data.ticks;
   }
 
   get hash(): Hash {
@@ -188,8 +191,11 @@ export class SuSetJournalState {
       // For a new clone, the journal's dummy tail does not have a timestamp
       const tail = await this.tail();
       return patch.concat(await tail.setHeadTime(localTime));
+    } else {
+      // This time might be seen by the outside world, so ensure that the tail
+      // entry is marked as covering it
+      return patch.concat(await this.journal.graph.insert({ '@id': this.body.tail, ticks: localTime.ticks }));
     }
-    return patch;
   }
 
   static initState(headEntry: Partial<JournalEntry>, localTime?: TreeClock): Subject {

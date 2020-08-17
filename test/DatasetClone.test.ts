@@ -1,5 +1,4 @@
 import { DatasetClone } from '../src/engine/dataset/DatasetClone';
-import { Subject, Describe } from 'json-rql';
 import { memStore, mockRemotes, hotLive, testConfig } from './testClones';
 import { NEVER, Subject as Source, asapScheduler, EMPTY, throwError } from 'rxjs';
 import { comesAlive } from '../src/engine/AbstractMeld';
@@ -7,7 +6,7 @@ import { first, take, toArray, map, observeOn } from 'rxjs/operators';
 import { TreeClock } from '../src/engine/clocks';
 import { DeltaMessage, MeldRemotes, Snapshot } from '../src/engine';
 import { uuid } from 'short-uuid';
-import { MeldConfig } from '../src';
+import { MeldConfig, Subject, Describe, Group } from '../src';
 import MemDown from 'memdown';
 import { AbstractLevelDOWN } from 'abstract-leveldown';
 import { Hash } from '../src/engine/hash';
@@ -140,6 +139,10 @@ describe('Dataset clone', () => {
       remotesLive.next(true); // remotes come alive
     });
 
+    test('answers rev-up from the new clone', async () => {
+      await expect(clone.revupFrom(remoteTime)).resolves.toBeDefined();
+    });
+
     test('comes online as not silo', async () => {
       await expect(clone.status.becomes({ online: true, silo: false })).resolves.toBeDefined();
     });
@@ -158,6 +161,29 @@ describe('Dataset clone', () => {
         delete: '{}'
       }));
       await expect(updates).resolves.toEqual([1, 2]);
+    });
+
+    // Edge cases from system testing: newClock exposes the current clock state
+    // even if it doesn't have a journaled entry. This can also happen due to:
+    // 1. a remote transaction, because of the clock space made for a constraint
+    test('answers rev-up from next new clone after apply', async () => {
+      const updated = clone.follow().pipe(take(1)).toPromise();
+      remoteUpdates.next(new DeltaMessage(remoteTime.ticked(), {
+        tid: uuid(),
+        insert: '{"@id":"http://test.m-ld.org/wilma","http://test.m-ld.org/#name":"Wilma"}',
+        delete: '{}'
+      }));
+      await updated;
+      const thirdTime = await clone.newClock();
+      await expect(clone.revupFrom(thirdTime)).resolves.toBeDefined();
+    });
+    // 2. a failed transaction
+    test('answers rev-up from next new clone after failure', async () => {
+      // Union at top-level is always invalid
+      await clone.transact(<Group>{ '@union': [] }).toPromise()
+        .then(() => fail('Expecting error'), () => {});
+      const thirdTime = await clone.newClock();
+      await expect(clone.revupFrom(thirdTime)).resolves.toBeDefined();
     });
   });
 
