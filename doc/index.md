@@ -10,8 +10,7 @@ The Javascript engine can be used in a modern browser or a server engine like
 > [concurrency](#concurrency) model is based on the Javascript event loop.
 
 ## Getting Started
-1. Download the [package here](media://m-ld.tgz)
-1. `npm install <path/to>/m-ld.tgz`
+`npm install @m-ld/m-ld`
 
 ### Data Persistence
 **m-ld** uses [levelup](https://github.com/level/levelup) to interface with a

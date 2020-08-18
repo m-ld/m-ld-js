@@ -6,7 +6,6 @@ module.exports = {
   out: '_site',
   theme: 'node_modules/@m-ld/typedoc-theme/bin/minimal',
   includes: './doc/includes',
-  media: './doc/media',
   exclude: [
     './src/engine/**',
     './src/ably/**',
