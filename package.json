@@ -5,7 +5,9 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
-    "./": "./dist/"
+    ".": "./dist/index.js",
+    "./dist/mqtt": "./dist/mqtt/index.js",
+    "./dist/ably": "./dist/ably/index.js"
   },
   "scripts": {
     "link-locals": "sudo npm link ../m-ld-spec ../json-rql ../typedoc-theme",
