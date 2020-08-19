@@ -12,6 +12,9 @@ The Javascript engine can be used in a modern browser or a server engine like
 ## Getting Started
 `npm install @m-ld/m-ld`
 
+To see some executable code, have a look at the Node.js
+[starter&nbsp;project](https://github.com/m-ld/m-ld-nodejs-starter).
+
 ### Data Persistence
 **m-ld** uses [levelup](https://github.com/level/levelup) to interface with a
 LevelDB-compatible storage backend.
