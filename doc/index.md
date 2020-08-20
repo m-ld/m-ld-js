@@ -18,10 +18,10 @@ To see some executable code, have a look at the Node.js
 ### Data Persistence
 **m-ld** uses [levelup](https://github.com/level/levelup) to interface with a
 LevelDB-compatible storage backend.
-- In the browser, use [level-js](https://github.com/Level/level-js).
+- For the fastest responses use [memdown](https://github.com/level/memdown).
+- In the browser, using [level-js](https://github.com/Level/level-js) will persist
+data into browser local storage.
 - In a service, use [leveldown](https://github.com/level/leveldown/).
-- If you can be sure there is another clone which is storing the data, for the
-  fastest responses use [memdown](https://github.com/level/memdown).
 
 ### Connecting to Other Clones
 A **m-ld** clone uses a 'remotes' object to communicate with other clones.
