@@ -37,11 +37,12 @@ Specifically:
 - On receipt of a data update from the [follow](/classes/meldapi.html#follow)
   method, no further data operations will have occurred until the receiver
   yields back to the event loop. This means that an immediate call to
-  [transact](/classes/meldapi.html#transact) is assured to operate on domain
-  data with the update (and no subsequent update) applied.
+  [transact](/classes/meldapi.html#transact) with a *read* (see below) is
+  assured to operate on domain data with the update (and no subsequent update)
+  applied.
 - Transactions operate atomically on a consistent state. However:
-  1. There may be a delay between the call to the `transact` method and the
-     execution tick of the transaction, and
+  1. For a *write*, there may be a delay between the call to the `transact`
+     method and the execution tick of the transaction, and
   1. Results of a *read* transaction are streamed to the caller asynchronously.
   
   During both of these asychronous phases, other transactions can occur, arising
