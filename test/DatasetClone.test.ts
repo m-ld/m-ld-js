@@ -6,7 +6,7 @@ import { first, take, toArray, map, observeOn } from 'rxjs/operators';
 import { TreeClock } from '../src/engine/clocks';
 import { DeltaMessage, MeldRemotes, Snapshot } from '../src/engine';
 import { uuid } from 'short-uuid';
-import { MeldConfig, Subject, Describe, Group } from '../src';
+import { MeldConfig, Subject, Describe, Group, Update } from '../src';
 import MemDown from 'memdown';
 import { AbstractLevelDOWN } from 'abstract-leveldown';
 import { Hash } from '../src/engine/hash';
@@ -164,7 +164,7 @@ describe('Dataset clone', () => {
     });
 
     // Edge cases from system testing: newClock exposes the current clock state
-    // even if it doesn't have a journaled entry. This can also happen due to:
+    // even if it doesn't have a journalled entry. This can also happen due to:
     // 1. a remote transaction, because of the clock space made for a constraint
     test('answers rev-up from next new clone after apply', async () => {
       const updated = clone.follow().pipe(take(1)).toPromise();
@@ -179,9 +179,9 @@ describe('Dataset clone', () => {
     });
     // 2. a failed transaction
     test('answers rev-up from next new clone after failure', async () => {
-      // Union at top-level is always invalid
-      await clone.transact(<Group>{ '@union': [] }).toPromise()
-        .then(() => fail('Expecting error'), () => {});
+      // Insert with variables is not valid
+      await clone.transact(<Update>{ '@insert': { '@id': '?s', '?p': '?o' } }).toPromise()
+        .then(() => fail('Expecting error'), () => { });
       const thirdTime = await clone.newClock();
       await expect(clone.revupFrom(thirdTime)).resolves.toBeDefined();
     });

@@ -1,7 +1,7 @@
 import { MeldUpdate, MeldClone, LiveStatus, MeldStatus, MeldConstraint, HasExecTick } from '../../MeldApi';
 import { Snapshot, DeltaMessage, MeldRemotes, MeldLocal } from '..';
 import { liveRollup } from "../LiveValue";
-import { Pattern, Subject, isRead, isSubject, isGroup, isUpdate } from '../../jrql-support';
+import { Pattern, Subject, isRead, isWrite } from '../../jrql-support';
 import {
   Observable, merge, from, EMPTY,
   concat, BehaviorSubject, Subscription, throwError, identity, interval, of, Subscriber
@@ -383,7 +383,7 @@ export class DatasetClone extends AbstractMeld implements MeldClone, MeldLocal {
         finalize(() => this.liveLock.leave(this.id)), share());
       const tick = Promise.resolve(exec.then(() => this.latestTicks.value));
       return Object.assign(results, { tick });
-    } else if (isSubject(request) || isGroup(request) || isUpdate(request)) {
+    } else if (isWrite(request)) {
       // For a write, execute immediately.
       const tick = this.liveLock.enter(this.id)
         .then(() => {
@@ -398,7 +398,7 @@ export class DatasetClone extends AbstractMeld implements MeldClone, MeldLocal {
         .finally(() => this.liveLock.leave(this.id));
       return Object.assign(from(tick).pipe(ignoreElements()), { tick });
     } else {
-      const error = new MeldError('Pattern is not read or writeable');
+      const error = new MeldError('Pattern is not read or writeable', request);
       return Object.assign(throwError(error), { tick: Promise.reject(error) });
     }
   }

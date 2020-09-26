@@ -122,6 +122,11 @@ export function isGroup(p: Pattern): p is Group {
   return '@graph' in p || '@union' in p;
 }
 
+/** @internal */
+export function isWriteGroup(p: Pattern): p is Group {
+  return '@graph' in p && !('@union' in p);
+}
+
 /**
  * A sub-type of Pattern which matches data using a `@where` clause.
  * @see https://json-rql.org/interfaces/query.html
@@ -141,15 +146,37 @@ export function isQuery(p: Pattern): p is Query {
 }
 
 /**
- * A query type that reads data from the domain.
+ * A query pattern that reads data from the domain.
  */
 export interface Read extends Query {
   // No support for @limit, @orderBy etc.
 }
 
-/** @internal */
+/** 
+ * Determines if the given pattern will read data from the domain.
+ */
 export function isRead(p: Pattern): p is Read {
   return isDescribe(p) || isSelect(p);
+}
+
+/** 
+ * Determines if the given pattern can probably be interpreted as a logical
+ * write of data to the domain. A write can be:
+ * - A {@link Subject} (any JSON object not a Read, Group or Update) will be
+ *   interpreted as data to be inserted.
+ * - A {@link Group} containing only a `@graph` key will be interpreted as
+ *   containing the data to be inserted.
+ * - An explicit {@link Update} with either an `@insert`, `@delete`, or both.
+ *
+ * This function is not exhaustive, and a pattern identified as a write can
+ * still turn out to be illogical, for example if it contains an `@insert` with
+ * embedded variables and no `@where` clause to bind them.
+ *
+ * Returns `true` if the logical write is a trivial no-op, such as `{}`,
+ * `{ "@insert": {} }` or `{ "@graph": [] }`.
+ */
+export function isWrite(p: Pattern): p is Subject | Group | Update {
+  return !isRead(p) && (isSubject(p) || isWriteGroup(p) || isUpdate(p));
 }
 
 /**
@@ -172,7 +199,7 @@ export function isDescribe(p: Pattern): p is Describe {
 }
 
 /**
- * A query type that returns values for variables in the query. The subjects
+ * A query pattern that returns values for variables in the query. The subjects
  * streamed in the query result will have the form:
  * ```
  * {

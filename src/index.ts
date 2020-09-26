@@ -10,7 +10,8 @@ import { DomainContext } from './engine/MeldJson';
 export * from './MeldApi';
 export {
   Pattern, Reference, Context, Variable, Value, Describe,
-  Group, Query, Read, Result, Select, Subject, Update
+  Group, Query, Read, Result, Select, Subject, Update,
+  isRead, isWrite
 } from './jrql-support';
 
 /**

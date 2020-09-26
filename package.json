@@ -14,7 +14,7 @@
     "clean": "rm -rf dist _site",
     "build-quick": "tsc",
     "build": "npm run clean && jest --silent && tsc && typedoc",
-    "dev": "jest --watch --silent",
+    "dev": "tsc -w & jest --watch --silent",
     "dev+log": "jest --watch",
     "compliance": "node compliance/test.js",
     "prepublishOnly": "npm run build && npm version $VERSION && git push",

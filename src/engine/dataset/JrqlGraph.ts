@@ -138,8 +138,8 @@ export class JrqlGraph {
   }
 
   /**
-   * This is shorthand for a `@insert` update with no `@where`. It requires no
-   * variables in the `@insert`.
+   * This is shorthand for a `@insert` update with no `@where`. It requires
+   * there to be no variables in the `@insert`.
    */
   async insert(insert: Subject | Subject[],
     context: Context = this.defaultContext): Promise<PatchQuads> {
