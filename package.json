@@ -10,7 +10,7 @@
     "./dist/ably": "./dist/ably/index.js"
   },
   "scripts": {
-    "link-locals": "sudo npm link ../m-ld-spec ../json-rql ../typedoc-theme",
+    "link-locals": "npm link ../m-ld-spec ../json-rql ../typedoc-theme",
     "clean": "rm -rf dist _site",
     "build-quick": "tsc",
     "build": "npm run clean && jest --silent && tsc && typedoc",

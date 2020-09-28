@@ -92,10 +92,6 @@ export class MqttRemotes extends PubsubRemotes {
     }
   }
 
-  protected reconnect(): void {
-    this.mqtt.reconnect();
-  }
-
   protected async setPresent(present: boolean) {
     if (present)
       return this.presence.join(this.id, this.controlTopic.address);

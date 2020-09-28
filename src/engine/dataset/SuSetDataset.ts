@@ -57,6 +57,7 @@ export class SuSetDataset extends JrqlGraph {
   private readonly updateSource: Source<MeldUpdate> = new Source;
   readonly updates: Observable<MeldUpdate> = this.updateSource;
   private readonly datasetLock: LocalLock;
+  private readonly maxDeltaSize: number;
   private readonly log: Logger;
 
   constructor(
@@ -72,6 +73,7 @@ export class SuSetDataset extends JrqlGraph {
       dataset.graph(qsName('tids')), SUSET_CONTEXT);
     // Update notifications are strictly ordered but don't hold up transactions
     this.datasetLock = new LocalLock(config['@id'], dataset.location);
+    this.maxDeltaSize = config.maxDeltaSize ?? Infinity;
     this.log = getIdLogger(this.constructor, config['@id'], config.logLevel);
   }
 
@@ -185,6 +187,9 @@ export class SuSetDataset extends JrqlGraph {
         const deletedTriplesTids = await this.findTriplesTids(patch.oldQuads);
         const delta = await this.txnDelta(txc.id, patch.newQuads,
           deletedTriplesTids.map(tt => tt.asTripleTids()));
+        const deltaMessage = new DeltaMessage(time, delta.json);
+        if (deltaMessage.size() > this.maxDeltaSize)
+          throw new MeldError('Delta too big');
 
         // Include tid changes in final patch
         txc.sw.next('new-tids');
@@ -198,7 +203,7 @@ export class SuSetDataset extends JrqlGraph {
         journaling = journaling.concat(await journal.setTail(tailId, time));
         return {
           patch: this.transactionPatch(patch, allTidsPatch, tidPatch, journaling),
-          value: new DeltaMessage(time, delta.json),
+          value: deltaMessage,
           after: () => this.updateSource.next(update)
         };
       }
@@ -276,6 +281,7 @@ export class SuSetDataset extends JrqlGraph {
           }
           return {
             patch: this.transactionPatch(patch, allTidsPatch, tidPatch, journaling),
+            // FIXME: If this delta message exceeds max size, what to do?
             value: cxn != null ? new DeltaMessage(localTime, cxn.delta.json) : null,
             after: () => this.updateSource.next(update)
           };

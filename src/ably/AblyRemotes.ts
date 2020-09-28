@@ -84,10 +84,6 @@ export class AblyRemotes extends PubsubRemotes {
     }
   };
 
-  protected reconnect(): void {
-    throw new Error('Method not implemented.'); // TODO
-  }
-
   protected setPresent(present: boolean): Promise<unknown> {
     if (present)
       return this.operations.presence.update('__live');

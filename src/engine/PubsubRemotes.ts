@@ -81,16 +81,18 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
             } catch (err) {
               // Failed to send an update while (probably) connected
               this.log.warn(err);
-              // We can't allow gaps, so ensure a reconnect
-              this.reconnect();
+              // Delta delivery is guaranteed at-least-once. So, if it fails,
+              // something catastrophic must have happened. Signal failure of
+              // this service and allow the clone to deal with it.
+              this.closeSafely(err);
             }
           }
         },
         // Local m-ld clone has stopped. It will no longer accept messages.
-        complete: () => this.close().catch(this.warnError),
+        complete: () => this.closeSafely(),
         // Local m-ld clone has stopped unexpectedly.
         // The application will already know, so just shut down gracefully.
-        error: err => this.close(err).catch(this.warnError)
+        error: err => this.closeSafely(err)
       });
       // When the clone comes live, join the presence on this domain if we can
       clone.live.subscribe(live => {
@@ -102,14 +104,11 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     }
   }
 
-  /**
-   * Force a re-connect to the pubsub layer. This must be sufficiently violent
-   * to lead to an unset and reset of the live flag.
-   */
-  protected abstract reconnect(): void;
-
   protected abstract setPresent(present: boolean): Promise<unknown>;
 
+  /**
+   * Publishes a delta message with at-least-once guaranteed delivery.
+   */
   protected abstract publishDelta(msg: object): Promise<unknown>;
 
   protected abstract present(): Observable<string>;
@@ -133,6 +132,10 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     await this.localClone.pipe(first(null)).toPromise();
     // Wait until all activity have finalised
     await Promise.all(this.activity); // TODO unit test this
+  }
+
+  private closeSafely(err?: any) {
+    this.close(err).catch(this.warnError);
   }
 
   async newClock(): Promise<TreeClock> {
@@ -207,7 +210,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
         this.nextUpdate(update);
       else
         // This is extremely bad - may indicate a bad actor
-        this.close(new MeldError('Bad update'));
+        this.closeSafely(new MeldError('Bad update'));
     }
   }
 

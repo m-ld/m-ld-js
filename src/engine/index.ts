@@ -34,6 +34,10 @@ export class DeltaMessage implements Message<TreeClock, JsonDelta> {
       return new DeltaMessage(time, json.data);
   }
 
+  size() {
+    return JSON.stringify(this.toJson()).length;
+  }
+
   toString() {
     return `${JSON.stringify(this.data)}
     @ ${this.time}`;

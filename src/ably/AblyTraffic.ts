@@ -37,7 +37,7 @@ export class AblyTraffic {
     if (config.maxRate != null) {
       const gap = 1000 / config.maxRate;
       let prev = 0;
-      // Use of concatMap guarantess ordering
+      // Use of concatMap guarantees ordering
       outLimited = outLimited.pipe(concatMap(msg => {
         const now = scheduler.now();
         if (now < prev + gap) {

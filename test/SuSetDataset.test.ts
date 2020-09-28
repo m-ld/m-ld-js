@@ -542,6 +542,18 @@ describe('SU-Set Dataset', () => {
         { '@insert': [], '@delete': [wilma], '@ticks': localTime.ticks });
     });
   });
+
+  test('enforces delta size limit', async () => {
+    ssd = new SuSetDataset(await memStore(), NO_CONSTRAINT, {
+      '@id': 'test', '@domain': 'test.m-ld.org', genesis: true, maxDeltaSize: 1
+    });
+    await ssd.initialise();
+    await ssd.saveClock(TreeClock.GENESIS, true);
+    await expect(ssd.transact(async () => [
+      TreeClock.GENESIS.ticked(),
+      await ssd.insert(fred)
+    ])).rejects.toThrow();
+  });
 });
 
 function remoteInsert(subject: Subject): JsonDelta {

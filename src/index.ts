@@ -62,6 +62,13 @@ export interface MeldConfig {
    */
   networkTimeout?: number;
   /**
+   * An upper bound on delta message size, in bytes. Usually imposed by the
+   * message publishing implementation. Default is infinity. Exceeding this
+   * limit will cause a transaction to fail, to prevent a clone from being
+   * unable to transmit the update to its peers.
+   */
+  maxDeltaSize?: number;
+  /**
    * Log level for the clone
    */
   logLevel?: LogLevelDesc;

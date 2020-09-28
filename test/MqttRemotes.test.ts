@@ -128,6 +128,24 @@ describe('New MQTT remotes', () => {
       await expect(entry.delivered).resolves.toBeUndefined();
     });
 
+    test('closes if publish fails', async () => {
+      mqtt.mockPublish(
+        '__presence/test.m-ld.org/client2',
+        '{"consumer2":"test.m-ld.org/control"}');
+      await comesAlive(remotes);
+
+      const updates = new Source<DeltaMessage>();
+      remotes.setLocal(mockLocal({ updates }));
+
+      mqtt.publish.mockReturnValue(<any>Promise.reject('Delivery failed'));
+
+      updates.next(new DeltaMessage(
+        TreeClock.GENESIS.forked().left,
+        { tid: 't1', insert: '{}', delete: '{}' }));
+      
+      await expect(remotes.updates.toPromise()).rejects.toBe('Delivery failed');
+    });
+
     test('live goes unknown if mqtt closes', async () => {
       mqtt.emit('close');
       expect(remotes.live.value).toBe(null);
