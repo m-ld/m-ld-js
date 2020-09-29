@@ -61,7 +61,7 @@
     }
   },
   "dependencies": {
-    "@m-ld/m-ld-spec": "^0.4.1",
+    "@m-ld/m-ld-spec": "^0.4.2",
     "@types/abstract-leveldown": "^5.0.1",
     "@types/async-lock": "^1.1.2",
     "@types/bn.js": "^4.11.6",
