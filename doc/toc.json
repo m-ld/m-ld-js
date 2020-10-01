@@ -12,6 +12,10 @@
     "title": "Ably Remotes"
   },
   {
+    "url": "#transactions",
+    "title": "Transactions"
+  },
+  {
     "url": "#concurrency",
     "title": "Concurrency"
   }

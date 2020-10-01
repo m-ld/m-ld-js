@@ -18,7 +18,7 @@
     "dev+log": "jest --watch",
     "compliance": "node compliance/test.js",
     "prepublishOnly": "npm run build && npm version $VERSION && git push",
-    "doc-dev": "tsc-watch --onSuccess \"typedoc\" & browser-sync start --server _site --files _site"
+    "doc-dev": "onchange 'src/**/*.ts' 'doc/**/*.*' -- typedoc & browser-sync start --server _site --files _site"
   },
   "repository": {
     "type": "git",
@@ -41,10 +41,10 @@
     "jest-mock-extended": "^1.0.9",
     "leveldown": "^5.6.0",
     "memdown": "^5.1.0",
+    "onchange": "^7.0.2",
     "restify": "^8.5.1",
     "tmp": "^0.2.1",
     "ts-jest": "^26.1.0",
-    "tsc-watch": "^4.2.8",
     "typedoc": "^0.17.7",
     "typescript": "^3.9.5"
   },
