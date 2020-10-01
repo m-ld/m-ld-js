@@ -5,8 +5,8 @@ The Javascript engine can be used in a modern browser or a server engine like
 [Node.js](https://nodejs.org/).
 
 > The Javascript clone engine conforms to the **m-ld**
-> [specification](http://spec.m-ld.org/). Its support for query pattern
-> complexity is detailed in the [Pattern](#pattern) type. Its
+> [specification](http://spec.m-ld.org/). Its support for transaction pattern
+> complexity is detailed [below](#transactions). Its
 > [concurrency](#concurrency) model is based on the Javascript event loop.
 
 ## Getting Started
@@ -29,6 +29,10 @@ LevelDB-compatible storage backend.
 A **m-ld** clone uses a 'remotes' object to communicate with other clones.
 - If you have an MQTT broker available, use [`MqttRemotes`](#mqtt-remotes).
 - For a scalable global managed service, use [`AblyRemotes`](#ably-remotes).
+
+> 🚧 *If your architecture includes some other publish/subscribe service like
+> AMQP, or you would like to use a fully peer-to-peer protocol, please
+> [contact&nbsp;us](mailto:info@m-ld.io) to discuss your use-case.*
 
 ### Initialisation
 The [clone](#clone) function initialises the m-ld engine with a leveldb back-end
@@ -57,15 +61,10 @@ the clone has the most recent data, you can add:
 await meld.status.becomes({ online: true, outdated: false });
 ```
 
-### Transactions
 As soon as the [clone](#clone) function's return promise has resolved, it is
-safe to make data transactions. See the **m-ld**
-[specification](https://spec.m-ld.org/#transactions) for a walk-through of the
-**m-ld** transaction syntax.
+safe to make data transactions. 
 
-The [MeldApi](/classes/meldapi.html) object returned by the `clone` function
-also augments the basic clone API with convenience methods to simplify common
-cases.
+[[include:transactions.md]]
 
 [[include:mqtt-remotes.md]]
 

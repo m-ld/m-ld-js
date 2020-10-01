@@ -8,16 +8,11 @@ import { Iri } from 'jsonld/jsonld-spec';
 // Re-exporting unchanged types
 /**
  * A m-ld transaction is a **json-rql** pattern, which represents a data read or
- * a data update. Supported pattern types are:
+ * a data write. Supported pattern types are:
  * - {@link Describe}
  * - {@link Select}
  * - {@link Group} or {@link Subject} (the shorthand way to insert data)
  * - {@link Update} (the longhand way to insert or delete data)
- *
- * > 🚧 *If you have a requirement for an unsupported pattern, please
- * > [contact&nbsp;us](mailto:info@m-ld.io) to discuss your use-case.* You can
- * > browse the full **json-rql** syntax at
- * > [json-rql.org](http://json-rql.org/).
  *
  * @see https://json-rql.org/interfaces/pattern.html
  */
@@ -73,6 +68,34 @@ export type Result = '*' | Variable | Variable[];
 
 /**
  * A resource, represented as a JSON object, that is part of the domain data.
+ * 
+ * Examples:
+ * 
+ * *A subject with one property: "fred's name is Fred"*
+ * ```json
+ * {
+ *   "@id": "fred",
+ *   "name": "Fred"
+ * }
+ * ```
+ * *A subject with a {@link Reference} property: "fred's wife is wilma"*
+ * ```json
+ * {
+ *   "@id": "fred",
+ *   "wife": { "@id": "wilma" }
+ * }
+ * ```
+ * *A subject with another nested subject: "fred's wife is wilma, and her name is Wilma"*
+ * ```json
+ * {
+ *   "@id": "fred",
+ *   "wife": {
+ *     "@id": "wilma",
+ *     "name": "Wilma"
+ *   }
+ * }
+ * ```
+ *
  * @see https://json-rql.org/interfaces/subject.html
  */
 export interface Subject extends Pattern {
@@ -92,7 +115,7 @@ export interface Subject extends Pattern {
   '@type'?: Iri | Variable | Iri[] | Variable[];
   /**
    * Specifies a graph edge, that is, a mapping from the `@id` of this subject
-   * to one or more values, which may also express constraints.
+   * to a set of one or more values.
    */
   [key: string]: Value | Value[] | Context | undefined;
 }
@@ -103,12 +126,76 @@ export function isSubject(p: Pattern): p is Subject {
 }
 
 /**
- * Used to express a group of patterns to match.
+ * Used to express a group of patterns to match, or a group of subjects to write
+ * (when used as a transaction pattern).
+ *
+ * Examples:
+ *
+ * *Insert multiple subjects*
+ * ```json
+ * {
+ *   "@graph": [
+ *     {
+ *       "@id": "fred",
+ *       "name": "Fred"
+ *     },
+ *     {
+ *       "@id": "wilma",
+ *       "name": "Wilma"
+ *     }
+ *   ]
+ * }
+ * ```
+ * *Delete all properties of subject `fred` **and** all properties of other
+ * subjects that reference it*
+ * ```json
+ * {
+ *   "@delete": [
+ *     { "@id": "fred", "?prop1": "?value" },
+ *     { "@id": "?id2", "?ref": { "@id": "fred" } }
+ *   ],
+ *   "@where": {
+ *     "@union": [
+ *       { "@id": "fred", "?prop1": "?value" },
+ *       { "@id": "?id2", "?ref": { "@id": "fred" } }
+ *     ]
+ *   }
+ * }
+ * ```
+ *
+ * > Note that when used in a `@where` clause, a plain array can substitute for
+ * > a Group, as follows:
+ * >
+ * > *Select combinations of subjects having a common property value*
+ * > ```json
+ * > {
+ * >   "@select": ["id1", "id2"],
+ * >   "@where": {
+ * >     "@graph": [
+ * >       { "@id": "id1", "name": "?name" },
+ * >       { "@id": "id2", "name": "?name" }
+ * >     ]
+ * >   }
+ * > }
+ * > ```
+ * > *is equivalent to:*
+ * > ```json
+ * > {
+ * >   "@select": ["id1", "id2"],
+ * >   "@where": [
+ * >     { "@id": "id1", "name": "?name" },
+ * >     { "@id": "id2", "name": "?name" }
+ * >   ]
+ * > }
+ * > ```
+ *
  * @see https://json-rql.org/interfaces/group.html
  */
 export interface Group extends Pattern {
   /**
-   * Specifies a Subject or an array of Subjects to match.
+   * Specifies a Subject or an array of Subjects.
+   * 
+   * When resolving query solutions, 
    */
   '@graph'?: Subject | Subject[];
   /**
@@ -135,7 +222,42 @@ export interface Query extends Pattern {
   // No support for @values
   /**
    * The data pattern to match, as a set of subjects or a group. Variables are
-   * used as placeholders to capture matching properties and values in the domain.
+   * used as placeholders to capture matching properties and values in the
+   * domain.
+   * 
+   * Examples:
+   * 
+   * *Match a subject by its `@id`*
+   * ```json
+   * {
+   *   ...
+   *   "@where": { "@id": "fred" }
+   * }
+   * ```
+   * *Match a subject where any property has a given value*
+   * ```json
+   * {
+   *   ...
+   *   "@where": {
+   *     "@id": "?id",
+   *     "?prop": "Bedrock"
+   *   }
+   * }
+   * ```
+   * *Match a subject with a given property, having any value*
+   * ```json
+   * {
+   *   ...
+   *   "@where": {
+   *     "@id": "?id",
+   *     "name": "?name"
+   *   }
+   * }
+   * ```
+   *
+   * > The Javascript engine supports exact-matches for subject identities, properties and
+   * > values. [Inline&nbsp;filters](https://json-rql.org/globals.html#inlinefilter)
+   * > will be available in future.
    */
   '@where'?: Subject | Subject[] | Group;
 }
@@ -182,13 +304,52 @@ export function isWrite(p: Pattern): p is Subject | Group | Update {
 /**
  * A simple means to get the properties of a specific subject, or a set of
  * subjects matching some `@where` clause.
+ *
+ * Examples:
+ *
+ * *Describe a specific subject whose `@id` is `fred`*
+ * ```json
+ * {
+ *   "@describe": "fred"
+ * }
+ * ```
+ * *Describe all subjects in the domain*
+ * ```json
+ * {
+ *   "@describe": "?id",
+ *   "@where": { "@id": "?id" }
+ * }
+ * ```
+ * *Describe subjects with a property `age` of `40`*
+ * ```json
+ * {
+ *   "@describe": "?id",
+ *   "@where": {
+ *     "@id": "?id",
+ *     "age": 40
+ *   }
+ * }
+ * ```
+ * *Describe all subjects referenced by `fred` via any property*
+ * ```json
+ * {
+ *   "@describe": "?id",
+ *   "@where": {
+ *     "@id": "fred",
+ *     "?prop": { "@id": "?id" }
+ *   }
+ * }
+ * ```
+ * See the [`@where`](#_where) property for more examples of how to use a where
+ * clause.
+ *
  * @see https://json-rql.org/interfaces/describe.html
  */
 export interface Describe extends Read {
   /**
    * Specifies a single Variable or Iri to return. Each matched value for the
-   * identified variable will be output in some suitable expanded format, such
-   * as a subject with its top-level properties.
+   * identified variable will be output as a [Subject](/interfaces/subject.html)
+   * with its top-level properties.
    */
   '@describe': Iri | Variable;
 }
@@ -199,15 +360,41 @@ export function isDescribe(p: Pattern): p is Describe {
 }
 
 /**
- * A query pattern that returns values for variables in the query. The subjects
- * streamed in the query result will have the form:
- * ```
+ * A query pattern that returns values for variables in the query.
+ *
+ * The subjects streamed in the query result will have the form:
+ * ```json
  * {
  *   "?var1": <value>
  *   "?var2": <value>
  *   ...
  * }
  * ```
+ * Examples:
+ * 
+ * *Select the ids of subjects having a given name*
+ * ```json
+ * {
+ *   "@select": "?id",
+ *   "@where": {
+ *     "@id": "?id",
+ *     "name": "Wilma"
+ *   }
+ * }
+ * ```
+ * *Select the ids and names of all subjects*
+ * ```json
+ * {
+ *   "@select": ["?id", "?value"],
+ *   "@where": {
+ *     "@id": "?id",
+ *     "name": "?value"
+ *   }
+ * }
+ * ```
+ * See the [`@where`](#_where) property for more examples of how to use a where
+ * clause.
+ *
  * @see https://json-rql.org/interfaces/select.html
  */
 export interface Select extends Read {
@@ -224,6 +411,60 @@ export function isSelect(p: Pattern): p is Select {
 
 /**
  * A pattern to update the properties of matching subjects in the domain.
+ * 
+ * Examples:
+ * 
+ * *Delete a subject property*
+ * ```json
+ * {
+ *   "@delete": {
+ *     "@id": "fred",
+ *     "name": "Fred"
+ *   }
+ * }
+ * ```
+ * *Delete a property, where another property has a value*
+ * ```json
+ * {
+ *   "@delete": {
+ *     "@id": "?id",
+ *     "age": "?any"
+ *   },
+ *   "@where": {
+ *     "@id": "?id",
+ *     "name": "Fred",
+ *     "age": "?any"
+ *   }
+ * }
+ * ```
+ * *Update a subject property*
+ * ```json
+ * {
+ *   "@delete": {
+ *     "@id": "fred",
+ *     "name": "Fred"
+ *   },
+ *   "@insert": {
+ *     "@id": "fred",
+ *     "name": "Fred Flintstone"
+ *   }
+ * }
+ * ```
+ * *Replace all of a subject's properties*
+ * ```json
+ * {
+ *   "@delete": {
+ *     "@id": "fred",
+ *     "?prop": "?value"
+ *   },
+ *   "@insert": {
+ *     "@id": "fred",
+ *     "age": 50,
+ *     "name": "Fred Flintstone"
+ *   }
+ * }
+ * ```
+ *
  * @see https://json-rql.org/interfaces/update.html
  */
 export interface Update extends Query {
