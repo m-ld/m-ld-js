@@ -5,7 +5,7 @@ import { MeldApi, MeldConstraint } from './MeldApi';
 import { Context } from './jrql-support';
 import { LogLevelDesc } from 'loglevel';
 import { ConstraintConfig, constraintFromConfig } from './constraints';
-import { DomainContext } from './engine/MeldJson';
+import { DomainContext } from './engine/MeldEncoding';
 
 export * from './MeldApi';
 export {

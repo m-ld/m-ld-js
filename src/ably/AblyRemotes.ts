@@ -65,7 +65,7 @@ export class AblyRemotes extends PubsubRemotes {
 
   private channelName(id: string) {
     // https://www.ably.io/documentation/realtime/channels#channel-namespaces
-    return `${this.meldJson.domain}:${id}`;
+    return `${this.meldEncoding.domain}:${id}`;
   }
 
   private onDirectMessage = async (data: any, name: string, clientId: string) => {
@@ -91,7 +91,7 @@ export class AblyRemotes extends PubsubRemotes {
       return this.operations.presence.leave();
   }
 
-  protected publishDelta(msg: object): Promise<unknown> {
+  protected publishDelta(msg: Buffer): Promise<unknown> {
     return this.traffic.publish(this.operations, '__delta', msg);
   }
 
@@ -117,10 +117,6 @@ export class AblyRemotes extends PubsubRemotes {
 
   protected replier(toId: string, messageId: string, sentMessageId: string): SubPub {
     return this.getSubPub({ type: '__reply', toId, messageId, sentMessageId });
-  }
-
-  protected isEcho(): boolean {
-    return false; // Echo is disabled in the config
   }
 
   private getParams(name: string, clientId: string): SendTypeParams | ReplyTypeParams | undefined {

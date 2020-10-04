@@ -16,7 +16,7 @@
     "build": "npm run clean && jest --silent && tsc && typedoc",
     "dev": "tsc -w & jest --watch --silent",
     "dev+log": "jest --watch",
-    "compliance": "node compliance/test.js",
+    "compliance": "tsc && node compliance/test.js",
     "prepublishOnly": "npm run build && npm version $VERSION && git push",
     "doc-dev": "onchange 'src/**/*.ts' 'doc/**/*.*' -- typedoc & browser-sync start --server _site --files _site"
   },

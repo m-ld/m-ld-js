@@ -155,11 +155,8 @@ describe('Dataset clone', () => {
         '@id': 'http://test.m-ld.org/fred',
         'http://test.m-ld.org/#name': 'Fred'
       } as Subject);
-      remoteUpdates.next(new DeltaMessage(remoteTime.ticked(), {
-        tid: uuid(),
-        insert: '{"@id":"http://test.m-ld.org/wilma","http://test.m-ld.org/#name":"Wilma"}',
-        delete: '{}'
-      }));
+      remoteUpdates.next(new DeltaMessage(remoteTime.ticked(),
+        [0, uuid(), '{}', '{"@id":"http://test.m-ld.org/wilma","http://test.m-ld.org/#name":"Wilma"}']));
       await expect(updates).resolves.toEqual([1, 2]);
     });
 
@@ -168,11 +165,8 @@ describe('Dataset clone', () => {
     // 1. a remote transaction, because of the clock space made for a constraint
     test('answers rev-up from next new clone after apply', async () => {
       const updated = clone.follow().pipe(take(1)).toPromise();
-      remoteUpdates.next(new DeltaMessage(remoteTime.ticked(), {
-        tid: uuid(),
-        insert: '{"@id":"http://test.m-ld.org/wilma","http://test.m-ld.org/#name":"Wilma"}',
-        delete: '{}'
-      }));
+      remoteUpdates.next(new DeltaMessage(remoteTime.ticked(),
+        [0, uuid(), '{}', '{"@id":"http://test.m-ld.org/wilma","http://test.m-ld.org/#name":"Wilma"}']));
       await updated;
       const thirdTime = await clone.newClock();
       await expect(clone.revupFrom(thirdTime)).resolves.toBeDefined();

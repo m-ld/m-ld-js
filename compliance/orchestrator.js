@@ -50,12 +50,18 @@ aedes.on('publish', function (packet, client) {
 aedes.on('client', client => {
   const log = LOG.getLogger('aedes');
   if (client.id in clones) {
-    log.debug(`${client.id}: MQTT client connecting`);
+    log.debug(client.id, 'MQTT client connecting');
     clones[client.id].mqtt.client = client;
   } else {
-    log.warn(`${client.id}: Unexpected MQTT client`);
+    log.warn(client.id, 'Unexpected MQTT client');
   }
 });
+
+function reportError(client, err) {
+  LOG.getLogger('aedes').warn(client.id, 'Error', err);
+}
+aedes.on('clientError', reportError);
+aedes.on('connectionError', reportError);
 
 function start(req, res, next) {
   registerRequest(req, res, next);

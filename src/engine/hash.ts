@@ -1,5 +1,5 @@
 import BN = require('bn.js');
-import { randomBytes, createHash } from 'crypto';
+import { randomBytes, createHash, BinaryLike } from 'crypto';
 
 export class Hash {
   static readonly BYTE_WIDTH = 32;
@@ -11,7 +11,7 @@ export class Hash {
     return new Hash(randomBytes(this.BYTE_WIDTH));
   }
 
-  static digest(...data: string[]): Hash {
+  static digest(...data: BinaryLike[]): Hash {
     const hash = createHash('sha256');
     data.forEach(datum => hash.update(datum));
     return new Hash(hash.digest());

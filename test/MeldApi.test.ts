@@ -3,7 +3,7 @@ import { memStore, mockRemotes, testConfig } from './testClones';
 import { first } from 'rxjs/operators';
 import { DatasetClone } from '../src/engine/dataset/DatasetClone';
 import { Group, Subject, Select, Describe, Reference, Update } from '../src/jrql-support';
-import { DomainContext } from '../src/engine/MeldJson';
+import { DomainContext } from '../src/engine/MeldEncoding';
 
 describe('Meld API', () => {
   let api: MeldApi;

@@ -8,6 +8,7 @@ import { Subject as Source, BehaviorSubject } from 'rxjs';
 import { Future } from '../src/engine/util';
 import { TreeClock } from '../src/engine/clocks';
 import { Request, Response } from '../src/engine/ControlMessage';
+import { MsgPack } from '../src/engine/util';
 
 /**
  * These tests use a fully mocked Ably to avoid incurring costs. The behaviour
@@ -142,12 +143,11 @@ describe('Ably remotes', () => {
     otherPresent();
     await comesAlive(remotes);
     const entry = new DeltaMessage(
-      TreeClock.GENESIS.forked().left,
-      { tid: 't1', insert: '{}', delete: '{}' });
+      TreeClock.GENESIS.forked().left, [0, 't1', '{}', '{}']);
     const updates = new Source<DeltaMessage>();
     remotes.setLocal(mockLocal({ updates }));
     updates.next(entry);
-    expect(operations.publish).toHaveBeenCalledWith('__delta', entry.toJson());
+    expect(operations.publish).toHaveBeenCalledWith('__delta', entry.encode());
   });
 
   test('sends a new clock request', async () => {
@@ -165,10 +165,10 @@ describe('Ably remotes', () => {
     other.publish.mockImplementation((name, data) => {
       const splitName = name.split(':');
       expect(splitName[0]).toBe('__send');
-      expect(data).toEqual(new Request.NewClock().toJson());
+      expect(MsgPack.decode(data)).toEqual(new Request.NewClock().toJson());
       setImmediate(() => subscriber(mock<Ably.Types.Message>({
         clientId: 'other',
-        data: new Response.NewClock(newClock).toJson(),
+        data: MsgPack.encode(new Response.NewClock(newClock).toJson()),
         name: `__reply:reply1:${splitName[1]}`
       })));
       return Promise.resolve();

@@ -30,7 +30,7 @@ export abstract class AbstractMeld implements Meld {
 
     // Log liveness
     this.live.pipe(skip(1)).subscribe(
-      live => this.log.debug('is', live ? 'live' : 'dead'));
+      live => this.log.debug('is', live == null ? 'gone' : live ? 'live' : 'dead'));
   }
 
   get live(): LiveValue<boolean | null> {

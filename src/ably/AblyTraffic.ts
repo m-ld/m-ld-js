@@ -53,7 +53,7 @@ export class AblyTraffic {
   }
 
   publish(channel: Ably.Types.RealtimeChannelPromise,
-    name: string, data: object | null): Promise<void> {
+    name: string, data: Buffer | object | null): Promise<void> {
     const channelMsg = new ChannelMessage(channel, name, data);
     this.outbound.next(channelMsg);
     return Promise.resolve(channelMsg.published);

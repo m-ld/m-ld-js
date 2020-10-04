@@ -9,6 +9,12 @@ import { publish, tap, flatMap } from "rxjs/operators";
 import AsyncLock = require('async-lock');
 import { LogLevelDesc, getLogger, getLoggers } from 'loglevel';
 import * as performance from 'marky';
+import { encode as rawEncode, decode as rawDecode } from '@ably/msgpack-js';
+
+export namespace MsgPack {
+  export const encode = (value: any) => Buffer.from(rawEncode(value));
+  export const decode: (buffer: Uint8Array) => any = rawDecode;
+}
 
 export function flatten<T>(bumpy: T[][]): T[] {
   return ([] as T[]).concat(...bumpy);

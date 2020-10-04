@@ -1,12 +1,13 @@
 import { Subject } from '../../jrql-support';
 import { toPrefixedId } from './SuSetGraph';
 import { Iri } from 'jsonld/jsonld-spec';
-import { UUID, MeldDelta, JsonDelta } from '..';
-import { JsonDeltaBagBlock } from '../MeldJson';
+import { UUID, MeldDelta, EncodedDelta } from '..';
+import { JsonDeltaBagBlock } from '../MeldEncoding';
 import { TreeClock } from '../clocks';
 import { PatchQuads, Patch } from '.';
 import { JrqlGraph } from './JrqlGraph';
 import { Hash } from '../hash';
+import { MsgPack } from '../util';
 
 interface Journal {
   '@id': 'qs:journal', // Singleton object
@@ -25,7 +26,10 @@ interface JournalBody {
 interface JournalEntry {
   /** entry:<encoded block hash> */
   '@id': Iri;
-  /** JSON-encoded body */
+  /**
+   * Base64-encoded message-packed body
+   * FIXME: This will get converted back to binary by encoding-down
+   */
   body: string;
   /**
    * Local clock ticks for which this entry was the Journal tail. This includes
@@ -38,8 +42,8 @@ interface JournalEntry {
 interface JournalEntryBody {
   tid: UUID; // Transaction ID
   hash: string; // Encoded Hash
-  delta: JsonDelta; // Raw JsonDelta
-  remote: boolean;
+  delta: EncodedDelta; // Raw delta - may contain Buffers
+  remote: boolean; // Whether this entry was a remote transaction
   time: any; // JSON-encoded TreeClock (the remote clock)
   next?: JournalEntry['@id'];
 }
@@ -56,7 +60,7 @@ export class SuSetJournalEntry {
   constructor(
     private readonly journal: SuSetJournal,
     private readonly data: JournalEntry) {
-    this.body = JSON.parse(data.body);
+    this.body = MsgPack.decode(Buffer.from(data.body, 'base64'));
   }
 
   get id(): Iri {
@@ -75,7 +79,7 @@ export class SuSetJournalEntry {
     return TreeClock.fromJson(this.body.time) as TreeClock;
   }
 
-  get delta(): JsonDelta {
+  get delta(): EncodedDelta {
     return this.body.delta;
   }
 
@@ -92,26 +96,34 @@ export class SuSetJournalEntry {
       body.time = startingTime.toJson();
     const entry: Partial<JournalEntry> = {
       '@id': headEntryId,
-      body: JSON.stringify(body),
+      body: SuSetJournalEntry.encodeBody(body),
       ticks: localTime?.ticks
     };
     return entry;
   }
 
+  private static encodeBody(body: Partial<JournalEntryBody>): string {
+    return MsgPack.encode(body).toString('base64');
+  }
+
   private static createEntry(
-    hash: Hash, delta: MeldDelta, localTime: TreeClock, remoteTime?: TreeClock, nextHash?: Hash) {
+    hash: Hash,
+    delta: MeldDelta,
+    localTime: TreeClock,
+    remoteTime?: TreeClock,
+    nextHash?: Hash): JournalEntry & Subject {
     const encodedHash = hash.encode();
     const body: JournalEntryBody = {
       remote: remoteTime != null,
       hash: encodedHash,
       tid: delta.tid,
       time: (remoteTime ?? localTime).toJson(),
-      delta: delta.json,
+      delta: delta.encoded, // may contain buffers
       next: nextHash != null ? SuSetJournalEntry.id(nextHash.encode()) : undefined
     };
     return {
       '@id': SuSetJournalEntry.id(encodedHash),
-      body: JSON.stringify(body),
+      body: SuSetJournalEntry.encodeBody(body),
       ticks: localTime.ticks
     };
   }
@@ -121,7 +133,7 @@ export class SuSetJournalEntry {
   }
 
   private static nextHash(prevHash: Hash, delta: MeldDelta) {
-    return new JsonDeltaBagBlock(prevHash).next(delta.json).id;
+    return new JsonDeltaBagBlock(prevHash).next(delta.encoded).id;
   }
 
   async setHeadTime(localTime: TreeClock): Promise<PatchQuads> {
@@ -152,7 +164,7 @@ export class SuSetJournalEntry {
   private updateBody(update: Partial<JournalEntryBody>): Promise<PatchQuads> {
     return this.journal.graph.write({
       '@delete': { '@id': this.id, body: this.data.body },
-      '@insert': { '@id': this.id, body: JSON.stringify({ ...this.body, ...update }) }
+      '@insert': { '@id': this.id, body: SuSetJournalEntry.encodeBody({ ...this.body, ...update }) }
     });
   }
 }

@@ -6,36 +6,46 @@ import { Observable } from 'rxjs';
 import { Message } from './messages';
 import { Quad } from 'rdf-js';
 import { Hash } from './hash';
-import { Pattern, Subject, Read, Update } from '../jrql-support';
-import { Future } from './util';
+import { MsgPack, Future } from './util';
 import { LiveValue } from './LiveValue';
+import { MeldError } from './MeldError';
+import { gzip as gzipCb, gunzip as gunzipCb, InputType } from 'zlib';
+const gzip = (input: InputType) => new Promise<Buffer>((resolve, reject) =>
+  gzipCb(input, (err, buf) => err ? reject(err) : resolve(buf)));
+const gunzip = (input: InputType) => new Promise<Buffer>((resolve, reject) =>
+  gunzipCb(input, (err, buf) => err ? reject(err) : resolve(buf)));
 const inspect = Symbol.for('nodejs.util.inspect.custom');
+
+const COMPRESS_THRESHOLD_BYTES = 1024;
 
 /**
  * The graph is implicit in m-ld operations.
  */
 export type Triple = Omit<Quad, 'graph'>;
 
-export class DeltaMessage implements Message<TreeClock, JsonDelta> {
+export class DeltaMessage implements Message<TreeClock, EncodedDelta> {
   readonly delivered = new Future;
 
   constructor(
     readonly time: TreeClock,
-    readonly data: JsonDelta) {
+    readonly data: EncodedDelta) {
   }
 
-  toJson(): object {
-    return { time: this.time.toJson(), data: this.data };
+  encode(): Buffer {
+    return MsgPack.encode({ time: this.time.toJson(), data: this.data });
   }
 
-  static fromJson(json: any): DeltaMessage | undefined {
+  static decode(enc: Buffer): DeltaMessage {
+    const json = MsgPack.decode(enc);
     const time = TreeClock.fromJson(json.time);
     if (time && json.data)
       return new DeltaMessage(time, json.data);
+    else
+      throw new MeldError('Bad update');
   }
 
   size() {
-    return JSON.stringify(this.toJson()).length;
+    return this.encode().length;
   }
 
   toString() {
@@ -81,11 +91,29 @@ export interface MeldDelta extends Object {
    * For any m-ld delta, there are many possible serialisations.
    * A delta carries its serialisation with it, for journaling and hashing.
    */
-  readonly json: JsonDelta;
+  readonly encoded: EncodedDelta;
 }
 
-export type JsonDelta = {
-  [key in 'tid' | 'insert' | 'delete']: string;
+/**
+ * A tuple containing version, tid, delete and insert components of a
+ * {@link MeldDelta}. The delete and insert components are UTF-8 encoded JSON-LD
+ * strings, which may be GZIP compressed into a Buffer if bigger than a
+ * threshold. Intended to be efficiently serialised with MessagePack.
+ */
+export type EncodedDelta = [0, string, string | Buffer, string | Buffer];
+
+export namespace EncodedDelta {
+  export async function encode(json: any): Promise<Buffer | string> {
+    const stringified = JSON.stringify(json);
+    return stringified.length > COMPRESS_THRESHOLD_BYTES ?
+      gzip(stringified) : stringified;
+  }
+
+  export async function decode(enc: string | Buffer): Promise<any> {
+    if (typeof enc != 'string')
+      enc = (await gunzip(enc)).toString();
+    return JSON.parse(enc);
+  }
 }
 
 export interface Snapshot {
