@@ -12,8 +12,8 @@ import * as performance from 'marky';
 import { encode as rawEncode, decode as rawDecode } from '@ably/msgpack-js';
 
 export namespace MsgPack {
-  export const encode = (value: any) => Buffer.from(rawEncode(value));
-  export const decode: (buffer: Uint8Array) => any = rawDecode;
+  export const encode = (value: any) => Buffer.from(rawEncode(value).buffer);
+  export const decode = (buffer: ArrayBuffer) => rawDecode(Buffer.from(buffer));
 }
 
 export function flatten<T>(bumpy: T[][]): T[] {
