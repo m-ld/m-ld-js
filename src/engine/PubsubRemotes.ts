@@ -113,7 +113,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
 
   protected abstract present(): Observable<string>;
 
-  protected abstract notifier(id: string): SubPubsub;
+  protected abstract notifier(toId: string, id: string): SubPubsub;
 
   protected abstract sender(toId: string, messageId: string): SubPub;
 
@@ -372,9 +372,9 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     ), 'expectAck');
     // Ack has been sent, start streaming the data and updates concurrently
     await Promise.all([
-      this.produce(quads, quadsAddress, this.bufferFromTriples, 'snapshot'),
-      this.produce(tids, tidsAddress, MsgPack.encode, 'tids'),
-      this.produce(updates, updatesAddress, msg => msg.encode(), 'updates')
+      this.produce(quads, sentParams.fromId, quadsAddress, this.bufferFromTriples, 'snapshot'),
+      this.produce(tids, sentParams.fromId, tidsAddress, MsgPack.encode, 'tids'),
+      this.produce(updates, sentParams.fromId, updatesAddress, msg => msg.encode(), 'updates')
     ]);
   }
 
@@ -386,7 +386,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
       const updatesAddress = uuid();
       await this.reply(sentParams, new Response.Revup(true, updatesAddress), 'expectAck');
       // Ack has been sent, start streaming the updates
-      await this.produce(revup, updatesAddress, msg => msg.encode(), 'updates');
+      await this.produce(revup, sentParams.fromId, updatesAddress, msg => msg.encode(), 'updates');
     } else if (this.clone) {
       await this.reply(sentParams, new Response.Revup(false, this.clone.id));
     }
@@ -396,7 +396,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     subAddress: string,
     map: (payload: Buffer) => T | Promise<T>,
     failIfSlow?: 'failIfSlow'): Promise<Observable<T>> {
-    const notifier = this.notifier(subAddress);
+    const notifier = this.notifier(this.id, subAddress);
     const src = this.consuming[notifier.id] = new Source;
     await notifier.subscribe();
     const consumed = src.pipe(
@@ -413,9 +413,9 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     return failIfSlow ? consumed.pipe(timeout(this.sendTimeout)) : consumed;
   }
 
-  private produce<T>(data: Observable<T>, subAddress: string,
+  private produce<T>(data: Observable<T>, toId: string, subAddress: string,
     datumToPayload: (datum: T) => Promise<Buffer> | Buffer, type: string) {
-    const notifier = this.notifier(subAddress);
+    const notifier = this.notifier(toId, subAddress);
     const notifyError: (error: any) => Promise<unknown> = error => {
       this.log.warn('Notifying error on', subAddress, error);
       return notify({ error: toJson(error) });

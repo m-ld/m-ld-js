@@ -111,7 +111,7 @@ export class MqttRemotes extends PubsubRemotes {
     return this.presence.present(this.controlTopic.address);
   }
 
-  protected notifier(id: string): SubPubsub {
+  protected notifier(_toId: string, id: string): SubPubsub {
     const address = this.notifyTopic.with({ id }).address;
     return {
       id,
