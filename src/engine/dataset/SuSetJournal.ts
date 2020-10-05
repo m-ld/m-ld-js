@@ -60,7 +60,16 @@ export class SuSetJournalEntry {
   constructor(
     private readonly journal: SuSetJournal,
     private readonly data: JournalEntry) {
-    this.body = MsgPack.decode(Buffer.from(data.body, 'base64'));
+    try {
+      this.body = MsgPack.decode(Buffer.from(data.body, 'base64'));
+    } catch (err) {
+      // This might be a v0.2 format
+      const body = JSON.parse(data.body);
+      if (typeof body.delta?.tid == 'string')
+        this.body = { ...body, delta: [0, body.delta.tid, body.delta.delete, body.delta.insert] };
+      else
+        throw err;
+    }
   }
 
   get id(): Iri {
