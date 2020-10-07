@@ -49,8 +49,8 @@ export function mockLocal(
 export interface MockMqtt extends AsyncMqttClient {
   mockConnect(): void;
   mockClose(): void;
-  mockPublish(topic: string, json: any): Promise<void>;
-  mockSubscribe(subscriber: (topic: string, json: any) => void): void;
+  mockPublish(topic: string, payload: Buffer | string): Promise<void>;
+  mockSubscribe(subscriber: (topic: string, payload: Buffer) => void): void;
   lastPublish(): Promise<IPublishPacket>;
 }
 
@@ -64,26 +64,20 @@ export function mockMqtt(): MockMqtt & MockProxy<AsyncMqttClient> {
     mqtt.connected = false;
     mqtt.emit('close');
   };
-  mqtt.mockPublish = (topic: string, json: any) => {
+  mqtt.mockPublish = (topic: string, payload: Buffer | string) => {
     return new Promise<void>((resolve) => setImmediate(mqtt => {
-      mqtt.emit('message', topic,
-        Buffer.from(typeof json === 'string' ? json : JSON.stringify(json)));
+      mqtt.emit('message', topic, payload);
       resolve();
     }, mqtt)); // Pass current mqtt in case of sync test
   };
-  mqtt.mockSubscribe = (subscriber: (topic: string, json: any) => void) => {
-    mqtt.on('message', (topic, payload) => {
-      try {
-        subscriber(topic, JSON.parse(payload.toString()));
-      } catch (err) {
-        subscriber(topic, payload.toString());
-      }
-    });
+  mqtt.mockSubscribe = (subscriber: (topic: string, payload: Buffer) => void) => {
+    mqtt.on('message', (topic, payload) => subscriber(topic, payload));
   };
   mqtt.lastPublish = () => mqtt.publish.mock.results.slice(-1)[0].value;
   mqtt = mock<MockMqtt>(mqtt);
   // jest-mock-extended typing is confused by the AsyncMqttClient overloads, hence <any>
   mqtt.subscribe.mockReturnValue(<any>Promise.resolve([]));
-  mqtt.publish.mockImplementation((topic, msg) => <any>mqtt.mockPublish(topic, <string>msg));
+  mqtt.publish.mockImplementation(
+    (topic, payload: Buffer | string) => <any>mqtt.mockPublish(topic, payload));
   return mqtt;
 }

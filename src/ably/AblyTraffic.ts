@@ -37,7 +37,7 @@ export class AblyTraffic {
     if (config.maxRate != null) {
       const gap = 1000 / config.maxRate;
       let prev = 0;
-      // Use of concatMap guarantess ordering
+      // Use of concatMap guarantees ordering
       outLimited = outLimited.pipe(concatMap(msg => {
         const now = scheduler.now();
         if (now < prev + gap) {
@@ -53,7 +53,7 @@ export class AblyTraffic {
   }
 
   publish(channel: Ably.Types.RealtimeChannelPromise,
-    name: string, data: object | null): Promise<void> {
+    name: string, data: Buffer | object | null): Promise<void> {
     const channelMsg = new ChannelMessage(channel, name, data);
     this.outbound.next(channelMsg);
     return Promise.resolve(channelMsg.published);

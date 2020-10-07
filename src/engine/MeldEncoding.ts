@@ -1,4 +1,4 @@
-import { MeldDelta, JsonDelta, UUID, Triple } from '.';
+import { MeldDelta, EncodedDelta, UUID, Triple } from '.';
 import { NamedNode, Quad } from 'rdf-js';
 import { literal, namedNode, blankNode, triple as newTriple, defaultGraph, quad as newQuad } from '@rdfjs/data-model';
 import { HashBagBlock } from './blocks';
@@ -101,10 +101,15 @@ export function unreify(reifications: Triple[]): [Triple, UUID[]][] {
   }, {} as { [rid: string]: [Triple, UUID[]] }));
 }
 
-export class JsonDeltaBagBlock extends HashBagBlock<JsonDelta> {
-  constructor(id: Hash, data?: JsonDelta) { super(id, data); }
-  protected construct = (id: Hash, data: JsonDelta) => new JsonDeltaBagBlock(id, data);
-  protected hash = (data: JsonDelta) => Hash.digest(data.tid, data.insert, data.delete);
+export class JsonDeltaBagBlock extends HashBagBlock<EncodedDelta> {
+  constructor(id: Hash, data?: EncodedDelta) { super(id, data); }
+  protected construct = (id: Hash, data: EncodedDelta) => new JsonDeltaBagBlock(id, data);
+  protected hash = (data: EncodedDelta) => {
+    const [ver, tid, del, ins] = data;
+    if (ver !== 0)
+      throw new Error(`Encoded delta version ${ver} not supported`);
+    return Hash.digest(tid, ins, del); // Note delete insert reversed (historical)
+  };
 }
 
 /**
@@ -120,31 +125,32 @@ const DEFAULT_CONTEXT = {
   o: 'rdf:object'
 };
 
-export class MeldJson {
+export class MeldEncoding {
   context: DomainContext;
 
   constructor(readonly domain: string) {
     this.context = new DomainContext(domain, DEFAULT_CONTEXT);
   }
 
-  newDelta = async (delta: Omit<MeldDelta, 'json'>): Promise<MeldDelta> => ({
-    ...delta,
-    json: {
-      tid: delta.tid,
-      insert: JSON.stringify(await this.toMeldJson(delta.insert)),
-      delete: JSON.stringify(await this.toMeldJson(delta.delete))
-    }
-  })
+  newDelta = async (delta: Omit<MeldDelta, 'encoded'>): Promise<MeldDelta> => {
+    const [del, ins] = await Promise.all([delta.delete, delta.insert]
+      .map(triples => this.jsonFromTriples(triples).then(EncodedDelta.encode)));
+    return { ...delta, encoded: [0, delta.tid, del, ins] };
+  }
 
-  asMeldDelta = async (delta: JsonDelta): Promise<MeldDelta> => ({
-    tid: delta.tid,
-    insert: await this.fromMeldJson(JSON.parse(delta.insert)),
-    delete: await this.fromMeldJson(JSON.parse(delta.delete)),
-    json: delta,
-    toString: () => `${delta.tid}: ${JSON.stringify(delta)}`
-  })
+  asDelta = async (delta: EncodedDelta): Promise<MeldDelta> => {
+    const [ver, tid, del, ins] = delta;
+    if (ver !== 0)
+      throw new Error(`Encoded delta version ${ver} not supported`);
+    const jsons = await Promise.all([del, ins].map(EncodedDelta.decode));
+    const [delTriples, insTriples] = await Promise.all(jsons.map(this.triplesFromJson));
+    return ({
+      tid, insert: insTriples, delete: delTriples, encoded: delta,
+      toString: () => `${tid}: ${JSON.stringify(jsons)}`
+    });
+  }
 
-  toMeldJson = async (triples: Triple[]): Promise<any> => {
+  jsonFromTriples = async (triples: Triple[]): Promise<any> => {
     const jsonld = await rdfToJson(triples.map(toDomainQuad));
     const graph: any = await compact(jsonld, this.context);
     // The jsonld processor may create a top-level @graph with @context
@@ -152,8 +158,9 @@ export class MeldJson {
     return '@graph' in graph ? graph['@graph'] : graph;
   }
 
-  fromMeldJson = async (json: any): Promise<Triple[]> =>
-    await jsonToRdf({ '@graph': json, '@context': this.context }) as Triple[]
+  triplesFromJson = async (json: any): Promise<Triple[]> =>
+    await jsonToRdf({ '@graph': json, '@context': this.context }) as Triple[];
+  
 }
 
 export function toDomainQuad(triple: Triple): Quad {

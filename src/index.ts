@@ -5,7 +5,7 @@ import { MeldApi, MeldConstraint } from './MeldApi';
 import { Context } from './jrql-support';
 import { LogLevelDesc } from 'loglevel';
 import { ConstraintConfig, constraintFromConfig } from './constraints';
-import { DomainContext } from './engine/MeldJson';
+import { DomainContext } from './engine/MeldEncoding';
 
 export * from './MeldApi';
 export {
@@ -61,6 +61,13 @@ export interface MeldConfig {
    * fallback behaviours. Default is five seconds.
    */
   networkTimeout?: number;
+  /**
+   * An upper bound on delta message size, in bytes. Usually imposed by the
+   * message publishing implementation. Default is infinity. Exceeding this
+   * limit will cause a transaction to fail, to prevent a clone from being
+   * unable to transmit the update to its peers.
+   */
+  maxDeltaSize?: number;
   /**
    * Log level for the clone
    */

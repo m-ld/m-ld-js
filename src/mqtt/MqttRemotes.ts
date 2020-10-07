@@ -7,7 +7,6 @@ import { AsyncMqttClient, IClientOptions, ISubscriptionMap, connect as defaultCo
 import { MqttTopic, SEND_TOPIC, REPLY_TOPIC, SendParams, } from './MqttTopic';
 import { TopicParams } from 'mqtt-pattern';
 import { MqttPresence } from './MqttPresence';
-import { jsonFrom } from '../engine/util';
 import { MeldConfig } from '..';
 import { ReplyParams, PubsubRemotes, SubPubsub, SubPub } from '../engine/PubsubRemotes';
 
@@ -16,15 +15,15 @@ export interface MeldMqttConfig extends MeldConfig {
 }
 
 interface DomainParams extends TopicParams { domain: string; }
+interface NoEchoParams extends DomainParams { clientId: string; }
 interface NotifyParams extends DomainParams { id: string; }
-const OPERATIONS_TOPIC = new MqttTopic<DomainParams>({ '+': 'domain' }, 'operations');
+const OPERATIONS_TOPIC = new MqttTopic<NoEchoParams>({ '+': 'domain' }, 'operations', { '+': 'clientId' });
 const CONTROL_TOPIC = new MqttTopic<DomainParams>({ '+': 'domain' }, 'control');
 const NOTIFY_TOPIC = new MqttTopic<NotifyParams>({ '+': 'domain' }, 'control', { '+': 'id' });
-const CHANNEL_ID_HEADER = '__channel.id';
 
 export class MqttRemotes extends PubsubRemotes {
   private readonly mqtt: AsyncMqttClient;
-  private readonly operationsTopic: MqttTopic<DomainParams>;
+  private readonly operationsTopic: MqttTopic<NoEchoParams>;
   private readonly controlTopic: MqttTopic<DomainParams>;
   private readonly notifyTopic: MqttTopic<NotifyParams>;
   private readonly sentTopic: MqttTopic<SendParams & TopicParams>;
@@ -48,10 +47,13 @@ export class MqttRemotes extends PubsubRemotes {
     // Set up listeners
     this.presence.on('change', () => this.onPresenceChange());
     this.mqtt.on('message', (topic, payload) => {
-      this.operationsTopic.match(topic, () => this.onRemoteUpdate(jsonFrom(payload)));
-      this.sentTopic.match(topic, sent => this.onSent(jsonFrom(payload), sent));
-      this.replyTopic.match(topic, replied => this.onReply(jsonFrom(payload), replied));
-      this.notifyTopic.match(topic, notify => this.onNotify(notify.id, jsonFrom(payload)));
+      this.operationsTopic.match(topic, params => {
+        if (params.clientId !== this.id) // Prevent echo
+          this.onRemoteUpdate(payload);
+      });
+      this.sentTopic.match(topic, sent => this.onSent(payload, sent));
+      this.replyTopic.match(topic, replied => this.onReply(payload, replied));
+      this.notifyTopic.match(topic, notify => this.onNotify(notify.id, payload));
     });
 
     // When MQTT.js receives an error just log - it will try to reconnect
@@ -92,10 +94,6 @@ export class MqttRemotes extends PubsubRemotes {
     }
   }
 
-  protected reconnect(): void {
-    this.mqtt.reconnect();
-  }
-
   protected async setPresent(present: boolean) {
     if (present)
       return this.presence.join(this.id, this.controlTopic.address);
@@ -103,22 +101,21 @@ export class MqttRemotes extends PubsubRemotes {
       return this.presence.leave(this.id);
   }
 
-  protected publishDelta(msg: object): Promise<unknown> {
+  protected publishDelta(msg: Buffer): Promise<unknown> {
     return this.mqtt.publish(
-      this.operationsTopic.address, JSON.stringify({
-        ...msg, [CHANNEL_ID_HEADER]: this.id
-      }), { qos: 1 });
+      // Client Id is included to prevent echo
+      this.operationsTopic.with({ clientId: this.id }).address, msg, { qos: 1 });
   }
 
   protected present(): Observable<string> {
     return this.presence.present(this.controlTopic.address);
   }
 
-  protected notifier(id: string): SubPubsub {
+  protected notifier(_toId: string, id: string): SubPubsub {
     const address = this.notifyTopic.with({ id }).address;
     return {
       id,
-      publish: notification => this.mqtt.publish(address, JSON.stringify(notification)),
+      publish: notification => this.mqtt.publish(address, notification),
       subscribe: () => this.mqtt.subscribe(address, { qos: 1 }),
       unsubscribe: () => this.mqtt.unsubscribe(address)
     };
@@ -130,7 +127,7 @@ export class MqttRemotes extends PubsubRemotes {
     }).address;
     return {
       id: address,
-      publish: request => this.mqtt.publish(address, JSON.stringify(request))
+      publish: request => this.mqtt.publish(address, request)
     };
   }
 
@@ -140,11 +137,7 @@ export class MqttRemotes extends PubsubRemotes {
     }).address;
     return {
       id: address,
-      publish: res => this.mqtt.publish(address, JSON.stringify(res))
+      publish: res => this.mqtt.publish(address, res)
     };
-  }
-
-  protected isEcho(json: any): boolean {
-    return json[CHANNEL_ID_HEADER] && json[CHANNEL_ID_HEADER] === this.id;
   }
 }

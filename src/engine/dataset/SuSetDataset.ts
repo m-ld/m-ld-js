@@ -1,5 +1,5 @@
 import { MeldUpdate, MeldConstraint } from '../../MeldApi';
-import { JsonDelta, Snapshot, UUID, DeltaMessage, Triple } from '..';
+import { EncodedDelta, Snapshot, UUID, DeltaMessage, Triple } from '..';
 import { Quad } from 'rdf-js';
 import { TreeClock } from '../clocks';
 import { Hash } from '../hash';
@@ -8,7 +8,7 @@ import { Dataset, PatchQuads } from '.';
 import { flatten as flatJsonLd } from 'jsonld';
 import { Iri } from 'jsonld/jsonld-spec';
 import { JrqlGraph } from './JrqlGraph';
-import { MeldJson, unreify, hashTriple, toDomainQuad, TripleTids } from '../MeldJson';
+import { MeldEncoding, unreify, hashTriple, toDomainQuad, TripleTids } from '../MeldEncoding';
 import { Observable, from, Subject as Source, EMPTY } from 'rxjs';
 import { toArray, bufferCount, flatMap, reduce, map, filter, takeWhile, expand } from 'rxjs/operators';
 import { flatten, Future, tapComplete, getIdLogger, check, rdfToJson } from '../util';
@@ -51,12 +51,13 @@ export class SuSetDataset extends JrqlGraph {
   private static checkNotClosed =
     check((d: SuSetDataset) => !d.dataset.closed, () => new MeldError('Clone has closed'));
 
-  private readonly meldJson: MeldJson;
+  private readonly meldEncoding: MeldEncoding;
   private readonly tidsGraph: JrqlGraph;
   private readonly journal: SuSetJournal;
   private readonly updateSource: Source<MeldUpdate> = new Source;
   readonly updates: Observable<MeldUpdate> = this.updateSource;
   private readonly datasetLock: LocalLock;
+  private readonly maxDeltaSize: number;
   private readonly log: Logger;
 
   constructor(
@@ -64,7 +65,7 @@ export class SuSetDataset extends JrqlGraph {
     private readonly constraint: MeldConstraint,
     config: MeldConfig) {
     super(dataset.graph());
-    this.meldJson = new MeldJson(config['@domain']);
+    this.meldEncoding = new MeldEncoding(config['@domain']);
     // Named graph for control quads e.g. Journal (note graph name is legacy)
     this.journal = new SuSetJournal(new JrqlGraph(
       dataset.graph(qsName('control')), SUSET_CONTEXT));
@@ -72,6 +73,7 @@ export class SuSetDataset extends JrqlGraph {
       dataset.graph(qsName('tids')), SUSET_CONTEXT);
     // Update notifications are strictly ordered but don't hold up transactions
     this.datasetLock = new LocalLock(config['@id'], dataset.location);
+    this.maxDeltaSize = config.maxDeltaSize ?? Infinity;
     this.log = getIdLogger(this.constructor, config['@id'], config.logLevel);
   }
 
@@ -185,6 +187,9 @@ export class SuSetDataset extends JrqlGraph {
         const deletedTriplesTids = await this.findTriplesTids(patch.oldQuads);
         const delta = await this.txnDelta(txc.id, patch.newQuads,
           deletedTriplesTids.map(tt => tt.asTripleTids()));
+        const deltaMessage = new DeltaMessage(time, delta.encoded);
+        if (deltaMessage.size() > this.maxDeltaSize)
+          throw new MeldError('Delta too big');
 
         // Include tid changes in final patch
         txc.sw.next('new-tids');
@@ -198,7 +203,7 @@ export class SuSetDataset extends JrqlGraph {
         journaling = journaling.concat(await journal.setTail(tailId, time));
         return {
           patch: this.transactionPatch(patch, allTidsPatch, tidPatch, journaling),
-          value: new DeltaMessage(time, delta.json),
+          value: deltaMessage,
           after: () => this.updateSource.next(update)
         };
       }
@@ -213,7 +218,7 @@ export class SuSetDataset extends JrqlGraph {
   }
 
   private txnDelta(tid: string, insert: Quad[], deletedTriplesTids: TripleTids[]) {
-    return this.meldJson.newDelta({
+    return this.meldEncoding.newDelta({
       tid, insert,
       // Delta has reifications of old quads, which we infer from found triple tids
       delete: TripleTids.reify(deletedTriplesTids)
@@ -222,10 +227,10 @@ export class SuSetDataset extends JrqlGraph {
 
   @SuSetDataset.checkNotClosed.async
   async apply(
-    msgData: JsonDelta, msgTime: TreeClock,
+    msgData: EncodedDelta, msgTime: TreeClock,
     arrivalTime: TreeClock, localTime: TreeClock): Promise<DeltaMessage | null> {
     return this.dataset.transact<DeltaMessage | null>({
-      id: msgData.tid,
+      id: msgData[1],
       prepare: async txc => {
         // Check we haven't seen this transaction before in the journal
         txc.sw.next('find-tids');
@@ -233,7 +238,7 @@ export class SuSetDataset extends JrqlGraph {
           this.log.debug(`Applying tid: ${txc.id}`);
 
           txc.sw.next('unreify');
-          const delta = await this.meldJson.asMeldDelta(msgData);
+          const delta = await this.meldEncoding.asDelta(msgData);
           let patch = new PatchQuads([], delta.insert.map(toDomainQuad));
           let allTidsPatch = await this.newTid(delta.tid);
           // The delta's delete contains reifications of deleted triples
@@ -276,7 +281,8 @@ export class SuSetDataset extends JrqlGraph {
           }
           return {
             patch: this.transactionPatch(patch, allTidsPatch, tidPatch, journaling),
-            value: cxn != null ? new DeltaMessage(localTime, cxn.delta.json) : null,
+            // FIXME: If this delta message exceeds max size, what to do?
+            value: cxn != null ? new DeltaMessage(localTime, cxn.delta.encoded) : null,
             after: () => this.updateSource.next(update)
           };
         } else {

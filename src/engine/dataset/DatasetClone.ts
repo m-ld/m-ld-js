@@ -156,7 +156,7 @@ export class DatasetClone extends AbstractMeld implements MeldClone, MeldLocal {
   }
 
   private acceptRemoteDelta(delta: DeltaMessage) {
-    const logBody = this.log.getLevel() < levels.DEBUG ? delta : `tid: ${delta.data.tid}`;
+    const logBody = this.log.getLevel() < levels.DEBUG ? delta : `tid: ${delta.data[1]}`;
     this.log.debug('Receiving', logBody, '@', this.localTime);
     // If we buffer a message, return false to signal we might need a re-connect
     return this.messageService.receive(delta, this.orderingBuffer, msg => {
