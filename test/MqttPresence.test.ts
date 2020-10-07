@@ -54,7 +54,7 @@ describe('MQTT presence', () => {
 
     mqtt.mockPublish('__presence/test.m-ld.org/client2', '{"consumer2":"address"}');
     mqtt.mockPublish('__presence/test.m-ld.org/client3', '{"consumer3":"address"}');
-    await presence.initialise();
+    presence.initialise();
 
     await expect(present.pipe(first()).toPromise()).resolves.toEqual(['consumer2', 'consumer3']);
   });
@@ -63,13 +63,13 @@ describe('MQTT presence', () => {
     const present = fromEvent(presence, 'change').pipe(
       concatMap(() => presence.present('address').pipe(toArray())));
 
-    await presence.initialise();
+    presence.initialise();
 
     await expect(present.pipe(first()).toPromise()).resolves.toEqual([]);
   });
 
   test('emits when presence changed', async () => {
-    await presence.initialise();
+    presence.initialise();
     await expect(nextChange(presence)).resolves.toEqual([]);
 
     mqtt.mockPublish('__presence/test.m-ld.org/client2', '{"consumer2":"address"}');

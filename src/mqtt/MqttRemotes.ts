@@ -42,7 +42,7 @@ export class MqttRemotes extends PubsubRemotes {
     this.sentTopic = SEND_TOPIC.with({ toId: this.id, address: this.controlTopic.path });
     this.replyTopic = REPLY_TOPIC.with({ toId: this.id });
     this.mqtt = connect({ ...config.mqtt, clientId: id, will: MqttPresence.will(domain, id) });
-    this.presence = new MqttPresence(this.mqtt, domain, id);
+    this.presence = new MqttPresence(this.mqtt, domain, id, config.logLevel);
 
     // Set up listeners
     this.presence.on('change', () => this.onPresenceChange());
@@ -58,7 +58,6 @@ export class MqttRemotes extends PubsubRemotes {
 
     // When MQTT.js receives an error just log - it will try to reconnect
     this.mqtt.on('error', this.warnError);
-    this.presence.on('error', this.warnError);
 
     // MQTT.js 'close' event signals a disconnect - definitely offline.
     this.mqtt.on('close', () => this.onDisconnect());
