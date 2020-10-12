@@ -1,17 +1,18 @@
 import { Quad, DefaultGraph, NamedNode, Quad_Subject, Quad_Predicate, Quad_Object } from 'rdf-js';
 import { defaultGraph } from '@rdfjs/data-model';
-import { RdfStore, MatchTerms } from 'quadstore';
+import { RdfStore } from 'quadstore';
 import AsyncLock = require('async-lock');
 import { AbstractLevelDOWN, AbstractOpenOptions } from 'abstract-leveldown';
 import { Observable } from 'rxjs';
 import { generate as uuid } from 'short-uuid';
 import { check, Stopwatch } from '../util';
+import dataFactory = require('@rdfjs/data-model');
 
 /**
  * Atomically-applied patch to a quad-store.
  */
 export interface Patch {
-  oldQuads: Quad[] | MatchTerms<Quad>;
+  oldQuads: Quad[] | Partial<Quad>;
   newQuads: Quad[];
 }
 
@@ -102,13 +103,22 @@ export class QuadStoreDataset implements Dataset {
   private readonly store: RdfStore;
   private readonly lock = new AsyncLock;
   private isClosed: boolean = false;
+  private ready: Promise<unknown>;
 
   constructor(
-    private readonly leveldown: AbstractLevelDOWN,
-    opts?: AbstractOpenOptions) {
-    this.store = new RdfStore(leveldown, opts);
+    private readonly leveldown: AbstractLevelDOWN) {
+    this.store = new RdfStore({ backend: leveldown, dataFactory });
     // Internal of level-js and leveldown
     this.location = (<any>leveldown).location ?? uuid();
+    this.ready = new Promise((resolve, reject) => {
+      this.store.on('ready', resolve);
+      this.store.on('error', reject);
+    });
+  }
+
+  async initialise(): Promise<QuadStoreDataset> {
+    await this.ready;
+    return this;
   }
 
   graph(name?: GraphName): Graph {
@@ -130,8 +140,17 @@ export class QuadStoreDataset implements Dataset {
       sw.next('prepare');
       const result = await txn.prepare({ id, sw: sw.lap });
       sw.next('apply');
-      if (result.patch != null)
-        await this.store.patch(result.patch.oldQuads, result.patch.newQuads);
+      if (result.patch != null) {
+        if (Array.isArray(result.patch.oldQuads)) {
+          await this.store.multiPatch(result.patch.oldQuads, result.patch.newQuads);
+        } else {
+          const { subject, predicate, object, graph } = result.patch.oldQuads;
+          await new Promise((resolve, reject) =>
+            this.store.removeMatches(subject, predicate, object, graph)
+              .on('end', resolve).on('error', reject));
+          await this.store.multiPut(result.patch.newQuads);
+        }
+      }
       sw.stop();
       await result.after?.();
       return <T>result.value;

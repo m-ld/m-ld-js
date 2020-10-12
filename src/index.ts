@@ -52,10 +52,6 @@ export interface MeldConfig {
    */
   genesis: boolean;
   /**
-   * Options for the LevelDB instance to be opened for the clone data
-   */
-  ldbOpts?: AbstractOpenOptions;
-  /**
    * An sane upper bound on how long any to wait for a response over the
    * network, in milliseconds. Used for message send timeouts and to trigger
    * fallback behaviours. Default is five seconds.
@@ -80,7 +76,7 @@ export interface MeldConfig {
  * transactions against the clone; this may be before the clone has received all
  * updates from the domain. To await latest updates, await a call to the
  * {@link MeldApi} `latest` method.
- * @param ldb an instance of a leveldb backend
+ * @param backend an instance of a leveldb backend
  * @param remotes a driver for connecting to remote m-ld clones on the domain.
  * This can be a configured object (e.g. `new MqttRemotes(config)`) or just the
  * class (`MqttRemotes`).
@@ -89,13 +85,13 @@ export interface MeldConfig {
  * 🚧 Experimental: use with caution.
  */
 export async function clone(
-  ldb: AbstractLevelDOWN,
+  backend: AbstractLevelDOWN,
   remotes: dist.mqtt.MqttRemotes | dist.ably.AblyRemotes,
   config: MeldConfig,
   constraint?: MeldConstraint): Promise<MeldApi> {
 
   const context = new DomainContext(config['@domain'], config['@context']);
-  const dataset = new QuadStoreDataset(ldb, config.ldbOpts);
+  const dataset = await new QuadStoreDataset(backend).initialise();
 
   if (typeof remotes == 'function')
     remotes = new remotes(config);
