@@ -15,6 +15,8 @@ describe('Meld State API', () => {
     api = new ApiStateMachine(new DomainContext('test.m-ld.org'), clone);
   });
 
+  // TODO: read(proc) and write(proc)
+
   test('retrieves a JSON-LD subject', async () => {
     const captureUpdate = new Future<MeldUpdate>();
     api.follow(captureUpdate.resolve);

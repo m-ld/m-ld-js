@@ -20,7 +20,7 @@ import { AbstractMeld, comesAlive } from '../AbstractMeld';
 import { MeldConfig } from '../..';
 import { RemoteUpdates } from './RemoteUpdates';
 import { NO_CONSTRAINT } from '../../constraints';
-import { CloneEngine } from '../MeldState';
+import { CloneEngine } from '../StateEngine';
 
 enum ConnectStyle {
   SOFT, HARD

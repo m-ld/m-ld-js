@@ -36,7 +36,7 @@ export class SharableLock<K extends string> {
   }
 
   enter(key: K, shared: boolean = true): Promise<void> {
-    if (key in this.active && this.active[key].shared) {
+    if (key in this.active && shared && this.active[key].shared) {
       this.active[key].count++;
       return Promise.resolve();
     } else {
