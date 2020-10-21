@@ -1,40 +1,41 @@
-import { MeldUpdate, MeldClone, LiveStatus, MeldStatus, MeldConstraint, HasExecTick } from '../../MeldApi';
+import { LiveStatus, MeldStatus, MeldConstraint } from '../../api';
 import { Snapshot, DeltaMessage, MeldRemotes, MeldLocal } from '..';
 import { liveRollup } from "../LiveValue";
-import { Pattern, Subject, isRead, isWrite } from '../../jrql-support';
+import { Subject, Read, Write } from '../../jrql-support';
 import {
   Observable, merge, from, EMPTY,
-  concat, BehaviorSubject, Subscription, throwError, identity, interval, of, Subscriber
+  concat, BehaviorSubject, Subscription, interval, of, Subscriber
 } from 'rxjs';
 import { TreeClock } from '../clocks';
 import { SuSetDataset } from './SuSetDataset';
 import { TreeClockMessageService } from '../messages';
 import { Dataset } from '.';
 import {
-  publishReplay, refCount, filter, ignoreElements, takeUntil, tap,
+  publishReplay, refCount, filter, takeUntil, tap,
   finalize, toArray, map, debounceTime,
-  distinctUntilChanged, expand, delayWhen, take, skipWhile, share
+  distinctUntilChanged, expand, delayWhen, take, skipWhile, share, mergeMap
 } from 'rxjs/operators';
-import { delayUntil, Future, tapComplete, SharableLock, fromArrayPromise } from '../util';
+import { delayUntil, Future, tapComplete, fromArrayPromise } from '../util';
+import { SharableLock } from "../locks";
 import { levels } from 'loglevel';
-import { MeldError } from '../MeldError';
 import { AbstractMeld, comesAlive } from '../AbstractMeld';
 import { MeldConfig } from '../..';
 import { RemoteUpdates } from './RemoteUpdates';
 import { NO_CONSTRAINT } from '../../constraints';
+import { CloneEngine } from '../MeldState';
 
 enum ConnectStyle {
   SOFT, HARD
 }
 
-export class DatasetClone extends AbstractMeld implements MeldClone, MeldLocal {
+export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLocal {
   private readonly dataset: SuSetDataset;
   private messageService: TreeClockMessageService;
   private readonly orderingBuffer: DeltaMessage[] = [];
   private readonly remotes: Omit<MeldRemotes, 'updates'>;
   private readonly remoteUpdates: RemoteUpdates;
   private subs = new Subscription;
-  private readonly liveLock = new SharableLock;
+  readonly lock = new SharableLock<'live' | 'state'>();
   private newClone: boolean = false;
   private readonly latestTicks = new BehaviorSubject<number>(NaN);
   private readonly networkTimeout: number;
@@ -121,6 +122,10 @@ export class DatasetClone extends AbstractMeld implements MeldClone, MeldLocal {
       await comesAlive(this, 'notNull');
   }
 
+  get dataUpdates() {
+    return this.dataset.updates;
+  }
+
   private get isGenesis(): boolean {
     return this.localTime.isId;
   }
@@ -135,9 +140,9 @@ export class DatasetClone extends AbstractMeld implements MeldClone, MeldLocal {
    */
   private bufferingDeltas(): Observable<unknown> {
     return this.remoteUpdates.receiving.pipe(
-      map(delta => !this.acceptRemoteDelta(delta)),
+      mergeMap(delta => this.acceptRemoteDelta(delta)),
       // From this point we are only interested in buffered messages
-      filter(identity),
+      filter(accepted => !accepted),
       // Wait for the network timeout in case the buffer clears
       debounceTime(this.networkTimeout),
       // After the debounce, check if still buffering
@@ -155,25 +160,25 @@ export class DatasetClone extends AbstractMeld implements MeldClone, MeldLocal {
       }));
   }
 
-  private acceptRemoteDelta(delta: DeltaMessage) {
+  private acceptRemoteDelta(delta: DeltaMessage): Promise<boolean> {
     const logBody = this.log.getLevel() < levels.DEBUG ? delta : `tid: ${delta.data[1]}`;
     this.log.debug('Receiving', logBody, '@', this.localTime);
-    // If we buffer a message, return false to signal we might need a re-connect
-    return this.messageService.receive(delta, this.orderingBuffer, msg => {
-      this.log.debug('Accepting', logBody);
-      const arrivalTime = this.localTime;
-      // Constraints should be applied if we are not revving-up. This is
-      // signalled to the dataset by making an extra clock tick available.
-      if (!this.remoteUpdates.state.value.revvingUp)
-        this.messageService.event();
-      this.dataset.apply(msg.data, msg.time, arrivalTime, this.localTime)
-        .then(cxUpdate => {
-          if (cxUpdate != null)
-            this.nextUpdate(cxUpdate);
-          msg.delivered.resolve();
-        })
-        .catch(err => this.close(err));
-    });
+    // Need exclusive access to the state, per CloneEngine contract
+    return this.lock.exclusive('state', () =>
+      // If we buffer a message, return false to signal we might need a re-connect
+      this.messageService.receive(delta, this.orderingBuffer, async msg => {
+        this.log.debug('Accepting', logBody);
+        const arrivalTime = this.localTime;
+        // Constraints should be applied if we are not revving-up. This is
+        // signalled to the dataset by making an extra clock tick available.
+        if (!this.remoteUpdates.state.value.revvingUp)
+          this.messageService.event();
+        const cxUpdate = await this.dataset.apply(
+          msg.data, msg.time, arrivalTime, this.localTime);
+        if (cxUpdate != null)
+          this.nextUpdate(cxUpdate);
+        msg.delivered.resolve();
+      }));
   }
 
   setLive(live: boolean) {
@@ -196,7 +201,7 @@ export class DatasetClone extends AbstractMeld implements MeldClone, MeldLocal {
     return new Observable(retrySubscriber => {
       // Block transactions, revups and other connect attempts while handling
       // liveness change.
-      this.liveLock.acquire(this.id, async () => {
+      this.lock.exclusive('live', async () => {
         const remotesLive = this.remotes.live.value;
         if (remotesLive === true) {
           if (this.isGenesis)
@@ -328,7 +333,7 @@ export class DatasetClone extends AbstractMeld implements MeldClone, MeldLocal {
 
   @AbstractMeld.checkLive.async
   async snapshot(): Promise<Snapshot> {
-    return this.liveLock.acquire(this.id, async () => {
+    return this.lock.exclusive('live', async () => {
       this.log.info('Compiling snapshot');
       const sentSnapshot = new Future;
       const updates = this.remoteUpdatesBeforeNow(sentSnapshot);
@@ -343,7 +348,7 @@ export class DatasetClone extends AbstractMeld implements MeldClone, MeldLocal {
 
   @AbstractMeld.checkLive.async
   async revupFrom(time: TreeClock): Promise<Observable<DeltaMessage> | undefined> {
-    return this.liveLock.acquire(this.id, async () => {
+    return this.lock.exclusive('live', async () => {
       const sentOperations = new Future;
       const maybeMissed = this.remoteUpdatesBeforeNow(sentOperations);
       const operations = await this.dataset.operationsSince(time);
@@ -370,37 +375,27 @@ export class DatasetClone extends AbstractMeld implements MeldClone, MeldLocal {
   }
 
   @AbstractMeld.checkNotClosed.rx
-  transact(request: Pattern): Observable<Subject> & HasExecTick {
-    if (isRead(request)) {
-      // Run the query once and share the result
-      const exec = new Future;
-      const results = new Observable<Subject>(subs => {
-        this.liveLock.enter(this.id)
-          .then(() => this.dataset.read(subs, request))
-          .then(exec.resolve, exec.reject);
-      }).pipe(
-        // Only leave the live-lock when the results have been fully streamed
-        finalize(() => this.liveLock.leave(this.id)), share());
-      const tick = Promise.resolve(exec.then(() => this.latestTicks.value));
-      return Object.assign(results, { tick });
-    } else if (isWrite(request)) {
-      // For a write, execute immediately.
-      const tick = this.liveLock.enter(this.id)
-        .then(() => {
-          // Take the send timestamp just before enqueuing the transaction. This
-          // ensures that transaction stamps increase monotonically.
-          const sendTime = this.messageService.send();
-          return this.dataset.transact(async () => [sendTime, await this.dataset.write(request)]);
-        })
-        // Publish the delta
-        .then(this.nextUpdate)
-        .then(() => this.latestTicks.value)
-        .finally(() => this.liveLock.leave(this.id));
-      return Object.assign(from(tick).pipe(ignoreElements()), { tick });
-    } else {
-      const error = new MeldError('Pattern is not read or writeable', request);
-      return Object.assign(throwError(error), { tick: Promise.reject(error) });
-    }
+  read(request: Read): Observable<Subject> {
+    // Run the query once and share the result
+    return new Observable<Subject>(subs => {
+      this.lock.enter('live').then(() => this.dataset.read(subs, request));
+    })
+      // Only leave the live-lock when the results have been fully streamed
+      .pipe(finalize(() => this.lock.leave('live')), share());
+  }
+
+  @AbstractMeld.checkNotClosed.async
+  async write(request: Write): Promise<unknown> {
+    // For a write, execute immediately.
+    return this.lock.share('live', async () => {
+      // Take the send timestamp just before enqueuing the transaction. This
+      // ensures that transaction stamps increase monotonically.
+      const sendTime = this.messageService.send();
+      const update = await this.dataset.transact(async () =>
+        [sendTime, await this.dataset.write(request)]);
+      // Publish the delta
+      this.nextUpdate(update);
+    });
   }
 
   get status(): Observable<MeldStatus> & LiveStatus {
@@ -437,10 +432,6 @@ export class DatasetClone extends AbstractMeld implements MeldClone, MeldLocal {
       becomes: { value: becomes },
       value: { get: () => toStatus(stateRollup.value) }
     });
-  }
-
-  follow(): Observable<MeldUpdate> {
-    return this.dataset.updates;
   }
 
   @AbstractMeld.checkNotClosed.async

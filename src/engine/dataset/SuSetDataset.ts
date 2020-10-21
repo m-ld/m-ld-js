@@ -1,4 +1,4 @@
-import { MeldUpdate, MeldConstraint } from '../../MeldApi';
+import { MeldUpdate, MeldConstraint, MeldReadState, readResult } from '../../api';
 import { EncodedDelta, Snapshot, UUID, DeltaMessage, Triple } from '..';
 import { Quad } from 'rdf-js';
 import { TreeClock } from '../clocks';
@@ -43,6 +43,11 @@ class TripleTidQuads {
   }
 }
 
+export const graphState = (graph: JrqlGraph): MeldReadState => ({
+  read: request => readResult(new Observable(subs => { graph.read(subs, request); })),
+  get: id => graph.describe1(id)
+});
+
 /**
  * Writeable Graph, similar to a Dataset, but with a slightly different transaction API.
  * Journals every transaction and creates m-ld compliant deltas.
@@ -55,10 +60,10 @@ export class SuSetDataset extends JrqlGraph {
   private readonly tidsGraph: JrqlGraph;
   private readonly journal: SuSetJournal;
   private readonly updateSource: Source<MeldUpdate> = new Source;
-  readonly updates: Observable<MeldUpdate> = this.updateSource;
   private readonly datasetLock: LocalLock;
   private readonly maxDeltaSize: number;
   private readonly log: Logger;
+  private readonly state: MeldReadState;
 
   constructor(
     private readonly dataset: Dataset,
@@ -75,6 +80,7 @@ export class SuSetDataset extends JrqlGraph {
     this.datasetLock = new LocalLock(config['@id'], dataset.location);
     this.maxDeltaSize = config.maxDeltaSize ?? Infinity;
     this.log = getIdLogger(this.constructor, config['@id'], config.logLevel);
+    this.state = graphState(this);
   }
 
   @SuSetDataset.checkNotClosed.async
@@ -93,6 +99,10 @@ export class SuSetDataset extends JrqlGraph {
         return journalPatch != null ? { patch: journalPatch } : {};
       }
     });
+  }
+
+  get updates(): Observable<MeldUpdate> {
+    return this.updateSource;
   }
 
   @SuSetDataset.checkNotClosed.async
@@ -181,7 +191,7 @@ export class SuSetDataset extends JrqlGraph {
         const update = await this.asUpdate(time, patch);
 
         txc.sw.next('check-constraints');
-        await this.constraint.check(update, this.reader);
+        await this.constraint.check(this.state, update);
 
         txc.sw.next('find-tids');
         const deletedTriplesTids = await this.findTriplesTids(patch.oldQuads);
@@ -301,7 +311,7 @@ export class SuSetDataset extends JrqlGraph {
    */
   async applyConstraint(
     to: { patch: PatchQuads, update: MeldUpdate, tid: string }) {
-    const result = await this.constraint.apply(to.update, this.reader);
+    const result = await this.constraint.apply(this.state, to.update);
     if (result != null) {
       const tid = uuid();
       const patch = await this.write(result);
@@ -382,10 +392,6 @@ export class SuSetDataset extends JrqlGraph {
 
   private findTripleTids(tripleId: string): Promise<Quad[]> {
     return this.tidsGraph.findQuads({ '@id': tripleId } as Partial<HashTid>);
-  }
-
-  private reader = <R>(query: R) => {
-    return new Observable<Subject>(subs => { this.read(subs, query); });
   }
 
   /**

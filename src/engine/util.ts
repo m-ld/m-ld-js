@@ -5,8 +5,7 @@ import {
   concat, Observable, OperatorFunction, Subscription, throwError,
   AsyncSubject, ObservableInput, onErrorResumeNext, NEVER, from
 } from "rxjs";
-import { publish, tap, flatMap } from "rxjs/operators";
-import AsyncLock = require('async-lock');
+import { publish, tap, mergeMap } from "rxjs/operators";
 import { LogLevelDesc, getLogger, getLoggers } from 'loglevel';
 import * as performance from 'marky';
 import { encode as rawEncode, decode as rawDecode } from '@ably/msgpack-js';
@@ -22,7 +21,7 @@ export function flatten<T>(bumpy: T[][]): T[] {
 
 export function fromArrayPromise<T>(reEmits: Promise<T[]>): Observable<T> {
   // Rx weirdness exemplified in 26 characters
-  return from(reEmits).pipe(flatMap(from));
+  return from(reEmits).pipe(mergeMap(from));
 }
 
 export function jsonFrom(payload: Buffer): any {
@@ -165,34 +164,6 @@ export function onErrorNever<T, R>(v: ObservableInput<T>): Observable<R> {
   return onErrorResumeNext(v, NEVER);
 }
 
-export class SharableLock extends AsyncLock {
-  private readonly refs: { [key: string]: { count: number, unref: Future } } = {};
-
-  enter(key: string): Promise<void> {
-    if (key in this.refs) {
-      this.refs[key].count++;
-      return Promise.resolve();
-    } else {
-      return new Promise((resolve, reject) => {
-        this.acquire(key, () => {
-          const unref = new Future;
-          this.refs[key] = { count: 1, unref };
-          resolve(); // Return control to caller as soon as lock acquired
-          return unref;
-        }).catch(reject); // Should only ever be due to lock acquisition
-      });
-    }
-  }
-
-  leave(key: string) {
-    if (key in this.refs && --this.refs[key].count == 0) {
-      const unref = this.refs[key].unref;
-      delete this.refs[key];
-      unref.resolve();
-    }
-  }
-}
-
 export function getIdLogger(ctor: Function, id: string, logLevel: LogLevelDesc = 'info') {
   const loggerName = `${ctor.name}.${id}`;
   const loggerInitialised = loggerName in getLoggers();
@@ -208,11 +179,13 @@ export function getIdLogger(ctor: Function, id: string, logLevel: LogLevelDesc =
   return log;
 }
 
+type SyncMethod<T> = (this: T, ...args: any[]) => any;
 type AsyncMethod<T> = (this: T, ...args: any[]) => Promise<any>;
 type RxMethod<T> = (this: T, ...args: any[]) => Observable<any>;
 
 export function check<T>(assertion: (t: T) => boolean, otherwise: () => Error) {
   return {
+    sync: checkWith<T, SyncMethod<T>>(assertion, otherwise, err => { throw err; }),
     async: checkWith<T, AsyncMethod<T>>(assertion, otherwise, Promise.reject.bind(Promise)),
     rx: checkWith<T, RxMethod<T>>(assertion, otherwise, throwError)
   };

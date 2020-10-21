@@ -1,4 +1,4 @@
-import { Pattern, isWrite, isRead } from '../src/jrql-support';
+import { Pattern, isWrite } from '../src/jrql-support';
 
 describe('write type checking', () => {
   test('includes updates', () => {

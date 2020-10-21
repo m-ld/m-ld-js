@@ -1,7 +1,7 @@
 import { Iri } from 'jsonld/jsonld-spec';
 import {
   Context, Read, Subject, Update, isDescribe, isGroup, isSubject, isUpdate,
-  Group, isSelect, Result, Variable, Value, isValueObject, isReference
+  Group, isSelect, Result, Variable, Value, isValueObject, isReference, Write
 } from '../../jrql-support';
 import {
   NamedNode, Quad, Term, Quad_Subject, Quad_Predicate, Quad_Object
@@ -9,11 +9,11 @@ import {
 import { compact } from 'jsonld';
 import { namedNode, defaultGraph, variable, quad as createQuad, blankNode } from '@rdfjs/data-model';
 import { Graph, PatchQuads } from '.';
-import { toArray, flatMap, map, filter, distinct } from 'rxjs/operators';
+import { toArray, mergeMap, map, filter, distinct } from 'rxjs/operators';
 import { from, of, EMPTY, Subscriber } from 'rxjs';
 import { flatten, rdfToJson, jsonToRdf, fromArrayPromise } from '../util';
 import { QuadSolution, VarValues, TriplePos } from './QuadSolution';
-import { array, shortId } from '../../MeldApi';
+import { array, shortId } from '../../util';
 
 /**
  * A graph wrapper that provides low-level json-rql handling for queries. The
@@ -36,7 +36,7 @@ export class JrqlGraph {
     throw new Error('Read type not supported.');
   }
 
-  async write(query: Subject | Group | Update,
+  async write(query: Write,
     context: Context = query['@context'] || this.defaultContext): Promise<PatchQuads> {
     // @unions not supported unless in a where clause
     if (isGroup(query) && query['@graph'] != null && query['@union'] == null) {
@@ -54,7 +54,7 @@ export class JrqlGraph {
     context: Context = this.defaultContext): Promise<unknown> {
     const solutions = this.whereSolutions(where, context);
     fromArrayPromise(solutions).pipe(
-      flatMap(solution => solutionSubject(select, solution, context)))
+      mergeMap(solution => solutionSubject(select, solution, context)))
       .subscribe(subs);
     return solutions;
   }
@@ -78,7 +78,7 @@ export class JrqlGraph {
         map(solution => solution.vars[varName]?.value),
         filter(iri => !!iri), distinct(),
         // FIXME: This could obtain more recent data than the solution
-        flatMap(iri => this.describe1(iri, context)))
+        mergeMap(iri => this.describe1(iri, context)))
         .subscribe(subs);
       return solutions;
     } else {
@@ -186,7 +186,7 @@ export class JrqlGraph {
       async (solutions, pattern) =>
         this.graph.match(...asMatchTerms(pattern)).pipe(
           // match each quad against already-found solutions
-          flatMap(quad => fromArrayPromise(solutions).pipe(flatMap(solution => {
+          mergeMap(quad => fromArrayPromise(solutions).pipe(mergeMap(solution => {
             const matchingSolution = quad ? solution.join(pattern, quad) : solution;
             return matchingSolution ? of(matchingSolution) : EMPTY;
           }))), toArray()).toPromise(),

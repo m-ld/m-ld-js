@@ -1,8 +1,8 @@
-import { DatasetClone } from '../src/engine/dataset/DatasetClone';
+import { DatasetEngine } from '../src/engine/dataset/DatasetEngine';
 import { memStore, mockRemotes, hotLive, testConfig } from './testClones';
 import { NEVER, Subject as Source, asapScheduler, EMPTY, throwError } from 'rxjs';
 import { comesAlive } from '../src/engine/AbstractMeld';
-import { first, take, toArray, map, observeOn } from 'rxjs/operators';
+import { first, take, toArray, map, observeOn, single } from 'rxjs/operators';
 import { TreeClock } from '../src/engine/clocks';
 import { DeltaMessage, MeldRemotes, Snapshot } from '../src/engine';
 import { uuid } from 'short-uuid';
@@ -11,10 +11,10 @@ import MemDown from 'memdown';
 import { AbstractLevelDOWN } from 'abstract-leveldown';
 import { Hash } from '../src/engine/hash';
 
-describe('Dataset clone', () => {
+describe('Dataset engine', () => {
   describe('as genesis', () => {
-    async function genesis(remotes: MeldRemotes, config?: Partial<MeldConfig>): Promise<DatasetClone> {
-      let clone = new DatasetClone({ dataset: await memStore(), remotes, config: testConfig(config) });
+    async function genesis(remotes: MeldRemotes, config?: Partial<MeldConfig>): Promise<DatasetEngine> {
+      let clone = new DatasetEngine({ dataset: await memStore(), remotes, config: testConfig(config) });
       await clone.initialise();
       return clone;
     }
@@ -44,41 +44,38 @@ describe('Dataset clone', () => {
   });
 
   describe('as silo genesis', () => {
-    let silo: DatasetClone;
+    let silo: DatasetEngine;
 
     beforeEach(async () => {
-      silo = new DatasetClone({ dataset: await memStore(), remotes: mockRemotes(), config: testConfig() });
+      silo = new DatasetEngine({ dataset: await memStore(), remotes: mockRemotes(), config: testConfig() });
       await silo.initialise();
     });
 
     test('not found is empty', async () => {
-      await expect(silo.transact({
+      await expect(silo.read({
         '@describe': 'http://test.m-ld.org/fred'
       } as Describe).toPromise()).resolves.toBeUndefined();
     });
 
     test('stores a JSON-LD object', async () => {
-      const result = silo.transact({
+      await expect(silo.write({
         '@id': 'http://test.m-ld.org/fred',
         'http://test.m-ld.org/#name': 'Fred'
-      } as Subject);
-      // Expecting nothing to be emitted for an insert
-      await expect(result.toPromise()).resolves.toBeUndefined();
-      await expect(result.tick).resolves.toBe(1);
+      } as Subject)).resolves.toBeUndefined();
+      expect(silo.status.value.ticks).toBe(1);
     });
 
     test('retrieves a JSON-LD object', async () => {
-      await silo.transact({
+      await silo.write({
         '@id': 'http://test.m-ld.org/fred',
         'http://test.m-ld.org/#name': 'Fred'
-      } as Subject).toPromise();
-      const result = silo.transact({
+      } as Subject);
+      const result = silo.read({
         '@describe': 'http://test.m-ld.org/fred'
       } as Describe);
       const fred = await result.toPromise();
       expect(fred['@id']).toBe('http://test.m-ld.org/fred');
       expect(fred['http://test.m-ld.org/#name']).toBe('Fred');
-      await expect(result.tick).resolves.toBe(1);
     });
 
     test('has no ticks from genesis', async () => {
@@ -86,17 +83,17 @@ describe('Dataset clone', () => {
     });
 
     test('has ticks after update', async () => {
-      silo.transact({
+      silo.write({
         '@id': 'http://test.m-ld.org/fred',
         'http://test.m-ld.org/#name': 'Fred'
       } as Subject);
-      await silo.follow().pipe(first()).toPromise();
+      await silo.dataUpdates.pipe(first()).toPromise();
       expect(silo.status.value).toEqual({ online: true, outdated: false, silo: true, ticks: 1 });
     });
 
     test('follow after initial ticks', async () => {
-      const firstUpdate = silo.follow().pipe(first()).toPromise();
-      silo.transact({
+      const firstUpdate = silo.dataUpdates.pipe(first()).toPromise();
+      silo.write({
         '@id': 'http://test.m-ld.org/fred',
         'http://test.m-ld.org/#name': 'Fred'
       } as Subject);
@@ -104,30 +101,28 @@ describe('Dataset clone', () => {
     });
 
     test('follow after current tick', async () => {
-      const insertFred = silo.transact({
+      await silo.write({
         '@id': 'http://test.m-ld.org/fred',
         'http://test.m-ld.org/#name': 'Fred'
       } as Subject);
-      await insertFred.toPromise();
-      await expect(insertFred.tick).resolves.toBe(1);
       expect(silo.status.value.ticks).toBe(1);
-      const firstUpdate = silo.follow().pipe(first()).toPromise();
-      await expect(silo.transact({
+      const firstUpdate = silo.dataUpdates.pipe(first()).toPromise();
+      await silo.write({
         '@id': 'http://test.m-ld.org/wilma',
         'http://test.m-ld.org/#name': 'Wilma'
-      } as Subject).tick).resolves.toBe(2);
+      } as Subject);
       await expect(firstUpdate).resolves.toHaveProperty('@ticks', 2);
     });
   });
 
   describe('as genesis with remote clone', () => {
-    let clone: DatasetClone;
+    let clone: DatasetEngine;
     let remoteTime: TreeClock;
     let remoteUpdates: Source<DeltaMessage> = new Source;
 
     beforeEach(async () => {
       const remotesLive = hotLive([false]);
-      clone = new DatasetClone({
+      clone = new DatasetEngine({
         dataset: await memStore(),
         // Ensure that remote updates are async
         remotes: mockRemotes(remoteUpdates.pipe(observeOn(asapScheduler)), remotesLive),
@@ -150,8 +145,8 @@ describe('Dataset clone', () => {
     test('ticks increase monotonically', async () => {
       // Edge case from compliance tests: a local transaction racing a remote
       // transaction could cause a clock reversal.
-      const updates = clone.follow().pipe(map(next => next['@ticks']), take(2), toArray()).toPromise();
-      clone.transact({
+      const updates = clone.dataUpdates.pipe(map(next => next['@ticks']), take(2), toArray()).toPromise();
+      clone.write({
         '@id': 'http://test.m-ld.org/fred',
         'http://test.m-ld.org/#name': 'Fred'
       } as Subject);
@@ -164,7 +159,7 @@ describe('Dataset clone', () => {
     // even if it doesn't have a journalled entry. This can also happen due to:
     // 1. a remote transaction, because of the clock space made for a constraint
     test('answers rev-up from next new clone after apply', async () => {
-      const updated = clone.follow().pipe(take(1)).toPromise();
+      const updated = clone.dataUpdates.pipe(take(1)).toPromise();
       remoteUpdates.next(new DeltaMessage(remoteTime.ticked(),
         [0, uuid(), '{}', '{"@id":"http://test.m-ld.org/wilma","http://test.m-ld.org/#name":"Wilma"}']));
       await updated;
@@ -174,7 +169,7 @@ describe('Dataset clone', () => {
     // 2. a failed transaction
     test('answers rev-up from next new clone after failure', async () => {
       // Insert with variables is not valid
-      await clone.transact(<Update>{ '@insert': { '@id': '?s', '?p': '?o' } }).toPromise()
+      await clone.write(<Update>{ '@insert': { '@id': '?s', '?p': '?o' } })
         .then(() => fail('Expecting error'), () => { });
       const thirdTime = await clone.newClock();
       await expect(clone.revupFrom(thirdTime)).resolves.toBeDefined();
@@ -200,14 +195,14 @@ describe('Dataset clone', () => {
     });
 
     test('initialises from snapshot', async () => {
-      const clone = new DatasetClone({ dataset: await memStore(), remotes, config: testConfig({ genesis: false }) });
+      const clone = new DatasetEngine({ dataset: await memStore(), remotes, config: testConfig({ genesis: false }) });
       await clone.initialise();
       await expect(clone.status.becomes({ outdated: false })).resolves.toBeDefined();
       expect(snapshot.mock.calls.length).toBe(1);
     });
 
     test('can become a silo', async () => {
-      const clone = new DatasetClone({ dataset: await memStore(), remotes, config: testConfig({ genesis: false }) });
+      const clone = new DatasetEngine({ dataset: await memStore(), remotes, config: testConfig({ genesis: false }) });
       await clone.initialise();
       remotesLive.next(false);
       await expect(clone.status.becomes({ silo: true })).resolves.toBeDefined();
@@ -222,7 +217,7 @@ describe('Dataset clone', () => {
       ldb = new MemDown();
       config = testConfig();
       // Start a temporary genesis clone to initialise the store
-      let clone = new DatasetClone({ dataset: await memStore(ldb), remotes: mockRemotes(), config });
+      let clone = new DatasetEngine({ dataset: await memStore(ldb), remotes: mockRemotes(), config });
       await clone.initialise();
       await clone.newClock(); // Forks the clock so no longer genesis
       await clone.close();
@@ -233,7 +228,7 @@ describe('Dataset clone', () => {
       // Re-start on the same data, with a rev-up that never completes
       const remotes = mockRemotes(NEVER, [true]);
       remotes.revupFrom = async () => NEVER;
-      const clone = new DatasetClone({ dataset: await memStore(ldb), remotes, config: testConfig() });
+      const clone = new DatasetEngine({ dataset: await memStore(ldb), remotes, config: testConfig() });
 
       // Check that we are never not outdated
       const everNotOutdated = clone.status.becomes({ outdated: false });
@@ -248,7 +243,7 @@ describe('Dataset clone', () => {
       // Re-start on the same data, with a rev-up that never completes
       const remotes = mockRemotes(NEVER, [true]);
       remotes.revupFrom = async () => EMPTY;
-      const clone = new DatasetClone({ dataset: await memStore(ldb), remotes, config: testConfig() });
+      const clone = new DatasetEngine({ dataset: await memStore(ldb), remotes, config: testConfig() });
 
       // Check that we do transition through an outdated state
       const wasOutdated = clone.status.becomes({ outdated: true });
@@ -266,7 +261,7 @@ describe('Dataset clone', () => {
         .mockReturnValueOnce(Promise.resolve(throwError('boom')))
         .mockReturnValueOnce(Promise.resolve(EMPTY));
       remotes.revupFrom = revupFrom;
-      const clone = new DatasetClone({ dataset: await memStore(ldb), remotes, config: testConfig() });
+      const clone = new DatasetEngine({ dataset: await memStore(ldb), remotes, config: testConfig() });
       await clone.initialise();
       await expect(clone.status.becomes({ outdated: false })).resolves.toBeDefined();
       expect(revupFrom.mock.calls.length).toBe(2);

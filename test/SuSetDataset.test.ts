@@ -392,13 +392,13 @@ describe('SU-Set Dataset', () => {
       ])).rejects.toBe('Failed!');
     });
 
-    test('provides read to the constraint', async () => {
+    test('provides state to the constraint', async () => {
       await ssd.transact(async () => [
         localTime = localTime.ticked(),
         await ssd.insert(wilma)
       ]);
-      constraint.check = async (_, read) =>
-        read<Describe>({ '@describe': 'http://test.m-ld.org/wilma' }).toPromise().then(wilma => {
+      constraint.check = async state =>
+        state.read<Describe>({ '@describe': 'http://test.m-ld.org/wilma' }).toPromise().then(wilma => {
           if (wilma == null)
             throw 'not found!';
         });

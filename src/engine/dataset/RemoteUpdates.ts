@@ -12,7 +12,7 @@ export interface AttachState {
 export class RemoteUpdates {
   readonly receiving: Observable<DeltaMessage>;
   // Note this is a behaviour subject because the subscribe from the
-  // DatasetClone happens after the remote updates are attached
+  // DatasetEngine happens after the remote updates are attached
   private readonly remoteUpdates = new BehaviorSubject<Observable<DeltaMessage>>(NEVER);
   private readonly attachState = new BehaviorSubject<AttachState>({
     attached: false, revvingUp: false

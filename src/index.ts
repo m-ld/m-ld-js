@@ -1,18 +1,21 @@
 import { QuadStoreDataset } from './engine/dataset';
-import { DatasetClone } from './engine/dataset/DatasetClone';
+import { DatasetEngine } from './engine/dataset/DatasetEngine';
 import { AbstractLevelDOWN, AbstractOpenOptions } from 'abstract-leveldown';
-import { MeldApi, MeldConstraint } from './MeldApi';
-import { Context } from './jrql-support';
+import { ApiStateMachine } from "./engine/MeldState";
 import { LogLevelDesc } from 'loglevel';
 import { ConstraintConfig, constraintFromConfig } from './constraints';
 import { DomainContext } from './engine/MeldEncoding';
+import { Context } from './jrql-support';
+import { MeldClone, MeldConstraint } from './api';
 
-export * from './MeldApi';
 export {
   Pattern, Reference, Context, Variable, Value, Describe,
   Group, Query, Read, Result, Select, Subject, Update,
   isRead, isWrite
 } from './jrql-support';
+
+export * from './util';
+export * from './api';
 
 /**
  * **m-ld** clone configuration, used to initialise a {@link clone} for use.
@@ -78,13 +81,20 @@ export interface MeldConfig {
  * Create or initialise a local clone, depending on whether the given LevelDB
  * database already exists. This function returns as soon as it is safe to begin
  * transactions against the clone; this may be before the clone has received all
- * updates from the domain. To await latest updates, await a call to the
- * {@link MeldApi} `latest` method.
+ * updates from the domain. To await latest updates [TODO]
+ * 
  * @param ldb an instance of a leveldb backend
  * @param remotes a driver for connecting to remote m-ld clones on the domain.
  * This can be a configured object (e.g. `new MqttRemotes(config)`) or just the
  * class (`MqttRemotes`).
  * @param config the clone configuration
+ * @param handler Handle updates from the domain. All data changes are signalled
+ * through this handler, strictly ordered according to the clone's logical
+ * clock. The updates can therefore be correctly used to maintain some other
+ * view of data, for example in a user interface or separate database. This will
+ * include the notification of 'rev-up' updates after a connect to the domain.
+ * To change this behaviour, subscribe to `status` changes and ignore updates
+ * while the status is marked as `outdated`.
  * @param constraint a constraint implementation, overrides config constraint.
  * 🚧 Experimental: use with caution.
  */
@@ -92,7 +102,7 @@ export async function clone(
   ldb: AbstractLevelDOWN,
   remotes: dist.mqtt.MqttRemotes | dist.ably.AblyRemotes,
   config: MeldConfig,
-  constraint?: MeldConstraint): Promise<MeldApi> {
+  constraint?: MeldConstraint): Promise<MeldClone> {
 
   const context = new DomainContext(config['@domain'], config['@context']);
   const dataset = new QuadStoreDataset(ldb, config.ldbOpts);
@@ -103,9 +113,17 @@ export async function clone(
   if (constraint == null && config.constraint != null)
     constraint = await constraintFromConfig(config.constraint, context);
 
-  const clone = new DatasetClone({ dataset, remotes, constraint, config });
-  await clone.initialise();
-  return new MeldApi(context, clone);
+  const engine = new DatasetEngine({ dataset, remotes, config, constraint });
+  await engine.initialise();
+  const api = new ApiStateMachine(context, engine);
+  return {
+    get: api.get,
+    read: api.read,
+    write: api.write,
+    delete: api.delete,
+    status: engine.status,
+    close: engine.close
+  };
 }
 
 // The m-ld remotes API is not yet public, so here we just declare the available

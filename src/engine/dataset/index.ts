@@ -25,6 +25,7 @@ export class PatchQuads implements Patch {
     readonly newQuads: Quad[] = []) {
   }
 
+  // FIXME: this is a merge, not a concat
   concat({ oldQuads, newQuads }: { oldQuads?: Quad[], newQuads?: Quad[] }) {
     return new PatchQuads(
       oldQuads ? this.oldQuads.concat(oldQuads) : this.oldQuads,

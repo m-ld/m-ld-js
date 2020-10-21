@@ -281,14 +281,22 @@ export function isRead(p: Pattern): p is Read {
   return isDescribe(p) || isSelect(p);
 }
 
+/**
+ * A query pattern that writes data to the domain. A write can be:
+ * - A {@link Subject} (any JSON object not a Read, Group or Update).
+ *   Interpreted as data to be inserted.
+ * - A {@link Group} containing only a `@graph` key. Interpreted as containing
+ *   the data to be inserted.
+ * - An explicit {@link Update} with either an `@insert`, `@delete`, or both.
+ *
+ * Note that this type does not fully capture the details above. Use
+ * {@link isWrite} to inspect a candidate pattern.
+ */
+export type Write = Subject | Group | Update;
+
 /** 
  * Determines if the given pattern can probably be interpreted as a logical
- * write of data to the domain. A write can be:
- * - A {@link Subject} (any JSON object not a Read, Group or Update) will be
- *   interpreted as data to be inserted.
- * - A {@link Group} containing only a `@graph` key will be interpreted as
- *   containing the data to be inserted.
- * - An explicit {@link Update} with either an `@insert`, `@delete`, or both.
+ * write of data to the domain.
  *
  * This function is not exhaustive, and a pattern identified as a write can
  * still turn out to be illogical, for example if it contains an `@insert` with
@@ -296,8 +304,10 @@ export function isRead(p: Pattern): p is Read {
  *
  * Returns `true` if the logical write is a trivial no-op, such as `{}`,
  * `{ "@insert": {} }` or `{ "@graph": [] }`.
+ * 
+ * @see {@link Write}
  */
-export function isWrite(p: Pattern): p is Subject | Group | Update {
+export function isWrite(p: Pattern): p is Write {
   return !isRead(p) && (isSubject(p) || isWriteGroup(p) || isUpdate(p));
 }
 

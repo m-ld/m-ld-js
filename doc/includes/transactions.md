@@ -15,6 +15,6 @@ Supported pattern types for this engine are (follow the links for examples):
 > browse the full **json-rql** syntax at
 > [json-rql.org](http://json-rql.org/).
 
-The [MeldApi](/classes/meldapi.html) object returned by the `clone` function
+The [MeldClone](/classes/meldclone.html) object returned by the `clone` function
 also augments the basic clone API with convenience methods to simplify common
 cases.
