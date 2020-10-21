@@ -7,6 +7,8 @@ import { ConstraintConfig, constraintFromConfig } from './constraints';
 import { DomainContext } from './engine/MeldEncoding';
 import { Context } from './jrql-support';
 import { MeldClone, MeldConstraint } from './api';
+import { MeldStatus, LiveStatus } from '@m-ld/m-ld-spec';
+import { Observable } from 'rxjs';
 
 export {
   Pattern, Reference, Context, Variable, Value, Describe,
@@ -115,15 +117,21 @@ export async function clone(
 
   const engine = new DatasetEngine({ dataset, remotes, config, constraint });
   await engine.initialise();
-  const api = new ApiStateMachine(context, engine);
-  return {
-    get: api.get,
-    read: api.read,
-    write: api.write,
-    delete: api.delete,
-    status: engine.status,
-    close: engine.close
-  };
+  return new DatasetClone(context, engine);
+}
+
+class DatasetClone extends ApiStateMachine implements MeldClone {
+  constructor(context: Context, private readonly dataset: DatasetEngine) {
+    super(context, dataset);
+  }
+
+  get status(): Observable<MeldStatus> & LiveStatus {
+    return this.dataset.status;
+  }
+
+  close(err?: any): Promise<unknown> {
+    return this.dataset.close(err);
+  }
 }
 
 // The m-ld remotes API is not yet public, so here we just declare the available

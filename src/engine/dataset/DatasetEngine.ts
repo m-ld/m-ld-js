@@ -4,8 +4,7 @@ import { liveRollup } from "../LiveValue";
 import { Subject, Read, Write } from '../../jrql-support';
 import {
   Observable, merge, from, EMPTY,
-  concat, BehaviorSubject, Subscription, interval, of, Subscriber
-} from 'rxjs';
+  concat, BehaviorSubject, Subscription, interval, of, Subscriber} from 'rxjs';
 import { TreeClock } from '../clocks';
 import { SuSetDataset } from './SuSetDataset';
 import { TreeClockMessageService } from '../messages';
@@ -13,8 +12,7 @@ import { Dataset } from '.';
 import {
   publishReplay, refCount, filter, takeUntil, tap,
   finalize, toArray, map, debounceTime,
-  distinctUntilChanged, expand, delayWhen, take, skipWhile, share, mergeMap
-} from 'rxjs/operators';
+  distinctUntilChanged, expand, delayWhen, take, skipWhile, share} from 'rxjs/operators';
 import { delayUntil, Future, tapComplete, fromArrayPromise } from '../util';
 import { SharableLock } from "../locks";
 import { levels } from 'loglevel';
@@ -140,7 +138,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
    */
   private bufferingDeltas(): Observable<unknown> {
     return this.remoteUpdates.receiving.pipe(
-      mergeMap(delta => this.acceptRemoteDelta(delta)),
+      map(delta => this.acceptRemoteDelta(delta)),
       // From this point we are only interested in buffered messages
       filter(accepted => !accepted),
       // Wait for the network timeout in case the buffer clears
@@ -160,15 +158,16 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
       }));
   }
 
-  private acceptRemoteDelta(delta: DeltaMessage): Promise<boolean> {
+  private acceptRemoteDelta(delta: DeltaMessage): boolean {
     const logBody = this.log.getLevel() < levels.DEBUG ? delta : `tid: ${delta.data[1]}`;
     this.log.debug('Receiving', logBody, '@', this.localTime);
-    // Need exclusive access to the state, per CloneEngine contract
-    return this.lock.exclusive('state', () =>
-      // If we buffer a message, return false to signal we might need a re-connect
-      this.messageService.receive(delta, this.orderingBuffer, async msg => {
-        this.log.debug('Accepting', logBody);
-        const arrivalTime = this.localTime;
+    // If we buffer a message, return false to signal we might need a re-connect
+    return this.messageService.receive(delta, this.orderingBuffer, msg => {
+      this.log.debug('Accepting', logBody);
+      // Need exclusive access to the state, per CloneEngine contract
+      this.lock.exclusive('state', async () => {
+        // Get the event time just before transacting the change
+        const arrivalTime = this.messageService.event();
         // Constraints should be applied if we are not revving-up. This is
         // signalled to the dataset by making an extra clock tick available.
         if (!this.remoteUpdates.state.value.revvingUp)
@@ -178,7 +177,8 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
         if (cxUpdate != null)
           this.nextUpdate(cxUpdate);
         msg.delivered.resolve();
-      }));
+      }).catch(err => this.close(err));
+    });
   }
 
   setLive(live: boolean) {
@@ -390,7 +390,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
     return this.lock.share('live', async () => {
       // Take the send timestamp just before enqueuing the transaction. This
       // ensures that transaction stamps increase monotonically.
-      const sendTime = this.messageService.send();
+      const sendTime = this.messageService.event();
       const update = await this.dataset.transact(async () =>
         [sendTime, await this.dataset.write(request)]);
       // Publish the delta

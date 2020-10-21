@@ -3,7 +3,7 @@ import { TreeClock } from '../src/engine/clocks';
 
 test('First message send', () => {
   const p1 = new TreeClockMessageService(TreeClock.GENESIS);
-  p1.send();
+  p1.event();
   expect(p1.peek().ticks).toBe(1);
 });
 
@@ -11,7 +11,10 @@ test('First message receive', () => {
   const { left: p1Clock, right: p2Clock } = TreeClock.GENESIS.forked();
   const p1 = new TreeClockMessageService(p1Clock);
   const messages: Message<TreeClock, string>[] = [];
-  p1.receive({ time: p2Clock.ticked(), data: 'Foo' }, [], msg => messages.push(msg));
+  p1.receive({ time: p2Clock.ticked(), data: 'Foo' }, [], msg => {
+    p1.event();
+    messages.push(msg);
+  });
   expect(p1.peek().equals(p1Clock.ticked().update(p2Clock.ticked()))).toBe(true);
   expect(messages[0].data).toBe('Foo');
 });

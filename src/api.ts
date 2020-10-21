@@ -108,7 +108,7 @@ export interface MeldState extends MeldReadState {
    * @param request the declarative write description
    * @returns the next state of the domain, changed by this write operation only
    */
-  write<W extends Write>(request: W): Promise<MeldState>;
+  write<W = Write>(request: W): Promise<MeldState>;
   /**
    * Shorthand method for deleting a single Subject by its `@id`. This will also
    * remove references to the given Subject from other Subjects.
@@ -125,6 +125,11 @@ export interface MeldUpdate extends spec.MeldUpdate {
   '@insert': Subject[];
 }
 
+export type StateProc<S extends MeldReadState = MeldReadState> = 
+  (state: S) => PromiseLike<unknown> | void;
+export type UpdateProc =
+  (update: MeldUpdate, state: MeldReadState) => PromiseLike<unknown> | void;
+
 /**
  * A m-ld state machine extends the {@link MeldState} API for convenience, but
  * note that the state of a machine is inherently mutable. For example, two
@@ -133,12 +138,13 @@ export interface MeldUpdate extends spec.MeldUpdate {
  * overloads taking a procedure.
  */
 export interface MeldStateMachine extends MeldState {
-  read(procedure: (state: MeldReadState) => PromiseLike<unknown> | void,
-    handler?: (update: MeldUpdate, state: MeldReadState) => PromiseLike<unknown> | void): Subscription;
+  follow(handler: UpdateProc): Subscription;
+
+  read(procedure: StateProc, handler?: UpdateProc): Subscription;
   read<R extends Read = Read, S = Subject>(request: R): ReadResult<Resource<S>>;
 
-  write(procedure: (state: MeldState) => PromiseLike<unknown> | void): Promise<MeldState>;
-  write<W extends Write>(request: W): Promise<MeldState>;
+  write(procedure: StateProc<MeldState>): Promise<MeldState>;
+  write<W = Write>(request: W): Promise<MeldState>;
 }
 
 /**

@@ -17,7 +17,7 @@ describe('Meld State API', () => {
 
   test('retrieves a JSON-LD subject', async () => {
     const captureUpdate = new Future<MeldUpdate>();
-    api.read(() => { }, captureUpdate.resolve);
+    api.follow(captureUpdate.resolve);
     await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
     await expect(captureUpdate).resolves.toEqual({
       '@ticks': 1,
@@ -31,7 +31,7 @@ describe('Meld State API', () => {
   test('deletes a subject by update', async () => {
     await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
     const captureUpdate = new Future<MeldUpdate>();
-    api.read(() => { }, captureUpdate.resolve);
+    api.follow(captureUpdate.resolve);
     await api.write<Update>({ '@delete': { '@id': 'fred' } });
     await expect(api.get('fred')).resolves.toBeUndefined();
     await expect(captureUpdate).resolves.toEqual({
@@ -44,7 +44,7 @@ describe('Meld State API', () => {
   test('deletes a property by update', async () => {
     await api.write<Subject>({ '@id': 'fred', name: 'Fred', height: 5 });
     const captureUpdate = new Future<MeldUpdate>();
-    api.read(() => { }, captureUpdate.resolve);
+    api.follow(captureUpdate.resolve);
     await api.write<Update>({ '@delete': { '@id': 'fred', height: 5 } });
     await expect(api.get('fred'))
       .resolves.toEqual({ '@id': 'fred', name: 'Fred' });
@@ -65,7 +65,7 @@ describe('Meld State API', () => {
   test('updates a property', async () => {
     await api.write<Subject>({ '@id': 'fred', name: 'Fred', height: 5 });
     const captureUpdate = new Future<MeldUpdate>();
-    api.read(() => { }, captureUpdate.resolve);
+    api.follow(captureUpdate.resolve);
     await api.write<Update>({
       '@delete': { '@id': 'fred', height: 5 },
       '@insert': { '@id': 'fred', height: 6 }
@@ -90,7 +90,7 @@ describe('Meld State API', () => {
 
   test('inserts a subject by update', async () => {
     const captureUpdate = new Future<MeldUpdate>();
-    api.read(() => { }, captureUpdate.resolve);
+    api.follow(captureUpdate.resolve);
     await api.write<Update>({ '@insert': { '@id': 'fred', name: 'Fred' } });
     await expect(api.get('fred')).resolves.toBeDefined();
     await expect(captureUpdate).resolves.toEqual({
@@ -103,7 +103,7 @@ describe('Meld State API', () => {
   test('deletes a subject by path', async () => {
     await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
     const captureUpdate = new Future<MeldUpdate>();
-    api.read(() => { }, captureUpdate.resolve);
+    api.follow(captureUpdate.resolve);
     await api.delete('fred');
     await expect(api.get('fred')).resolves.toBeUndefined();
     await expect(captureUpdate).resolves.toEqual({

@@ -6,23 +6,22 @@ export interface Message<C, D> {
 }
 
 export abstract class MessageService<C extends CausalClock<C>> {
-  send(): C {
-    this.event();
-    return this.peek();
-  }
-
   /**
    * Call to process newly received message data from the wire.
    *
+   * The given process MUST tick the clock using {@link event} prior to sending
+   * any data that is caused by receipt of this message.
+   *
    * @param message the message from the wire
    * @param buffer  a buffer for out-of-order messages
-   * @param process the local message data consumer, which will receive message data in order
-   * @return <code>true</code> if the message was delivered, <code>false</code> if buffered
+   * @param process the local message data consumer, which will receive message
+   * data in order
+   * @return <code>true</code> if the message was delivered, <code>false</code>
+   * if buffered
    */
   receive<M extends Message<C, unknown>>(
     message: M, buffer: M[], process: (message: M) => void): boolean {
     if (this.readyFor(message.time)) {
-      this.event();
       this.deliver(message, buffer, process);
       return true;
     } else {
@@ -42,13 +41,12 @@ export abstract class MessageService<C extends CausalClock<C>> {
     if (readyForIdx > -1) {
       const msg = buffer[readyForIdx];
       buffer.splice(readyForIdx, 1);
-      this.event();
       this.deliver(msg, buffer, process);
     }
   }
 
   abstract peek(): C;
-  abstract event(): void;
+  abstract event(): C;
   abstract join(time: C): void;
   abstract fork(): C;
 
@@ -69,8 +67,8 @@ export class TreeClockMessageService extends MessageService<TreeClock> {
     return this.localTime;
   }
 
-  event(): void {
-    this.localTime = this.localTime.ticked();
+  event(): TreeClock {
+    return this.localTime = this.localTime.ticked();
   }
 
   join(time: TreeClock): void {

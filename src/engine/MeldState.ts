@@ -2,7 +2,7 @@ import { Context, Subject, Describe, Pattern, Update, Read, Write } from '../jrq
 import { Observable, Subscription } from 'rxjs';
 import { map, take } from 'rxjs/operators';
 import { flatten } from 'jsonld';
-import { MeldUpdate, MeldState, Resource, any, MeldReadState, MeldStateMachine, ReadResult, readResult } from '../api';
+import { MeldUpdate, MeldState, Resource, any, MeldReadState, MeldStateMachine, ReadResult, readResult, StateProc, UpdateProc } from '../api';
 import { SharableLock } from "./locks";
 
 /** Simplified clone engine with only the basic requirements of an engine */
@@ -20,8 +20,8 @@ interface EngineState {
   write(request: Write): Promise<EngineState>;
 }
 
-type UpdateHandler = (update: MeldUpdate, state: EngineState) => PromiseLike<unknown> | void;
-type StateProc = (state: EngineState) => PromiseLike<unknown> | void;
+type EngineUpdateProc = (update: MeldUpdate, state: EngineState) => PromiseLike<unknown> | void;
+type EngineStateProc = (state: EngineState) => PromiseLike<unknown> | void;
 
 /**
  * Gates access to a {@link CloneEngine} such that its state is immutable during
@@ -29,7 +29,7 @@ type StateProc = (state: EngineState) => PromiseLike<unknown> | void;
  */
 class StateEngine {
   private state: EngineState;
-  private readonly handlers: UpdateHandler[] = [];
+  private readonly handlers: EngineUpdateProc[] = [];
   private handling: Promise<unknown>;
 
   constructor(
@@ -38,22 +38,25 @@ class StateEngine {
     this.engine.dataUpdates.subscribe(this.nextState);
   }
 
+  follow(handler: EngineUpdateProc): Subscription {
+    const key = this.handlers.push(handler);
+    return new Subscription(() => { delete this.handlers[key]; });
+  }
+
   /** procedure and handler must not reject */
-  read(procedure: StateProc, handler?: UpdateHandler): Subscription {
+  read(procedure: EngineStateProc, handler?: EngineUpdateProc): Subscription {
     const subs = new Subscription;
     this.engine.lock.share('state', async () => {
       if (!subs.closed) {
-        if (handler != null) {
-          const key = this.handlers.push(handler);
-          subs.add(() => { delete this.handlers[key]; });
-        }
+        if (handler != null)
+          this.follow(handler);
         await procedure(this.state);
       }
     });
     return subs;
   }
 
-  write(procedure: StateProc): Promise<unknown> {
+  write(procedure: EngineStateProc): Promise<unknown> {
     return this.engine.lock.exclusive('state', () => procedure(this.state));
   }
 
@@ -101,7 +104,7 @@ abstract class ApiState implements MeldState {
       <Resource<S>>this.stripSubjectContext(subject))));
   }
 
-  async write<W extends Write>(request: W): Promise<MeldState> {
+  async write<W = Write>(request: W): Promise<MeldState> {
     return this.construct(await this.state.write(this.applyRequestContext(request)));
   }
 
@@ -167,25 +170,30 @@ export class ApiStateMachine extends ApiState implements MeldStateMachine {
     this.engine = stateEngine;
   }
 
-  read(procedure: (state: MeldReadState) => PromiseLike<unknown> | void,
-    handler?: (update: MeldUpdate, state: MeldReadState) => PromiseLike<unknown> | void): Subscription;
+  private updateHandler(handler: UpdateProc): EngineUpdateProc {
+    return async (update, state) =>
+      handler(await this.applyUpdateContext(update), new ImmutableState(this.context, state))
+  }
+
+  follow(handler: UpdateProc): Subscription {
+    return this.engine.follow(this.updateHandler(handler));
+  }
+
+  read(procedure: StateProc, handler?: UpdateProc): Subscription;
   read<R extends Read = Read, S = Subject>(request: R): ReadResult<Resource<S>>;
-  read(request: Read | ((state: MeldReadState) => PromiseLike<unknown> | void),
-    handler?: (update: MeldUpdate, state: MeldReadState) => PromiseLike<unknown> | void) {
+  read(request: Read | StateProc, handler?: UpdateProc) {
     if (typeof request == 'function') {
       return this.engine.read(
         state => request(new ImmutableState(this.context, state)),
-        handler != null ? async (update, state) =>
-          handler(await this.applyUpdateContext(update), new ImmutableState(this.context, state)) :
-          undefined);
+        handler != null ? this.updateHandler(handler) : undefined);
     } else {
       return super.read(request);
     }
   }
 
-  write(procedure: (state: MeldState) => PromiseLike<unknown> | void): Promise<unknown>;
-  write<W extends Write>(request: W): Promise<MeldState>;
-  async write(request: Write | ((state: MeldState) => PromiseLike<unknown> | void)) {
+  write(procedure: StateProc<MeldState>): Promise<unknown>;
+  write<W = Write>(request: W): Promise<MeldState>;
+  async write(request: Write | StateProc<MeldState>) {
     if (typeof request == 'function') {
       await this.engine.write(state => request(new ImmutableState(this.context, state)));
       return this;
