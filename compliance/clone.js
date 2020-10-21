@@ -1,5 +1,5 @@
 const leveldown = require('leveldown');
-const { clone } = require('../dist');
+const { clone, isRead } = require('../dist');
 const { MqttRemotes } = require('../dist/mqtt');
 const LOG = require('loglevel');
 
@@ -13,11 +13,18 @@ clone(leveldown(tmpDirName), new MqttRemotes(config), config).then(meld => {
   send(requestId, 'started', { cloneId: config['@id'] });
 
   const handlers = {
-    transact: message => meld.transact(message.request).subscribe({
-      next: subject => send(message.id, 'next', { body: subject }),
-      complete: () => send(message.id, 'complete'),
-      error: errorHandler(message)
-    }),
+    transact: message => {
+      if (isRead(message.request))
+        meld.read(message.request).subscribe({
+          next: subject => send(message.id, 'next', { body: subject }),
+          complete: () => send(message.id, 'complete'),
+          error: errorHandler(message)
+        });
+      else
+        meld.write(message.request)
+          .then(() => send(message.id, 'complete'))
+          .catch(errorHandler(message))
+    },
     stop: message => meld.close()
       .then(() => send(message.id, 'stopped'))
       .catch(errorHandler(message)),
@@ -33,11 +40,12 @@ clone(leveldown(tmpDirName), new MqttRemotes(config), config).then(meld => {
       send(message.id, 'error', { err: `No handler for ${message['@type']}` });
   });
 
-  meld.follow().subscribe({
-    next: update => send(requestId, 'updated', { body: update }),
+  meld.follow(update => send(requestId, 'updated', { body: update }));
+
+  meld.status.subscribe({
     complete: () => send(requestId, 'closed'),
     error: err => sendError(requestId, err)
-  });
+  })
 }).catch(err => {
   LOG.error(config['@id'], err);
   send(requestId, 'unstarted', { err: `${err}` });
