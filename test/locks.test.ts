@@ -1,4 +1,4 @@
-import { SharableLock } from '../src/engine/locks';
+import { LockManager } from '../src/engine/locks';
 
 describe('Sharable lock', () => {
   let ops: number[]; // Used to assert concurrent operation ordering
@@ -9,7 +9,7 @@ describe('Sharable lock', () => {
   });
 
   test('exclusive ops execute immediately', async () => {
-    const lock = new SharableLock<'it'>();
+    const lock = new LockManager<'it'>();
     await lock.exclusive('it', async () => {
       await pushOp(1);
       await pushOp(2);
@@ -23,7 +23,7 @@ describe('Sharable lock', () => {
   });
 
   test('three exclusive ops execute immediately', async () => {
-    const lock = new SharableLock<'it'>();
+    const lock = new LockManager<'it'>();
     await lock.exclusive('it', async () => {
       await pushOp(1);
       await pushOp(2);
@@ -42,7 +42,7 @@ describe('Sharable lock', () => {
   });
 
   test('exclusive ops do not share', async () => {
-    const lock = new SharableLock<'it'>();
+    const lock = new LockManager<'it'>();
     lock.exclusive('it', async () => {
       await pushOp(1);
       await pushOp(2);
@@ -55,7 +55,7 @@ describe('Sharable lock', () => {
   });
 
   test('three exclusive ops do not share', async () => {
-    const lock = new SharableLock<'it'>();
+    const lock = new LockManager<'it'>();
     lock.exclusive('it', async () => {
       await pushOp(1);
       await pushOp(2);
@@ -72,7 +72,7 @@ describe('Sharable lock', () => {
   });
 
   test('shared ops execute immediately', async () => {
-    const lock = new SharableLock<'it'>();
+    const lock = new LockManager<'it'>();
     await lock.share('it', async () => {
       await pushOp(1);
       await pushOp(2);
@@ -86,7 +86,7 @@ describe('Sharable lock', () => {
   });
 
   test('shared ops do share', async () => {
-    const lock = new SharableLock<'it'>();
+    const lock = new LockManager<'it'>();
     lock.share('it', async () => {
       await pushOp(1);
       await pushOp(2);
@@ -99,7 +99,7 @@ describe('Sharable lock', () => {
   });
 
   test('shared ops resolve as soon as they can', async () => {
-    const lock = new SharableLock<'it'>();
+    const lock = new LockManager<'it'>();
     await Promise.all([
       lock.share('it', async () => {
         await pushOp(1);
@@ -117,7 +117,7 @@ describe('Sharable lock', () => {
   });
 
   test('shared ops do not share with exclusive ops', async () => {
-    const lock = new SharableLock<'it'>();
+    const lock = new LockManager<'it'>();
     lock.share('it', async () => {
       await pushOp(1);
       await pushOp(2);
@@ -134,7 +134,7 @@ describe('Sharable lock', () => {
   });
 
   test('exclusive ops do not share with shared ops', async () => {
-    const lock = new SharableLock<'it'>();
+    const lock = new LockManager<'it'>();
     lock.exclusive('it', async () => {
       await pushOp(1);
       await pushOp(2);
@@ -151,7 +151,7 @@ describe('Sharable lock', () => {
   });
 
   test('exclusive ops follow shared ops in call order', async () => {
-    const lock = new SharableLock<'it'>();
+    const lock = new LockManager<'it'>();
     lock.exclusive('it', async () => {
       await pushOp(1);
       await pushOp(2);
@@ -172,7 +172,7 @@ describe('Sharable lock', () => {
   });
 
   test('shared ops follow exclusive ops in call order', async () => {
-    const lock = new SharableLock<'it'>();
+    const lock = new LockManager<'it'>();
     lock.share('it', async () => {
       await pushOp(1);
       await pushOp(2);
@@ -193,7 +193,7 @@ describe('Sharable lock', () => {
   });
 
   test('shared ops can be extended', async () => {
-    const lock = new SharableLock<'it'>();
+    const lock = new LockManager<'it'>();
     lock.share('it', async () => {
       await pushOp(1);
       await pushOp(2);
@@ -206,7 +206,7 @@ describe('Sharable lock', () => {
   });
 
   test('exclusive ops can be extended', async () => {
-    const lock = new SharableLock<'it'>();
+    const lock = new LockManager<'it'>();
     lock.exclusive('it', async () => {
       await pushOp(1);
       await pushOp(2);
@@ -219,7 +219,7 @@ describe('Sharable lock', () => {
   });
 
   test('cannot extend if no running op', async () => {
-    const lock = new SharableLock<'it'>();
+    const lock = new LockManager<'it'>();
     await lock.exclusive('it', async () => {
       await pushOp(1);
       await pushOp(2);

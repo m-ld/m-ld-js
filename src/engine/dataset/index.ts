@@ -1,11 +1,12 @@
 import { Quad, DefaultGraph, NamedNode, Quad_Subject, Quad_Predicate, Quad_Object } from 'rdf-js';
 import { defaultGraph } from '@rdfjs/data-model';
 import { RdfStore, MatchTerms } from 'quadstore';
-import AsyncLock = require('async-lock');
 import { AbstractLevelDOWN, AbstractOpenOptions } from 'abstract-leveldown';
 import { Observable } from 'rxjs';
 import { generate as uuid } from 'short-uuid';
 import { check, Stopwatch } from '../util';
+import { LockManager } from '../locks';
+import { promisify } from 'util';
 
 /**
  * Atomically-applied patch to a quad-store.
@@ -101,7 +102,7 @@ export interface Graph {
 export class QuadStoreDataset implements Dataset {
   readonly location: string;
   private readonly store: RdfStore;
-  private readonly lock = new AsyncLock;
+  private readonly lock = new LockManager;
   private isClosed: boolean = false;
 
   constructor(
@@ -127,7 +128,7 @@ export class QuadStoreDataset implements Dataset {
     // TODO: This could be improved with snapshots
     // https://github.com/Level/leveldown/issues/486
     sw.next('lock-wait');
-    return this.lock.acquire('txn', async () => {
+    return this.lock.exclusive('txn', async () => {
       sw.next('prepare');
       const result = await txn.prepare({ id, sw: sw.lap });
       sw.next('apply');
@@ -142,9 +143,9 @@ export class QuadStoreDataset implements Dataset {
   @notClosed.async
   close(): Promise<void> {
     // Make efforts to ensure no transactions are running
-    return this.lock.acquire('txn', done => {
+    return this.lock.exclusive('txn', () => {
       this.isClosed = true;
-      this.leveldown.close(done);
+      return promisify(this.leveldown.close.bind(this.leveldown))();
     });
   }
 

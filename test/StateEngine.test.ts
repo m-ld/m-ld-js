@@ -1,12 +1,12 @@
 import { of, Subject as Source } from 'rxjs';
 import { MeldUpdate } from '../src/api';
-import { SharableLock } from '../src/engine/locks';
+import { LockManager } from '../src/engine/locks';
 import { CloneEngine, StateEngine } from '../src/engine/StateEngine';
 
 describe('State Engine', () => {
   class MockCloneEngine implements CloneEngine {
     tick = 0;
-    readonly lock = new SharableLock<'state'>();
+    readonly lock = new LockManager<'state'>();
     readonly dataUpdates = new Source<MeldUpdate>();
     read = () => of({ tick: this.tick });
     write = async () => {

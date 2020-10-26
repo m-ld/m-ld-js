@@ -14,7 +14,7 @@ import {
   finalize, toArray, map, debounceTime,
   distinctUntilChanged, expand, delayWhen, take, skipWhile} from 'rxjs/operators';
 import { delayUntil, Future, tapComplete, fromArrayPromise } from '../util';
-import { SharableLock } from "../locks";
+import { LockManager } from "../locks";
 import { levels } from 'loglevel';
 import { AbstractMeld, comesAlive } from '../AbstractMeld';
 import { MeldConfig } from '../..';
@@ -33,7 +33,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
   private readonly remotes: Omit<MeldRemotes, 'updates'>;
   private readonly remoteUpdates: RemoteUpdates;
   private subs = new Subscription;
-  readonly lock = new SharableLock<'live' | 'state'>();
+  readonly lock = new LockManager<'live' | 'state'>();
   private newClone: boolean = false;
   private readonly latestTicks = new BehaviorSubject<number>(NaN);
   private readonly networkTimeout: number;

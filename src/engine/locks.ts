@@ -1,16 +1,5 @@
 import { Future } from './util';
 
-// TODO: Use this instead of AsyncLock
-export class LockManager<K extends string> {
-  private head: { [key: string]: Promise<unknown> } = {};
-
-  request<T = void>(key: K, fn: () => T | PromiseLike<T>): Promise<T> {
-    const result = (this.head[key] ?? Promise.resolve()).then(fn);
-    this.head[key] = settled(result);
-    return result;
-  }
-}
-
 interface SharedPromiseLike extends PromiseLike<unknown> {
   readonly pending: boolean;
   share<T>(fn: () => T | PromiseLike<T>): Promise<T>;
@@ -58,7 +47,7 @@ class SharedPromise extends Future implements SharedPromiseLike {
   }
 }
 
-export class SharableLock<K extends string> {
+export class LockManager<K extends string> {
   private head: { [key: string]: { task: SharedPromise, shared: boolean } } = {};
 
   async exclusive<T = void>(key: K, fn: () => T | PromiseLike<T>): Promise<T> {

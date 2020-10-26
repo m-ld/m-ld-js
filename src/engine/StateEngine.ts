@@ -1,11 +1,11 @@
 import { Subject, Read, Write } from '../jrql-support';
 import { MeldUpdate } from '../api';
-import { SharableLock } from './locks';
+import { LockManager } from './locks';
 import { Observable, Subscription } from 'rxjs';
 
 /** Simplified clone engine with only the basic requirements of an engine */
 export interface CloneEngine {
-  readonly lock: SharableLock<'state'>;
+  readonly lock: LockManager<'state'>;
   /** An update MUST happen during a write OR when 'state' is exclusively locked */
   readonly dataUpdates: Observable<MeldUpdate>;
 
