@@ -1,4 +1,4 @@
-import { MeldUpdate, MeldConstraint, MeldReadState, readResult } from '../../api';
+import { MeldUpdate, MeldConstraint, MeldReadState, readResult, Resource, ReadResult } from '../../api';
 import { EncodedDelta, Snapshot, UUID, DeltaMessage, Triple } from '..';
 import { Quad } from 'rdf-js';
 import { TreeClock } from '../clocks';
@@ -18,7 +18,7 @@ import { MeldError } from '../MeldError';
 import { LocalLock } from '../local';
 import { SUSET_CONTEXT, qsName, toPrefixedId } from './SuSetGraph';
 import { SuSetJournal, SuSetJournalEntry } from './SuSetJournal';
-import { MeldConfig } from '../..';
+import { MeldConfig, Read } from '../..';
 
 interface HashTid extends Subject {
   '@id': Iri; // hash:<hashed triple id>
@@ -43,10 +43,20 @@ class TripleTidQuads {
   }
 }
 
-export const graphState = (graph: JrqlGraph): MeldReadState => ({
-  read: request => readResult(new Observable(subs => { graph.read(subs, request); })),
-  get: id => graph.describe1(id)
-});
+export class GraphState implements MeldReadState {
+  constructor(
+    readonly graph: JrqlGraph) {
+  }
+
+  read<S>(request: Read): ReadResult<Resource<S>> {
+    return readResult(this.graph.read(request)
+      .pipe(map(subject => <Resource<S>>subject)));
+  }
+
+  get<S = Subject>(id: string): Promise<Resource<S> | undefined> {
+    return this.graph.describe1(id);
+  }
+}
 
 /**
  * Writeable Graph, similar to a Dataset, but with a slightly different transaction API.
@@ -80,7 +90,7 @@ export class SuSetDataset extends JrqlGraph {
     this.datasetLock = new LocalLock(config['@id'], dataset.location);
     this.maxDeltaSize = config.maxDeltaSize ?? Infinity;
     this.log = getIdLogger(this.constructor, config['@id'], config.logLevel);
-    this.state = graphState(this);
+    this.state = new GraphState(this);
   }
 
   @SuSetDataset.checkNotClosed.async

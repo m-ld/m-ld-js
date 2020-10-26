@@ -15,8 +15,6 @@ describe('Meld State API', () => {
     api = new ApiStateMachine(new DomainContext('test.m-ld.org'), clone);
   });
 
-  // TODO: read(proc) and write(proc)
-
   test('retrieves a JSON-LD subject', async () => {
     const captureUpdate = new Future<MeldUpdate>();
     api.follow(captureUpdate.resolve);
@@ -180,5 +178,65 @@ describe('Meld State API', () => {
     await api.write<Subject>({ '@id': 'fred', name: 'Fred', age: 40.5 });
     await expect(api.read<Describe>({ '@describe': 'fred' }))
       .resolves.toMatchObject([{ '@id': 'fred', name: 'Fred', age: 40.5 }]);
+  });
+
+  test('reads with a procedure', async done => {
+    await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
+    api.read(async state => {
+      await expect(state.read<Describe>({ '@describe': 'fred' }))
+        .resolves.toMatchObject([{ '@id': 'fred', name: 'Fred' }]);
+      done();
+    });
+  });
+
+  test('writes with a procedure', async done => {
+    api.write(async state => {
+      state = await state.write<Subject>({ '@id': 'fred', name: 'Fred' });
+      await expect(state.read<Describe>({ '@describe': 'fred' }))
+        .resolves.toMatchObject([{ '@id': 'fred', name: 'Fred' }]);
+      done();
+    });
+  });
+
+  test('write state is predictable', async done => {
+    api.write(async state => {
+      state = await state.write<Subject>({ '@id': 'fred', age: 40 });
+      await expect(state.read<Describe>({
+        '@describe': '?id', '@where': { '@id': '?id', age: 40 }
+      }))
+        // We only expect one person of that age
+        .resolves.toMatchObject([{ '@id': 'fred', age: 40 }]);
+      done();
+    });
+    // Immediately make another write which could affect the query
+    api.write(state => state.write<Subject>({ '@id': 'wilma', age: 40 }));
+  });
+
+  test('handler state follows writes', async done => {
+    let hadFred = false;
+    api.read(async state => {
+      await expect(state.read<Describe>({
+        '@describe': '?id', '@where': { '@id': '?id', age: 40 }
+      })).resolves.toEqual([]);
+    }, async (_, state) => {
+      if (!hadFred) {
+        await expect(state.read<Describe>({
+          '@describe': '?id', '@where': { '@id': '?id', age: 40 }
+        })).resolves.toMatchObject([{ '@id': 'fred', age: 40 }]);
+        hadFred = true;
+      } else {
+        await expect(state.read<Describe>({
+          '@describe': '?id', '@where': { '@id': '?id', age: 40 }
+        })).resolves.toMatchObject([{ '@id': 'wilma', age: 40 }]);
+        done();
+      }
+    });
+    api.write(async state => {
+      state = await state.write<Subject>({ '@id': 'fred', age: 40 });
+      await state.write<Subject>({
+        '@delete': { '@id': 'fred', age: 40 },
+        '@insert': { '@id': 'wilma', age: 40 }
+      });
+    });
   });
 });

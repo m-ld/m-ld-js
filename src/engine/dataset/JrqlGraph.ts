@@ -10,7 +10,7 @@ import { compact } from 'jsonld';
 import { namedNode, defaultGraph, variable, quad as createQuad, blankNode } from '@rdfjs/data-model';
 import { Graph, PatchQuads } from '.';
 import { toArray, mergeMap, map, filter, distinct } from 'rxjs/operators';
-import { from, of, EMPTY, Subscriber } from 'rxjs';
+import { from, of, EMPTY, Observable, throwError } from 'rxjs';
 import { flatten, rdfToJson, jsonToRdf, fromArrayPromise } from '../util';
 import { QuadSolution, VarValues, TriplePos } from './QuadSolution';
 import { array, shortId } from '../../util';
@@ -26,14 +26,15 @@ export class JrqlGraph {
     readonly defaultContext: Context = {}) {
   }
 
-  async read(subs: Subscriber<Subject>, query: Read,
-    context: Context = query['@context'] || this.defaultContext): Promise<unknown> {
+  read(query: Read,
+    context: Context = query['@context'] || this.defaultContext): Observable<Subject> {
     if (isDescribe(query) && !Array.isArray(query['@describe'])) {
-      return this.describe(subs, query['@describe'], query['@where'], context);
+      return this.describe(query['@describe'], query['@where'], context);
     } else if (isSelect(query) && query['@where'] != null) {
-      return this.select(subs, query['@select'], query['@where'], context);
+      return this.select(query['@select'], query['@where'], context);
+    } else {
+      return throwError(new Error('Read type not supported.'));
     }
-    throw new Error('Read type not supported.');
   }
 
   async write(query: Write,
@@ -49,14 +50,12 @@ export class JrqlGraph {
     throw new Error('Write type not supported.');
   }
 
-  select(subs: Subscriber<Subject>, select: Result,
+  select(select: Result,
     where: Subject | Subject[] | Group,
-    context: Context = this.defaultContext): Promise<unknown> {
+    context: Context = this.defaultContext): Observable<Subject> {
     const solutions = this.whereSolutions(where, context);
-    fromArrayPromise(solutions).pipe(
-      mergeMap(solution => solutionSubject(select, solution, context)))
-      .subscribe(subs);
-    return solutions;
+    return fromArrayPromise(solutions).pipe(
+      mergeMap(solution => solutionSubject(select, solution, context)));
   }
 
   private async whereSolutions(where: Subject | Subject[] | Group,
@@ -66,25 +65,22 @@ export class JrqlGraph {
       graph => this.quads(graph, context).then(quads => this.matchSolutions(quads)))));
   }
 
-  describe(subs: Subscriber<Subject>,
-    describe: Iri | Variable,
+  describe(describe: Iri | Variable,
     where?: Subject | Subject[] | Group,
-    context: Context = this.defaultContext): Promise<unknown> {
+    context: Context = this.defaultContext): Observable<Subject> {
     const varName = matchVar(describe);
     if (varName) {
       const solutions = this.whereSolutions(where ?? {}, context);
       // Find a set of solutions for every union
-      fromArrayPromise(solutions).pipe(
+      return fromArrayPromise(solutions).pipe(
         map(solution => solution.vars[varName]?.value),
         filter(iri => !!iri), distinct(),
         // FIXME: This could obtain more recent data than the solution
-        mergeMap(iri => this.describe1(iri, context)))
-        .subscribe(subs);
-      return solutions;
+        mergeMap(iri => this.describe1(iri, context)),
+        filter<Subject>(subject => subject != null));
     } else {
       const subject = this.describe1(describe, context);
-      from(subject).pipe(filter(subject => subject != null)).subscribe(subs);
-      return subject;
+      return from(subject).pipe(filter<Subject>(subject => subject != null));
     }
   }
 

@@ -12,7 +12,7 @@ import { Dataset } from '.';
 import {
   publishReplay, refCount, filter, takeUntil, tap,
   finalize, toArray, map, debounceTime,
-  distinctUntilChanged, expand, delayWhen, take, skipWhile, share} from 'rxjs/operators';
+  distinctUntilChanged, expand, delayWhen, take, skipWhile} from 'rxjs/operators';
 import { delayUntil, Future, tapComplete, fromArrayPromise } from '../util';
 import { SharableLock } from "../locks";
 import { levels } from 'loglevel';
@@ -376,12 +376,12 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
 
   @AbstractMeld.checkNotClosed.rx
   read(request: Read): Observable<Subject> {
-    // Run the query once and share the result
     return new Observable<Subject>(subs => {
-      this.lock.enter('live').then(() => this.dataset.read(subs, request));
-    })
-      // Only leave the live-lock when the results have been fully streamed
-      .pipe(finalize(() => this.lock.leave('live')), share());
+      this.lock.share('live', () => new Promise(resolve =>
+        // Only leave the live-lock when the results have been fully streamed
+        this.dataset.read(request).pipe(finalize(resolve)).subscribe(subs)))
+        .catch(err => subs.error(err)); // Only if lock fails
+    });
   }
 
   @AbstractMeld.checkNotClosed.async

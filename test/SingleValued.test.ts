@@ -2,7 +2,7 @@ import { MeldReadState } from '../src/api';
 import { memStore } from './testClones';
 import { SingleValued } from '../src/constraints/SingleValued';
 import { JrqlGraph } from '../src/engine/dataset/JrqlGraph';
-import { graphState } from '../src/engine/dataset/SuSetDataset';
+import { GraphState } from '../src/engine/dataset/SuSetDataset';
 import { Dataset } from '../src/engine/dataset';
 
 describe('Single-valued constraint', () => {
@@ -13,7 +13,7 @@ describe('Single-valued constraint', () => {
   beforeEach(async () => {
     data = await memStore();
     graph = new JrqlGraph(data.graph());
-    state = graphState(graph);
+    state = new GraphState(graph);
   });
 
   test('Passes an empty update', async () => {

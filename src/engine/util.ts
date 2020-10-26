@@ -83,6 +83,10 @@ export class Future<T = void> implements PromiseLike<T> {
     }
   }
 
+  get pending() {
+    return !this.subject.isStopped;
+  }
+
   resolve = (value: T) => {
     this.subject.next(value);
     this.subject.complete();
