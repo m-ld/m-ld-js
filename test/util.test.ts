@@ -60,11 +60,15 @@ test('graphy to array', () => {
 
 test('short id is valid XML local name', () => {
   for (let i = 0; i < 10; i++)
-    expect(shortId()).toMatch(/[a-zA-Z_]([a-zA-Z0-9_])*/g);
+    expect(shortId()).toMatch(/^[a-zA-Z_]([a-zA-Z0-9_])*/g);
 });
 
 test('short id for a string is valid XML local name', () => {
-  expect(shortId('_*.')).toMatch(/[a-zA-Z_]([a-zA-Z0-9_])*/g);
+  expect(shortId('_*.')).toMatch(/^[a-zA-Z_]([a-zA-Z0-9_])*/g);
+});
+
+test('short id for a longer string is valid XML local name', () => {
+  expect(shortId('assain-tackies.m-ld.org')).toMatch(/^[a-zA-Z_]([a-zA-Z0-9_])*/g);
 });
 
 test('short Id is always different', () => {

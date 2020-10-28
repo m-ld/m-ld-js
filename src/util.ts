@@ -15,8 +15,8 @@ export function array<T>(value?: T | T[]): T[] {
 /**
  * Utility to generate a short Id according to the given spec.
  * @param spec If a number, a random Id will be generated with the given length.
- * If a string, an obfuscated Id will be deterministically generated for the
- * string with a fast hash (passing the same spec again will generate the same Id).
+ * If a string, a stable obfuscated Id will be generated for the string with a
+ * fast hash.
  * @return a string identifier that is safe to use as an HTML (& XML) element Id
  */
 export function shortId(spec: number | string = 8) {
@@ -25,10 +25,10 @@ export function shortId(spec: number | string = 8) {
     return ('a' + 'x'.repeat(spec - 1)).replace(/[ax]/g, c =>
       ((d + Math.random() * 16) % (c == 'a' ? 6 : 16) + (c == 'a' ? 10 : 0) | 0).toString(16));
   } else {
-    let hashCode = Array.from(spec).reduce((hash, char) => {
+    let hashCode = Math.abs(Array.from(spec).reduce((hash, char) => {
       hash = ((hash << 5) - hash) + char.charCodeAt(0);
       return hash & hash;
-    }, 0).toString(16);
+    }, 0)).toString(16);
     if (hashCode.charAt(0) <= '9') // Ensure first char is alpha (a-j)
       hashCode = String.fromCharCode(hashCode.charCodeAt(0) + 49) + hashCode.slice(1);
     return hashCode;
