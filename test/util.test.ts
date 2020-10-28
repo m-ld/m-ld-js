@@ -1,5 +1,5 @@
 import { Future } from '../src/engine/util';
-import { array, shortId } from '../src';
+import { array, shortId, any } from '../src';
 
 test('Future can be resolved', async () => {
   const f = new Future<string>();
@@ -81,4 +81,8 @@ test('short Id for a string is always the same', () => {
 
 test('short Id for strings are different', () => {
   expect(shortId('foobar')).not.toEqual(shortId('snafu'));
+});
+
+test('any var is always different', () => {
+  expect(any()).not.toEqual(any());
 });

@@ -1,10 +1,10 @@
 import * as spec from '@m-ld/m-ld-spec';
 import {
-  Subject, Update, Value, isValueObject, Reference, Variable, Read, Write
+  Subject, Update, Reference, Variable, Read, Write
 } from './jrql-support';
 import { Observable, Subscription } from 'rxjs';
 import { toArray } from 'rxjs/operators';
-import { array, shortId } from './util';
+import { shortId } from './util';
 
 /**
  * A convenience type for a struct with a `@insert` and `@delete` property, like
@@ -16,12 +16,14 @@ export interface DeleteInsert<T> {
 }
 
 /**
- * A utility to generate a variable with a random Id. Convenient to use when
+ * A utility to generate a variable with a unique Id. Convenient to use when
  * generating query patterns in code.
  */
 export function any(): Variable {
-  return `?${shortId(4)}`;
+  return `?${shortId((nextAny++).toString(16))}`;
 }
+/** @internal */
+let nextAny = 0;
 
 // Unchanged from m-ld-spec
 /** @see m-ld [specification](http://spec.m-ld.org/interfaces/livestatus.html) */
@@ -29,8 +31,22 @@ export type LiveStatus = spec.LiveStatus;
 /** @see m-ld [specification](http://spec.m-ld.org/interfaces/meldstatus.html) */
 export type MeldStatus = spec.MeldStatus;
 
+/**
+ * Convenience return type for reading data from a clone. Use as a
+ * [Promise](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise)
+ * with `.then` or `await` to obtain the results as an array of
+ * {@link Subject}s. Use as an
+ * [Observable](https://rxjs.dev/api/index/class/Observable) with `.subscribe`
+ * (or other RxJS methods) to be notified of individual Subjects as they arrive.
+ *
+ * Note that all reads operate on a data snapshot, so results will not be
+ * affected by concurrent writes, even outside the scope of a read procedure.
+ *
+ * @see {@link MeldStateMachine.read}
+ */
 export type ReadResult<T> = Observable<T> & PromiseLike<T[]>;
 
+/** @internal */
 export function readResult<T>(result: Observable<T>): ReadResult<T> {
   const then: PromiseLike<T[]>['then'] =
     (onfulfilled, onrejected) => result.pipe(toArray()).toPromise()
@@ -39,24 +55,28 @@ export function readResult<T>(result: Observable<T>): ReadResult<T> {
 }
 
 /**
- * Read methods for a {@link MeldState}
+ * Read methods for a {@link MeldState}.
+ *
+ * Methods are typed to ensure that app code is aware of **m-ld**
+ * [data&nbsp;semantics](http://spec.m-ld.org/#data-semantics). See the
+ * [Resource](/#resource) type for more details.
  */
 export interface MeldReadState {
   /**
    * Actively reads data from the domain.
    *
-   * The query executes in response to the first subscription to the returned
-   * stream, and subsequent subscribers will share the same results stream.
+   * The query executes in response to either subscription to the returned
+   * result, or calling `.then`.
    *
    * All results are guaranteed to derive from the current state; however since
    * the observable results are delivered asynchronously, the current state is
    * not guaranteed to be live in the subscriber. In order to keep this state
    * alive during iteration (for example, to perform a consequential operation),
-   * do not resolve the transaction until you're done.
+   * perform the read in the scope of a read procedure.
    *
    * @param request the declarative read description
-   * @returns an observable stream of subjects.
-   * @see {@link MeldClone.transact}
+   * @returns read subjects
+   * @see {@link MeldStateMachine.read}
    */
   read<R extends Read = Read, S = Subject>(request: R): ReadResult<Resource<S>>;
   /**
@@ -73,39 +93,32 @@ export interface MeldReadState {
  * state (an new clone), or follow a write operation, which may have been
  * transacted locally in this clone, or remotely on another clone.
  *
- * - Methods are typed to ensure that app code is aware of **m-ld**
- *   [data&nbsp;semantics](http://spec.m-ld.org/#data-semantics). See the
- *   [Resource](/#resource) type for more details.
- * - Static utility methods are provided to help update app views of data based
- *   on updates notified via the {@link read} method.
- *
  * The `get` and `delete` methods are intentionally suggestive of a REST API,
  * which could be implemented by the class when used in a service environment.
  *
  * > 🚧 `put`, `post` and `patch` methods will be available in a future release.
  *
- * If a data state is not 'live' for read and write operations, the methods will
- * throw.
+ * If a data state is not available ('live') for read and write operations, the
+ * methods will throw. Liveness depends on how this state was obtained. A
+ * mutable state such as a {@link MeldClone} is always live until it is closed.
+ * An immutable state such as obtained in a read or write procedure is live
+ * until either a write is performed in the procedure, or the procedure's
+ * asynchronous return promise resolves or rejects.
  *
- * A data state signalled from a write operation or a follow will always be
- * live. If a consumer needs to keep a state live while waiting for an
- * asynchronous operation to complete (including any reads), it should pass a
- * procedure to the transact method. Otherwise, liveness ends aggressively as
- * soon as the state object goes out of the current synchronous function scope.
- *
+ * @see {@link MeldStateMachine.read}
+ * @see {@link MeldStateMachine.write}
  * @see m-ld [specification](http://spec.m-ld.org/interfaces/meldupdate.html)
  */
 export interface MeldState extends MeldReadState {
   /**
    * Actively writes data to the domain.
    *
-   * As soon as this method is called, this current state is no longer alive
+   * As soon as this method is called, this current state is no longer 'live'
    * ({@link write} will throw). To keep operating on state, use the returned
    * new state.
    *
-   * The returned new state will 
-   *
    * @param request the declarative write description
+   * @typeParam W one of the {@link Write} types
    * @returns the next state of the domain, changed by this write operation only
    */
   write<W = Write>(request: W): Promise<MeldState>;
@@ -125,8 +138,24 @@ export interface MeldUpdate extends spec.MeldUpdate {
   '@insert': Subject[];
 }
 
-export type StateProc<S extends MeldReadState = MeldReadState> = 
+/**
+ * A function type specifying a 'procedure' during which a clone state is
+ * available as immutable. Strictly, the immutable state is guaranteed to remain
+ * 'live' until the procedure's return Promise resolves or rejects.
+ *
+ * @typeParam S can be {@link MeldReadState} (default) or {@link MeldState}. If
+ * the latter, the state can be transitioned to another immutable state using
+ * {@link MeldState.write}.
+ */
+export type StateProc<S extends MeldReadState = MeldReadState> =
   (state: S) => PromiseLike<unknown> | void;
+
+/**
+ * A function type specifying a 'procedure' during which a clone state is
+ * available as immutable following an update. Strictly, the immutable state is
+ * guaranteed to remain 'live' until the procedure's return Promise resolves or
+ * rejects.
+ */
 export type UpdateProc =
   (update: MeldUpdate, state: MeldReadState) => PromiseLike<unknown> | void;
 
@@ -138,12 +167,72 @@ export type UpdateProc =
  * overloads taking a procedure.
  */
 export interface MeldStateMachine extends MeldState {
+  /**
+   * Handle updates from the domain, from the moment this method is called. All
+   * data changes are signalled through the handler, strictly ordered according
+   * to the clone's logical clock. The updates can therefore be correctly used
+   * to maintain some other view of data, for example in a user interface or
+   * separate database. This will include the notification of 'rev-up' updates
+   * after a connect to the domain. To change this behaviour, ignore updates
+   * while the clone status is marked as `outdated`.
+   *
+   * This method is equivalent to calling {@link read} with a no-op procedure.
+   *
+   * @param handler a procedure to run for every update
+   * @returns a subscription, allowing the caller to unsubscribe the handler
+   */
   follow(handler: UpdateProc): Subscription;
 
+  /**
+   * Performs some read procedure on the current state, with notifications of
+   * subsequent updates.
+   *
+   * The state passed to the procedure is immutable and is guaranteed to remain
+   * 'live' until the procedure's return Promise resolves or rejects.
+   *
+   * @param procedure a procedure to run for the current state
+   * @param handler a procedure to run for every update that follows the state
+   * in the procedure
+   */
   read(procedure: StateProc, handler?: UpdateProc): Subscription;
+
+  /**
+   * Actively reads data from the domain.
+   *
+   * The query executes in response to either subscription to the returned
+   * result, or calling `.then`.
+   *
+   * All results are guaranteed to derive from the current state; however since
+   * the observable results are delivered asynchronously, the current state is
+   * not guaranteed to be live in the subscriber. In order to keep this state
+   * alive during iteration (for example, to perform a consequential operation),
+   * perform the request in the scope of a read procedure instead.
+   *
+   * @param request the declarative read description
+   * @returns read subjects
+   */
   read<R extends Read = Read, S = Subject>(request: R): ReadResult<Resource<S>>;
 
+  /**
+   * Performs some write procedure on the current state.
+   *
+   * The state passed to the procedure is immutable and is guaranteed to remain
+   * 'live' until its `write` method is called, or the procedure's return
+   * Promise resolves or rejects.
+   *
+   * @param procedure a procedure to run against the current state. This
+   * procedure is able to modify the given state incrementally using its `write`
+   * method
+   */
   write(procedure: StateProc<MeldState>): Promise<MeldState>;
+
+  /**
+   * Actively writes data to the domain.
+   *
+   * @param request the declarative write description
+   * @typeParam W one of the {@link Write} types
+   * @returns the next state of the domain, changed by this write operation only
+   */
   write<W = Write>(request: W): Promise<MeldState>;
 }
 
@@ -237,105 +326,3 @@ export interface MeldConstraint {
 export type Resource<T> = Subject & Reference & {
   [P in keyof T]: T[P] extends Array<unknown> ? T[P] | undefined : T[P] | T[P][] | undefined;
 };
-
-export namespace MeldClone {
-  /**
-   * Indexes a **m-ld** update notification by Subject.
-   *
-   * By default, updates are presented with arrays of inserted and deleted
-   * subjects:
-   * ```json
-   * {
-   *   "@delete": [{ "@id": "foo", "severity": 3 }],
-   *   "@insert": [
-   *     { "@id": "foo", "severity": 5 },
-   *     { "@id": "bar", "severity": 1 }
-   *   ]
-   * }
-   * ```
-   *
-   * In many cases it is preferable to apply inserted and deleted properties to
-   * app data views on a subject-by-subject basis. This method transforms the
-   * above into:
-   * ```json
-   * {
-   *   "foo": {
-   *     "@delete": { "@id": "foo", "severity": 3 },
-   *     "@insert": { "@id": "foo", "severity": 5 }
-   *   },
-   *   "bar": {
-   *     "@delete": {},
-   *     "@insert": { "@id": "bar", "severity": 1 }
-   *   }
-   * }
-   * ```
-   *
-   * @param update a **m-ld** update notification obtained via the
-   * {@link follow} method
-   */
-  export function asSubjectUpdates(update: DeleteInsert<Subject[]>): SubjectUpdates {
-    return bySubject(update, '@insert', bySubject(update, '@delete'));
-  }
-
-  /**
-   * A **m-ld** update notification, indexed by Subject.
-   * @see {@link asSubjectUpdates}
-   */
-  export type SubjectUpdates = { [id: string]: DeleteInsert<Subject> };
-
-  /** @internal */
-  function bySubject(update: DeleteInsert<Subject[]>,
-    key: '@insert' | '@delete', bySubject: SubjectUpdates = {}): SubjectUpdates {
-    return update[key].reduce((byId, subject) =>
-      ({ ...byId, [subject['@id'] ?? '*']: { ...byId[subject['@id'] ?? '*'], [key]: subject } }), bySubject);
-  }
-
-  /**
-   * Applies a subject update to the given subject, expressed as a
-   * {@link Resource}. This method will correctly apply the deleted and inserted
-   * properties from the update, accounting for **m-ld**
-   * [data&nbsp;semantics](http://spec.m-ld.org/#data-semantics).
-   * @param subject the resource to apply the update to
-   * @param update the update, obtained from an {@link asSubjectUpdates} transformation
-   */
-  export function update<T>(subject: Resource<T>, update: DeleteInsert<Subject>): Resource<T> {
-    // Allow for undefined/null ids
-    const inserts = update['@insert'] && subject['@id'] == update['@insert']['@id'] ? update['@insert'] : {};
-    const deletes = update['@delete'] && subject['@id'] == update['@delete']['@id'] ? update['@delete'] : {};
-    new Set(Object.keys(subject).concat(Object.keys(inserts))).forEach(key => {
-      switch (key) {
-        case '@id': break;
-        default: subject[key as keyof Resource<T>] =
-          updateProperty(subject[key], inserts[key], deletes[key]);
-      }
-    });
-    return subject;
-  }
-
-  /** @internal */
-  function updateProperty(value: any, insertVal: any, deleteVal: any): any {
-    let rtn = array(value).filter(v => !includesValue(array(deleteVal), v));
-    rtn = rtn.concat(array(insertVal).filter(v => !includesValue(rtn, v)));
-    return rtn.length == 1 && !Array.isArray(value) ? rtn[0] : rtn;
-  }
-
-  /**
-   * Determines whether the given set of values contains the given value. This
-   * method accounts for the identity semantics of {@link Reference}s and
-   * {@link Subject}s.
-   * @param set the set of values to inspect
-   * @param value the value to find in the set
-   */
-  export function includesValue(set: Value[], value: Value): boolean {
-    // TODO support value objects
-    if (isSubjectOrRef(value)) {
-      return !!value['@id'] && set.filter(isSubjectOrRef).map(v => v['@id']).includes(value['@id']);
-    } else {
-      return set.includes(value);
-    }
-  }
-
-  function isSubjectOrRef(value: Value): value is Subject | Reference {
-    return typeof value == 'object' && !isValueObject(value);
-  }
-}

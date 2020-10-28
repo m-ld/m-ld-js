@@ -16,22 +16,23 @@ export function array<T>(value?: T | T[]): T[] {
  * Utility to generate a short Id according to the given spec.
  * @param spec If a number, a random Id will be generated with the given length.
  * If a string, an obfuscated Id will be deterministically generated for the
- * string (passing the same spec again will generate the same Id).
+ * string with a fast hash (passing the same spec again will generate the same Id).
  * @return a string identifier that is safe to use as an HTML (& XML) element Id
  */
 export function shortId(spec: number | string = 8) {
-  let genChar: () => number, len: number;
   if (typeof spec == 'number') {
     let d = new Date().getTime();
-    genChar = () => (d + Math.random() * 16);
-    len = spec;
+    return ('a' + 'x'.repeat(spec - 1)).replace(/[ax]/g, c =>
+      ((d + Math.random() * 16) % (c == 'a' ? 6 : 16) + (c == 'a' ? 10 : 0) | 0).toString(16));
   } else {
-    let i = 0;
-    genChar = () => spec.charCodeAt(i++);
-    len = spec.length;
+    let hashCode = Array.from(spec).reduce((hash, char) => {
+      hash = ((hash << 5) - hash) + char.charCodeAt(0);
+      return hash & hash;
+    }, 0).toString(16);
+    if (hashCode.charAt(0) <= '9') // Ensure first char is alpha (a-j)
+      hashCode = String.fromCharCode(hashCode.charCodeAt(0) + 49) + hashCode.slice(1);
+    return hashCode;
   }
-  return ('a' + 'x'.repeat(len - 1)).replace(/[ax]/g, c =>
-    (genChar() % (c == 'a' ? 6 : 16) + (c == 'a' ? 10 : 0) | 0).toString(16));
 }
 
 /**

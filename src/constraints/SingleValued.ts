@@ -1,4 +1,4 @@
-import { MeldConstraint, MeldUpdate, MeldReadState, MeldClone, any } from '..';
+import { MeldConstraint, MeldUpdate, MeldReadState, asSubjectUpdates, updateSubject } from '..';
 import { Iri } from 'jsonld/jsonld-spec';
 import { DeleteInsert } from '..';
 import { map, filter, take, reduce, mergeMap, defaultIfEmpty } from 'rxjs/operators';
@@ -59,7 +59,7 @@ export class SingleValued implements MeldConstraint {
     return !propertyInserts.length ? EMPTY :
       concat(failEarly ? from(propertyInserts) : EMPTY, defer(() => {
         // Reformulate the update per-(subject with the target property)
-        const subjectUpdates = MeldClone.asSubjectUpdates({
+        const subjectUpdates = asSubjectUpdates({
           '@delete': update['@delete'].filter(hasProperty),
           '@insert': propertyInserts
         });
@@ -72,7 +72,7 @@ export class SingleValued implements MeldConstraint {
               // Weirdness to construct a subject from the select result
               // TODO: Support `@construct`
               const subject = { '@id': sid, [this.property]: selectResult['?o'] };
-              MeldClone.update(subject, subjectUpdates[sid]);
+              updateSubject(subject, subjectUpdates[sid]);
               // Side-effect to prevent duplicate processing
               delete subjectUpdates[sid];
               return subject;

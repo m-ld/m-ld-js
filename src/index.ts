@@ -18,6 +18,7 @@ export {
 
 export * from './util';
 export * from './api';
+export * from './updates';
 
 /**
  * **m-ld** clone configuration, used to initialise a {@link clone} for use.
@@ -34,7 +35,7 @@ export interface MeldConfig {
    * A URI domain name, which defines the universal identity of the dataset
    * being manipulated by a set of clones (for example, on the configured
    * message bus). For a clone with persistent data from a prior session, this
-   * *must not* be different to the previous session.
+   * *must* be the same as the previous session.
    */
   '@domain': string;
   /**
@@ -83,20 +84,14 @@ export interface MeldConfig {
  * Create or initialise a local clone, depending on whether the given LevelDB
  * database already exists. This function returns as soon as it is safe to begin
  * transactions against the clone; this may be before the clone has received all
- * updates from the domain. To await latest updates [TODO]
- * 
+ * updates from the domain. You can wait until the clone is up-to-date using the
+ * {@link MeldClone.status} property.
+ *
  * @param ldb an instance of a leveldb backend
  * @param remotes a driver for connecting to remote m-ld clones on the domain.
  * This can be a configured object (e.g. `new MqttRemotes(config)`) or just the
  * class (`MqttRemotes`).
  * @param config the clone configuration
- * @param handler Handle updates from the domain. All data changes are signalled
- * through this handler, strictly ordered according to the clone's logical
- * clock. The updates can therefore be correctly used to maintain some other
- * view of data, for example in a user interface or separate database. This will
- * include the notification of 'rev-up' updates after a connect to the domain.
- * To change this behaviour, subscribe to `status` changes and ignore updates
- * while the status is marked as `outdated`.
  * @param constraint a constraint implementation, overrides config constraint.
  * 🚧 Experimental: use with caution.
  */
@@ -120,6 +115,7 @@ export async function clone(
   return new DatasetClone(context, engine);
 }
 
+/** @internal */
 class DatasetClone extends ApiStateMachine implements MeldClone {
   constructor(context: Context, private readonly dataset: DatasetEngine) {
     super(context, dataset);

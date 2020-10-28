@@ -6,8 +6,8 @@ The Javascript engine can be used in a modern browser or a server engine like
 
 > The Javascript clone engine conforms to the **m-ld**
 > [specification](http://spec.m-ld.org/). Its support for transaction pattern
-> complexity is detailed [below](#transactions). Its
-> [concurrency](#concurrency) model is based on the Javascript event loop.
+> complexity is detailed [below](#transactions). Its [concurrency](#concurrency)
+> model is based on immutable states.
 
 ## Getting Started
 `npm install @m-ld/m-ld`
@@ -64,10 +64,10 @@ await meld.status.becomes({ online: true, outdated: false });
 As soon as the [clone](#clone) function's return promise has resolved, it is
 safe to make data transactions. 
 
-[[include:transactions.md]]
-
 [[include:mqtt-remotes.md]]
 
 [[include:ably-remotes.md]]
+
+[[include:transactions.md]]
 
 [[include:concurrency.md]]
