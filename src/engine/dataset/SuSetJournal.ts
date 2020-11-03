@@ -215,7 +215,9 @@ export class SuSetJournalState {
     } else {
       // This time might be seen by the outside world, so ensure that the tail
       // entry is marked as covering it
-      return patch.concat(await this.journal.graph.insert({ '@id': this.body.tail, ticks: localTime.ticks }));
+      return patch.concat(await this.journal.graph.insert({
+        '@id': this.body.tail, ticks: localTime.ticks
+      }));
     }
   }
 

@@ -1,7 +1,7 @@
 import { TopicParams, matches } from 'mqtt-pattern';
 import { MqttTopic } from './MqttTopic';
 import { AsyncMqttClient, IClientOptions, IClientPublishOptions, ISubscriptionMap } from 'async-mqtt';
-import { getIdLogger, jsonFrom } from '../engine/util';
+import { Future, getIdLogger } from '../engine/util';
 import { EventEmitter } from 'events';
 import { BehaviorSubject, from, Observable } from 'rxjs';
 import { first, mergeMap } from 'rxjs/operators';
@@ -20,13 +20,16 @@ const PRESENCE_OPTS: Required<Pick<IClientPublishOptions, 'qos' | 'retain'>> =
  * @see http://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.html#_Toc385349265
  */
 const LEAVE_PAYLOAD = '';
+/**
+ * Used to ensure that retained presence messages are processed
+ */
 const GHOST_PAYLOAD = '-';
 
 export class MqttPresence extends EventEmitter {
   private readonly clientTopic: MqttTopic<PresenceParams>;
   private readonly domainTopic: MqttTopic<PresenceParams>;
   private readonly presence: { [clientId: string]: { [consumerId: string]: string } } = {};
-  private readonly waiting = new BehaviorSubject<string | boolean>(true);
+  private readonly ready = new Future;
   private readonly log: Logger;
 
   constructor(
@@ -40,34 +43,23 @@ export class MqttPresence extends EventEmitter {
     this.domainTopic = PRESENCE_TOPIC.with({ domain });
     this.clientTopic = this.domainTopic.with({ client: clientId });
 
-    this.waiting.subscribe(waiting => this.log.debug(waiting ?
-      waiting === true ? 'Uninitialised' : `Waiting for ${waiting}` : 'Ready'));
-
-    mqtt.on('close', () => {
-      Object.keys(this.presence).forEach(clientId => delete this.presence[clientId]);
-      this.waiting.next(true);
-    });
+    mqtt.on('close', () =>
+      Object.keys(this.presence).forEach(clientId => delete this.presence[clientId]));
 
     mqtt.on('message', (topic, payload) => {
       this.domainTopic.match(topic, presence => {
-        if (presence.client === this.waiting.value)
-          this.waiting.next(false);
-        
-        if (payload.toString() === GHOST_PAYLOAD) {
-          if (this.waiting.value && presence.client < this.clientId) {
-            // Someone else is also bootstrapping. If they have arbitrary
-            // priority, wait for them to decide their status (present or absent)
-            this.log.info(`Bootstrapping concurrently with ${presence.client}. Demurring.`);
-            this.waiting.next(presence.client);
-          } // Otherwise fall through to the change notification
-        } else if (payload.toString() === LEAVE_PAYLOAD) {
+        const payloadStr = payload.toString();
+        if (payloadStr === GHOST_PAYLOAD) {
+          if (presence.client === this.clientId)
+            this.ready.resolve();
+        } else if (payloadStr === LEAVE_PAYLOAD) {
           this.log.debug('Has left:', presence.client);
           this.left(presence.client);
         } else {
           this.log.debug('Has arrived:', presence.client);
-          this.presence[presence.client] = jsonFrom(payload);
+          this.presence[presence.client] = JSON.parse(payloadStr);
         }
-        if (!this.waiting.value)
+        if (!this.ready.pending)
           this.emit('change');
       });
     });
@@ -79,7 +71,6 @@ export class MqttPresence extends EventEmitter {
   }
 
   initialise(): Promise<unknown> {
-    this.waiting.next(this.clientId);
     return this.mqtt.publish(this.clientTopic.address, GHOST_PAYLOAD, { qos: 1 });
   }
 
@@ -91,13 +82,12 @@ export class MqttPresence extends EventEmitter {
     };
   }
 
-  on(event: 'change', listener: () => void): this;
-  on(event: string | symbol, listener: (...args: any[]) => void): this {
+  on(event: 'change', listener: () => void): this {
     return super.on(event, listener);
   }
 
   async join(consumerId: string, address: string): Promise<unknown> {
-    if (this.waiting.value)
+    if (this.ready.pending) // Convenience for tests: makes this method sync
       await this.ready;
     const myConsumers = this.presence[this.clientId] || (this.presence[this.clientId] = {});
     myConsumers[consumerId] = address;
@@ -122,10 +112,6 @@ export class MqttPresence extends EventEmitter {
         }
         subs.complete();
       })));
-  }
-
-  private get ready(): Promise<unknown> {
-    return this.waiting.pipe(first(waiting => !waiting)).toPromise();
   }
 
   private left(clientId: string, consumerId?: string) {

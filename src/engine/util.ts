@@ -24,10 +24,6 @@ export function fromArrayPromise<T>(reEmits: Promise<T[]>): Observable<T> {
   return from(reEmits).pipe(mergeMap(from));
 }
 
-export function jsonFrom(payload: Buffer): any {
-  return JSON.parse(payload.toString());
-}
-
 export function toJson(thing: any): any {
   if (thing == null)
     return null;

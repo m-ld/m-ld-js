@@ -4,7 +4,8 @@ import { liveRollup } from "../LiveValue";
 import { Subject, Read, Write } from '../../jrql-support';
 import {
   Observable, merge, from, EMPTY,
-  concat, BehaviorSubject, Subscription, interval, of, Subscriber} from 'rxjs';
+  concat, BehaviorSubject, Subscription, interval, of, Subscriber
+} from 'rxjs';
 import { TreeClock } from '../clocks';
 import { SuSetDataset } from './SuSetDataset';
 import { TreeClockMessageService } from '../messages';
@@ -12,7 +13,8 @@ import { Dataset } from '.';
 import {
   publishReplay, refCount, filter, takeUntil, tap,
   finalize, toArray, map, debounceTime,
-  distinctUntilChanged, expand, delayWhen, take, skipWhile} from 'rxjs/operators';
+  distinctUntilChanged, expand, delayWhen, take, skipWhile
+} from 'rxjs/operators';
 import { delayUntil, Future, tapComplete, fromArrayPromise } from '../util';
 import { LockManager } from "../locks";
 import { levels } from 'loglevel';
@@ -21,6 +23,7 @@ import { MeldConfig } from '../..';
 import { RemoteUpdates } from './RemoteUpdates';
 import { NO_CONSTRAINT } from '../../constraints';
 import { CloneEngine } from '../StateEngine';
+import { MeldError } from '../MeldError';
 
 enum ConnectStyle {
   SOFT, HARD
@@ -30,10 +33,13 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
   private readonly dataset: SuSetDataset;
   private messageService: TreeClockMessageService;
   private readonly orderingBuffer: DeltaMessage[] = [];
+  private readonly bufferingDeltas: Observable<unknown>;
   private readonly remotes: Omit<MeldRemotes, 'updates'>;
   private readonly remoteUpdates: RemoteUpdates;
   private subs = new Subscription;
   readonly lock = new LockManager<'live' | 'state'>();
+  // FIXME: New clone flag should be inferred from the journal (e.g. tail has no
+  // delta) in case of crash between new clock and first snapshot
   private newClone: boolean = false;
   private readonly latestTicks = new BehaviorSubject<number>(NaN);
   private readonly networkTimeout: number;
@@ -47,7 +53,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
   }) {
     super(config['@id'], config.logLevel);
     this.dataset = new SuSetDataset(dataset, constraint ?? NO_CONSTRAINT, config);
-    this.subs.add(this.dataset.updates
+    this.subs.add(this.dataUpdates
       .pipe(map(update => update['@ticks']))
       .subscribe(this.latestTicks));
     this.remotes = remotes;
@@ -56,6 +62,30 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
     this.networkTimeout = config.networkTimeout ?? 5000;
     this.genesisClaim = config.genesis;
     this.subs.add(this.status.subscribe(status => this.log.debug(status)));
+    /*
+    Create an observable that emits if deltas are being chronically buffered.
+    That is, if the buffer has been filling for longer than the network timeout.
+    This observable is subscribed in the initialise() method.
+     */
+    this.bufferingDeltas = this.remoteUpdates.receiving.pipe(
+      map(delta => this.acceptRemoteDelta(delta)),
+      // From this point we are only interested in buffered messages
+      filter(accepted => !accepted),
+      // Wait for the network timeout in case the buffer clears
+      debounceTime(this.networkTimeout),
+      // After the debounce, check if still buffering
+      filter(() => {
+        if (this.orderingBuffer.length > 0) {
+          // We're missing messages that have been received by others.
+          // Let's re-connect to see if we can get back on track.
+          this.log.warn('Messages are out of order and backing up. Re-connecting.');
+          return true;
+        }
+        else {
+          this.log.debug('Messages were out of order, but now cleared.');
+          return false;
+        }
+      }));
   }
 
   /**
@@ -79,7 +109,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
       this.newClone = !this.genesisClaim; // New clone means non-genesis
       await this.dataset.saveClock(time, true);
     }
-    this.log.info(`has time ${time}`);
+    this.log.info('has time', time);
     this.messageService = new TreeClockMessageService(time);
     this.latestTicks.next(time.ticks);
 
@@ -96,17 +126,16 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
     // Each opportunity is a ConnectStyle: HARD to force re-connect.
     // The stream errors/completes with the remote updates.
     this.subs.add(merge(
-      // 1. Changes to the liveness of the remotes (never hard). This emits the
-      //    current liveness, but we don't use it because the value might have
-      //    changed by the time we get the lock.
-      this.remotes.live.pipe(map(() => ConnectStyle.SOFT)),
-      // 2. Chronic buffering of messages (always hard)
-      this.bufferingDeltas().pipe(map(() => ConnectStyle.HARD))
+      // 1. Changes to the liveness of the remotes. This emits the current
+      //    liveness, but we don't use it because the value might have changed
+      //    by the time we get the lock.
+      this.remotes.live,
+      // 2. Chronic buffering of messages
+      this.bufferingDeltas
     ).pipe(
       // 3. Last attempt can generate more attempts (delay if soft)
-      expand(style => this.decideLive(style).pipe(
-        delayWhen(retry => retry == ConnectStyle.HARD ?
-          of(0) : interval(this.networkTimeout))))
+      expand(() => this.decideLive()
+        .pipe(delayWhen(this.reconnectDelayer)))
     ).subscribe({
       error: err => this.close(err),
       complete: () => this.close()
@@ -120,6 +149,20 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
       await comesAlive(this, 'notNull');
   }
 
+  private reconnectDelayer = (style: ConnectStyle): Observable<number> => {
+    switch (style) {
+      case ConnectStyle.HARD:
+        // Hard retry is immediate
+        return of(0);
+      case ConnectStyle.SOFT:
+        // Soft retry is a distribution around ~2 * network timeout
+        let delayMultiple = 0; // will be >= 1, most probably around 2
+        for (let p = 1.0; p > 0.3; p *= Math.random())
+          delayMultiple++;
+        return interval(delayMultiple * Math.random() * this.networkTimeout);
+    }
+  }
+
   get dataUpdates() {
     return this.dataset.updates;
   }
@@ -130,32 +173,6 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
 
   private get localTime() {
     return this.messageService.peek();
-  }
-
-  /**
-   * @returns an observable that emits if deltas are being chronically buffered.
-   * That is, if the buffer has been filling for longer than the network timeout.
-   */
-  private bufferingDeltas(): Observable<unknown> {
-    return this.remoteUpdates.receiving.pipe(
-      map(delta => this.acceptRemoteDelta(delta)),
-      // From this point we are only interested in buffered messages
-      filter(accepted => !accepted),
-      // Wait for the network timeout in case the buffer clears
-      debounceTime(this.networkTimeout),
-      // After the debounce, check if still buffering
-      filter(() => {
-        if (this.orderingBuffer.length > 0) {
-          // We're missing messages that have been received by others.
-          // Let's re-connect to see if we can get back on track.
-          this.log.warn('Messages are out of order and backing up. Re-connecting.');
-          return true;
-        }
-        else {
-          this.log.debug('Messages were out of order, but now cleared.');
-          return false;
-        }
-      }));
   }
 
   private acceptRemoteDelta(delta: DeltaMessage): boolean {
@@ -197,7 +214,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
    * emitted, it indicates failure, and the value is whether the re-connect
    * should be hard.
    */
-  private decideLive(style: ConnectStyle): Observable<ConnectStyle> {
+  private decideLive(): Observable<ConnectStyle> {
     return new Observable(retrySubscriber => {
       // Block transactions, revups and other connect attempts while handling
       // liveness change.
@@ -207,11 +224,11 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
           if (this.isGenesis)
             throw new Error('Genesis clone trying to join a live domain.');
           // Connect in the live lock
-          this.connect(style, retrySubscriber);
+          this.connect(retrySubscriber);
         } else if (remotesLive === false) {
           if (this.newClone)
             throw new Error('New clone is siloed.');
-          // We are a silo, the last survivor. Stay live for any newcomers.
+          // We are the silo, the last survivor. Stay live for any newcomers.
           this.setLive(true);
           retrySubscriber.complete();
         } else if (remotesLive === null) {
@@ -224,42 +241,43 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
   }
 
   /**
-   * @param retrySubscriber to be notified of collaboration completion
+   * @param retry to be notified of collaboration completion
    * @see decideLive return value
    * @param style `ConnectStyle.HARD` to force the connect even if already live
    */
-  private async connect(style: ConnectStyle, retrySubscriber: Subscriber<ConnectStyle>) {
-    this.log.info('Connecting to remotes');
+  private async connect(retry: Subscriber<ConnectStyle>) {
+    this.log.info(
+      this.newClone ? 'New clone' : this.live.value ? 'Silo' : 'Clone',
+      'connecting to remotes');
     try {
-      // If silo (already live), no rev-up to do
-      if (style == ConnectStyle.SOFT && this.live.value) {
-        this.log.info('Silo attaching to domain');
-        this.remoteUpdates.attach();
-      } else if (this.newClone) {
-        this.log.info('New clone requesting snapshot');
-        await this.requestSnapshot(retrySubscriber);
-      } else {
-        await this.tryRevup(retrySubscriber);
-      }
+      if (this.newClone || !(await this.requestRevup(retry)))
+        await this.requestSnapshot(retry);
       this.log.info('connected.');
       this.setLive(true);
     } catch (err) {
-      // This could indicate that the remotes have gone offline during our
-      // connection attempt. If they have reconnected, another attempt will have
-      // already been queued on the connect lock.
       this.log.info('Cannot connect to remotes due to', err);
-      retrySubscriber.next(ConnectStyle.SOFT); // Schedule re-connect, but don't force
-      retrySubscriber.complete();
+      /*
+      An error could indicate that:
+      1. The remotes have gone offline during our connection attempt. If they
+         have reconnected, another attempt will have already been queued on the
+         connect lock.
+      2. A candidate collaborator timed-out. This could happen if we are
+         mutually requesting rev-ups, for example if we both believe we are the
+         silo. Hence the jitter on the soft reconnect, see this.softDelay.
+      */
+      retry.next(ConnectStyle.SOFT);
+      retry.complete();
     }
   }
 
   /**
    * This method returns async as soon as the revup has started. There may
    * still be updates incoming from the collaborator.
-   * @param retrySubscriber to be notified of collaboration completion
+   * @param retry to be notified of collaboration completion
    * @see decideLive return value
+   * @returns `true` if the rev-up request found a collaborator
    */
-  private async tryRevup(retrySubscriber: Subscriber<ConnectStyle>) {
+  private async requestRevup(retry: Subscriber<ConnectStyle>): Promise<boolean> {
     // For a new clone, last hash is random so this will return undefined
     const revup = await this.remotes.revupFrom(this.localTime);
     if (revup) {
@@ -270,57 +288,61 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
         if (recent)
           this.subs.add(recent.subscribe(this.nextUpdate, this.warnError));
         // Done revving-up
-        retrySubscriber.complete();
-      }).catch(err => this.onRevupFailed(retrySubscriber, err));
-    } else {
-      this.log.info('cannot rev-up, requesting snapshot');
-      await this.requestSnapshot(retrySubscriber);
+        retry.complete();
+      }).catch(err => this.onRevupFailed(retry, err));
+      return true;
     }
+    return false;
   }
 
   /**
    * This method returns async as soon as the snapshot is delivered. There may
    * still be updates incoming from the collaborator.
-   * @param retrySubscriber to be notified of collaboration completion
+   * @param retry to be notified of collaboration completion
    * @see decideLive return value
    */
-  private async requestSnapshot(retrySubscriber: Subscriber<ConnectStyle>) {
+  private async requestSnapshot(retry: Subscriber<ConnectStyle>) {
     const snapshot = await this.remotes.snapshot();
     // We contractually have to subscribe to the snapshot streams on this tick,
-    // so no awaits allowed intil we injectRevups below.
+    // so no awaits allowed until we injectRevups below.
 
     this.messageService.join(snapshot.lastTime);
     // If we have any operations since the snapshot: re-emit them now and
     // re-apply them to our own dataset when the snapshot is applied.
-    const reEmits = this.dataset.operationsSince(snapshot.lastTime)
-      .then(recent => (recent ?? EMPTY).pipe(tap(this.nextUpdate), toArray()).toPromise());
+    const reEmits = this.newClone ? Promise.resolve<DeltaMessage[]>([]) :
+      this.dataset.operationsSince(snapshot.lastTime).then(recent => {
+        // If we don't have journal from our ticks on the snapshot's clock, this
+        // will lose data! – Close and let the app decide what to do.
+        if (recent == null)
+          throw new MeldError('Clone outdated');
+        else
+          return recent.pipe(tap(this.nextUpdate), toArray()).toPromise();
+      });
     // Start delivering the snapshot when we have done re-emitting
     const delivered = reEmits.then(() =>
       this.dataset.applySnapshot(snapshot, this.localTime));
     // Delay all updates until the snapshot has been fully delivered
     // This is because a snapshot is applied in multiple transactions
     const updates = snapshot.updates.pipe(delayUntil(from(delivered)));
-    this.remoteUpdates.injectRevups(concat(updates, fromArrayPromise(reEmits)))
-      .then(() => {
-        // If we were a new clone, we're up-to-date now
-        this.newClone = false;
-        retrySubscriber.complete();
-      })
-      .catch(err => this.onRevupFailed(retrySubscriber, err));
+    this.remoteUpdates.injectRevups(concat(updates, fromArrayPromise(reEmits))).then(() => {
+      // If we were a new clone, we're up-to-date now
+      this.newClone = false;
+      retry.complete();
+    }).catch(err => this.onRevupFailed(retry, err));
     return delivered; // We can go live as soon as the snapshot is delivered
   }
 
   /**
-   * @param retrySubscriber to be notified of collaboration completion
+   * @param retry to be notified of collaboration completion
    * @param err the error that occured during rev-up
    * @see decideLive return value
    */
-  private onRevupFailed(retrySubscriber: Subscriber<ConnectStyle>, err: any) {
+  private onRevupFailed(retry: Subscriber<ConnectStyle>, err: any) {
     // If rev-ups fail (for example, if the collaborator goes offline)
     // it's not a catastrophe but we do need to enqueue a retry
     this.log.warn('Rev-up did not complete due to', err);
-    retrySubscriber.next(ConnectStyle.HARD); // Force re-connect
-    retrySubscriber.complete();
+    retry.next(ConnectStyle.HARD); // Force re-connect
+    retry.complete();
   };
 
   @AbstractMeld.checkNotClosed.async
