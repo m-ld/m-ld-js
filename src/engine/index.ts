@@ -10,6 +10,7 @@ import { MsgPack, Future } from './util';
 import { LiveValue } from './LiveValue';
 import { MeldError } from './MeldError';
 import { gzip as gzipCb, gunzip as gunzipCb, InputType } from 'zlib';
+import { Triple } from './quads';
 const gzip = (input: InputType) => new Promise<Buffer>((resolve, reject) =>
   gzipCb(input, (err, buf) => err ? reject(err) : resolve(buf)));
 const gunzip = (input: InputType) => new Promise<Buffer>((resolve, reject) =>
@@ -17,11 +18,6 @@ const gunzip = (input: InputType) => new Promise<Buffer>((resolve, reject) =>
 const inspect = Symbol.for('nodejs.util.inspect.custom');
 
 const COMPRESS_THRESHOLD_BYTES = 1024;
-
-/**
- * The graph is implicit in m-ld operations.
- */
-export type Triple = Omit<Quad, 'graph'>;
 
 export class DeltaMessage implements Message<TreeClock, EncodedDelta> {
   readonly delivered = new Future;
@@ -79,7 +75,7 @@ export interface Meld {
 
   newClock(): Promise<TreeClock>;
   snapshot(): Promise<Snapshot>;
-  revupFrom(time: TreeClock): Promise<Observable<DeltaMessage> | undefined>;
+  revupFrom(time: TreeClock): Promise<Revup | undefined>;
 }
 
 export interface MeldDelta extends Object {
@@ -116,8 +112,15 @@ export namespace EncodedDelta {
   }
 }
 
-export interface Snapshot {
+export interface Recovery {
   readonly lastTime: TreeClock;
+  readonly updates: Observable<DeltaMessage>;
+}
+
+export interface Revup extends Recovery {
+}
+
+export interface Snapshot extends Recovery {
   /**
    * An observable of reified quad arrays. Reified quads include their observed
    * TIDs. Arrays for batching (sender decides array size).
@@ -128,7 +131,6 @@ export interface Snapshot {
    */
   readonly tids: Observable<UUID[]>;
   readonly lastHash: Hash;
-  readonly updates: Observable<DeltaMessage>;
 }
 
 export interface MeldRemotes extends Meld {

@@ -1,4 +1,4 @@
-import { Meld, Snapshot, DeltaMessage } from '.';
+import { Meld, Snapshot, DeltaMessage, Revup } from '.';
 import { LiveValue } from "./LiveValue";
 import { TreeClock } from './clocks';
 import { Observable, Subject as Source, BehaviorSubject, asapScheduler, of } from 'rxjs';
@@ -49,7 +49,7 @@ export abstract class AbstractMeld implements Meld {
 
   abstract newClock(): Promise<TreeClock>;
   abstract snapshot(): Promise<Snapshot>;
-  abstract revupFrom(time: TreeClock): Promise<Observable<DeltaMessage> | undefined>;
+  abstract revupFrom(time: TreeClock): Promise<Revup | undefined>;
 
   close(err?: any) {
     this.closed = true;

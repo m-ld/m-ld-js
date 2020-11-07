@@ -191,8 +191,7 @@ describe('SU-Set Dataset', () => {
           await ssd.apply(
               // Deleting the triple based on the inserted Transaction ID
             [0, 'uSX1mPGhuWAEH56RLwYmvG', `{"@type":"rdf:Statement",
-              "tid":"${firstTid}","o":"Fred","p":"#name",
-              "s":"fred"}`, '{}'],
+              "tid":"${firstTid}","o":"Fred","p":"#name", "s":"fred"}`, '{}'],
             remoteTime = remoteTime.ticked(),
             localTime = localTime.update(remoteTime).ticked(),
             localTime = localTime.ticked());
@@ -442,23 +441,6 @@ describe('SU-Set Dataset', () => {
       expect(ins).toBe('{\"@id\":\"wilma\",\"name\":\"Wilma\"}');
     });
 
-    test('does not apply a constraint if suppressed', async () => {
-      constraint.apply = async () => ({ '@insert': wilma });
-      const willUpdate = captureUpdate();
-      await ssd.apply(
-        [0, 'B6FVbHGtFxXhdLKEVmkcd', '{}', '{"@id":"fred","name":"Fred"}'],
-        remoteTime = remoteTime.ticked(),
-        localTime = localTime.update(remoteTime).ticked(),
-        // No tick provided for constraint
-        localTime);
-
-      await expect(ssd.find1({ '@id': 'http://test.m-ld.org/wilma' }))
-        .resolves.toBeFalsy();
-
-      await expect(willUpdate).resolves.toEqual(
-        { '@delete': [], '@insert': [fred], '@ticks': localTime.ticks });
-    });
-
     test('applies a deleting constraint', async () => {
       constraint.apply = async () => ({ '@delete': wilma });
 
@@ -495,8 +477,10 @@ describe('SU-Set Dataset', () => {
       await expect(ssd.find1({ '@id': 'http://test.m-ld.org/wilma' }))
         .resolves.toBeFalsy();
 
+      // The inserted data was deleted so no update happens
+      // TODO: empty update should be suppressed
       await expect(willUpdate).resolves.toEqual(
-        { '@insert': [], '@delete': [wilma], '@ticks': localTime.ticks });
+        { '@insert': [], '@delete': [], '@ticks': localTime.ticks });
     });
   });
 

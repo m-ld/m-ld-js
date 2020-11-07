@@ -1,6 +1,3 @@
-import { Quad, Term, Literal } from 'rdf-js';
-import { namedNode, defaultGraph, variable, blankNode, literal, quad as newQuad } from '@rdfjs/data-model';
-import { fromRDF, toRDF } from 'jsonld';
 import {
   concat, Observable, OperatorFunction, Subscription, throwError,
   AsyncSubject, ObservableInput, onErrorResumeNext, NEVER, from
@@ -35,40 +32,6 @@ export function toJson(thing: any): any {
     return thing;
 }
 
-export function rdfToJson(quads: Quad[]): Promise<any> {
-  // Using native types to avoid unexpected value objects
-  return fromRDF(quads, { useNativeTypes: true });
-}
-
-export function jsonToRdf(json: any): Promise<Quad[]> {
-  // jsonld produces quad members without equals
-  return toRDF(json).then((quads: Quad[]) => quads.map(cloneQuad));
-}
-
-export function cloneQuad(quad: Quad): Quad {
-  return newQuad(
-    cloneTerm(quad.subject),
-    cloneTerm(quad.predicate),
-    cloneTerm(quad.object),
-    cloneTerm(quad.graph));
-}
-
-export function cloneTerm<T extends Term>(term: T): T {
-  switch (term.termType) {
-    case 'BlankNode':
-      return <T>blankNode(term.value);
-    case 'DefaultGraph':
-      return <T>defaultGraph();
-    case 'Literal':
-      const lit = <Literal>term;
-      return <T>literal(term.value, lit.language != null ? lit.language : cloneTerm(lit.datatype));
-    case 'NamedNode':
-      return <T>namedNode(term.value);
-    case 'Variable':
-      return <T>variable(term.value);
-  }
-}
-
 export class Future<T = void> implements PromiseLike<T> {
   private readonly subject = new AsyncSubject<T>();
 
@@ -81,6 +44,10 @@ export class Future<T = void> implements PromiseLike<T> {
 
   get pending() {
     return !this.subject.isStopped;
+  }
+
+  get settle() {
+    return [this.resolve, this.reject];
   }
 
   resolve = (value: T) => {

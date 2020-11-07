@@ -1,5 +1,5 @@
 import { MeldUpdate, MeldConstraint, MeldReadState, readResult, Resource, ReadResult } from '../../api';
-import { EncodedDelta, Snapshot, UUID, DeltaMessage, Triple } from '..';
+import { EncodedDelta, Snapshot, UUID, DeltaMessage } from '..';
 import { Quad } from 'rdf-js';
 import { TreeClock } from '../clocks';
 import { Hash } from '../hash';
@@ -8,10 +8,10 @@ import { Dataset, PatchQuads } from '.';
 import { flatten as flatJsonLd } from 'jsonld';
 import { Iri } from 'jsonld/jsonld-spec';
 import { JrqlGraph } from './JrqlGraph';
-import { MeldEncoding, unreify, hashTriple, toDomainQuad, TripleTids } from '../MeldEncoding';
-import { Observable, from, Subject as Source, EMPTY } from 'rxjs';
-import { toArray, bufferCount, flatMap, reduce, map, filter, takeWhile, expand } from 'rxjs/operators';
-import { flatten, Future, tapComplete, getIdLogger, check, rdfToJson } from '../util';
+import { MeldEncoding, unreify, hashTriple, toDomainQuad, reifyTriplesTids } from '../MeldEncoding';
+import { Observable, from, Subject as Source, EMPTY, of } from 'rxjs';
+import { bufferCount, mergeMap, reduce, map, filter, takeWhile, expand } from 'rxjs/operators';
+import { flatten, Future, tapComplete, getIdLogger, check } from '../util';
 import { generate as uuid } from 'short-uuid';
 import { Logger } from 'loglevel';
 import { MeldError } from '../MeldError';
@@ -19,6 +19,7 @@ import { LocalLock } from '../local';
 import { SUSET_CONTEXT, qsName, toPrefixedId } from './SuSetGraph';
 import { SuSetJournal, SuSetJournalEntry } from './SuSetJournal';
 import { MeldConfig, Read } from '../..';
+import { QuadMap, QuadSet, TripleMap, Triple, rdfToJson } from '../quads';
 
 interface HashTid extends Subject {
   '@id': Iri; // hash:<hashed triple id>
@@ -32,15 +33,10 @@ interface AllTids extends Subject {
 
 type DatasetSnapshot = Omit<Snapshot, 'updates'>;
 
-class TripleTidQuads {
-  constructor(
-    readonly triple: Triple,
-    readonly tids: Quad[]) {
-  }
-
-  asTripleTids(): TripleTids {
-    return new TripleTids(this.triple, this.tids.map(tidQuad => tidQuad.object.value));
-  }
+function asTriplesTids(quadTidQuads: QuadMap<Quad[]>): TripleMap<UUID[]> {
+  return new TripleMap<UUID[]>([...quadTidQuads].map(([quad, tids]) => {
+    return [quad, tids.map(tidQuad => tidQuad.object.value)];
+  }));
 }
 
 export class GraphState implements MeldReadState {
@@ -148,8 +144,7 @@ export class SuSetDataset extends JrqlGraph {
   @SuSetDataset.checkNotClosed.async
   async lastHash(): Promise<Hash> {
     const journal = await this.journal.state();
-    const tail = await journal.tail();
-    return tail.hash;
+    return (await journal.tail()).hash;
   }
 
   /**
@@ -166,15 +161,16 @@ export class SuSetDataset extends JrqlGraph {
    * `undefined` if the given time is not found in the journal
    */
   @SuSetDataset.checkNotClosed.async
-  async operationsSince(time: TreeClock): Promise<Observable<DeltaMessage> | undefined> {
+  async operationsSince(time: TreeClock, lastTime?: Future<TreeClock>):
+    Promise<Observable<DeltaMessage> | undefined> {
     return this.dataset.transact<Observable<DeltaMessage> | undefined>({
       id: 'suset-ops-since',
       prepare: async () => {
         const journal = await this.journal.state();
-        const tick = typeof time == 'number' ? time :
-          // How many ticks of mine has the requester seen?
-          time.getTicks(journal.time);
-
+        // How many ticks of mine has the requester seen?
+        const tick = time.getTicks(journal.time);
+        if (lastTime != null)
+          journal.tail().then(tail => tail.time).then(...lastTime.settle);
         const found = tick != null ? await journal.findEntry(tick) : '';
         return {
           value: !found ? undefined : from(found.next()).pipe(
@@ -185,7 +181,7 @@ export class SuSetDataset extends JrqlGraph {
             }),
             takeWhile<SuSetJournalEntry>(entry => entry != null),
             // Don't emit an entry if it's all less than the requested time
-            filter(entry => typeof time == 'number' || time.anyLt(entry.time, 'includeIds')),
+            filter(entry => time.anyLt(entry.time, 'includeIds')),
             map(entry => new DeltaMessage(entry.time, entry.delta)))
         };
       }
@@ -205,8 +201,7 @@ export class SuSetDataset extends JrqlGraph {
 
         txc.sw.next('find-tids');
         const deletedTriplesTids = await this.findTriplesTids(patch.oldQuads);
-        const delta = await this.txnDelta(txc.id, patch.newQuads,
-          deletedTriplesTids.map(tt => tt.asTripleTids()));
+        const delta = await this.txnDelta(txc.id, patch.newQuads, asTriplesTids(deletedTriplesTids));
         const deltaMessage = new DeltaMessage(time, delta.encoded);
         if (deltaMessage.size() > this.maxDeltaSize)
           throw new MeldError('Delta too big');
@@ -230,18 +225,18 @@ export class SuSetDataset extends JrqlGraph {
     });
   }
 
-  private async txnTidPatches(tid: string, insert: Quad[], deletedTriplesTids: TripleTidQuads[]) {
+  private async txnTidPatches(tid: string, insert: Quad[], deletedTriplesTids: QuadMap<Quad[]>) {
     const allTidsPatch = await this.newTid(tid);
     const tidPatch = (await this.newTriplesTid(insert, tid))
-      .concat({ oldQuads: flatten(deletedTriplesTids.map(tripleTids => tripleTids.tids)) });
+      .concat({ oldQuads: flatten([...deletedTriplesTids].map(([_, tids]) => tids)) });
     return { allTidsPatch, tidPatch };
   }
 
-  private txnDelta(tid: string, insert: Quad[], deletedTriplesTids: TripleTids[]) {
+  private txnDelta(tid: string, insert: Quad[], deletedTriplesTids: TripleMap<UUID[]>) {
     return this.meldEncoding.newDelta({
       tid, insert,
       // Delta has reifications of old quads, which we infer from found triple tids
-      delete: TripleTids.reify(deletedTriplesTids)
+      delete: reifyTriplesTids(deletedTriplesTids)
     });
   }
 
@@ -268,16 +263,15 @@ export class SuSetDataset extends JrqlGraph {
               const ourTripleTids = await this.findTripleTids(tripleId(triple));
               const toRemove = ourTripleTids.filter(tripleTid => theirTids.includes(tripleTid.object.value));
               // If no tids are left, delete the triple in our graph
-              if (toRemove.length == ourTripleTids.length)
-                patch.oldQuads.push(toDomainQuad(triple));
+              if (toRemove.length > 0 && toRemove.length == ourTripleTids.length)
+                patch.add('oldQuads', toDomainQuad(triple));
               return (await tripleTidPatch).concat({ oldQuads: toRemove });
             }, Promise.resolve(new PatchQuads()));
 
           txc.sw.next('apply-cx'); // "cx" = constraint
           let update = await this.asUpdate(arrivalTime, patch);
           // Only apply the constraint if we have a tick for it
-          const cxn = !arrivalTime.equals(localTime) ?
-            await this.applyConstraint({ patch, update, tid: txc.id }) : null;
+          const cxn = await this.applyConstraint({ patch, update, tid: txc.id });
           // After applying the constraint, patch new quads might have changed
           tidPatch = tidPatch.concat(await this.newTriplesTid(patch.newQuads, delta.tid));
 
@@ -290,7 +284,6 @@ export class SuSetDataset extends JrqlGraph {
             // Also create an entry for the constraint "transaction"
             tail.createNext(mainEntryDetails, { delta: cxn.delta, localTime }));
           journaling = journaling.concat(await journal.setTail(tailId, localTime));
-
           // If the constraint has done anything, we need to merge its work
           if (cxn != null) {
             allTidsPatch = allTidsPatch.concat(cxn.allTidsPatch);
@@ -325,19 +318,21 @@ export class SuSetDataset extends JrqlGraph {
     if (result != null) {
       const tid = uuid();
       const patch = await this.write(result);
-
+      // Triples that were inserted in the applied transaction may have been
+      // deleted by the constraint - these need to be removed from the applied
+      // transaction patch but still published in the constraint delta
       const deletedExistingTidQuads = await this.findTriplesTids(patch.oldQuads);
-      // Triples that were inserted in the applied transaction may now be
-      // deleted - these need to be removed from the applied transaction
-      // patch but still published in the delta
-      const deleted = to.patch.removeAll('newQuads', patch.oldQuads);
-      const deletedTriplesTids = deletedExistingTidQuads.map(tt => tt.asTripleTids())
-        .concat(deleted.map(delQuad => new TripleTids(delQuad, [to.tid])));
-      const delta = await this.txnDelta(tid, patch.newQuads, deletedTriplesTids);
-
-      const { allTidsPatch, tidPatch } =
-        await this.txnTidPatches(tid, patch.newQuads, deletedExistingTidQuads);
-      return { delta, patch, allTidsPatch, tidPatch };
+      const deletedTriplesTids = asTriplesTids(deletedExistingTidQuads);
+      to.patch.removeAll('newQuads', patch.oldQuads)
+        .forEach(delQuad => deletedTriplesTids.with(delQuad, () => []).push(to.tid));
+      // Anything deleted by the constraint that did not exist before the
+      // applied transaction can now be removed from the constraint patch
+      patch.removeAll('oldQuads', quad => deletedExistingTidQuads.get(quad) == null);
+      return {
+        patch,
+        delta: await this.txnDelta(tid, patch.newQuads, deletedTriplesTids),
+        ...await this.txnTidPatches(tid, patch.newQuads, deletedExistingTidQuads)
+      };
     }
     return null;
   }
@@ -393,11 +388,14 @@ export class SuSetDataset extends JrqlGraph {
       tid => ({ '@id': theTripleId, tid })));
   }
 
-  private async findTriplesTids(quads: Triple[]): Promise<TripleTidQuads[]> {
-    return from(quads).pipe(
-      flatMap(async quad =>
-        new TripleTidQuads(quad, await this.findTripleTids(tripleId(quad)))),
-      toArray()).toPromise();
+  private async findTriplesTids(quads: Quad[]): Promise<QuadMap<Quad[]>> {
+    const quadTriplesTids = new QuadMap<Quad[]>();
+    await Promise.all(quads.map(async quad => {
+      const tripleTids = await this.findTripleTids(tripleId(quad));
+      if (tripleTids.length)
+        quadTriplesTids.set(quad, tripleTids);
+    }));
+    return quadTriplesTids;
   }
 
   private findTripleTids(tripleId: string): Promise<Quad[]> {
@@ -422,7 +420,7 @@ export class SuSetDataset extends JrqlGraph {
         ({ patch: await this.journal.reset(snapshot.lastHash, snapshot.lastTime, localTime) })
     });
 
-    const tidsApplied = snapshot.tids.pipe(flatMap(
+    const tidsApplied = snapshot.tids.pipe(mergeMap(
       // Each batch of TIDs goes in happily as an array
       tids => this.dataset.transact({
         id: 'snapshot-tids-batch',
@@ -431,12 +429,12 @@ export class SuSetDataset extends JrqlGraph {
 
     const quadsApplied = snapshot.quads.pipe(
       // For each batch of reified quads with TIDs, first unreify
-      flatMap(async batch => this.dataset.transact({
+      mergeMap(async batch => this.dataset.transact({
         id: 'snapshot-batch',
         prepare: async () => ({
           patch: await from(unreify(batch)).pipe(
             // For each triple in the batch, insert the TIDs into the tids graph
-            flatMap(async ([triple, tids]) => (await this.newTripleTids(triple, tids))
+            mergeMap(async ([triple, tids]) => (await this.newTripleTids(triple, tids))
               // And include the triple itself
               .concat({ newQuads: [toDomainQuad(triple)] })),
             // Concat all of the resultant batch patches together
@@ -466,8 +464,8 @@ export class SuSetDataset extends JrqlGraph {
             lastHash: tail.hash,
             quads: this.graph.match().pipe(
               bufferCount(10), // TODO batch size config
-              flatMap(async batch => TripleTids.reify(
-                (await this.findTriplesTids(batch)).map(tt => tt.asTripleTids()))),
+              mergeMap(async batch => reifyTriplesTids(
+                asTriplesTids(await this.findTriplesTids(batch)))),
               tapComplete(dataEmitted)),
             tids: this.tidsGraph.graph.match(qsName('all'), qsName('#tid')).pipe(
               map(tid => tid.object.value), bufferCount(10)) // TODO batch size config

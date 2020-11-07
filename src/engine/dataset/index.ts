@@ -7,6 +7,8 @@ import { generate as uuid } from 'short-uuid';
 import { check, Stopwatch } from '../util';
 import { LockManager } from '../locks';
 import { promisify } from 'util';
+import { QuadSet } from '../quads';
+import { Filter } from '../indices';
 
 /**
  * Atomically-applied patch to a quad-store.
@@ -21,28 +23,35 @@ export interface Patch {
  * Requires that the oldQuads are concrete Quads and not a MatchTerms.
  */
 export class PatchQuads implements Patch {
+  private readonly sets: { [key in keyof Patch]: QuadSet };
+
   constructor(
-    readonly oldQuads: Quad[] = [],
-    readonly newQuads: Quad[] = []) {
+    oldQuads: Iterable<Quad> = [],
+    newQuads: Iterable<Quad> = []) {
+    this.sets = { oldQuads: new QuadSet(oldQuads), newQuads: new QuadSet(newQuads) };
+    this.sets.newQuads.deleteAll(this.sets.oldQuads.deleteAll(this.sets.newQuads));
   }
 
-  // FIXME: this is a merge, not a concat
-  concat({ oldQuads, newQuads }: { oldQuads?: Quad[], newQuads?: Quad[] }) {
+  get oldQuads() {
+    return [...this.sets.oldQuads];
+  }
+
+  get newQuads() {
+    return [...this.sets.newQuads];
+  }
+
+  concat(patch: { oldQuads?: Iterable<Quad>, newQuads?: Iterable<Quad> }) {
     return new PatchQuads(
-      oldQuads ? this.oldQuads.concat(oldQuads) : this.oldQuads,
-      newQuads ? this.newQuads.concat(newQuads) : this.newQuads);
+      new QuadSet(this.sets.oldQuads).addAll(patch.oldQuads),
+      new QuadSet(this.sets.newQuads).addAll(patch.newQuads));
   }
 
-  removeAll(key: keyof Patch, quads: Quad[]): Quad[] {
-    const removed: Quad[] = [];
-    for (let i = 0; i < this[key].length;) {
-      const myQuad = this[key][i];
-      if (quads.some(quad => quad.equals(myQuad)))
-        this[key].splice(i, 1);
-      else
-        i++;
-    }
-    return removed;
+  add(key: keyof Patch, quad: Quad): boolean {
+    return this.sets[key].add(quad);
+  }
+
+  removeAll(key: keyof Patch, quads: Quad[] | QuadSet | Filter<Quad>): Quad[] {
+    return [...this.sets[key].deleteAll(quads)];
   }
 }
 
@@ -174,3 +183,4 @@ class QuadStoreGraph implements Graph {
     });
   }
 }
+

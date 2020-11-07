@@ -1,4 +1,4 @@
-import { Snapshot, DeltaMessage, MeldRemotes, MeldLocal, UUID, Triple } from '.';
+import { Snapshot, DeltaMessage, MeldRemotes, MeldLocal, UUID, Revup } from '.';
 import { Observable, Subject as Source, BehaviorSubject, identity } from 'rxjs';
 import { TreeClock } from './clocks';
 import { generate as uuid } from 'short-uuid';
@@ -9,6 +9,7 @@ import { MeldEncoding } from './MeldEncoding';
 import { MeldError, MeldErrorStatus } from './MeldError';
 import { AbstractMeld } from './AbstractMeld';
 import { MeldConfig, shortId } from '..';
+import { Triple } from './quads';
 
 // @see org.m_ld.json.MeldJacksonModule.NotificationDeserializer
 export interface JsonNotification {
@@ -163,21 +164,21 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
   private triplesFromBuffer = (payload: Buffer) =>
     this.meldEncoding.triplesFromJson(MsgPack.decode(payload))
 
-  async revupFrom(time: TreeClock): Promise<Observable<DeltaMessage> | undefined> {
+  async revupFrom(time: TreeClock): Promise<Revup | undefined> {
     const ack = new Future;
     const sw = new Stopwatch('revup', shortId(4));
     const res = await this.send<Response.Revup>(new Request.Revup(time), {
       // Try everyone until we find someone who can revup
-      ack, check: res => res.canRevup, sw
+      ack, check: res => res.lastTime != null, sw
     });
-    if (res.canRevup) {
+    if (res.lastTime != null) {
       sw.next('consume');
       const updates = await this.consume(
         res.updatesAddress, DeltaMessage.decode, 'failIfSlow');
       // Ack the response to start the streams
       ack.resolve();
       sw.stop();
-      return updates;
+      return { lastTime: res.lastTime, updates };
     } // else return undefined
     sw.stop();
   }
@@ -381,14 +382,14 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
   private bufferFromTriples = async (triples: Triple[]) =>
     MsgPack.encode(await this.meldEncoding.jsonFromTriples(triples))
 
-  private async replyRevup(sentParams: DirectParams, revup: Observable<DeltaMessage> | undefined) {
+  private async replyRevup(sentParams: DirectParams, revup: Revup | undefined) {
     if (revup) {
       const updatesAddress = uuid();
-      await this.reply(sentParams, new Response.Revup(true, updatesAddress), 'expectAck');
+      await this.reply(sentParams, new Response.Revup(revup.lastTime, updatesAddress), 'expectAck');
       // Ack has been sent, start streaming the updates
-      await this.produce(revup, sentParams.fromId, updatesAddress, msg => msg.encode(), 'updates');
+      await this.produce(revup.updates, sentParams.fromId, updatesAddress, msg => msg.encode(), 'updates');
     } else if (this.clone) {
-      await this.reply(sentParams, new Response.Revup(false, this.clone.id));
+      await this.reply(sentParams, new Response.Revup(null, this.clone.id));
     }
   }
 

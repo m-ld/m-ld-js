@@ -1,12 +1,13 @@
-import { MeldDelta, EncodedDelta, UUID, Triple } from '.';
+import { MeldDelta, EncodedDelta, UUID } from '.';
 import { NamedNode, Quad } from 'rdf-js';
 import { literal, namedNode, blankNode, triple as newTriple, defaultGraph, quad as newQuad } from '@rdfjs/data-model';
 import { HashBagBlock } from './blocks';
 import { Hash } from './hash';
 import { compact } from 'jsonld';
-import { rdfToJson, flatten, jsonToRdf } from './util';
+import { flatten } from './util';
 import { Context, ExpandedTermDef } from '../jrql-support';
 import { Iri } from 'jsonld/jsonld-spec';
+import { Triple, tripleKey, rdfToJson, jsonToRdf, TripleMap } from './quads';
 
 export class DomainContext implements Context {
   '@base': Iri;
@@ -38,42 +39,19 @@ namespace rdf {
 }
 
 export function hashTriple(triple: Triple): Hash {
-  switch (triple.object.termType) {
-    case 'Literal': return Hash.digest(
-      triple.subject.value,
-      triple.predicate.value,
-      triple.object.termType,
-      triple.object.value || '',
-      triple.object.datatype.value || '',
-      triple.object.language || '');
-    default: return Hash.digest(
-      triple.subject.value,
-      triple.predicate.value,
-      triple.object.termType,
-      triple.object.value);
-  }
+  return Hash.digest(...tripleKey(triple));
 }
 
-export class TripleTids {
-  constructor(
-    readonly triple: Triple,
-    readonly tids: UUID[]) {
-  }
-
-  // See https://jena.apache.org/documentation/notes/reification.html
-  reify(): Triple[] {
+export function reifyTriplesTids(triplesTids: TripleMap<UUID[]>): Triple[] {
+  return flatten([...triplesTids].map(([triple, tids]) => {
     const rid = blankNode();
     return [
       newTriple(rid, rdf.type, rdf.Statement),
-      newTriple(rid, rdf.subject, this.triple.subject),
-      newTriple(rid, rdf.predicate, this.triple.predicate),
-      newTriple(rid, rdf.object, this.triple.object)
-    ].concat(this.tids.map(tid => newTriple(rid, meld.tid, literal(tid))));
-  }
-
-  static reify(triplesTids: TripleTids[]): Triple[] {
-    return flatten(triplesTids.map(tripleTids => tripleTids.reify()));
-  }
+      newTriple(rid, rdf.subject, triple.subject),
+      newTriple(rid, rdf.predicate, triple.predicate),
+      newTriple(rid, rdf.object, triple.object)
+    ].concat(tids.map(tid => newTriple(rid, meld.tid, literal(tid))));
+  }));
 }
 
 export function unreify(reifications: Triple[]): [Triple, UUID[]][] {
