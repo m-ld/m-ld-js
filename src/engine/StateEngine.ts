@@ -74,9 +74,8 @@ export class StateEngine {
         // Ensure all read handlers are complete before changing state
         await this.handling;
         await gateEngine().write(request);
-        // At this point, there should be a new state from the data update
-        if (state === this.state)
-          throw new Error('Write did not produce a new state');
+        // At this point, there should be a new state from the data update, but
+        // not if the write was a no-op
         return this.state;
       }
     };

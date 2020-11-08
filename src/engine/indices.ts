@@ -1,5 +1,5 @@
 export abstract class Index<K, T> {
-  private index: { [key: string]: T; } = {};
+  private index = new Map<string, T>();
 
   protected abstract getIndex(key: K): string;
 
@@ -8,18 +8,22 @@ export abstract class Index<K, T> {
   value(key: K): T | null; // Gets
   value(key: K, value?: T | null): T | null {
     const i = this.getIndex(key);
-    const old = this.index[i] ?? null;
+    const old = this.index.get(i) ?? null;
     if (typeof value != 'undefined') {
       if (value != null)
-        this.index[i] = value;
+        this.index.set(i, value);
       else
-        delete this.index[i];
+        this.index.delete(i);
     }
     return old;
   }
 
+  get size() {
+    return this.index.size;
+  }
+
   [Symbol.iterator]() {
-    return Object.values(this.index)[Symbol.iterator]();
+    return this.index.values();
   }
 }
 

@@ -9,7 +9,7 @@ import { flatten as flatJsonLd } from 'jsonld';
 import { Iri } from 'jsonld/jsonld-spec';
 import { JrqlGraph } from './JrqlGraph';
 import { MeldEncoding, unreify, hashTriple, toDomainQuad, reifyTriplesTids } from '../MeldEncoding';
-import { Observable, from, Subject as Source, EMPTY, of } from 'rxjs';
+import { Observable, from, Subject as Source, EMPTY } from 'rxjs';
 import { bufferCount, mergeMap, reduce, map, filter, takeWhile, expand } from 'rxjs/operators';
 import { flatten, Future, tapComplete, getIdLogger, check } from '../util';
 import { generate as uuid } from 'short-uuid';
@@ -19,7 +19,7 @@ import { LocalLock } from '../local';
 import { SUSET_CONTEXT, qsName, toPrefixedId } from './SuSetGraph';
 import { SuSetJournal, SuSetJournalEntry } from './SuSetJournal';
 import { MeldConfig, Read } from '../..';
-import { QuadMap, QuadSet, TripleMap, Triple, rdfToJson } from '../quads';
+import { QuadMap, TripleMap, Triple, rdfToJson } from '../quads';
 
 interface HashTid extends Subject {
   '@id': Iri; // hash:<hashed triple id>
@@ -189,14 +189,16 @@ export class SuSetDataset extends JrqlGraph {
   }
 
   @SuSetDataset.checkNotClosed.async
-  async transact(prepare: () => Promise<[TreeClock, PatchQuads]>): Promise<DeltaMessage> {
-    return this.dataset.transact<DeltaMessage>({
+  async transact(prepare: () => Promise<[TreeClock, PatchQuads]>): Promise<DeltaMessage | null> {
+    return this.dataset.transact<DeltaMessage | null>({
       id: uuid(), // New transaction ID
       prepare: async txc => {
         const [time, patch] = await prepare();
-        const update = await this.asUpdate(time, patch);
+        if (patch.isEmpty)
+          return { value: null };
 
         txc.sw.next('check-constraints');
+        const update = await this.asUpdate(time, patch);
         await this.constraint.check(this.state, update);
 
         txc.sw.next('find-tids');
@@ -267,11 +269,11 @@ export class SuSetDataset extends JrqlGraph {
                 patch.add('oldQuads', toDomainQuad(triple));
               return (await tripleTidPatch).concat({ oldQuads: toRemove });
             }, Promise.resolve(new PatchQuads()));
+          // Done determining the applied delta patch. At this point we could
+          // have an empty patch, but we still need to complete the journal.
 
           txc.sw.next('apply-cx'); // "cx" = constraint
-          let update = await this.asUpdate(arrivalTime, patch);
-          // Only apply the constraint if we have a tick for it
-          const cxn = await this.applyConstraint({ patch, update, tid: txc.id });
+          let { cxn, update } = await this.constrainUpdate(patch, arrivalTime, delta.tid);
           // After applying the constraint, patch new quads might have changed
           tidPatch = tidPatch.concat(await this.newTriplesTid(patch.newQuads, delta.tid));
 
@@ -290,13 +292,13 @@ export class SuSetDataset extends JrqlGraph {
             tidPatch = tidPatch.concat(cxn.tidPatch);
             patch = patch.concat(cxn.patch);
             // Re-create the update with the constraint resolution included
-            update = await this.asUpdate(localTime, patch)
+            update = patch.isEmpty ? null : await this.asUpdate(localTime, patch)
           }
           return {
             patch: this.transactionPatch(patch, allTidsPatch, tidPatch, journaling),
             // FIXME: If this delta message exceeds max size, what to do?
             value: cxn != null ? new DeltaMessage(localTime, cxn.delta.encoded) : null,
-            after: () => this.updateSource.next(update)
+            after: () => update && this.updateSource.next(update)
           };
         } else {
           this.log.debug(`Rejecting tid: ${txc.id} as duplicate`);
@@ -307,32 +309,40 @@ export class SuSetDataset extends JrqlGraph {
     });
   }
 
+  private async constrainUpdate(patch: PatchQuads, arrivalTime: TreeClock, tid: string) {
+    const update = patch.isEmpty ? null : await this.asUpdate(arrivalTime, patch);
+    const cxn = update == null ? null : await this.applyConstraint({ patch, update, tid });
+    return { cxn, update };
+  }
+
   /**
    * Caution: mutates to.patch
    * @param to transaction details to apply the patch to
    * @param localTime local clock time
    */
-  async applyConstraint(
+  private async applyConstraint(
     to: { patch: PatchQuads, update: MeldUpdate, tid: string }) {
     const result = await this.constraint.apply(this.state, to.update);
     if (result != null) {
-      const tid = uuid();
       const patch = await this.write(result);
-      // Triples that were inserted in the applied transaction may have been
-      // deleted by the constraint - these need to be removed from the applied
-      // transaction patch but still published in the constraint delta
-      const deletedExistingTidQuads = await this.findTriplesTids(patch.oldQuads);
-      const deletedTriplesTids = asTriplesTids(deletedExistingTidQuads);
-      to.patch.removeAll('newQuads', patch.oldQuads)
-        .forEach(delQuad => deletedTriplesTids.with(delQuad, () => []).push(to.tid));
-      // Anything deleted by the constraint that did not exist before the
-      // applied transaction can now be removed from the constraint patch
-      patch.removeAll('oldQuads', quad => deletedExistingTidQuads.get(quad) == null);
-      return {
-        patch,
-        delta: await this.txnDelta(tid, patch.newQuads, deletedTriplesTids),
-        ...await this.txnTidPatches(tid, patch.newQuads, deletedExistingTidQuads)
-      };
+      if (!patch.isEmpty) {
+        const tid = uuid();
+        // Triples that were inserted in the applied transaction may have been
+        // deleted by the constraint - these need to be removed from the applied
+        // transaction patch but still published in the constraint delta
+        const deletedExistingTidQuads = await this.findTriplesTids(patch.oldQuads);
+        const deletedTriplesTids = asTriplesTids(deletedExistingTidQuads);
+        to.patch.removeAll('newQuads', patch.oldQuads)
+          .forEach(delQuad => deletedTriplesTids.with(delQuad, () => []).push(to.tid));
+        // Anything deleted by the constraint that did not exist before the
+        // applied transaction can now be removed from the constraint patch
+        patch.removeAll('oldQuads', quad => deletedExistingTidQuads.get(quad) == null);
+        return {
+          patch,
+          delta: await this.txnDelta(tid, patch.newQuads, deletedTriplesTids),
+          ...await this.txnTidPatches(tid, patch.newQuads, deletedExistingTidQuads)
+        };
+      }
     }
     return null;
   }

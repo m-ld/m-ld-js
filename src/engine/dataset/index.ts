@@ -40,6 +40,10 @@ export class PatchQuads implements Patch {
     return [...this.sets.newQuads];
   }
 
+  get isEmpty() {
+    return this.sets.newQuads.size === 0 && this.sets.oldQuads.size === 0;
+  }
+
   concat(patch: { oldQuads?: Iterable<Quad>, newQuads?: Iterable<Quad> }) {
     return new PatchQuads(
       new QuadSet(this.sets.oldQuads).addAll(patch.oldQuads),
@@ -80,7 +84,7 @@ export interface Dataset {
 
 export interface TxnResult {
   patch?: Patch,
-  after?(): void | Promise<void>;
+  after?(): unknown | Promise<unknown>;
   value?: unknown;
 }
 
@@ -134,8 +138,10 @@ export class QuadStoreDataset implements Dataset {
     // transaction (e.g. evaluating the @where clause) are not affected by
     // concurrent transactions (fully serialiseable consistency). This is
     // particularly important for SU-Set operation.
-    // TODO: This could be improved with snapshots
-    // https://github.com/Level/leveldown/issues/486
+    /*
+    TODO: This could be improved with snapshots, if all the reads were on the
+    same event loop tick, see https://github.com/Level/leveldown/issues/486
+    */
     sw.next('lock-wait');
     return this.lock.exclusive('txn', async () => {
       sw.next('prepare');

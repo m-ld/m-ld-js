@@ -81,6 +81,8 @@ describe('Meld State API', () => {
 
   test('delete where must match all', async () => {
     await api.write<Subject>({ '@id': 'fred', name: 'Fred', height: 5 });
+    // This write has no effect because we're asking for triples with subject of
+    // both fred and bambam
     await api.write<Update>({
       '@delete': [{ '@id': 'fred', height: 5 }, { '@id': 'bambam' }]
     });

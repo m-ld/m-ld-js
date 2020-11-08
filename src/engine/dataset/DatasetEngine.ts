@@ -422,7 +422,8 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
       const update = await this.dataset.transact(async () =>
         [sendTime, await this.dataset.write(request)]);
       // Publish the delta
-      this.nextUpdate(update);
+      if (update != null)
+        this.nextUpdate(update);
     });
   }
 

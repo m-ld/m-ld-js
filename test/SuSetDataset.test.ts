@@ -82,13 +82,26 @@ describe('SU-Set Dataset', () => {
         await expect(snapshot.tids.toPromise()).resolves.toBeUndefined();
       });
 
+      test('transacts a no-op', async () => {
+        const willUpdate = captureUpdate();
+        const msg = await ssd.transact(async () => [
+          localTime = localTime.ticked(),
+          await ssd.insert([])
+        ]);
+        expect(msg).toBeNull();
+        await expect(Promise.race([willUpdate, Promise.resolve()]))
+          .resolves.toBeUndefined();
+      });
+
       test('transacts an insert', async () => {
         const willUpdate = captureUpdate();
 
         const msg = await ssd.transact(async () => [
           localTime = localTime.ticked(),
           await ssd.insert(fred)
-        ]);
+        ]) ?? fail();
+        // The update should happen in-transaction, so no 'await' here
+        expect(willUpdate).resolves.toHaveProperty('@insert', [fred]);
 
         expect(msg.time.equals(localTime)).toBe(true);
         const [ver, tid, del, ins] = msg.data;
@@ -98,8 +111,6 @@ describe('SU-Set Dataset', () => {
         expect(await EncodedDelta.decode(ins))
           .toEqual({ '@id': 'fred', 'name': 'Fred' });
         expect(await EncodedDelta.decode(del)).toEqual({});
-
-        await expect(willUpdate).resolves.toHaveProperty('@insert', [fred]);
       });
 
       test('applies an insert delta', async () => {
@@ -110,11 +121,25 @@ describe('SU-Set Dataset', () => {
           remoteTime = remoteTime.ticked(),
           localTime = localTime.update(remoteTime).ticked(),
           localTime = localTime.ticked());
+        expect(willUpdate).resolves.toHaveProperty('@insert', [fred]);
 
         await expect(ssd.find1({ '@id': 'http://test.m-ld.org/fred' }))
           .resolves.toEqual('http://test.m-ld.org/fred');
 
-        await expect(willUpdate).resolves.toHaveProperty('@insert', [fred]);
+      });
+
+      test('applies a no-op delta', async () => {
+        const willUpdate = captureUpdate();
+
+        const msg = await ssd.apply(
+          [0, 'B6FVbHGtFxXhdLKEVmkcd', '{}', '{}'],
+          remoteTime = remoteTime.ticked(),
+          localTime = localTime.update(remoteTime).ticked(),
+          localTime = localTime.ticked());
+
+        expect(msg).toBeNull();
+        await expect(Promise.race([willUpdate, Promise.resolve()]))
+          .resolves.toBeUndefined();
       });
 
       describe('with an initial triple', () => {
@@ -126,7 +151,7 @@ describe('SU-Set Dataset', () => {
           firstTid = (await ssd.transact(async () => [
             localTime = localTime.ticked(),
             await ssd.insert(fred)
-          ])).data[1];
+          ]) ?? fail()).data[1];
         });
 
         test('has a new hash', async () => {
@@ -167,7 +192,8 @@ describe('SU-Set Dataset', () => {
           const msg = await ssd.transact(async () => [
             localTime = localTime.ticked(),
             await ssd.delete({ '@id': 'http://test.m-ld.org/fred' })
-          ]);
+          ]) ?? fail();
+          expect(willUpdate).resolves.toHaveProperty('@delete', [fred]);
 
           expect(msg.time.equals(localTime)).toBe(true);
           const [_, tid, del, ins] = msg.data;
@@ -181,30 +207,28 @@ describe('SU-Set Dataset', () => {
             'p': '#name',
             'o': 'Fred'
           });
-
-          await expect(willUpdate).resolves.toHaveProperty('@delete', [fred]);
         });
 
         test('applies a delete delta', async () => {
           const willUpdate = captureUpdate();
 
           await ssd.apply(
-              // Deleting the triple based on the inserted Transaction ID
+            // Deleting the triple based on the inserted Transaction ID
             [0, 'uSX1mPGhuWAEH56RLwYmvG', `{"@type":"rdf:Statement",
               "tid":"${firstTid}","o":"Fred","p":"#name", "s":"fred"}`, '{}'],
             remoteTime = remoteTime.ticked(),
             localTime = localTime.update(remoteTime).ticked(),
             localTime = localTime.ticked());
+          expect(willUpdate).resolves.toHaveProperty('@delete', [fred]);
 
           await expect(ssd.find1({ '@id': 'http://test.m-ld.org/fred' })).resolves.toEqual('');
-          await expect(willUpdate).resolves.toHaveProperty('@delete', [fred]);
         });
 
         test('transacts another insert', async () => {
           const msg = await ssd.transact(async () => [
             localTime = localTime.ticked(),
             await ssd.insert(barney)
-          ]);
+          ]) ?? fail();
           expect(msg.time.equals(localTime)).toBe(true);
 
           await expect(ssd.describe1('http://test.m-ld.org/barney')).resolves.toEqual(barney);
@@ -289,7 +313,7 @@ describe('SU-Set Dataset', () => {
           const localOp = await ssd.transact(async () => [
             localTime = localTime.ticked(),
             await ssd.insert(barney)
-          ]);
+          ]) ?? fail();
           // Don't update remote time from local
           await ssd.apply(remoteInsert(wilma),
             remoteTime = remoteTime.ticked(),
@@ -415,6 +439,8 @@ describe('SU-Set Dataset', () => {
         remoteTime = remoteTime.update(localTime).ticked(),
         localTime = localTime.update(remoteTime).ticked(),
         localTime = localTime.ticked());
+      expect(willUpdate).resolves.toEqual(
+        { '@delete': [], '@insert': [fred, wilma], '@ticks': localTime.ticks });
 
       expect(msg).not.toBeNull();
       if (msg != null) {
@@ -426,9 +452,6 @@ describe('SU-Set Dataset', () => {
 
       expect((<TreeClock>await ssd.loadClock()).equals(localTime)).toBe(true);
 
-      await expect(willUpdate).resolves.toEqual(
-        { '@delete': [], '@insert': [fred, wilma], '@ticks': localTime.ticks });
-      
       // Check that we have a valid journal
       const ops = await ssd.operationsSince(remoteTime);
       if (ops == null)
@@ -436,7 +459,7 @@ describe('SU-Set Dataset', () => {
       const entries = await ops.pipe(toArray()).toPromise();
       expect(entries.length).toBe(1);
       expect(entries[0].time.equals(localTime)).toBe(true);
-      const [,, del, ins] = entries[0].data;
+      const [, , del, ins] = entries[0].data;
       expect(del).toBe('{}');
       expect(ins).toBe('{\"@id\":\"wilma\",\"name\":\"Wilma\"}');
     });
@@ -455,12 +478,11 @@ describe('SU-Set Dataset', () => {
         remoteTime = remoteTime.ticked(),
         localTime = localTime.update(remoteTime).ticked(),
         localTime = localTime.ticked());
-
+      expect(willUpdate).resolves.toEqual(
+        { '@insert': [fred], '@delete': [wilma], '@ticks': localTime.ticks });
+      
       await expect(ssd.find1({ '@id': 'http://test.m-ld.org/wilma' }))
         .resolves.toBeFalsy();
-
-      await expect(willUpdate).resolves.toEqual(
-        { '@insert': [fred], '@delete': [wilma], '@ticks': localTime.ticks });
     });
 
     test('applies a self-deleting constraint', async () => {
@@ -478,9 +500,33 @@ describe('SU-Set Dataset', () => {
         .resolves.toBeFalsy();
 
       // The inserted data was deleted so no update happens
-      // TODO: empty update should be suppressed
-      await expect(willUpdate).resolves.toEqual(
-        { '@insert': [], '@delete': [], '@ticks': localTime.ticks });
+      await expect(Promise.race([willUpdate, Promise.resolve()]))
+        .resolves.toBeUndefined();
+    });
+
+    test('applies a self-inserting constraint', async () => {
+      // Constraint is going to insert the data we're deleting
+      constraint.apply = async () => ({ '@insert': wilma });
+
+      const tid = (await ssd.transact(async () => [
+        localTime = localTime.ticked(),
+        await ssd.insert(wilma)
+      ]) ?? fail()).data[1];
+
+      const willUpdate = captureUpdate();
+      await ssd.apply(
+        [0, 'uSX1mPGhuWAEH56RLwYmvG', `{"@type":"rdf:Statement",
+              "tid":"${tid}","o":"Wilma","p":"#name", "s":"wilma"}`, '{}'],
+        remoteTime = remoteTime.ticked(),
+        localTime = localTime.update(remoteTime).ticked(),
+        localTime = localTime.ticked());
+
+      await expect(ssd.find1({ '@id': 'http://test.m-ld.org/wilma' }))
+        .resolves.toBeTruthy();
+
+      // The deleted data was re-inserted so no update happens
+      await expect(Promise.race([willUpdate, Promise.resolve()]))
+        .resolves.toBeUndefined();
     });
   });
 
