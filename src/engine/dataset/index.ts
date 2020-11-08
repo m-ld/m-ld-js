@@ -14,8 +14,8 @@ import { Filter } from '../indices';
  * Atomically-applied patch to a quad-store.
  */
 export interface Patch {
-  oldQuads: Quad[] | MatchTerms<Quad>;
-  newQuads: Quad[];
+  readonly oldQuads: Quad[] | MatchTerms<Quad>;
+  readonly newQuads: Quad[];
 }
 
 /**
@@ -29,7 +29,7 @@ export class PatchQuads implements Patch {
     oldQuads: Iterable<Quad> = [],
     newQuads: Iterable<Quad> = []) {
     this.sets = { oldQuads: new QuadSet(oldQuads), newQuads: new QuadSet(newQuads) };
-    this.sets.newQuads.deleteAll(this.sets.oldQuads.deleteAll(this.sets.newQuads));
+    this.ensureMinimal();
   }
 
   get oldQuads() {
@@ -44,18 +44,19 @@ export class PatchQuads implements Patch {
     return this.sets.newQuads.size === 0 && this.sets.oldQuads.size === 0;
   }
 
-  concat(patch: { oldQuads?: Iterable<Quad>, newQuads?: Iterable<Quad> }) {
-    return new PatchQuads(
-      new QuadSet(this.sets.oldQuads).addAll(patch.oldQuads),
-      new QuadSet(this.sets.newQuads).addAll(patch.newQuads));
+  append(patch: { [key in keyof Patch]?: Iterable<Quad> }) {
+    this.sets.oldQuads.addAll(patch.oldQuads);
+    this.sets.newQuads.addAll(patch.newQuads);
+    this.ensureMinimal();
+    return this;
   }
 
-  add(key: keyof Patch, quad: Quad): boolean {
-    return this.sets[key].add(quad);
-  }
-
-  removeAll(key: keyof Patch, quads: Quad[] | QuadSet | Filter<Quad>): Quad[] {
+  remove(key: keyof Patch, quads: Iterable<Quad> | Filter<Quad>): Quad[] {
     return [...this.sets[key].deleteAll(quads)];
+  }
+
+  private ensureMinimal() {
+    this.sets.newQuads.deleteAll(this.sets.oldQuads.deleteAll(this.sets.newQuads));
   }
 }
 

@@ -122,14 +122,14 @@ export class JrqlGraph {
           return hiddenVarQuads != null ? unhideVars(hiddenVarQuads, solution.vars)
             .filter(quad => !anyVarTerm(quad)) : [];
         }
-        patch = patch.concat(new PatchQuads(
+        patch.append(new PatchQuads(
           matchingQuads(varDelete), matchingQuads(varInsert)));
       });
     } else {
       if (query['@delete'])
-        patch = patch.concat(await this.delete(query['@delete'], context));
+        patch.append(await this.delete(query['@delete'], context));
       if (query['@insert'])
-        patch = patch.concat(await this.insert(query['@insert'], context));
+        patch.append(await this.insert(query['@insert'], context));
     }
     return patch;
   }

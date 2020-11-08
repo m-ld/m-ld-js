@@ -148,7 +148,7 @@ export class SuSetJournalEntry {
   async setHeadTime(localTime: TreeClock): Promise<PatchQuads> {
     const patchBody = await this.updateBody({ time: localTime.toJson() });
     const patchTicks = await this.journal.graph.insert({ '@id': this.id, ticks: localTime.ticks });
-    return patchBody.concat(patchTicks);
+    return patchBody.append(patchTicks);
   }
 
   async createNext(...next: EntryCreateDetails[]): Promise<{ patch: PatchQuads, tailId: Iri }> {
@@ -164,10 +164,8 @@ export class SuSetJournalEntry {
         hashes[i], next.delta, next.localTime, next.remoteTime, hashes[i + 1]));
 
     const patch = await this.journal.graph.insert(entries);
-    return {
-      patch: patch.concat(await this.updateBody({ next: entries[0]['@id'] })),
-      tailId: entries.slice(-1)[0]['@id']
-    };
+    patch.append(await this.updateBody({ next: entries[0]['@id'] }));
+    return { patch, tailId: entries.slice(-1)[0]['@id'] };
   }
 
   private updateBody(update: Partial<JournalEntryBody>): Promise<PatchQuads> {
@@ -211,14 +209,15 @@ export class SuSetJournalState {
     if (newClone) {
       // For a new clone, the journal's dummy tail does not have a timestamp
       const tail = await this.tail();
-      return patch.concat(await tail.setHeadTime(localTime));
+      patch.append(await tail.setHeadTime(localTime));
     } else {
       // This time might be seen by the outside world, so ensure that the tail
       // entry is marked as covering it
-      return patch.concat(await this.journal.graph.insert({
+      patch.append(await this.journal.graph.insert({
         '@id': this.body.tail, ticks: localTime.ticks
       }));
     }
+    return patch;
   }
 
   static initState(headEntry: Partial<JournalEntry>, localTime?: TreeClock): Subject {
