@@ -175,7 +175,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
 
   private acceptRemoteDelta(delta: DeltaMessage): boolean {
     const logBody = this.log.getLevel() < levels.DEBUG ? delta : `tid: ${delta.data[1]}`;
-    this.log.debug('Receiving', logBody, '@', this.localTime);
+    this.log.debug('Receiving', logBody);
     // If we buffer a message, return false to signal we might need a re-connect
     return this.messageService.receive(delta, this.orderingBuffer, msg => {
       this.log.debug('Accepting', logBody);

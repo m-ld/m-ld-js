@@ -40,7 +40,7 @@ export class DeltaMessage implements Message<TreeClock, EncodedDelta> {
       throw new MeldError('Bad update');
   }
 
-  size() {
+  get size() {
     return this.encode().length;
   }
 

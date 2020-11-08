@@ -205,7 +205,7 @@ export class SuSetDataset extends JrqlGraph {
         const deletedTriplesTids = await this.findTriplesTids(patch.oldQuads);
         const delta = await this.txnDelta(txc.id, patch.newQuads, asTriplesTids(deletedTriplesTids));
         const deltaMessage = new DeltaMessage(time, delta.encoded);
-        if (deltaMessage.size() > this.maxDeltaSize)
+        if (deltaMessage.size > this.maxDeltaSize)
           throw new MeldError('Delta too big');
 
         // Include tid changes in final patch
@@ -252,7 +252,7 @@ export class SuSetDataset extends JrqlGraph {
         // Check we haven't seen this transaction before in the journal
         txc.sw.next('find-tids');
         if (!(await this.tidsGraph.find1<AllTids>({ '@id': 'qs:all', tid: [txc.id] }))) {
-          this.log.debug(`Applying tid: ${txc.id}`);
+          this.log.debug(`Applying tid: ${txc.id} @ ${arrivalTime}`);
 
           txc.sw.next('unreify');
           const delta = await this.meldEncoding.asDelta(msgData);
@@ -267,8 +267,7 @@ export class SuSetDataset extends JrqlGraph {
               // If no tids are left, delete the triple in our graph
               if (toRemove.length > 0 && toRemove.length == ourTripleTids.length)
                 patch.append({ oldQuads: [toDomainQuad(triple)] });
-              (await tripleTidPatch).append({ oldQuads: toRemove });
-              return tripleTidPatch;
+              return (await tripleTidPatch).append({ oldQuads: toRemove });
             }, Promise.resolve(new PatchQuads()));
           // Done determining the applied delta patch. At this point we could
           // have an empty patch, but we still need to complete the journal.
