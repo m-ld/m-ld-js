@@ -103,9 +103,9 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
     // Establish a clock for this clone
     let time = await this.dataset.loadClock();
     if (!time) {
-      time = this.genesisClaim ? TreeClock.GENESIS : await this.remotes.newClock();
       this.newClone = !this.genesisClaim; // New clone means non-genesis
-      await this.dataset.saveClock(time, true);
+      time = await this.dataset.saveClock(async () =>
+        this.genesisClaim ? TreeClock.GENESIS : await this.remotes.newClock(), true);
     }
     this.log.info('has time', time);
     this.messageService = new TreeClockMessageService(time);
@@ -177,7 +177,14 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
     const logBody = this.log.getLevel() < levels.DEBUG ? delta : `tid: ${delta.data[1]}`;
     this.log.debug('Receiving', logBody);
     // If we buffer a message, return false to signal we might need a re-connect
-    return this.messageService.receive(delta, this.orderingBuffer, msg => {
+    return this.messageService.receive(delta, this.orderingBuffer, (msg, prevTime) => {
+      // Check that we have the previous message from this clock ID
+      const expectedPrev = prevTime.getTicks(msg.time);
+      // TODO if (journalPrevTicks >= msg.time.ticks) we've seen this before
+      if (msg.prev !== expectedPrev)
+        throw new MeldError('Update out of order', `
+        Update claims prev is ${msg.prev} @ ${msg.time},
+        but local clock was ${expectedPrev} @ ${prevTime}`);
       this.log.debug('Accepting', logBody);
       // Need exclusive access to the state, per CloneEngine contract
       this.lock.exclusive('state', async () => {
@@ -185,8 +192,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
         const arrivalTime = this.messageService.event();
         // Make an extra clock tick available for constraints.
         this.messageService.event();
-        const cxUpdate = await this.dataset.apply(
-          msg.data, msg.time, arrivalTime, this.localTime);
+        const cxUpdate = await this.dataset.apply(msg, arrivalTime, this.localTime);
         if (cxUpdate != null)
           this.nextUpdate(cxUpdate);
         msg.delivered.resolve();
@@ -349,9 +355,17 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
 
   @AbstractMeld.checkNotClosed.async
   async newClock(): Promise<TreeClock> {
-    const newClock = this.messageService.fork();
-    // Forking is a mutation operation, need to save the new clock state
-    await this.dataset.saveClock(this.localTime);
+    const newClock = new Future<TreeClock>();
+    await this.dataset.saveClock(gwc => {
+      const lastPublicTick = gwc.getTicks(this.localTime);
+      // Back-date the clock to the last public tick before forking
+      const fork = this.localTime.forked(lastPublicTick);
+      newClock.resolve(fork.right);
+      // And re-apply the ticks to our local clock
+      const localClock = fork.left.ticked(this.localTime.ticks - lastPublicTick);
+      this.messageService.push(localClock);
+      return localClock
+    });
     return newClock;
   }
 

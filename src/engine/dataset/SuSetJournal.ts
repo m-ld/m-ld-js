@@ -32,19 +32,31 @@ interface JournalEntry {
    */
   body: string;
   /**
-   * Local clock ticks for which this entry was the Journal tail. This includes
-   * any tick that has been exposed to the outside world, NOT ticks that were
-   * only ever seen internally.
+   * Local clock ticks for which this entry was the Journal tail. This can
+   * include ticks not associated with any message, such as forking of the
+   * process clock.
    */
   ticks: number | number[];
 }
 
 interface JournalEntryBody {
-  tid: UUID; // Transaction ID
-  hash: string; // Encoded Hash
-  delta: EncodedDelta; // Raw delta - may contain Buffers
-  remote: boolean; // Whether this entry was a remote transaction
-  time: any; // JSON-encoded TreeClock (the remote clock)
+  /** Transaction ID */
+  tid: UUID;
+  /** Encoded Hash */
+  hash: string;
+  /** Raw delta - may contain Buffers */
+  delta: EncodedDelta;
+  /** JSON-encoded transaction message time */
+  time: any;
+  /**
+   * JSON-encoded public clock time ('Global wall clock' or 'Great Westminster
+   * Clock'). This has latest public ticks seen for all processes (not internal
+   * ticks), unlike the message time, which may be causally related to older
+   * messages from third parties, and the journal time, which has internal
+   * ticks. The clock has no identity.
+   */
+  gwc: any;
+  /** Next entry in the linked list */
   next?: JournalEntry['@id'];
 }
 
@@ -54,6 +66,7 @@ export interface EntryCreateDetails {
   remoteTime?: TreeClock;
 }
 
+/** Immutable */
 export class SuSetJournalEntry {
   private readonly body: JournalEntryBody;
 
@@ -80,12 +93,12 @@ export class SuSetJournalEntry {
     return Hash.decode(this.body.hash);
   }
 
-  get remote(): boolean {
-    return this.body.remote;
-  }
-
   get time(): TreeClock {
     return TreeClock.fromJson(this.body.time) as TreeClock;
+  }
+
+  get gwc(): TreeClock {
+    return TreeClock.fromJson(this.body.gwc) as TreeClock;
   }
 
   get delta(): EncodedDelta {
@@ -97,12 +110,12 @@ export class SuSetJournalEntry {
       return this.journal.entry(this.body.next);
   }
 
-  static headEntry(startingHash: Hash, localTime?: TreeClock, startingTime?: TreeClock): Subject {
-    const encodedHash = startingHash.encode();
+  static headEntry(hash: Hash, localTime?: TreeClock, gwc?: TreeClock): Subject {
+    const encodedHash = hash.encode();
     const headEntryId = SuSetJournalEntry.id(encodedHash);
     const body: Partial<JournalEntryBody> = { hash: encodedHash };
-    if (startingTime != null)
-      body.time = startingTime.toJson();
+    if (gwc != null)
+      body.gwc = gwc.toJson();
     const entry: Partial<JournalEntry> = {
       '@id': headEntryId,
       body: SuSetJournalEntry.encodeBody(body),
@@ -111,30 +124,75 @@ export class SuSetJournalEntry {
     return entry;
   }
 
-  private static encodeBody(body: Partial<JournalEntryBody>): string {
-    return MsgPack.encode(body).toString('base64');
+  async setHeadTime(localTime: TreeClock): Promise<PatchQuads> {
+    if (this.body.delta != null)
+      throw new Error('Trying to set head time for a non-head entry');
+    // The dummy head time will only ever be used for a genesis clone, as all
+    // other clones will have their journal reset with a snapshot. So, it's safe
+    // to use the local time as the gwc, which is needed for subsequent entries.
+    const patchBody = await this.updateBody({
+      time: localTime.toJson(), gwc: localTime.scrubId().toJson()
+    });
+    const patchTicks = await this.journal.graph.insert({ '@id': this.id, ticks: localTime.ticks });
+    return patchBody.append(patchTicks);
   }
 
-  private static createEntry(
-    hash: Hash,
-    delta: MeldDelta,
-    localTime: TreeClock,
-    remoteTime?: TreeClock,
-    nextHash?: Hash): JournalEntry & Subject {
-    const encodedHash = hash.encode();
-    const body: JournalEntryBody = {
-      remote: remoteTime != null,
-      hash: encodedHash,
-      tid: delta.tid,
-      time: (remoteTime ?? localTime).toJson(),
-      delta: delta.encoded, // may contain buffers
-      next: nextHash != null ? SuSetJournalEntry.id(nextHash.encode()) : undefined
+  buildPatch(journal: SuSetJournalState, entry: EntryCreateDetails) {
+    class EntryCreate {
+      next?: EntryCreate;
+      hash: Hash;
+      gwc: TreeClock;
+      time: TreeClock;
+      constructor(prevHash: Hash, prevGwc: TreeClock, readonly details: EntryCreateDetails) {
+        this.hash = SuSetJournalEntry.nextHash(prevHash, details.delta);
+        this.time = details.remoteTime ?? details.localTime;
+        this.gwc = prevGwc.update(this.time);
+      }
+      *create(): Iterable<JournalEntry & Subject> {
+        const encodedHash = this.hash.encode();
+        const body: JournalEntryBody = {
+          hash: encodedHash,
+          tid: this.details.delta.tid,
+          time: this.time.toJson(),
+          gwc: this.gwc.toJson(),
+          delta: this.details.delta.encoded, // may contain buffers
+        };
+        if (this.next != null)
+          body.next = SuSetJournalEntry.id(this.next.hash.encode());
+        yield {
+          '@id': SuSetJournalEntry.id(encodedHash),
+          body: SuSetJournalEntry.encodeBody(body),
+          ticks: this.details.localTime.ticks
+        };
+        if (this.next)
+          yield* this.next.create();
+      }
+    }
+    let head = new EntryCreate(this.hash, this.gwc, entry), tail = head;
+    const builder = {
+      next: (entry: EntryCreateDetails) => {
+        tail = tail.next = new EntryCreate(tail.hash, tail.gwc, entry);
+      },
+      build: async () => {
+        const entries = Array.from(head.create());
+        const patch = await this.updateBody({ next: entries[0]['@id'] });
+        patch.append(await this.journal.graph.insert(entries));
+        patch.append(await journal.setTail(entries.slice(-1)[0]['@id'], tail.details.localTime));
+        return patch;
+      }
     };
-    return {
-      '@id': SuSetJournalEntry.id(encodedHash),
-      body: SuSetJournalEntry.encodeBody(body),
-      ticks: localTime.ticks
-    };
+    return builder;
+  }
+
+  private updateBody(update: Partial<JournalEntryBody>): Promise<PatchQuads> {
+    return this.journal.graph.write({
+      '@delete': { '@id': this.id, body: this.data.body },
+      '@insert': { '@id': this.id, body: SuSetJournalEntry.encodeBody({ ...this.body, ...update }) }
+    });
+  }
+
+  private static encodeBody(body: Partial<JournalEntryBody>): string {
+    return MsgPack.encode(body).toString('base64');
   }
 
   private static id(encodedHash: string) {
@@ -143,36 +201,6 @@ export class SuSetJournalEntry {
 
   private static nextHash(prevHash: Hash, delta: MeldDelta) {
     return new JsonDeltaBagBlock(prevHash).next(delta.encoded).id;
-  }
-
-  async setHeadTime(localTime: TreeClock): Promise<PatchQuads> {
-    const patchBody = await this.updateBody({ time: localTime.toJson() });
-    const patchTicks = await this.journal.graph.insert({ '@id': this.id, ticks: localTime.ticks });
-    return patchBody.append(patchTicks);
-  }
-
-  async createNext(...next: EntryCreateDetails[]): Promise<{ patch: PatchQuads, tailId: Iri }> {
-    if (!next.length)
-      throw new Error('next required');
-    // First create the hashes from previous or this
-    const hashes = next.reduce<Hash[]>((hashes, next) =>
-      hashes.concat(SuSetJournalEntry.nextHash(
-        hashes.length ? hashes.slice(-1)[0] : this.hash, next.delta)), []);
-    // Then create the entries
-    const entries = next.map((next, i) =>
-      SuSetJournalEntry.createEntry(
-        hashes[i], next.delta, next.localTime, next.remoteTime, hashes[i + 1]));
-
-    const patch = await this.journal.graph.insert(entries);
-    patch.append(await this.updateBody({ next: entries[0]['@id'] }));
-    return { patch, tailId: entries.slice(-1)[0]['@id'] };
-  }
-
-  private updateBody(update: Partial<JournalEntryBody>): Promise<PatchQuads> {
-    return this.journal.graph.write({
-      '@delete': { '@id': this.id, body: this.data.body },
-      '@insert': { '@id': this.id, body: SuSetJournalEntry.encodeBody({ ...this.body, ...update }) }
-    });
   }
 }
 
@@ -251,9 +279,8 @@ export class SuSetJournal {
       return this.reset(Hash.random());
   }
 
-  async reset(startingHash: Hash,
-    startingTime?: TreeClock, localTime?: TreeClock): Promise<Patch> {
-    const entry = SuSetJournalEntry.headEntry(startingHash, localTime, startingTime);
+  async reset(hash: Hash, gwc?: TreeClock, localTime?: TreeClock): Promise<Patch> {
+    const entry = SuSetJournalEntry.headEntry(hash, localTime, gwc);
     const journal = SuSetJournalState.initState(entry, localTime);
     const insert = await this.graph.insert([journal, entry]);
     // Delete matches everything in all graphs

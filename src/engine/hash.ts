@@ -1,5 +1,6 @@
 import BN = require('bn.js');
 import { randomBytes, createHash, BinaryLike } from 'crypto';
+const inspect = Symbol.for('nodejs.util.inspect.custom');
 
 export class Hash {
   static readonly BYTE_WIDTH = 32;
@@ -32,6 +33,13 @@ export class Hash {
   equals(that: Hash): boolean {
     return this.value.eq(that.value);
   }
+
+  toString() {
+    return `Hash: ${this.encode()}`;
+  }
+
+  // v8(chrome/nodejs) console
+  [inspect] = () => this.toString();
 
   private constructor(hash: Buffer) {
     this.value = new BN(Hash.toWidth(hash, Hash.BYTE_WIDTH), 'be').fromTwos(Hash.BIT_WIDTH);

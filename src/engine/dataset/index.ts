@@ -86,11 +86,11 @@ export interface Dataset {
 export interface TxnResult {
   patch?: Patch,
   after?(): unknown | Promise<unknown>;
-  value?: unknown;
+  return?: unknown;
 }
 
 export interface TxnValueResult<T> extends TxnResult {
-  value: T
+  return: T
 }
 
 export interface TxnOptions<T extends TxnResult> extends Partial<TxnContext> {
@@ -152,7 +152,7 @@ export class QuadStoreDataset implements Dataset {
         await this.store.patch(result.patch.oldQuads, result.patch.newQuads);
       sw.stop();
       await result.after?.();
-      return <T>result.value;
+      return <T>result.return;
     });
   }
 

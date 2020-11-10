@@ -90,7 +90,7 @@ export namespace Response {
       updatesAddress: this.updatesAddress
     });
 
-    toString = () => `Snapshot at ${this.lastTime} with hash ${this.lastHash}`;
+    toString = () => `Snapshot at ${this.lastTime} with ${this.lastHash}`;
     [inspect] = () => this.toString();
   }
 

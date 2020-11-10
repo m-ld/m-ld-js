@@ -4,7 +4,6 @@
 import { TreeClock } from './clocks';
 import { Observable } from 'rxjs';
 import { Message } from './messages';
-import { Quad } from 'rdf-js';
 import { Hash } from './hash';
 import { MsgPack, Future } from './util';
 import { LiveValue } from './LiveValue';
@@ -23,19 +22,22 @@ export class DeltaMessage implements Message<TreeClock, EncodedDelta> {
   readonly delivered = new Future;
 
   constructor(
+    readonly prev: number,
     readonly time: TreeClock,
     readonly data: EncodedDelta) {
   }
 
   encode(): Buffer {
-    return MsgPack.encode({ time: this.time.toJson(), data: this.data });
+    return MsgPack.encode({
+      time: this.time.toJson(), prev: this.prev, data: this.data
+    });
   }
 
   static decode(enc: Buffer): DeltaMessage {
     const json = MsgPack.decode(enc);
     const time = TreeClock.fromJson(json.time);
     if (time && json.data)
-      return new DeltaMessage(time, json.data);
+      return new DeltaMessage(json.prev, time, json.data);
     else
       throw new MeldError('Bad update');
   }
@@ -46,7 +48,7 @@ export class DeltaMessage implements Message<TreeClock, EncodedDelta> {
 
   toString() {
     return `${JSON.stringify(this.data)}
-    @ ${this.time}`;
+    @ ${this.time}, prev ${this.prev}`;
   }
 
   // v8(chrome/nodejs) console

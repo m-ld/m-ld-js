@@ -5,6 +5,11 @@ export interface Message<C, D> {
   data: D;
 }
 
+/**
+ * A process that accepts messages
+ */
+export type Process<M, C extends CausalClock<C>> = (message: M, prev: C) => void;
+
 export abstract class MessageService<C extends CausalClock<C>> {
   /**
    * Call to process newly received message data from the wire.
@@ -20,7 +25,7 @@ export abstract class MessageService<C extends CausalClock<C>> {
    * if buffered
    */
   receive<M extends Message<C, unknown>>(
-    message: M, buffer: M[], process: (message: M) => void): boolean {
+    message: M, buffer: M[], process: Process<M, C>): boolean {
     if (this.readyFor(message.time)) {
       this.deliver(message, buffer, process);
       return true;
@@ -30,13 +35,14 @@ export abstract class MessageService<C extends CausalClock<C>> {
     }
   }
 
-  deliver<M extends Message<C, unknown>>(message: M, buffer: M[], process: (message: M) => void) {
+  deliver<M extends Message<C, unknown>>(message: M, buffer: M[], process: Process<M, C>) {
+    const prev = this.peek();
     this.join(message.time);
-    process(message);
+    process(message, prev);
     this.reconsider(buffer, process);
   }
 
-  reconsider<M extends Message<C, unknown>>(buffer: M[], process: (message: M) => void) {
+  reconsider<M extends Message<C, unknown>>(buffer: M[], process: Process<M, C>) {
     const readyForIdx = buffer.findIndex(msg => this.readyFor(msg.time));
     if (readyForIdx > -1) {
       const msg = buffer[readyForIdx];
@@ -48,7 +54,7 @@ export abstract class MessageService<C extends CausalClock<C>> {
   abstract peek(): C;
   abstract event(): C;
   abstract join(time: C): void;
-  abstract fork(): C;
+  abstract push(time: C): void;
 
   private readyFor(senderTime: C) {
     return !this.peek().anyLt(senderTime);
@@ -75,10 +81,8 @@ export class TreeClockMessageService extends MessageService<TreeClock> {
     this.localTime = this.localTime.update(time);
   }
 
-  fork(): TreeClock {
-    const fork = this.localTime.forked();
-    this.localTime = fork.left;
-    return fork.right;
+  push(time: TreeClock): void {
+    this.localTime = time;
   }
 }
 

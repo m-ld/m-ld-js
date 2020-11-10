@@ -133,50 +133,6 @@ test('Ticks for ticked updated forked not Id', () => {
   expect(updatedLeft.nonIdTicks).toBe(2);
 });
 
-test('No-op merge', () => {
-  expect(TreeClock.GENESIS.equals(TreeClock.GENESIS.mergeId(TreeClock.GENESIS))).toBe(true);
-});
-
-test('Merge forked', () => {
-  const fork = TreeClock.GENESIS.forked();
-  expect(TreeClock.GENESIS.equals(fork.left.mergeId(fork.right))).toBe(true);
-});
-
-test('Merge ticked forked', () => {
-  const ticked = TreeClock.GENESIS.ticked();
-  const fork = ticked.forked();
-  expect(ticked.equals(fork.left.mergeId(fork.right))).toBe(true);
-});
-
-test('Merge forked ticked', () => {
-  const fork = TreeClock.GENESIS.forked();
-  expect(fork.left.ticked().mergeId(fork.right).ticks).toBe(1);
-});
-
-test('Merge forked ticked ticked', () => {
-  const fork = TreeClock.GENESIS.forked();
-  expect(fork.left.ticked().mergeId(fork.right.ticked()).ticks).toBe(1);
-});
-
-test('Non-contiguous merge', () => {
-  const fork1 = TreeClock.GENESIS.forked(), fork2 = fork1.right.forked();
-  const clock1 = fork1.left.ticked(), clock3 = fork2.right.ticked();
-
-  expect(clock1.mergeId(clock3).ticks).toBe(1);
-  expect(clock1.update(clock3).mergeId(clock3).ticks).toBe(2);
-});
-
-test('Merge all', () => {
-  const fork1 = TreeClock.GENESIS.forked(), fork2 = fork1.right.forked();
-  const clock1 = fork1.left.ticked(),
-    clock2 = fork2.left.ticked(),
-    clock3 = fork2.right.ticked(),
-    clock4 = clock1.update(clock3).mergeId(clock3),
-    clock5 = clock2.update(clock4).mergeId(clock4);
-
-  expect(clock5.ticks).toBe(3);
-});
-
 test('Less than genesis self', () => {
   expect(TreeClock.GENESIS.anyLt(TreeClock.GENESIS)).toBe(false);
 });
@@ -304,4 +260,24 @@ test('forked ID with ticks is not lt unforked', () => {
   const id1 = fork.left.update(fork.right.ticked());
   // { 1{ ID, 1 }, } !< { 1, ID }
   expect(id1.anyLt(id2)).toBe(false);
+});
+
+test('scrubbing ID', () => {
+  expect(TreeClock.GENESIS.scrubId().toJson()).toBe(0);
+  expect(TreeClock.GENESIS.ticked().forked().left.scrubId().toJson()).toEqual([1, 0, 0]);
+  expect(TreeClock.GENESIS.forked().left.ticked().scrubId().toJson()).toEqual([1, 0]);
+});
+
+test('update of scrubbed ID from ID', () => {
+  expect(TreeClock.GENESIS.scrubId().update(
+    TreeClock.GENESIS.forked().left.ticked()).toJson()).toEqual([1, 0]);
+  expect(TreeClock.GENESIS.scrubId().update(
+    TreeClock.GENESIS.ticked().forked().left).toJson()).toEqual([1, 0, 0]);
+});
+
+test('update of scrubbed ID from scrubbed ID', () => {
+  expect(TreeClock.GENESIS.scrubId().update(
+    TreeClock.GENESIS.forked().left.ticked().scrubId()).toJson()).toEqual([1, 0]);
+  expect(TreeClock.GENESIS.scrubId().update(
+    TreeClock.GENESIS.ticked().forked().left.scrubId()).toJson()).toEqual([1, 0, 0]);
 });

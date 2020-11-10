@@ -142,8 +142,9 @@ describe('Ably remotes', () => {
     connCallbacks.connected?.(mock<Ably.Types.ConnectionStateChange>());
     otherPresent();
     await comesAlive(remotes);
-    const entry = new DeltaMessage(
-      TreeClock.GENESIS.forked().left, [0, 't1', '{}', '{}']);
+    const time = TreeClock.GENESIS.forked().left;
+    const entry = new DeltaMessage(time.ticks,
+      time.ticked(), [0, 't1', '{}', '{}']);
     const updates = new Source<DeltaMessage>();
     remotes.setLocal(mockLocal({ updates }));
     updates.next(entry);

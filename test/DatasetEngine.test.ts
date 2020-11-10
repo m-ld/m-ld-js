@@ -149,7 +149,7 @@ describe('Dataset engine', () => {
         '@id': 'http://test.m-ld.org/fred',
         'http://test.m-ld.org/#name': 'Fred'
       } as Subject);
-      remoteUpdates.next(new DeltaMessage(remoteTime.ticked(),
+      remoteUpdates.next(new DeltaMessage(remoteTime.ticks, remoteTime.ticked(),
         [0, uuid(), '{}', '{"@id":"http://test.m-ld.org/wilma","http://test.m-ld.org/#name":"Wilma"}']));
       // Note extra tick for constraint application in remote update
       await expect(updates).resolves.toEqual([1, 3]);
@@ -160,7 +160,7 @@ describe('Dataset engine', () => {
     // 1. a remote transaction, because of the clock space made for a constraint
     test('answers rev-up from next new clone after apply', async () => {
       const updated = clone.dataUpdates.pipe(take(1)).toPromise();
-      remoteUpdates.next(new DeltaMessage(remoteTime.ticked(),
+      remoteUpdates.next(new DeltaMessage(remoteTime.ticks, remoteTime.ticked(),
         [0, uuid(), '{}', '{"@id":"http://test.m-ld.org/wilma","http://test.m-ld.org/#name":"Wilma"}']));
       await updated;
       const thirdTime = await clone.newClock();
@@ -280,8 +280,7 @@ describe('Dataset engine', () => {
       // Need a remote with rev-ups to share
       const remotes = mockRemotes(NEVER, [true]);
       const revUps = new Source<DeltaMessage>();
-      remoteTime = remoteTime.ticked();
-      remotes.revupFrom = async () => ({ lastTime: remoteTime, updates: revUps });
+      remotes.revupFrom = async () => ({ lastTime: remoteTime.ticked(), updates: revUps });
       // The clone will initialise into a revving-up state, waiting for a revUp
       clone = new DatasetEngine({ dataset: await memStore(ldb), remotes, config: testConfig() });
       const observedTicks = clone.updates.pipe(map(next => next.time.ticks), take(2), toArray()).toPromise();
@@ -292,7 +291,7 @@ describe('Dataset engine', () => {
         'http://test.m-ld.org/#name': 'Flintstone'
       });
       // Provide a rev-up that pre-dates the local siloed update
-      revUps.next(new DeltaMessage(remoteTime,
+      revUps.next(new DeltaMessage(remoteTime.ticks, remoteTime.ticked(),
         [0, uuid(), '{}', '{"@id":"http://test.m-ld.org/wilma","http://test.m-ld.org/#name":"Wilma"}']));
       revUps.complete();
       // Check that the updates are not out of order
