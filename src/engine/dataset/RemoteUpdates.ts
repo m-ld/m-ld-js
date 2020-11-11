@@ -27,8 +27,9 @@ export class RemoteUpdates {
       this.outdatedState.complete();
   }
 
-  detach = () => {
-    // We may or may not be outdated at this point
+  detach = (outdated?: 'outdated') => {
+    if (outdated)
+      this.outdatedState.next(true);
     this.remoteUpdates.next(NEVER);
   };
 

@@ -297,5 +297,22 @@ describe('Dataset engine', () => {
       // Check that the updates are not out of order
       await expect(observedTicks).resolves.toEqual([1, 2]);
     });
+
+    test('immediately re-connects after out of order delta', async () => {
+      // Re-start on the same data
+      const remoteUpdates = new Source<DeltaMessage>();
+      const remotes = mockRemotes(remoteUpdates, [true]);
+      remotes.revupFrom = async () => ({ lastTime: remoteTime, updates: EMPTY });
+      const clone = new DatasetEngine({ dataset: await memStore(ldb), remotes, config: testConfig() });
+      await clone.initialise();
+      await clone.status.becomes({ outdated: false });
+
+      // Push a delta claiming a missed tick
+      remoteUpdates.next(new DeltaMessage(remoteTime.ticks + 1, remoteTime.ticked().ticked(),
+        [0, uuid(), '{}', '{"@id":"http://test.m-ld.org/wilma","http://test.m-ld.org/#name":"Wilma"}']));
+
+      await expect(clone.status.becomes({ outdated: true })).resolves.toBeDefined();
+      await expect(clone.status.becomes({ outdated: false })).resolves.toBeDefined();
+    });
   });
 });

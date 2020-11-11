@@ -13,7 +13,7 @@ import { Dataset } from '.';
 import {
   publishReplay, refCount, filter, takeUntil, tap,
   finalize, toArray, map, debounceTime,
-  distinctUntilChanged, expand, delayWhen, take, skipWhile, ignoreElements, mergeMap
+  distinctUntilChanged, expand, delayWhen, take, skipWhile, ignoreElements, mergeMap, share
 } from 'rxjs/operators';
 import { delayUntil, Future, tapComplete, fromArrayPromise } from '../util';
 import { LockManager } from "../locks";
@@ -169,7 +169,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
    */
   private get deltaProblems(): Observable<DeltaOutcome> {
     const [disordered, maybeBuffering] = partition(this.remoteUpdates.receiving.pipe(
-      mergeMap(delta => this.acceptRemoteDelta(delta))),
+      mergeMap(delta => this.acceptRemoteDelta(delta)), share()),
       outcome => outcome === DeltaOutcome.DISORDERED);
     // Disordered messages are an immediate problem, buffering only if chronic
     return merge(disordered, maybeBuffering.pipe(
@@ -189,7 +189,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
           this.log.debug('Messages were out of order, but now cleared.');
           return false;
         }
-      })));
+      }))).pipe(tap(() => this.remoteUpdates.detach('outdated')));
   }
 
   private async acceptRemoteDelta(delta: DeltaMessage): Promise<DeltaOutcome> {
@@ -198,11 +198,10 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
     // Grab the state lock, per CloneEngine contract and to ensure that all
     // clock ticks are immediately followed by their respective transactions.
     return this.lock.exclusive('state', async () => {
-      // Synchronously gather ticks for transaction applications
-      const applys: [DeltaMessage, TreeClock, TreeClock][] = [];
-      // If we buffer a message, return false to signal we might need a re-connect
       try {
         const startTime = this.localTime;
+        // Synchronously gather ticks for transaction applications
+        const applys: [DeltaMessage, TreeClock, TreeClock][] = [];
         const accepted = this.messageService.receive(delta, this.orderingBuffer, (msg, prevTime) => {
           // Check that we have the previous message from this clock ID
           const expectedPrev = prevTime.getTicks(msg.time);
@@ -261,7 +260,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
           await this.connect(retry);
           this.setLive(true);
         } else {
-          // Stop receiving updates until re-connect.
+          // Stop receiving updates until re-connect, do not change outdated
           this.remoteUpdates.detach();
           if (remotesLive === false) {
             // We are the silo, the last survivor.
