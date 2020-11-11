@@ -4,7 +4,7 @@ import { liveRollup } from "../LiveValue";
 import { Subject, Read, Write } from '../../jrql-support';
 import {
   Observable, merge, from, EMPTY,
-  concat, BehaviorSubject, Subscription, interval, of, Subscriber, OperatorFunction
+  concat, BehaviorSubject, Subscription, interval, of, Subscriber, OperatorFunction, partition
 } from 'rxjs';
 import { TreeClock } from '../clocks';
 import { SuSetDataset } from './SuSetDataset';
@@ -13,7 +13,7 @@ import { Dataset } from '.';
 import {
   publishReplay, refCount, filter, takeUntil, tap,
   finalize, toArray, map, debounceTime,
-  distinctUntilChanged, expand, delayWhen, take, skipWhile, ignoreElements
+  distinctUntilChanged, expand, delayWhen, take, skipWhile, ignoreElements, mergeMap
 } from 'rxjs/operators';
 import { delayUntil, Future, tapComplete, fromArrayPromise } from '../util';
 import { LockManager } from "../locks";
@@ -24,16 +24,24 @@ import { RemoteUpdates } from './RemoteUpdates';
 import { NO_CONSTRAINT } from '../../constraints';
 import { CloneEngine } from '../StateEngine';
 import { MeldError } from '../MeldError';
+import { MeldErrorStatus } from '@m-ld/m-ld-spec';
 
 enum ConnectStyle {
   SOFT, HARD
+}
+enum DeltaOutcome {
+  /** Delta was accepted (and may have precipitated un-buffering) */
+  ACCEPTED,
+  /** Delta was buffered in expectation of causal deltas */
+  BUFFERED,
+  /** Delta was unacceptable due to missing prior deltas */
+  DISORDERED
 }
 
 export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLocal {
   private readonly dataset: SuSetDataset;
   private messageService: TreeClockMessageService;
   private readonly orderingBuffer: DeltaMessage[] = [];
-  private readonly bufferingDeltas: Observable<unknown>;
   private readonly remotes: Omit<MeldRemotes, 'updates'>;
   private readonly remoteUpdates: RemoteUpdates;
   private subs = new Subscription;
@@ -62,28 +70,6 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
     this.networkTimeout = config.networkTimeout ?? 5000;
     this.genesisClaim = config.genesis;
     this.subs.add(this.status.subscribe(status => this.log.debug(status)));
-    // Create an observable that emits if deltas are being chronically buffered.
-    // That is, if the buffer has been filling for longer than the network
-    // timeout. This observable is subscribed in the initialise() method.
-    this.bufferingDeltas = this.remoteUpdates.receiving.pipe(
-      map(delta => this.acceptRemoteDelta(delta)),
-      // From this point we are only interested in buffered messages
-      filter(accepted => !accepted),
-      // Wait for the network timeout in case the buffer clears
-      debounceTime(this.networkTimeout),
-      // After the debounce, check if still buffering
-      filter(() => {
-        if (this.orderingBuffer.length > 0) {
-          // We're missing messages that have been received by others.
-          // Let's re-connect to see if we can get back on track.
-          this.log.warn('Messages are out of order and backing up. Re-connecting.');
-          return true;
-        }
-        else {
-          this.log.debug('Messages were out of order, but now cleared.');
-          return false;
-        }
-      }));
   }
 
   /**
@@ -120,18 +106,18 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
       }
     }));
 
-    // Create a stream of 'opportunities' to decide our liveness.
-    // Each opportunity is a ConnectStyle: HARD to force re-connect.
-    // The stream errors/completes with the remote updates.
+    // Create a stream of 'opportunities' to decide our liveness, i.e.
+    // re-connect. The stream errors/completes with the remote updates.
     this.subs.add(merge(
       // 1. Changes to the liveness of the remotes. This emits the current
       //    liveness, but we don't use it because the value might have changed
       //    by the time we get the lock.
       this.remotes.live,
-      // 2. Chronic buffering of messages
-      this.bufferingDeltas
+      // 2. Chronic buffering of deltas
+      // 3. Unordered deltas
+      this.deltaProblems
     ).pipe(
-      // 3. Last attempt can generate more attempts (delay if soft)
+      // 4. Last attempt to connect can generate more attempts (delay if soft)
       expand(() => this.decideLive()
         .pipe(delayWhen(this.reconnectDelayer)))
     ).subscribe({
@@ -173,30 +159,85 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
     return this.messageService.peek();
   }
 
-  private acceptRemoteDelta(delta: DeltaMessage): boolean {
+  /**
+   * Creates observables that emit if
+   * - deltas are being chronically buffered or
+   * - a delta is received out of order.
+   *
+   * The former emits if the buffer has been filling for longer than the network
+   * timeout. This observables are subscribed in the initialise() method.
+   */
+  private get deltaProblems(): Observable<DeltaOutcome> {
+    const [disordered, maybeBuffering] = partition(this.remoteUpdates.receiving.pipe(
+      mergeMap(delta => this.acceptRemoteDelta(delta))),
+      outcome => outcome === DeltaOutcome.DISORDERED);
+    // Disordered messages are an immediate problem, buffering only if chronic
+    return merge(disordered, maybeBuffering.pipe(
+      // Accepted messages need no action, we are only interested in buffered
+      filter(outcome => outcome === DeltaOutcome.BUFFERED),
+      // Wait for the network timeout in case the buffer clears
+      debounceTime(this.networkTimeout),
+      // After the debounce, check if still buffering
+      filter(() => {
+        if (this.orderingBuffer.length > 0) {
+          // We're missing messages that have been received by others.
+          // Let's re-connect to see if we can get back on track.
+          this.log.warn('Messages are out of order and backing up. Re-connecting.');
+          return true;
+        }
+        else {
+          this.log.debug('Messages were out of order, but now cleared.');
+          return false;
+        }
+      })));
+  }
+
+  private async acceptRemoteDelta(delta: DeltaMessage): Promise<DeltaOutcome> {
     const logBody = this.log.getLevel() < levels.DEBUG ? delta : `tid: ${delta.data[1]}`;
     this.log.debug('Receiving', logBody);
-    // If we buffer a message, return false to signal we might need a re-connect
-    return this.messageService.receive(delta, this.orderingBuffer, (msg, prevTime) => {
-      // Check that we have the previous message from this clock ID
-      const expectedPrev = prevTime.getTicks(msg.time);
-      // TODO if (journalPrevTicks >= msg.time.ticks) we've seen this before
-      if (msg.prev !== expectedPrev)
-        throw new MeldError('Update out of order', `
-        Update claims prev is ${msg.prev} @ ${msg.time},
-        but local clock was ${expectedPrev} @ ${prevTime}`);
-      this.log.debug('Accepting', logBody);
-      // Need exclusive access to the state, per CloneEngine contract
-      this.lock.exclusive('state', async () => {
-        // Get the event time just before transacting the change
-        const arrivalTime = this.messageService.event();
-        // Make an extra clock tick available for constraints.
-        this.messageService.event();
-        const cxUpdate = await this.dataset.apply(msg, arrivalTime, this.localTime);
-        if (cxUpdate != null)
-          this.nextUpdate(cxUpdate);
-        msg.delivered.resolve();
-      }).catch(err => this.close(err));
+    // Grab the state lock, per CloneEngine contract and to ensure that all
+    // clock ticks are immediately followed by their respective transactions.
+    return this.lock.exclusive('state', async () => {
+      // Synchronously gather ticks for transaction applications
+      const applys: [DeltaMessage, TreeClock, TreeClock][] = [];
+      // If we buffer a message, return false to signal we might need a re-connect
+      try {
+        const startTime = this.localTime;
+        const accepted = this.messageService.receive(delta, this.orderingBuffer, (msg, prevTime) => {
+          // Check that we have the previous message from this clock ID
+          const expectedPrev = prevTime.getTicks(msg.time);
+          if (msg.prev < expectedPrev) {
+            // TODO Is the TID graph redundant?!
+            this.log.debug('Ignoring outdated', logBody);
+          } else if (msg.prev > expectedPrev) {
+            // We're missing a message. Reset the clock and trigger a re-connect.
+            this.messageService.push(startTime);
+            throw new MeldError('Update out of order', `
+              Update claims prev is ${msg.prev} @ ${msg.time},
+              but local clock was ${expectedPrev} @ ${prevTime}`);
+          } else {
+            this.log.debug('Accepting', logBody);
+            // Get the event time just before transacting the change, making an
+            // extra clock tick available for constraints.
+            applys.push([msg, this.messageService.event(), this.messageService.event()]);
+          }
+        });
+        // The applys will enqueue in order on the dataset's transaction lock
+        await Promise.all(applys.map(async ([msg, arrivalTime, localTime]) => {
+          const cxUpdate = await this.dataset.apply(msg, arrivalTime, localTime);
+          if (cxUpdate != null)
+            this.nextUpdate(cxUpdate);
+          msg.delivered.resolve();
+        }))
+        return accepted ? DeltaOutcome.ACCEPTED : DeltaOutcome.BUFFERED;
+      } catch (err) {
+        if (err instanceof MeldError && err.status === MeldErrorStatus['Update out of order']) {
+          this.log.info(err.message);
+          return DeltaOutcome.DISORDERED;
+        } else {
+          throw err;
+        }
+      }
     });
   }
 
