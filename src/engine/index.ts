@@ -128,10 +128,6 @@ export interface Snapshot extends Recovery {
    * TIDs. Arrays for batching (sender decides array size).
    */
   readonly quads: Observable<Triple[]>;
-  /**
-   * All observed TIDs, for detecting duplicates.
-   */
-  readonly tids: Observable<UUID[]>;
   readonly lastHash: Hash;
 }
 

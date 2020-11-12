@@ -150,15 +150,14 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     const res = await this.send<Response.Snapshot>(new Request.Snapshot, { ack, sw });
     sw.next('consume');
     // Subscribe in parallel (subscription can be slow)
-    const [quads, tids, updates] = await Promise.all([
+    const [quads, updates] = await Promise.all([
       this.consume(res.quadsAddress, this.triplesFromBuffer, 'failIfSlow'),
-      this.consume<UUID[]>(res.tidsAddress, MsgPack.decode, 'failIfSlow'),
       this.consume(res.updatesAddress, DeltaMessage.decode)
     ]);
     // Ack the response to start the streams
     ack.resolve();
     sw.stop();
-    return { lastTime: res.lastTime, lastHash: res.lastHash, quads, tids, updates };
+    return { lastTime: res.lastTime, lastHash: res.lastHash, quads, updates };
   }
 
   private triplesFromBuffer = (payload: Buffer) =>
@@ -366,15 +365,14 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
   }
 
   private async replySnapshot(sentParams: DirectParams, snapshot: Snapshot): Promise<void> {
-    const { lastTime, lastHash, quads, tids, updates } = snapshot;
-    const quadsAddress = uuid(), tidsAddress = uuid(), updatesAddress = uuid();
+    const { lastTime, lastHash, quads, updates } = snapshot;
+    const quadsAddress = uuid(), updatesAddress = uuid();
     await this.reply(sentParams, new Response.Snapshot(
-      lastTime, quadsAddress, tidsAddress, lastHash, updatesAddress
+      lastTime, quadsAddress, lastHash, updatesAddress
     ), 'expectAck');
     // Ack has been sent, start streaming the data and updates concurrently
     await Promise.all([
       this.produce(quads, sentParams.fromId, quadsAddress, this.bufferFromTriples, 'snapshot'),
-      this.produce(tids, sentParams.fromId, tidsAddress, MsgPack.encode, 'tids'),
       this.produce(updates, sentParams.fromId, updatesAddress, msg => msg.encode(), 'updates')
     ]);
   }

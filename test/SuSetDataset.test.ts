@@ -84,7 +84,6 @@ describe('SU-Set Dataset', () => {
         expect(snapshot.lastTime.equals(localTime.scrubId())).toBe(true);
         expect(snapshot.lastHash).toBeTruthy();
         await expect(snapshot.quads.toPromise()).resolves.toBeUndefined();
-        await expect(snapshot.tids.toPromise()).resolves.toBeUndefined();
       });
 
       test('transacts a no-op', async () => {
@@ -175,7 +174,6 @@ describe('SU-Set Dataset', () => {
           expect(snapshot.lastTime.equals(localTime.scrubId())).toBe(true);
           expect(snapshot.lastHash.equals(firstHash)).toBe(false);
           await expect(snapshot.quads.toPromise()).resolves.toBeDefined();
-          await expect(snapshot.tids.toPromise()).resolves.toBeDefined();
         });
 
         test('applies a snapshot', async () => {
@@ -184,8 +182,7 @@ describe('SU-Set Dataset', () => {
           await ssd.applySnapshot({
             lastTime: localTime,
             lastHash,
-            quads: from(await snapshot.quads.pipe(toArray()).toPromise()),
-            tids: from(await snapshot.tids.pipe(toArray()).toPromise())
+            quads: from(await snapshot.quads.pipe(toArray()).toPromise())
           }, localTime = localTime.ticked());
           expect((await ssd.lastHash()).equals(lastHash)).toBe(true);
           await expect(ssd.find1({ '@id': 'http://test.m-ld.org/fred' }))
@@ -239,43 +236,6 @@ describe('SU-Set Dataset', () => {
           expect(msg.time.equals(localTime)).toBe(true);
 
           await expect(ssd.describe1('http://test.m-ld.org/barney')).resolves.toEqual(barney);
-        });
-
-        test('rejects a duplicate transaction', async () => {
-          await ssd.transact(async () => [
-            localTime = localTime.ticked(),
-            await ssd.delete({ '@id': 'http://test.m-ld.org/fred' })
-          ]);
-          await ssd.apply(new DeltaMessage(
-            remoteTime.ticks,
-            remoteTime = remoteTime.ticked(),
-            [0, firstTid, '{}', '{"@id":"fred","name":"Fred"}']),
-            localTime = localTime.update(remoteTime).ticked(),
-            localTime = localTime.ticked());
-
-          await expect(ssd.find1({ '@id': 'http://test.m-ld.org/fred' })).resolves.toEqual('');
-        });
-
-        test('rejects a duplicate txn after snapshot', async () => {
-          await ssd.transact(async () => [
-            localTime = localTime.ticked(),
-            await ssd.delete({ '@id': 'http://test.m-ld.org/fred' })
-          ]);
-          const snapshot = await ssd.takeSnapshot();
-          await ssd.applySnapshot({
-            lastTime: localTime,
-            lastHash: await ssd.lastHash(),
-            quads: from(await snapshot.quads.pipe(toArray()).toPromise()),
-            tids: from(await snapshot.tids.pipe(toArray()).toPromise())
-          }, localTime = localTime.ticked());
-          await ssd.apply(new DeltaMessage(
-            remoteTime.ticks,
-            remoteTime = remoteTime.ticked(),
-            [0, firstTid, '{}', '{"@id":"fred","name":"Fred"}']),
-            localTime = localTime.update(remoteTime).ticked(),
-            localTime = localTime.ticked());
-
-          await expect(ssd.find1({ '@id': 'http://test.m-ld.org/fred' })).resolves.toEqual('');
         });
 
         test('answers local op since first', async () => {

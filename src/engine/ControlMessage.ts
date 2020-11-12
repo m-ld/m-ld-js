@@ -76,7 +76,6 @@ export namespace Response {
     constructor(
       readonly lastTime: TreeClock,
       readonly quadsAddress: string,
-      readonly tidsAddress: string,
       readonly lastHash: Hash,
       readonly updatesAddress: string) {
     }
@@ -85,7 +84,6 @@ export namespace Response {
       '@type': 'http://control.m-ld.org/response/snapshot',
       lastTime: this.lastTime.toJson(),
       quadsAddress: this.quadsAddress,
-      tidsAddress: this.tidsAddress,
       lastHash: this.lastHash.encode(),
       updatesAddress: this.updatesAddress
     });
@@ -146,8 +144,9 @@ export namespace Response {
           lastTime = TreeClock.fromJson(json.lastTime);
           if (lastTime)
             return new Snapshot(
-              lastTime, json.quadsAddress, json.tidsAddress,
-              Hash.decode(json.lastHash), json.updatesAddress);
+              lastTime, json.quadsAddress,
+              Hash.decode(json.lastHash),
+              json.updatesAddress);
           break;
         case 'http://control.m-ld.org/response/revup':
           lastTime = TreeClock.fromJson(json.lastTime);

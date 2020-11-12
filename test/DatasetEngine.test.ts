@@ -1,12 +1,12 @@
 import { DatasetEngine } from '../src/engine/dataset/DatasetEngine';
 import { memStore, mockRemotes, hotLive, testConfig } from './testClones';
-import { NEVER, Subject as Source, asapScheduler, EMPTY, throwError } from 'rxjs';
+import { NEVER, Subject as Source, asapScheduler, EMPTY, throwError, BehaviorSubject } from 'rxjs';
 import { comesAlive } from '../src/engine/AbstractMeld';
-import { first, take, toArray, map, observeOn } from 'rxjs/operators';
+import { first, take, toArray, map, observeOn, count } from 'rxjs/operators';
 import { TreeClock } from '../src/engine/clocks';
 import { DeltaMessage, MeldRemotes, Snapshot } from '../src/engine';
 import { uuid } from 'short-uuid';
-import { MeldConfig, Subject, Describe, Group, Update } from '../src';
+import { MeldConfig, Subject, Describe, Update } from '../src';
 import MemDown from 'memdown';
 import { AbstractLevelDOWN } from 'abstract-leveldown';
 import { Hash } from '../src/engine/hash';
@@ -178,17 +178,21 @@ describe('Dataset engine', () => {
 
   describe('as new clone', () => {
     let remotes: MeldRemotes;
+    let remoteUpdates: Source<DeltaMessage>;
     let snapshot: jest.Mock<Promise<Snapshot>, void[]>;
-    const remotesLive = hotLive([true]);
+    let collabClock: TreeClock;
+    let remotesLive: BehaviorSubject<boolean | null>;
 
     beforeEach(async () => {
-      const { left: cloneClock, right: collabClock } = TreeClock.GENESIS.forked()
-      remotes = mockRemotes(NEVER, remotesLive, cloneClock);
+      const { left, right } = TreeClock.GENESIS.forked()
+      collabClock = right;
+      remoteUpdates = new Source<DeltaMessage>();
+      remotesLive = hotLive([true]);
+      remotes = mockRemotes(remoteUpdates, remotesLive, left);
       snapshot = jest.fn().mockReturnValueOnce(Promise.resolve<Snapshot>({
         lastHash: Hash.random(),
-        lastTime: collabClock.ticked(),
+        lastTime: collabClock.ticked().scrubId(),
         quads: EMPTY,
-        tids: EMPTY,
         updates: EMPTY
       }));
       remotes.snapshot = snapshot;
@@ -206,6 +210,18 @@ describe('Dataset engine', () => {
       await clone.initialise();
       remotesLive.next(false);
       await expect(clone.status.becomes({ silo: true })).resolves.toBeDefined();
+    });
+
+    test('ignores delta from before snapshot', async () => {
+      const clone = new DatasetEngine({ dataset: await memStore(), remotes, config: testConfig({ genesis: false }) });
+      await clone.initialise();
+      const updates = clone.dataUpdates.pipe(count()).toPromise();
+      remoteUpdates.next(new DeltaMessage(collabClock.ticks, collabClock.ticked(),
+        [0, uuid(), '{}', '{"@id":"http://test.m-ld.org/wilma","http://test.m-ld.org/#name":"Wilma"}']));
+      // Also enqueue a no-op write, which we can wait for - relying on queue ordering
+      await clone.write({ '@insert': [] } as Update);
+      await clone.close(); // Will complete the updates
+      await expect(updates).resolves.toBe(0);
     });
   });
 
@@ -313,6 +329,30 @@ describe('Dataset engine', () => {
 
       await expect(clone.status.becomes({ outdated: true })).resolves.toBeDefined();
       await expect(clone.status.becomes({ outdated: false })).resolves.toBeDefined();
+    });
+
+    test('ignores outdated delta', async () => {
+      // Re-start on the same data
+      const remoteUpdates = new Source<DeltaMessage>();
+      const remotes = mockRemotes(remoteUpdates, [true]);
+      remotes.revupFrom = async () => ({ lastTime: remoteTime, updates: EMPTY });
+      const clone = new DatasetEngine({ dataset: await memStore(ldb), remotes, config: testConfig() });
+      await clone.initialise();
+      await clone.status.becomes({ outdated: false });
+
+      const updates = clone.dataUpdates.pipe(toArray()).toPromise();
+      const delta = new DeltaMessage(remoteTime.ticks, remoteTime.ticked(),
+        [0, uuid(), '{}', '{"@id":"http://test.m-ld.org/wilma","http://test.m-ld.org/#name":"Wilma"}']);
+      // Push a delta
+      remoteUpdates.next(delta);
+      // Push the same delta again
+      remoteUpdates.next(delta);
+      // Also enqueue a no-op write, which we can wait for - relying on queue ordering
+      await clone.write({ '@insert': [] } as Update);
+      await clone.close(); // Will complete the updates
+      const arrived = await updates;
+      expect(arrived.length).toBe(1);
+      expect(arrived[0]).toMatchObject({ '@insert': [{ "@id": "http://test.m-ld.org/wilma" }]})
     });
   });
 });
