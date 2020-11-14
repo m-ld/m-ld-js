@@ -1,4 +1,4 @@
-import { Future } from './util';
+import { Future, settled } from './util';
 
 interface SharedPromiseLike extends PromiseLike<unknown> {
   readonly pending: boolean;
@@ -84,8 +84,3 @@ export class LockManager<K extends string> {
     return this.head[key] ?? SharedPromise.resolve();
   }
 }
-
-function settled(result: Promise<unknown>): Promise<unknown> {
-  return new Promise(done => result.then(done, done));
-}
-

@@ -1,19 +1,18 @@
 import { DeltaMessage, MeldRemotes } from '..';
 import { LiveValue } from "../LiveValue";
-import { Observable, merge, NEVER, BehaviorSubject } from 'rxjs';
-import { switchAll } from 'rxjs/operators';
-import { delayUntil, Future, tapLast, onErrorNever } from '../util';
+import { Observable, merge, NEVER, BehaviorSubject, from } from 'rxjs';
+import { delayUntil, Future, tapLast, onErrorNever, HotSwitch, settled } from '../util';
 
 export class RemoteUpdates {
-  readonly receiving: Observable<DeltaMessage>;
-  // Note this is a behaviour subject because the subscribe from the
-  // DatasetEngine happens after the remote updates are attached
-  private readonly remoteUpdates = new BehaviorSubject<Observable<DeltaMessage>>(NEVER);
   private readonly outdatedState = new BehaviorSubject<boolean>(true);
+  private readonly updates = new HotSwitch<DeltaMessage>();
 
   constructor(
     private readonly remotes: MeldRemotes) {
-    this.receiving = this.remoteUpdates.pipe(switchAll());
+  }
+
+  get receiving(): Observable<DeltaMessage> {
+    return this.updates;
   }
 
   get outdated(): LiveValue<boolean> {
@@ -30,7 +29,7 @@ export class RemoteUpdates {
   detach = (outdated?: 'outdated') => {
     if (outdated)
       this.outdatedState.next(true);
-    this.remoteUpdates.next(NEVER);
+    this.updates.switch(NEVER);
   };
 
   attach(revups: Observable<DeltaMessage>): Promise<unknown> {
@@ -40,10 +39,11 @@ export class RemoteUpdates {
       // Updates must be paused during revups because the collaborator might
       // send an update while also sending revups of its own prior updates.
       // That would break the fifo guarantee.
-      this.remoteUpdates.next(merge(
+      this.updates.switch(merge(
         // Errors should be handled in the returned promise
         onErrorNever(revups.pipe(tapLast(lastRevup))),
-        this.remotes.updates.pipe(delayUntil(onErrorNever(lastRevup)))));
+        // If the revups error, we will detach, below
+        this.remotes.updates.pipe(delayUntil(settled(lastRevup)))));
       lastRevup.then(
         async (lastRevup: DeltaMessage | undefined) => {
           // Here, we are definitely before the first post-revup update, but
@@ -53,7 +53,7 @@ export class RemoteUpdates {
           this.outdatedState.next(false);
         },
         // Rev-up failed - detached and nothing-doing
-        () => { });
+        () => this.updates.switch(NEVER));
     });
     return Promise.resolve(lastRevup);
   }

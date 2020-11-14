@@ -15,7 +15,7 @@ import {
   finalize, toArray, map, debounceTime,
   distinctUntilChanged, expand, delayWhen, take, skipWhile, ignoreElements, mergeMap, share
 } from 'rxjs/operators';
-import { delayUntil, Future, tapComplete, fromArrayPromise } from '../util';
+import { delayUntil, Future, tapComplete, fromArrayPromise, poisson } from '../util';
 import { LockManager } from "../locks";
 import { levels } from 'loglevel';
 import { AbstractMeld, comesAlive } from '../AbstractMeld';
@@ -114,7 +114,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
       //    by the time we get the lock.
       this.remotes.live,
       // 2. Chronic buffering of deltas
-      // 3. Unordered deltas
+      // 3. Disordered deltas
       this.deltaProblems
     ).pipe(
       // 4. Last attempt to connect can generate more attempts (delay if soft)
@@ -139,11 +139,8 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
         // Hard retry is immediate
         return of(0);
       case ConnectStyle.SOFT:
-        // Soft retry is a distribution around ~2 * network timeout
-        let delayMultiple = 0; // will be >= 1, most probably around 2
-        for (let p = 1.0; p > 0.3; p *= Math.random())
-          delayMultiple++;
-        return interval(delayMultiple * Math.random() * this.networkTimeout);
+        // Soft retry is a distribution ~(>=0 mean 2) * network timeout
+        return interval((poisson(2) + 1) * Math.random() * this.networkTimeout);
     }
   }
 
@@ -206,7 +203,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
           // Check that we have the previous message from this clock ID
           const expectedPrev = prevTime.getTicks(msg.time);
           if (msg.prev < expectedPrev) {
-            // TODO Is the TID graph redundant?!
+            // Already had this message.
             this.log.debug('Ignoring outdated', logBody);
           } else if (msg.prev > expectedPrev) {
             // We're missing a message. Reset the clock and trigger a re-connect.
@@ -241,41 +238,41 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
   }
 
   /**
-   * @param style `ConnectStyle.HARD` to force a re-connect regardless of
-   * liveness
    * @returns Zero or one retry indication. If zero, success. If a value is
    * emitted, it indicates failure, and the value is whether the re-connect
-   * should be hard.
+   * should be hard. Emission of an error is catastrophic.
    */
   private decideLive(): Observable<ConnectStyle> {
     return new Observable(retry => {
-      // Block transactions, revups and other connect attempts while handling
-      // liveness change.
-      this.lock.exclusive('live', async () => {
-        const remotesLive = this.remotes.live.value;
-        if (remotesLive === true) {
-          if (this.isGenesis)
-            throw new Error('Genesis clone trying to join a live domain.');
-          // Connect in the live lock
-          await this.connect(retry);
-          this.setLive(true);
-        } else {
-          // Stop receiving updates until re-connect, do not change outdated
-          this.remoteUpdates.detach();
-          if (remotesLive === false) {
-            // We are the silo, the last survivor.
-            if (this.newClone)
-              throw new Error('New clone is siloed.');
-            // Stay live for any newcomers to rev-up from us.
+      // As soon as a decision on liveness needs to be made, pause output
+      // updates to mitigate against breaking fifo with emitOpsSince(). 
+      this.pauseUpdates(
+        // Also block transactions, revups and other connect attempts.
+        this.lock.exclusive('live', async () => {
+          const remotesLive = this.remotes.live.value;
+          if (remotesLive === true) {
+            if (this.isGenesis)
+              throw new Error('Genesis clone trying to join a live domain.');
+            // Connect in the live lock
+            await this.connect(retry);
             this.setLive(true);
-            retry.complete();
-          } else if (remotesLive === null) {
-            // We are partitioned from the domain.
-            this.setLive(false);
-            retry.complete();
+          } else {
+            // Stop receiving updates until re-connect, do not change outdated
+            this.remoteUpdates.detach();
+            if (remotesLive === false) {
+              // We are the silo, the last survivor.
+              if (this.newClone)
+                throw new Error('New clone is siloed.');
+              // Stay live for any newcomers to rev-up from us.
+              this.setLive(true);
+              retry.complete();
+            } else if (remotesLive === null) {
+              // We are partitioned from the domain.
+              this.setLive(false);
+              retry.complete();
+            }
           }
-        }
-      }).catch(err => retry.error(err));
+        }).catch(err => retry.error(err)));
     });
   }
 
@@ -316,7 +313,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
    */
   private async requestRevup(retry: Subscriber<ConnectStyle>): Promise<boolean> {
     const revup = await this.remotes.revupFrom(this.localTime);
-    if (revup) {
+    if (revup != null) {
       this.log.info('revving-up from collaborator');
       // We don't wait until rev-ups have been completely delivered
       this.acceptRecoveryUpdates(revup.updates, retry);
@@ -357,7 +354,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
     // Delay all updates until the snapshot has been fully applied
     // This is because a snapshot is applied in multiple transactions
     const updates = concat(
-      snapshot.updates.pipe(delayUntil(from(snapshotApplied))),
+      snapshot.updates.pipe(delayUntil(snapshotApplied)),
       fromArrayPromise(reEmits));
     this.acceptRecoveryUpdates(updates, retry);
     return snapshotApplied; // We can go live as soon as the snapshot is applied
@@ -427,17 +424,17 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
   @AbstractMeld.checkLive.async
   async revupFrom(time: TreeClock): Promise<Revup | undefined> {
     return this.lock.exclusive('live', async () => {
-      const sentOperations = new Future;
-      const maybeMissed = this.remoteUpdatesBeforeNow(sentOperations);
+      const operationsSent = new Future;
+      const maybeMissed = this.remoteUpdatesBeforeNow(operationsSent);
       const lastTime = new Future<TreeClock>();
       const operations = await this.dataset.operationsSince(time, lastTime);
       if (operations)
         return {
           lastTime: await lastTime,
           updates: merge(
-            operations.pipe(tapComplete(sentOperations), tap(msg =>
+            operations.pipe(tapComplete(operationsSent), tap(msg =>
               this.log.debug('Sending rev-up', msg))),
-            maybeMissed.pipe(delayUntil(from(sentOperations))))
+            maybeMissed.pipe(delayUntil(operationsSent)))
         };
     });
   }

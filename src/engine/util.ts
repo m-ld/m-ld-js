@@ -1,11 +1,12 @@
 import {
   concat, Observable, OperatorFunction, Subscription, throwError,
-  AsyncSubject, ObservableInput, onErrorResumeNext, NEVER, from
+  AsyncSubject, ObservableInput, onErrorResumeNext, NEVER, from, BehaviorSubject, Subject, SubscriptionLike, Observer
 } from "rxjs";
-import { publish, tap, mergeMap } from "rxjs/operators";
+import { publish, tap, mergeMap, switchAll } from "rxjs/operators";
 import { LogLevelDesc, getLogger, getLoggers } from 'loglevel';
 import * as performance from 'marky';
 import { encode as rawEncode, decode as rawDecode } from '@ably/msgpack-js';
+import { Source } from 'rdf-js';
 
 export namespace MsgPack {
   export const encode = (value: any) => Buffer.from(rawEncode(value).buffer);
@@ -30,6 +31,10 @@ export function toJson(thing: any): any {
     return { ...thing, message: thing.message };
   else
     return thing;
+}
+
+export function settled(result: PromiseLike<unknown>): Promise<unknown> {
+  return new Promise(done => result.then(done, done));
 }
 
 export class Future<T = void> implements PromiseLike<T> {
@@ -90,7 +95,7 @@ export function tapComplete<T>(done: Future): OperatorFunction<T, T> {
  * Delays notifications from a source until a signal is received from a notifier.
  * @see https://ncjamieson.com/how-to-write-delayuntil/
  */
-export function delayUntil<T>(notifier: Observable<any>): OperatorFunction<T, T> {
+export function delayUntil<T>(notifier: ObservableInput<unknown>): OperatorFunction<T, T> {
   return source =>
     source.pipe(
       publish(published => {
@@ -99,7 +104,7 @@ export function delayUntil<T>(notifier: Observable<any>): OperatorFunction<T, T>
           const buffer: T[] = [];
           const subscription = new Subscription();
           subscription.add(
-            notifier.subscribe(
+            from(notifier).subscribe(
               () => {
                 buffer.forEach(value => subscriber.next(value));
                 subscriber.complete();
@@ -127,8 +132,42 @@ export function delayUntil<T>(notifier: Observable<any>): OperatorFunction<T, T>
     );
 }
 
-export function onErrorNever<T, R>(v: ObservableInput<T>): Observable<R> {
+export function onErrorNever<T>(v: ObservableInput<T>): Observable<T> {
   return onErrorResumeNext(v, NEVER);
+}
+
+export class HotSwitch<T> extends Observable<T> {
+  private readonly in: BehaviorSubject<Observable<T>>;
+  
+  constructor(position: Observable<T> = NEVER) {
+    super(subs => this.in.pipe(switchAll()).subscribe(subs));
+    this.in = new BehaviorSubject<Observable<T>>(position);
+  }
+
+  switch(to: Observable<T>) {
+    this.in.next(to);
+  }
+}
+
+export class PauseableSource<T> extends Observable<T> implements Observer<T> {
+  private readonly subject = new Subject<T>();
+  private readonly switch = new HotSwitch<T>(this.subject);
+
+  constructor() {
+    super(subs => this.switch.subscribe(subs));
+  }
+  
+  get closed() {
+    return this.subject.closed;
+  };
+
+  next = (value: T) => this.subject.next(value);
+  error = (err: any) => this.subject.error(err);
+  complete = () => this.subject.complete();
+
+  pause(until: ObservableInput<unknown>) {
+    this.switch.switch(this.subject.pipe(delayUntil(until)));
+  }
 }
 
 export function getIdLogger(ctor: Function, id: string, logLevel: LogLevelDesc = 'info') {
@@ -194,4 +233,12 @@ export class Stopwatch {
       this.lap.stop();
     return this.entry = performance.stop(this.name);
   }
+}
+
+export function poisson(mean: number) {
+  const threshold = Math.exp(-mean);
+  let rtn = 0;
+  for (let p = 1.0; p > threshold; p *= Math.random())
+    rtn++;
+  return rtn - 1;
 }
