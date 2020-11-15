@@ -272,6 +272,16 @@ describe('Dataset engine', () => {
         .resolves.toEqual({ online: true, outdated: false, silo: false, ticks: 0 });
     });
 
+    test('is not outdated if immediately siloed', async () => {
+      const remotes = mockRemotes(NEVER, [null, false]);
+      const clone = new DatasetEngine({ dataset: await memStore(ldb), remotes, config: testConfig() });
+
+      await clone.initialise();
+
+      await expect(clone.status.becomes({ outdated: false }))
+        .resolves.toEqual({ online: true, outdated: false, silo: true, ticks: 0 });
+    });
+
     test('immediately re-connects if rev-up fails', async () => {
       const remotes = mockRemotes(NEVER, [true]);
       const revupFrom = jest.fn()

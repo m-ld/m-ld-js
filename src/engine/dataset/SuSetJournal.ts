@@ -83,6 +83,10 @@ export class SuSetJournalEntry {
       else
         throw err;
     }
+    if (this.body.gwc == null && 'remote' in <any>this.body) {
+      // Prior versions with remote flag had no gwc. Use scrubbed time.
+      this.body.gwc = this.time.scrubId().toJson();
+    }
   }
 
   get id(): Iri {

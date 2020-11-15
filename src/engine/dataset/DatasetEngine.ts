@@ -52,6 +52,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
   private readonly latestTicks = new BehaviorSubject<number>(NaN);
   private readonly networkTimeout: number;
   private readonly genesisClaim: boolean;
+  readonly status: Observable<MeldStatus> & LiveStatus;
 
   constructor({ dataset, remotes, constraint, config }: {
     dataset: Dataset;
@@ -69,6 +70,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
     this.remoteUpdates = new RemoteUpdates(remotes);
     this.networkTimeout = config.networkTimeout ?? 5000;
     this.genesisClaim = config.genesis;
+    this.status = this.createStatus();
     this.subs.add(this.status.subscribe(status => this.log.debug(status)));
   }
 
@@ -79,7 +81,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
    * collaborator.
    *
    * An application may choose to delay its own initialisation until the latest
-   * updates have either been received, using the {@link #latest} method.
+   * updates have been received, using the {@link status} field.
    *
    * @return resolves when the clone can accept transactions
    */
@@ -297,7 +299,8 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
          connect lock.
       2. A candidate collaborator timed-out. This could happen if we are
          mutually requesting rev-ups, for example if we both believe we are the
-         silo. Hence the jitter on the soft reconnect, see this.softDelay.
+         silo. Hence the jitter on the soft reconnect, see
+         this.reconnectDelayer.
       */
       retry.next(ConnectStyle.SOFT);
       retry.complete();
@@ -334,7 +337,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
   private async requestSnapshot(retry: Subscriber<ConnectStyle>): Promise<unknown> {
     const snapshot = await this.remotes.snapshot();
     // We contractually have to subscribe to the snapshot streams on this tick,
-    // so no awaits allowed until we injectRevups
+    // so no awaits allowed until we acceptRecoveryUpdates
     return this.acceptSnapshot(snapshot, retry);
   }
 
@@ -478,20 +481,26 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
     });
   }
 
-  get status(): Observable<MeldStatus> & LiveStatus {
+  private createStatus(): Observable<MeldStatus> & LiveStatus {
+    let remotesEverLive = false;
     const stateRollup = liveRollup({
       live: this.live,
       remotesLive: this.remotes.live,
       outdated: this.remoteUpdates.outdated,
       ticks: this.latestTicks
     });
-    const toStatus = (state: typeof stateRollup['value']): MeldStatus => ({
-      online: state.remotesLive != null,
-      // If genesis, never outdated.
-      outdated: !this.isGenesis && state.outdated,
-      silo: state.live === true && state.remotesLive === false,
-      ticks: state.ticks
-    });
+    const toStatus = (state: typeof stateRollup['value']): MeldStatus => {
+      if (state.remotesLive === true)
+        remotesEverLive = true;
+      const silo = state.live === true && state.remotesLive === false;
+      return ({
+        online: state.remotesLive != null,
+        // If genesis, never outdated.
+        // If we have never had live remotes and siloed, not outdated
+        outdated: !this.isGenesis && state.outdated && (remotesEverLive || !silo),
+        silo, ticks: state.ticks
+      });
+    };
     const matchStatus = (status: MeldStatus, match?: Partial<MeldStatus>) =>
       (match?.online === undefined || match.online === status.online) &&
       (match?.outdated === undefined || match.outdated === status.outdated) &&
