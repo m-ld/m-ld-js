@@ -410,7 +410,7 @@ describe('SU-Set Dataset', () => {
     });
 
     test('applies an inserting constraint', async () => {
-      constraint.apply = async () => ({ '@insert': wilma });
+      constraint.apply = async (_, update) => update.append({ '@insert': wilma });
       const willUpdate = captureUpdate();
       const msg = await ssd.apply(new DeltaMessage(
         remoteTime.ticks,
@@ -444,7 +444,7 @@ describe('SU-Set Dataset', () => {
     });
 
     test('applies a deleting constraint', async () => {
-      constraint.apply = async () => ({ '@delete': wilma });
+      constraint.apply = async (_, update) => update.append({ '@delete': wilma });
 
       await ssd.transact(async () => [
         localTime = localTime.ticked(),
@@ -467,7 +467,7 @@ describe('SU-Set Dataset', () => {
 
     test('applies a self-deleting constraint', async () => {
       // Constraint is going to delete the data we're inserting
-      constraint.apply = async () => ({ '@delete': wilma });
+      constraint.apply = async (_, update) => update.append({ '@delete': wilma });
 
       const willUpdate = captureUpdate();
       await ssd.apply(new DeltaMessage(
@@ -487,7 +487,7 @@ describe('SU-Set Dataset', () => {
 
     test('applies a self-inserting constraint', async () => {
       // Constraint is going to insert the data we're deleting
-      constraint.apply = async () => ({ '@insert': wilma });
+      constraint.apply = async (_, update) => update.append({ '@insert': wilma });
 
       const tid = (await ssd.transact(async () => [
         localTime = localTime.ticked(),

@@ -1,7 +1,7 @@
-import { MeldConstraint, MeldUpdate, MeldReadState, asSubjectUpdates, updateSubject } from '..';
+import { MeldConstraint, MeldUpdate, MeldReadState, asSubjectUpdates, updateSubject, MutableMeldUpdate } from '..';
 import { Iri } from 'jsonld/jsonld-spec';
 import { DeleteInsert } from '..';
-import { map, filter, take, reduce, mergeMap, defaultIfEmpty } from 'rxjs/operators';
+import { map, filter, take, reduce, mergeMap, defaultIfEmpty, concatMap } from 'rxjs/operators';
 import { Subject, Select, Update, Value, isValueObject } from '../jrql-support';
 import { Observable, EMPTY, concat, defer, from } from 'rxjs';
 
@@ -34,21 +34,20 @@ export class SingleValued implements MeldConstraint {
     return failed != null ? Promise.reject(this.failure(failed)) : Promise.resolve();
   }
 
-  async apply(state: MeldReadState, update: MeldUpdate): Promise<Update | null> {
-    return await this.affected(state, update).pipe(
-      reduce<Subject, Promise<DeleteInsert<Subject[]> | null>>(async (accPattern, subject) => {
+  apply(state: MeldReadState, update: MutableMeldUpdate): Promise<unknown> {
+    return this.affected(state, update).pipe(
+      concatMap(async subject => {
         const values = subject[this.property];
         if (isMultiValued(values)) {
           const resolvedValue = await this.resolve(values);
-          const pattern = await accPattern ?? { '@insert': [], '@delete': [] };
-          pattern['@delete'].push({
-            '@id': subject['@id'],
-            [this.property]: values.filter(v => v !== resolvedValue)
+          await update.append({
+            '@delete': {
+              '@id': subject['@id'],
+              [this.property]: values.filter(v => v !== resolvedValue)
+            }
           });
-          return pattern;
         }
-        return accPattern;
-      }, Promise.resolve(null))).toPromise();
+      })).toPromise();
   }
 
   private affected(state: MeldReadState, update: MeldUpdate, failEarly?: 'failEarly'): Observable<Subject> {

@@ -1,9 +1,10 @@
-import { MeldReadState } from '../src/api';
+import { MeldReadState, MutableMeldUpdate } from '../src/api';
 import { memStore } from './testClones';
 import { SingleValued } from '../src/constraints/SingleValued';
 import { JrqlGraph } from '../src/engine/dataset/JrqlGraph';
 import { GraphState } from '../src/engine/dataset/SuSetDataset';
 import { Dataset } from '../src/engine/dataset';
+import { mock, mockFn } from 'jest-mock-extended';
 
 describe('Single-valued constraint', () => {
   let data: Dataset;
@@ -70,23 +71,27 @@ describe('Single-valued constraint', () => {
 
   test('does not apply to a single-valued property update', async () => {
     const constraint = new SingleValued('http://test.m-ld.org/#name');
-    await expect(constraint.apply(state, {
+    const update = mock<MutableMeldUpdate>({
       '@ticks': 0,
       '@delete': [],
       '@insert': [{ '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Fred' }]
-    })).resolves.toBeNull();
+    });
+    await constraint.apply(state, update);
+    expect(update.append.mock.calls).toEqual([]);
   });
 
   test('applies to a multi-valued property update', async () => {
     const constraint = new SingleValued('http://test.m-ld.org/#name');
-    await expect(constraint.apply(state, {
+    const update = mock<MutableMeldUpdate>({
       '@ticks': 0,
       '@delete': [],
       '@insert': [{ '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': ['Fred', 'Flintstone'] }]
-    })).resolves.toEqual({
+    });
+    await constraint.apply(state, update);
+    expect(update.append.calledWith({
       '@delete': [{ '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': ['Flintstone'] }],
       '@insert': []
-    });
+    }));
   });
 
   test('applies to a single-valued additive property update', async () => {
@@ -98,14 +103,16 @@ describe('Single-valued constraint', () => {
       })
     });
     const constraint = new SingleValued('http://test.m-ld.org/#name');
-    await expect(constraint.apply(state, {
+    const update = mock<MutableMeldUpdate>({
       '@ticks': 0,
       '@delete': [],
       '@insert': [{ '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Flintstone' }]
-    })).resolves.toEqual({
+    });
+    await constraint.apply(state, update);
+    expect(update.append.calledWith({
       '@delete': [{ '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': ['Flintstone'] }],
       '@insert': []
-    });
+    }));
   });
 
   test('applies selectively to existing data', async () => {
@@ -119,11 +126,13 @@ describe('Single-valued constraint', () => {
       })
     });
     const constraint = new SingleValued('http://test.m-ld.org/#name');
-    await constraint.apply(state, {
+    const update = mock<MutableMeldUpdate>({
       '@ticks': 0,
       '@delete': [],
       '@insert': [{ '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Flintstone' }]
     });
+    await constraint.apply(state, update);
+    // FIXME: not applied to the dataset!
 
     await expect(graph.describe1('http://test.m-ld.org/fred'))
       .resolves.toMatchObject({ 'http://test.m-ld.org/#name': 'Fred' });

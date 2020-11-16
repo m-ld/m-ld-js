@@ -286,21 +286,27 @@ export interface MeldClone extends MeldStateMachine {
 export interface MeldConstraint {
   /**
    * Check the given update does not violate this constraint.
-   * @param update the provisional update, prior to application to the data
    * @param state a read-only view of data from the clone prior to the update
+   * @param update the provisional update, prior to application to the data
    * @returns a rejection if the constraint is violated (or fails)
    */
   check(state: MeldReadState, update: MeldUpdate): Promise<unknown>;
   /**
    * Applies the constraint to an update being applied to the data. If the
-   * update would cause a violation, this method must provide an Update which
-   * resolves the violation.
-   * @param update the provisional update, prior to application to the data
+   * update would cause a violation, this method must mutate the given update
+   * using its `append` method, to resolve the violation.
    * @param state a read-only view of data from the clone prior to the update
-   * @returns `null` if no violation is found. Otherwise, an Update the resolves
-   * the violation so that the constraint invariant is upheld.
+   * @param update the provisional update, prior to application to the data
+   * @returns a rejection only if the constraint application fails
    */
-  apply(state: MeldReadState, update: MeldUpdate): Promise<Update | null>;
+  apply(state: MeldReadState, update: MutableMeldUpdate): Promise<unknown>;
+}
+
+/**
+ * An update to which further updates can be appended.
+ */
+export interface MutableMeldUpdate extends MeldUpdate {
+  append(update: Update): Promise<unknown>;
 }
 
 /**

@@ -121,7 +121,7 @@ export class ApiStateMachine extends ApiState implements MeldStateMachine {
     return this;
   }
 
-  private async applyUpdateContext(update: MeldUpdate) {
+  private async applyUpdateContext(update: MeldUpdate): Promise<MeldUpdate> {
     return {
       '@ticks': update['@ticks'],
       '@delete': await this.regroup(update['@delete']),
