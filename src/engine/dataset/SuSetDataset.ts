@@ -95,10 +95,7 @@ export class SuSetDataset extends JrqlGraph {
     // Create the Journal if not exists
     return this.dataset.transact({
       id: 'suset-reset',
-      prepare: async () => {
-        const journalPatch = await this.journal.initialise();
-        return journalPatch != null ? { patch: journalPatch } : {};
-      }
+      prepare: async () => ({ patch: await this.journal.initialise() })
     });
   }
 

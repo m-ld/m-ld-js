@@ -37,7 +37,7 @@ export function hotLive(lives: Array<boolean | null>): BehaviorSubject<boolean |
 
 export async function memStore(
   leveldown: AbstractLevelDOWN = new MemDown): Promise<Dataset> {
-  return new QuadStoreDataset(leveldown);
+  return new QuadStoreDataset(leveldown).initialise();
 }
 
 export function mockLocal(

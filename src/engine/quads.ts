@@ -4,6 +4,7 @@ import { fromRDF, toRDF } from 'jsonld';
 import { IndexMap, IndexSet } from "./indices";
 
 export type Triple = Omit<Quad, 'graph'>;
+export type TriplePos = 'subject' | 'predicate' | 'object';
 
 export class QuadMap<T> extends IndexMap<Quad, T> {
   protected getIndex(key: Quad): string {
@@ -74,6 +75,8 @@ export function cloneQuad(quad: Quad): Quad {
 
 export function cloneTerm<T extends Term>(term: T): T {
   switch (term.termType) {
+    case 'Quad':
+      return <T>cloneQuad(<Quad>term);
     case 'BlankNode':
       return <T>blankNode(term.value);
     case 'DefaultGraph':

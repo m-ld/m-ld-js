@@ -1,20 +1,20 @@
 import { Quad, DefaultGraph, NamedNode, Quad_Subject, Quad_Predicate, Quad_Object } from 'rdf-js';
 import { defaultGraph } from '@rdfjs/data-model';
-import { RdfStore, MatchTerms } from 'quadstore';
-import { AbstractLevelDOWN, AbstractOpenOptions } from 'abstract-leveldown';
+import { Quadstore } from 'quadstore';
+import { AbstractLevelDOWN } from 'abstract-leveldown';
 import { Observable } from 'rxjs';
 import { generate as uuid } from 'short-uuid';
 import { check, Stopwatch } from '../util';
 import { LockManager } from '../locks';
-import { promisify } from 'util';
 import { QuadSet } from '../quads';
 import { Filter } from '../indices';
+import dataFactory = require('@rdfjs/data-model');
 
 /**
  * Atomically-applied patch to a quad-store.
  */
 export interface Patch {
-  readonly oldQuads: Quad[] | MatchTerms<Quad>;
+  readonly oldQuads: Quad[] | Partial<Quad>;
   readonly newQuads: Quad[];
 }
 
@@ -115,16 +115,19 @@ export interface Graph {
 
 export class QuadStoreDataset implements Dataset {
   readonly location: string;
-  private readonly store: RdfStore;
+  private readonly store: Quadstore;
   private readonly lock = new LockManager;
   private isClosed: boolean = false;
 
-  constructor(
-    private readonly leveldown: AbstractLevelDOWN,
-    opts?: AbstractOpenOptions) {
-    this.store = new RdfStore(leveldown, opts);
+  constructor(backend: AbstractLevelDOWN) {
+    this.store = new Quadstore({ backend, dataFactory });
     // Internal of level-js and leveldown
-    this.location = (<any>leveldown).location ?? uuid();
+    this.location = (<any>backend).location ?? uuid();
+  }
+
+  async initialise(): Promise<QuadStoreDataset> {
+    await this.store.open();
+    return this;
   }
 
   graph(name?: GraphName): Graph {
@@ -149,11 +152,24 @@ export class QuadStoreDataset implements Dataset {
       const result = await txn.prepare({ id, sw: sw.lap });
       sw.next('apply');
       if (result.patch != null)
-        await this.store.patch(result.patch.oldQuads, result.patch.newQuads);
+        await this.apply(result.patch);
       sw.stop();
       await result.after?.();
       return <T>result.return;
     });
+  }
+
+  private async apply(patch: Patch) {
+    if (Array.isArray(patch.oldQuads)) {
+      await this.store.multiPatch(patch.oldQuads, patch.newQuads);
+    } else {
+      // FIXME: Not atomic! – Rarely used
+      const { subject, predicate, object, graph } = patch.oldQuads;
+      await new Promise((resolve, reject) =>
+        this.store.removeMatches(subject, predicate, object, graph)
+          .on('end', resolve).on('error', reject));
+      await this.store.multiPut(patch.newQuads);
+    }
   }
 
   @notClosed.async
@@ -161,7 +177,7 @@ export class QuadStoreDataset implements Dataset {
     // Make efforts to ensure no transactions are running
     return this.lock.exclusive('txn', () => {
       this.isClosed = true;
-      return promisify(this.leveldown.close.bind(this.leveldown))();
+      return this.store.close();
     });
   }
 
@@ -172,7 +188,7 @@ export class QuadStoreDataset implements Dataset {
 
 class QuadStoreGraph implements Graph {
   constructor(
-    readonly store: RdfStore,
+    readonly store: Quadstore,
     readonly name: GraphName) {
   }
 

@@ -12,9 +12,9 @@ import { Graph, PatchQuads } from '.';
 import { toArray, mergeMap, map, filter, distinct } from 'rxjs/operators';
 import { from, of, EMPTY, Observable, throwError } from 'rxjs';
 import { flatten, fromArrayPromise } from '../util';
-import { QuadSolution, VarValues, TriplePos } from './QuadSolution';
+import { QuadSolution, VarValues } from './QuadSolution';
 import { array, shortId } from '../../util';
-import { jsonToRdf, rdfToJson } from '../quads';
+import { jsonToRdf, rdfToJson, TriplePos } from '../quads';
 
 /**
  * A graph wrapper that provides low-level json-rql handling for queries. The

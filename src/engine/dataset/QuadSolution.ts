@@ -1,7 +1,7 @@
 import { Quad, Quad_Object, Quad_Predicate } from 'rdf-js'
+import { TriplePos } from '../quads';
 
 export type VarValues = { [name: string]: Quad_Object | Quad_Predicate | Quad_Object };
-export type TriplePos = Exclude<keyof Quad, 'equals' | 'graph'>;
 
 export class QuadSolution {
   static EMPTY: QuadSolution = new QuadSolution({}, []);
