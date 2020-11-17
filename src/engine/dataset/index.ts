@@ -9,6 +9,7 @@ import { LockManager } from '../locks';
 import { QuadSet } from '../quads';
 import { Filter } from '../indices';
 import dataFactory = require('@rdfjs/data-model');
+import { TermName } from 'quadstore/dist/lib/types';
 
 /**
  * Atomically-applied patch to a quad-store.
@@ -120,7 +121,12 @@ export class QuadStoreDataset implements Dataset {
   private isClosed: boolean = false;
 
   constructor(backend: AbstractLevelDOWN) {
-    this.store = new Quadstore({ backend, dataFactory });
+    this.store = new Quadstore({
+      backend, dataFactory, indexes: [
+        [TermName.GRAPH, TermName.SUBJECT, TermName.PREDICATE, TermName.OBJECT],
+        [TermName.GRAPH, TermName.OBJECT, TermName.SUBJECT, TermName.PREDICATE],
+        [TermName.GRAPH, TermName.PREDICATE, TermName.OBJECT, TermName.SUBJECT]
+    ] });
     // Internal of level-js and leveldown
     this.location = (<any>backend).location ?? uuid();
   }
