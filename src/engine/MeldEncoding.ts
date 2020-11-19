@@ -7,7 +7,8 @@ import { compact } from 'jsonld';
 import { flatten } from './util';
 import { Context, ExpandedTermDef } from '../jrql-support';
 import { Iri } from 'jsonld/jsonld-spec';
-import { Triple, tripleKey, rdfToJson, jsonToRdf, TripleMap } from './quads';
+import { Triple, tripleKey, TripleMap } from './quads';
+import { rdfToJson, jsonToRdf } from "./jsonld";
 
 export class DomainContext implements Context {
   '@base': Iri;

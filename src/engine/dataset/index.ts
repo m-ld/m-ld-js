@@ -10,6 +10,9 @@ import { QuadSet } from '../quads';
 import { Filter } from '../indices';
 import dataFactory = require('@rdfjs/data-model');
 import { TermName } from 'quadstore/dist/lib/types';
+import { Context } from 'jsonld/jsonld-spec';
+import { activeCtx, compactIri, expandTerm } from '../jsonld';
+import { ActiveContext } from 'jsonld/lib/context';
 
 /**
  * Atomically-applied patch to a quad-store.
@@ -116,22 +119,36 @@ export interface Graph {
 
 export class QuadStoreDataset implements Dataset {
   readonly location: string;
-  private readonly store: Quadstore;
+  private /* readonly */ store: Quadstore;
+  private readonly activeCtx?: Promise<ActiveContext>;
   private readonly lock = new LockManager;
   private isClosed: boolean = false;
 
-  constructor(backend: AbstractLevelDOWN) {
-    this.store = new Quadstore({
-      backend, dataFactory, indexes: [
-        [TermName.GRAPH, TermName.SUBJECT, TermName.PREDICATE, TermName.OBJECT],
-        [TermName.GRAPH, TermName.OBJECT, TermName.SUBJECT, TermName.PREDICATE],
-        [TermName.GRAPH, TermName.PREDICATE, TermName.OBJECT, TermName.SUBJECT]
-    ] });
+  constructor(private readonly backend: AbstractLevelDOWN, context?: Context) {
     // Internal of level-js and leveldown
     this.location = (<any>backend).location ?? uuid();
+    if (context != null)
+      this.activeCtx = activeCtx(context);
   }
 
   async initialise(): Promise<QuadStoreDataset> {
+    const activeCtx = await this.activeCtx;
+    this.store = new Quadstore({
+      backend : this.backend,
+      dataFactory,
+      indexes: [
+        [TermName.GRAPH, TermName.SUBJECT, TermName.PREDICATE, TermName.OBJECT],
+        [TermName.GRAPH, TermName.OBJECT, TermName.SUBJECT, TermName.PREDICATE],
+        [TermName.GRAPH, TermName.PREDICATE, TermName.OBJECT, TermName.SUBJECT]
+      ],
+      prefixes: activeCtx == null ? undefined : {
+        expandTerm: term => {
+console.log('expanding', term)
+          return expandTerm(term, activeCtx);
+        },
+        compactIri: iri => compactIri(iri, activeCtx)
+      }
+    });
     await this.store.open();
     return this;
   }

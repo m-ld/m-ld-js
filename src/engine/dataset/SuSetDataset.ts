@@ -19,7 +19,8 @@ import { LocalLock } from '../local';
 import { SUSET_CONTEXT, qsName, toPrefixedId } from './SuSetGraph';
 import { SuSetJournalGraph, SuSetJournalEntry } from './SuSetJournal';
 import { MeldConfig, Read } from '../..';
-import { QuadMap, TripleMap, Triple, rdfToJson } from '../quads';
+import { QuadMap, TripleMap, Triple } from '../quads';
+import { rdfToJson } from "../jsonld";
 
 interface HashTid extends Subject {
   '@id': Iri; // hash:<hashed triple id>

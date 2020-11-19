@@ -14,7 +14,8 @@ import { from, of, EMPTY, Observable, throwError } from 'rxjs';
 import { flatten, fromArrayPromise } from '../util';
 import { QuadSolution, VarValues } from './QuadSolution';
 import { array, shortId } from '../../util';
-import { jsonToRdf, rdfToJson, TriplePos } from '../quads';
+import { TriplePos } from '../quads';
+import { activeCtx, expandTerm, jsonToRdf, rdfToJson } from "../jsonld";
 
 /**
  * A graph wrapper that provides low-level json-rql handling for queries. The
@@ -222,12 +223,8 @@ export async function toSubject(quads: Quad[], context: Context): Promise<object
   return compact(await rdfToJson(quads), context || {}) as unknown as Subject;
 }
 
-export async function resolve(iri: Iri, context?: Context): Promise<NamedNode> {
-  return namedNode(context ? (await compact({
-    '@id': iri,
-    'http://json-rql.org/predicate': 1,
-    '@context': context
-  }, {}) as any)['@id'] : iri);
+async function resolve(iri: Iri, context?: Context): Promise<NamedNode> {
+  return namedNode(context ? expandTerm(iri, await activeCtx(context)) : iri);
 }
 
 function asMatchTerms(quad: Quad):

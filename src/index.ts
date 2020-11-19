@@ -98,7 +98,7 @@ export async function clone(
   constraint?: MeldConstraint): Promise<MeldClone> {
 
   const context = new DomainContext(config['@domain'], config['@context']);
-  const dataset = await new QuadStoreDataset(backend).initialise();
+  const dataset = await new QuadStoreDataset(backend, context).initialise();
 
   if (typeof remotes == 'function')
     remotes = new remotes(config);
