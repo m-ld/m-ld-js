@@ -2,6 +2,9 @@ import { Context } from '../../jrql-support';
 import { namedNode } from '@rdfjs/data-model';
 import { NamedNode } from 'rdf-js';
 
+/**
+ * Context for SU-Set Dataset code to manipulate control content.
+ */
 export const SUSET_CONTEXT: Context = {
   qs: 'http://qs.m-ld.org/',
   tid: 'qs:#tid', // Property of journal entry AND triple hash

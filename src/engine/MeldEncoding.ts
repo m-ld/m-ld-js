@@ -95,7 +95,7 @@ export class JsonDeltaBagBlock extends HashBagBlock<EncodedDelta> {
  * TODO: re-sync with Java
  * @see m-ld/m-ld-core/src/main/java/org/m_ld/MeldResource.java
  */
-const DEFAULT_CONTEXT = {
+const DELTA_CONTEXT = {
   rdf: rdf.$id,
   xs: 'http://www.w3.org/2001/XMLSchema#',
   tid: meld.tid.value,
@@ -108,7 +108,7 @@ export class MeldEncoding {
   context: DomainContext;
 
   constructor(readonly domain: string) {
-    this.context = new DomainContext(domain, DEFAULT_CONTEXT);
+    this.context = new DomainContext(domain, DELTA_CONTEXT);
   }
 
   newDelta = async (delta: Omit<MeldDelta, 'encoded'>): Promise<MeldDelta> => {

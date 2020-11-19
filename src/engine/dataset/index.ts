@@ -117,6 +117,16 @@ export interface Graph {
   match(subject?: Quad_Subject, predicate?: Quad_Predicate, object?: Quad_Object): Observable<Quad>;
 }
 
+/**
+ * Context for Quadstore dataset storage. Mix in with a domain context to
+ * optimise (minimise) both control and user content.
+ */
+export const STORAGE_CONTEXT: Context = {
+  qs: 'http://qs.m-ld.org/',
+  xs: 'http://www.w3.org/2001/XMLSchema#',
+  rdf: 'http://www.w3.org/1999/02/22-rdf-syntax-ns#'
+}
+
 export class QuadStoreDataset implements Dataset {
   readonly location: string;
   private /* readonly */ store: Quadstore;
@@ -127,8 +137,7 @@ export class QuadStoreDataset implements Dataset {
   constructor(private readonly backend: AbstractLevelDOWN, context?: Context) {
     // Internal of level-js and leveldown
     this.location = (<any>backend).location ?? uuid();
-    if (context != null)
-      this.activeCtx = activeCtx(context);
+    this.activeCtx = activeCtx(Object.assign({}, STORAGE_CONTEXT, context));
   }
 
   async initialise(): Promise<QuadStoreDataset> {
@@ -142,10 +151,7 @@ export class QuadStoreDataset implements Dataset {
         [TermName.GRAPH, TermName.PREDICATE, TermName.OBJECT, TermName.SUBJECT]
       ],
       prefixes: activeCtx == null ? undefined : {
-        expandTerm: term => {
-console.log('expanding', term)
-          return expandTerm(term, activeCtx);
-        },
+        expandTerm: term => expandTerm(term, activeCtx),
         compactIri: iri => compactIri(iri, activeCtx)
       }
     });
