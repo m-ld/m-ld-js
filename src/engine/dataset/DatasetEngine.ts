@@ -130,9 +130,9 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
     if (this.newClone)
       // For a new non-genesis clone, the first connect is essential.
       await comesAlive(this);
-    else
-      // For any other clone, just wait for decided liveness.
-      await comesAlive(this, 'notNull');
+    // else
+    //   // For any other clone, just wait for decided liveness.
+    //   await comesAlive(this, 'notNull');
   }
 
   private reconnectDelayer = (style: ConnectStyle): Observable<number> => {

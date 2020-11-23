@@ -4,7 +4,6 @@
 import { TreeClock } from './clocks';
 import { Observable } from 'rxjs';
 import { Message } from './messages';
-import { Hash } from './hash';
 import { MsgPack, Future } from './util';
 import { LiveValue } from './LiveValue';
 import { MeldError } from './MeldError';
@@ -128,7 +127,6 @@ export interface Snapshot extends Recovery {
    * TIDs. Arrays for batching (sender decides array size).
    */
   readonly quads: Observable<Triple[]>;
-  readonly lastHash: Hash;
 }
 
 export interface MeldRemotes extends Meld {

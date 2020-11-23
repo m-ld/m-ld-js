@@ -1,7 +1,6 @@
 import { SuSetDataset } from '../src/engine/dataset/SuSetDataset';
 import { memStore } from './testClones';
 import { TreeClock } from '../src/engine/clocks';
-import { Hash } from '../src/engine/hash';
 import { first, toArray, isEmpty } from 'rxjs/operators';
 import { uuid } from 'short-uuid';
 import { Subject } from 'json-rql';
@@ -47,10 +46,6 @@ describe('SU-Set Dataset', () => {
       await expect(otherSsd.initialise()).rejects.toThrow();
     });
 
-    test('has a hash', async () => {
-      expect(await ssd.lastHash()).toBeTruthy();
-    });
-
     test('does not have a time', async () => {
       expect(await ssd.loadClock()).toBeNull();
     });
@@ -82,7 +77,6 @@ describe('SU-Set Dataset', () => {
       test('answers an empty snapshot', async () => {
         const snapshot = await ssd.takeSnapshot();
         expect(snapshot.lastTime.equals(localTime.scrubId())).toBe(true);
-        expect(snapshot.lastHash).toBeTruthy();
         await expect(snapshot.quads.toPromise()).resolves.toBeUndefined();
       });
 
@@ -148,20 +142,13 @@ describe('SU-Set Dataset', () => {
       });
 
       describe('with an initial triple', () => {
-        let firstHash: Hash;
         let firstTid: string;
 
         beforeEach(async () => {
-          firstHash = await ssd.lastHash();
           firstTid = (await ssd.transact(async () => [
             localTime = localTime.ticked(),
             await ssd.insert(fred)
           ]) ?? fail()).data[1];
-        });
-
-        test('has a new hash', async () => {
-          const newHash = await ssd.lastHash();
-          expect(newHash.equals(firstHash)).toBe(false);
         });
 
         test('answers the new time', async () => {
@@ -172,19 +159,15 @@ describe('SU-Set Dataset', () => {
         test('answers a snapshot', async () => {
           const snapshot = await ssd.takeSnapshot();
           expect(snapshot.lastTime.equals(localTime.scrubId())).toBe(true);
-          expect(snapshot.lastHash.equals(firstHash)).toBe(false);
           await expect(snapshot.quads.toPromise()).resolves.toBeDefined();
         });
 
         test('applies a snapshot', async () => {
           const snapshot = await ssd.takeSnapshot();
-          const lastHash = Hash.random(); // Blatant lie, for the test
           await ssd.applySnapshot({
             lastTime: localTime,
-            lastHash,
             quads: from(await snapshot.quads.pipe(toArray()).toPromise())
           }, localTime = localTime.ticked());
-          expect((await ssd.lastHash()).equals(lastHash)).toBe(true);
           await expect(ssd.find1({ '@id': 'http://test.m-ld.org/fred' }))
             .resolves.toEqual('http://test.m-ld.org/fred');
         });

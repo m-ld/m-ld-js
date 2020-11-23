@@ -1,12 +1,10 @@
 import { Subject } from '../../jrql-support';
-import { qsName, SUSET_CONTEXT, toPrefixedId } from './SuSetGraph';
+import { fromPrefixedId, qsName, SUSET_CONTEXT, toPrefixedId } from './SuSetGraph';
 import { Iri } from 'jsonld/jsonld-spec';
 import { UUID, MeldDelta, EncodedDelta } from '..';
-import { JsonDeltaBagBlock } from '../MeldEncoding';
 import { TreeClock } from '../clocks';
 import { PatchQuads, Patch, Dataset } from '.';
 import { JrqlGraph } from './JrqlGraph';
-import { Hash } from '../hash';
 import { MsgPack } from '../util';
 
 interface JournalJson extends Subject {
@@ -29,7 +27,6 @@ interface JournalEntryJson extends Subject {
   /**
    * Base64-encoded message-packed body
    */
-  // FIXME: This will get converted back to binary by encoding-down
   body: string;
   /**
    * Local clock ticks for which this entry was the Journal tail. This can
@@ -40,10 +37,6 @@ interface JournalEntryJson extends Subject {
 }
 
 interface JournalEntryBody {
-  /** Transaction ID */
-  tid: UUID;
-  /** Encoded Hash */
-  hash: string;
   /** Raw delta - may contain Buffers */
   delta: EncodedDelta;
   /** JSON-encoded transaction message time */
@@ -56,8 +49,6 @@ interface JournalEntryBody {
    * for the local clone identity. This clock has no identity.
    */
   gwc: any;
-  /** Next entry in the linked list */
-  next?: JournalEntryJson['@id'];
 }
 
 export interface EntryCreateDetails {
@@ -73,23 +64,20 @@ export class SuSetJournalEntry {
     private readonly json: JournalEntryJson,
     private readonly body: JournalEntryBody = SuSetJournalEntry.decodeBody(json.body),
     readonly id: Iri = json['@id'],
-    readonly hash: Hash = Hash.decode(body.hash),
+    readonly seq: number = SuSetJournalEntry.seq(id),
     readonly time = TreeClock.fromJson(body.time) as TreeClock, // null iff temporary head
     readonly gwc = TreeClock.fromJson(body.gwc) as TreeClock, // null iff temporary head
     readonly delta = body.delta) { // undefined iff head
   }
 
   async next(): Promise<SuSetJournalEntry | undefined> {
-    if (this.body.next)
-      return this.graph.entry(this.body.next);
+    return this.graph.entry(SuSetJournalEntry.id(this.seq + 1));
   }
 
-  static headJson(hash: Hash, localTime?: TreeClock, gwc?: TreeClock):
+  static headJson(localTime?: TreeClock, gwc?: TreeClock):
     Partial<JournalEntryJson> & Subject {
-    const encodedHash = hash.encode();
-    const headEntryId = SuSetJournalEntry.id(encodedHash);
+    const headEntryId = SuSetJournalEntry.id(0);
     const body: Partial<JournalEntryBody> = {
-      hash: encodedHash,
       time: localTime?.toJson(),
       gwc: gwc?.toJson()
     };
@@ -110,58 +98,54 @@ export class SuSetJournalEntry {
     const patchBody = await this.updateBody({
       time: localTime.toJson(), gwc: localTime.scrubId().toJson()
     });
-    const patchTicks = await this.graph.insert({ '@id': this.id, ticks: localTime.ticks });
+    const patchTicks = await this.graph.insert({
+      '@id': SuSetJournalEntry.id(this.seq), ticks: localTime.ticks
+    });
     return patchBody.append(patchTicks);
   }
 
   builder(journal: SuSetJournal, entry: EntryCreateDetails) {
     const graph = this.graph;
     class EntryBuild {
-      next?: EntryBuild;
-      hash: Hash;
+      seq: number;
       gwc: TreeClock;
       time: TreeClock;
-      constructor(prevHash: Hash, prevGwc: TreeClock, readonly details: EntryCreateDetails) {
-        this.hash = SuSetJournalEntry.nextHash(prevHash, details.delta);
+      next?: EntryBuild;
+      constructor(prevSeq: number, prevGwc: TreeClock, readonly details: EntryCreateDetails) {
+        this.seq = prevSeq + 1;
         this.time = details.remoteTime ?? details.localTime;
         this.gwc = prevGwc.update(this.time);
       }
       *build(): Iterable<SuSetJournalEntry> {
-        const encodedHash = this.hash.encode();
         const body: JournalEntryBody = {
-          hash: encodedHash,
-          tid: this.details.delta.tid,
           time: this.time.toJson(),
           gwc: this.gwc.toJson(),
           delta: this.details.delta.encoded, // may contain buffers
         };
-        if (this.next != null)
-          body.next = SuSetJournalEntry.id(this.next.hash.encode());
-        const id = SuSetJournalEntry.id(encodedHash);
+        const id = SuSetJournalEntry.id(this.seq);
         yield new SuSetJournalEntry(graph, {
           '@id': id,
           body: SuSetJournalEntry.encodeBody(body),
           ticks: this.details.localTime.ticks
-        }, body, id, this.hash, this.time, this.gwc);
+        }, body, id, this.seq, this.time, this.gwc);
         if (this.next)
           yield* this.next.build();
       }
     }
-    let head = new EntryBuild(this.hash, this.gwc, entry), tail = head;
+    let head = new EntryBuild(this.seq, this.gwc, entry), tail = head;
     const builder = {
       /**
        * Adds another journal entry to this builder
        */
       next: (entry: EntryCreateDetails) => {
-        tail = tail.next = new EntryBuild(tail.hash, tail.gwc, entry);
+        tail = tail.next = new EntryBuild(tail.seq, tail.gwc, entry);
       },
       /**
        * Commits the built journal entries to the journal
        */
       commit: async () => {
         const entries = Array.from(head.build());
-        const patch = await this.updateBody({ next: entries[0].id });
-        patch.append(await this.graph.insert(entries.map(entry => entry.json)));
+        const patch = await this.graph.insert(entries.map(entry => entry.json));
         patch.append(await journal.commit(entries.slice(-1)[0], tail.details.localTime));
         return patch;
       }
@@ -199,12 +183,12 @@ export class SuSetJournalEntry {
     return body;
   }
 
-  private static id(encodedHash: string) {
-    return toPrefixedId('entry', encodedHash);
+  private static id(seq: number): Iri {
+    return toPrefixedId('entry', seq.toString());
   }
 
-  private static nextHash(prevHash: Hash, delta: MeldDelta) {
-    return new JsonDeltaBagBlock(prevHash).next(delta.encoded).id;
+  private static seq(id: Iri): number {
+    return Number(fromPrefixedId('entry', id)[0]);
   }
 }
 
@@ -229,7 +213,9 @@ export class SuSetJournal {
     if (this._tail == null) {
       if (this.body.tail == null)
         throw new Error('Journal has no tail yet');
-      this._tail = await this.graph.entry(this.body.tail);
+      this._tail = await this.graph.entry(this.body.tail) ?? null;
+      if (this._tail == null)
+        throw new Error('Journal tail is missing');
     }
     return this._tail;
   }
@@ -299,11 +285,11 @@ export class SuSetJournalGraph extends JrqlGraph {
     // Create the Journal if not exists
     const journal = await this.describe1<JournalJson>('qs:journal');
     if (journal == null)
-      return this.reset(Hash.random());
+      return this.reset();
   }
 
-  async reset(hash: Hash, gwc?: TreeClock, localTime?: TreeClock): Promise<Patch> {
-    const head = SuSetJournalEntry.headJson(hash, localTime, gwc);
+  async reset(gwc?: TreeClock, localTime?: TreeClock): Promise<Patch> {
+    const head = SuSetJournalEntry.headJson(localTime, gwc);
     const journal = SuSetJournal.initJson(head, localTime);
     const insert = await this.insert([journal, head]);
     this._journal = null; // Not caching one-time change
@@ -323,8 +309,7 @@ export class SuSetJournalGraph extends JrqlGraph {
 
   async entry(id: JournalEntryJson['@id']) {
     const entry = await this.describe1<JournalEntryJson>(id);
-    if (entry == null)
-      throw new Error('Missing entry');
-    return new SuSetJournalEntry(this, entry);
+    if (entry != null)
+      return new SuSetJournalEntry(this, entry);
   }
 }

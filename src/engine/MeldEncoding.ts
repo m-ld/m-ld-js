@@ -1,13 +1,11 @@
 import { MeldDelta, EncodedDelta, UUID } from '.';
 import { NamedNode, Quad } from 'rdf-js';
 import { literal, namedNode, blankNode, triple as newTriple, defaultGraph, quad as newQuad } from '@rdfjs/data-model';
-import { HashBagBlock } from './blocks';
-import { Hash } from './hash';
 import { compact } from 'jsonld';
 import { flatten } from './util';
 import { Context, ExpandedTermDef } from '../jrql-support';
 import { Iri } from 'jsonld/jsonld-spec';
-import { Triple, tripleKey, TripleMap } from './quads';
+import { Triple, TripleMap } from './quads';
 import { rdfToJson, jsonToRdf } from "./jsonld";
 
 export class DomainContext implements Context {
@@ -37,10 +35,6 @@ namespace rdf {
   export const subject = namedNode($id + 'subject');
   export const predicate = namedNode($id + 'predicate');
   export const object = namedNode($id + 'object');
-}
-
-export function hashTriple(triple: Triple): Hash {
-  return Hash.digest(...tripleKey(triple));
 }
 
 export function reifyTriplesTids(triplesTids: TripleMap<UUID[]>): Triple[] {
@@ -78,17 +72,6 @@ export function unreify(reifications: Triple[]): [Triple, UUID[]][] {
     rids[rid] = [triple, tids];
     return rids;
   }, {} as { [rid: string]: [Triple, UUID[]] }));
-}
-
-export class JsonDeltaBagBlock extends HashBagBlock<EncodedDelta> {
-  constructor(id: Hash, data?: EncodedDelta) { super(id, data); }
-  protected construct = (id: Hash, data: EncodedDelta) => new JsonDeltaBagBlock(id, data);
-  protected hash = (data: EncodedDelta) => {
-    const [ver, tid, del, ins] = data;
-    if (ver !== 0)
-      throw new Error(`Encoded delta version ${ver} not supported`);
-    return Hash.digest(tid, ins, del); // Note delete insert reversed (historical)
-  };
 }
 
 /**

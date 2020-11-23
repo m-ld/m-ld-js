@@ -1,4 +1,4 @@
-import { Snapshot, DeltaMessage, MeldRemotes, MeldLocal, UUID, Revup } from '.';
+import { Snapshot, DeltaMessage, MeldRemotes, MeldLocal, Revup } from '.';
 import { Observable, Subject as Source, BehaviorSubject, identity } from 'rxjs';
 import { TreeClock } from './clocks';
 import { generate as uuid } from 'short-uuid';
@@ -157,7 +157,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     // Ack the response to start the streams
     ack.resolve();
     sw.stop();
-    return { lastTime: res.lastTime, lastHash: res.lastHash, quads, updates };
+    return { lastTime: res.lastTime, quads, updates };
   }
 
   private triplesFromBuffer = (payload: Buffer) =>
@@ -365,10 +365,10 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
   }
 
   private async replySnapshot(sentParams: DirectParams, snapshot: Snapshot): Promise<void> {
-    const { lastTime, lastHash, quads, updates } = snapshot;
+    const { lastTime, quads, updates } = snapshot;
     const quadsAddress = uuid(), updatesAddress = uuid();
     await this.reply(sentParams, new Response.Snapshot(
-      lastTime, quadsAddress, lastHash, updatesAddress
+      lastTime, quadsAddress, updatesAddress
     ), 'expectAck');
     // Ack has been sent, start streaming the data and updates concurrently
     await Promise.all([

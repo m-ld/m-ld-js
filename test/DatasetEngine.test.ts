@@ -9,7 +9,6 @@ import { uuid } from 'short-uuid';
 import { MeldConfig, Subject, Describe, Update } from '../src';
 import MemDown from 'memdown';
 import { AbstractLevelDOWN } from 'abstract-leveldown';
-import { Hash } from '../src/engine/hash';
 
 describe('Dataset engine', () => {
   describe('as genesis', () => {
@@ -190,7 +189,6 @@ describe('Dataset engine', () => {
       remotesLive = hotLive([true]);
       remotes = mockRemotes(remoteUpdates, remotesLive, left);
       snapshot = jest.fn().mockReturnValueOnce(Promise.resolve<Snapshot>({
-        lastHash: Hash.random(),
         lastTime: collabClock.ticked().scrubId(),
         quads: EMPTY,
         updates: EMPTY

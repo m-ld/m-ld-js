@@ -2,13 +2,12 @@ import { MeldUpdate, MeldConstraint, MeldReadState, readResult, Resource, ReadRe
 import { Snapshot, UUID, DeltaMessage, MeldDelta } from '..';
 import { Quad } from 'rdf-js';
 import { TreeClock } from '../clocks';
-import { Hash } from '../hash';
 import { Subject } from '../../jrql-support';
 import { Dataset, PatchQuads } from '.';
 import { flatten as flatJsonLd } from 'jsonld';
 import { Iri } from 'jsonld/jsonld-spec';
 import { JrqlGraph } from './JrqlGraph';
-import { MeldEncoding, unreify, hashTriple, toDomainQuad, reifyTriplesTids } from '../MeldEncoding';
+import { MeldEncoding, unreify, toDomainQuad, reifyTriplesTids } from '../MeldEncoding';
 import { Observable, from, Subject as Source, EMPTY } from 'rxjs';
 import { bufferCount, mergeMap, reduce, map, filter, takeWhile, expand } from 'rxjs/operators';
 import { flatten, Future, tapComplete, getIdLogger, check } from '../util';
@@ -16,7 +15,7 @@ import { generate as uuid } from 'short-uuid';
 import { Logger } from 'loglevel';
 import { MeldError } from '../MeldError';
 import { LocalLock } from '../local';
-import { SUSET_CONTEXT, qsName, toPrefixedId } from './SuSetGraph';
+import { SUSET_CONTEXT, qsName, tripleId } from './SuSetGraph';
 import { SuSetJournalGraph, SuSetJournalEntry } from './SuSetJournal';
 import { MeldConfig, Read } from '../..';
 import { QuadMap, TripleMap, Triple } from '../quads';
@@ -133,15 +132,6 @@ export class SuSetDataset extends JrqlGraph {
         };
       }
     });
-  }
-
-  /**
-   * @return the last hash seen in the journal.
-   */
-  @SuSetDataset.checkNotClosed.async
-  async lastHash(): Promise<Hash> {
-    const journal = await this.journalGraph.journal();
-    return (await journal.tail()).hash;
   }
 
   /**
@@ -432,7 +422,7 @@ export class SuSetDataset extends JrqlGraph {
     const dataReset = this.dataset.transact({
       id: 'suset-reset',
       prepare: async () =>
-        ({ patch: await this.journalGraph.reset(snapshot.lastHash, snapshot.lastTime, localTime) })
+        ({ patch: await this.journalGraph.reset(snapshot.lastTime, localTime) })
     });
 
     const quadsApplied = snapshot.quads.pipe(
@@ -469,7 +459,6 @@ export class SuSetDataset extends JrqlGraph {
           const tail = await journal.tail();
           resolve({
             lastTime: tail.gwc,
-            lastHash: tail.hash,
             quads: this.graph.match().pipe(
               bufferCount(10), // TODO batch size config
               mergeMap(async batch => reifyTriplesTids(
@@ -482,8 +471,4 @@ export class SuSetDataset extends JrqlGraph {
       }).catch(reject);
     });
   }
-}
-
-function tripleId(triple: Triple): string {
-  return toPrefixedId('thash', hashTriple(triple).encode());
 }
