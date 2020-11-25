@@ -130,9 +130,6 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
     if (this.newClone)
       // For a new non-genesis clone, the first connect is essential.
       await comesAlive(this);
-    // else
-    //   // For any other clone, just wait for decided liveness.
-    //   await comesAlive(this, 'notNull');
   }
 
   private reconnectDelayer = (style: ConnectStyle): Observable<number> => {
@@ -336,13 +333,6 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
    */
   private async requestSnapshot(retry: Subscriber<ConnectStyle>): Promise<unknown> {
     const snapshot = await this.remotes.snapshot();
-    // We contractually have to subscribe to the snapshot streams on this tick,
-    // so no awaits allowed until we acceptRecoveryUpdates
-    return this.acceptSnapshot(snapshot, retry);
-  }
-
-  // This helper method must not be async, see comment in requestSnapshot
-  private acceptSnapshot(snapshot: Snapshot, retry: Subscriber<ConnectStyle>): Promise<unknown> {
     this.messageService.join(snapshot.lastTime);
     // If we have any operations since the snapshot: re-emit them now and
     // re-apply them to our own dataset when the snapshot is applied.

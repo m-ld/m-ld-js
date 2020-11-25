@@ -1,5 +1,5 @@
 import { Snapshot, DeltaMessage, MeldRemotes, MeldLocal, Revup } from '.';
-import { Observable, Subject as Source, BehaviorSubject, identity } from 'rxjs';
+import { Observable, Subject as Source, BehaviorSubject, identity, defer } from 'rxjs';
 import { TreeClock } from './clocks';
 import { generate as uuid } from 'short-uuid';
 import { Response, Request } from './ControlMessage';
@@ -154,10 +154,12 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
       this.consume(res.quadsAddress, this.triplesFromBuffer, 'failIfSlow'),
       this.consume(res.updatesAddress, DeltaMessage.decode)
     ]);
-    // Ack the response to start the streams
-    ack.resolve();
     sw.stop();
-    return { lastTime: res.lastTime, quads, updates };
+    return { lastTime: res.lastTime, quads: defer(() => {
+      // Ack the response to start the streams
+      ack.resolve();
+      return quads;
+    }), updates };
   }
 
   private triplesFromBuffer = (payload: Buffer) =>
@@ -174,10 +176,12 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
       sw.next('consume');
       const updates = await this.consume(
         res.updatesAddress, DeltaMessage.decode, 'failIfSlow');
-      // Ack the response to start the streams
-      ack.resolve();
       sw.stop();
-      return { lastTime: res.lastTime, updates };
+      return { lastTime: res.lastTime, updates: defer(() => {
+        // Ack the response to start the streams
+        ack.resolve();
+        return updates;
+      }) };
     } // else return undefined
     sw.stop();
   }

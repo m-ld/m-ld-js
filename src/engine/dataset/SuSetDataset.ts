@@ -16,7 +16,7 @@ import { Logger } from 'loglevel';
 import { MeldError } from '../MeldError';
 import { LocalLock } from '../local';
 import { SUSET_CONTEXT, qsName, tripleId } from './SuSetGraph';
-import { SuSetJournalGraph, SuSetJournalEntry } from './SuSetJournal';
+import { SuSetJournalDataset, SuSetJournalEntry } from './SuSetJournal';
 import { MeldConfig, Read } from '../..';
 import { QuadMap, TripleMap, Triple } from '../quads';
 import { rdfToJson } from "../jsonld";
@@ -59,7 +59,7 @@ export class SuSetDataset extends JrqlGraph {
 
   private readonly meldEncoding: MeldEncoding;
   private readonly tidsGraph: JrqlGraph;
-  private readonly journalGraph: SuSetJournalGraph;
+  private readonly journalData: SuSetJournalDataset;
   private readonly updateSource: Source<MeldUpdate> = new Source;
   private readonly datasetLock: LocalLock;
   private readonly maxDeltaSize: number;
@@ -72,7 +72,7 @@ export class SuSetDataset extends JrqlGraph {
     config: MeldConfig) {
     super(dataset.graph());
     this.meldEncoding = new MeldEncoding(config['@domain']);
-    this.journalGraph = new SuSetJournalGraph(dataset);
+    this.journalData = new SuSetJournalDataset(dataset);
     this.tidsGraph = new JrqlGraph(
       dataset.graph(qsName('tids')), SUSET_CONTEXT);
     // Update notifications are strictly ordered but don't hold up transactions
@@ -93,7 +93,7 @@ export class SuSetDataset extends JrqlGraph {
     // Create the Journal if not exists
     return this.dataset.transact({
       id: 'suset-reset',
-      prepare: async () => ({ patch: await this.journalGraph.initialise() })
+      prepare: async () => ({ kvps: await this.journalData.initialise() })
     });
   }
 
@@ -116,7 +116,7 @@ export class SuSetDataset extends JrqlGraph {
 
   @SuSetDataset.checkNotClosed.async
   async loadClock(): Promise<TreeClock | null> {
-    return (await this.journalGraph.journal()).time;
+    return (await this.journalData.journal()).time;
   }
 
   @SuSetDataset.checkNotClosed.async
@@ -124,10 +124,11 @@ export class SuSetDataset extends JrqlGraph {
     return this.dataset.transact<TreeClock>({
       id: 'suset-save-clock',
       prepare: async () => {
-        const journal = await this.journalGraph.journal(), tail = await journal.tail();
-        const newClock = await prepare(tail.gwc);
+        const journal = await this.journalData.journal(),
+          tail = await journal.tail(),
+          newClock = await prepare(tail.gwc);
         return {
-          patch: await journal.setLocalTime(newClock, newClone),
+          kvps: journal.setLocalTime(newClock, newClone),
           return: newClock
         };
       }
@@ -153,12 +154,12 @@ export class SuSetDataset extends JrqlGraph {
     return this.dataset.transact<Observable<DeltaMessage> | undefined>({
       id: 'suset-ops-since',
       prepare: async () => {
-        const journal = await this.journalGraph.journal();
+        const journal = await this.journalData.journal();
         // How many ticks of mine has the requester seen?
         const tick = time.getTicks(journal.safeTime);
         if (lastTime != null)
           journal.tail().then(tail => tail.gwc).then(...lastTime.settle);
-        const found = tick != null ? await journal.findEntry(tick) : '';
+        const found = tick != null ? await journal.entry(tick) : '';
         async function nextEntry(entry: SuSetJournalEntry) {
           return [entry, await entry.next()];
         }
@@ -202,11 +203,12 @@ export class SuSetDataset extends JrqlGraph {
 
         // Include journaling in final patch
         txc.sw.next('journal');
-        const journal = await this.journalGraph.journal(), tail = await journal.tail();
-        const journaling = await tail.builder(journal, { delta, localTime: time }).commit();
+        const journal = await this.journalData.journal(), tail = await journal.tail();
+        const journaling = tail.builder(journal, { delta, localTime: time });
 
         return {
-          patch: this.transactionPatch(patch, tidPatch, journaling),
+          patch: this.transactionPatch(patch, tidPatch),
+          kvps: journaling.commit,
           return: this.deltaMessage(tail, time, delta),
           after: () => this.updateSource.next(update)
         };
@@ -259,8 +261,8 @@ export class SuSetDataset extends JrqlGraph {
         // have an empty patch, but we still need to complete the journal
         // entry for it.
         txc.sw.next('journal');
-        const journal = await this.journalGraph.journal(), tail = await journal.tail();
-        const journalBuild = tail.builder(
+        const journal = await this.journalData.journal(), tail = await journal.tail();
+        const journaling = tail.builder(
           journal, { delta, localTime: arrivalTime, remoteTime: msg.time });
 
         // If the constraint has done anything, we need to merge its work
@@ -270,11 +272,11 @@ export class SuSetDataset extends JrqlGraph {
           // Re-create the update with the constraint resolution included
           update = patch.isEmpty ? null : await this.asUpdate(localTime, patch)
           // Also create a journal entry for the constraint "transaction"
-          journalBuild.next({ delta: cxn.delta, localTime });
+          journaling.next({ delta: cxn.delta, localTime });
         }
-        const journaling = await journalBuild.commit();
         return {
-          patch: this.transactionPatch(patch, tidPatch, journaling),
+          patch: this.transactionPatch(patch, tidPatch),
+          kvps: journaling.commit,
           // FIXME: If this delta message exceeds max size, what to do?
           return: cxn != null ? this.deltaMessage(tail, localTime, cxn.delta) : null,
           after: () => update && this.updateSource.next(update)
@@ -346,16 +348,9 @@ export class SuSetDataset extends JrqlGraph {
    * present.
    * @param dataPatch the transaction data patch
    * @param tidPatch triple TID patch (inserts and deletes)
-   * @param journaling transaction journaling patch
    */
-  private transactionPatch(
-    dataPatch: PatchQuads,
-    tidPatch: PatchQuads,
-    journaling: PatchQuads): PatchQuads {
-    return new PatchQuads()
-      .append(dataPatch)
-      .append(tidPatch)
-      .append(journaling);
+  private transactionPatch(dataPatch: PatchQuads, tidPatch: PatchQuads): PatchQuads {
+    return new PatchQuads().append(dataPatch).append(tidPatch);
   }
 
   private async asUpdate(time: TreeClock, patch: PatchQuads): Promise<MeldUpdate> {
@@ -415,17 +410,13 @@ export class SuSetDataset extends JrqlGraph {
    */
   @SuSetDataset.checkNotClosed.async
   async applySnapshot(snapshot: DatasetSnapshot, localTime: TreeClock) {
-    // First reset the dataset with the given parameters.
-    // Note that this is not awaited because the tids and quads are hot, so we
-    // must subscribe to them on the current tick. The transaction lock will
-    // take care of making sure the reset happens first.
-    const dataReset = this.dataset.transact({
+    await this.dataset.clear();
+    await this.dataset.transact({
       id: 'suset-reset',
       prepare: async () =>
-        ({ patch: await this.journalGraph.reset(snapshot.lastTime, localTime) })
+        ({ kvps: this.journalData.reset(snapshot.lastTime, localTime) })
     });
-
-    const quadsApplied = snapshot.quads.pipe(
+    await snapshot.quads.pipe(
       // For each batch of reified quads with TIDs, first unreify
       mergeMap(async batch => this.dataset.transact({
         id: 'snapshot-batch',
@@ -440,7 +431,6 @@ export class SuSetDataset extends JrqlGraph {
             .toPromise()
         })
       }))).toPromise();
-    return Promise.all([dataReset, quadsApplied]);
   }
 
   /**
@@ -455,7 +445,7 @@ export class SuSetDataset extends JrqlGraph {
         id: 'snapshot',
         prepare: async () => {
           const dataEmitted = new Future;
-          const journal = await this.journalGraph.journal();
+          const journal = await this.journalData.journal();
           const tail = await journal.tail();
           resolve({
             lastTime: tail.gwc,

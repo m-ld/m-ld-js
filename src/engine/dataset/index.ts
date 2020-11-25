@@ -1,7 +1,7 @@
 import { Quad, DefaultGraph, NamedNode, Quad_Subject, Quad_Predicate, Quad_Object } from 'rdf-js';
 import { defaultGraph } from '@rdfjs/data-model';
 import { Quadstore } from 'quadstore';
-import { AbstractLevelDOWN } from 'abstract-leveldown';
+import { AbstractChainedBatch, AbstractLevelDOWN } from 'abstract-leveldown';
 import { Observable } from 'rxjs';
 import { generate as uuid } from 'short-uuid';
 import { check, Stopwatch } from '../util';
@@ -9,7 +9,7 @@ import { LockManager } from '../locks';
 import { QuadSet } from '../quads';
 import { Filter } from '../indices';
 import dataFactory = require('@rdfjs/data-model');
-import { TermName } from 'quadstore/dist/lib/types';
+import { BatchOpts, TermName } from 'quadstore/dist/lib/types';
 import { Context } from 'jsonld/jsonld-spec';
 import { activeCtx, compactIri, expandTerm } from '../jsonld';
 import { ActiveContext } from 'jsonld/lib/context';
@@ -83,12 +83,20 @@ export interface Dataset {
   transact(txn: TxnOptions<TxnResult>): Promise<void>;
   transact<T>(txn: TxnOptions<TxnValueResult<T>>): Promise<T>;
 
+  get(key: string): Promise<Buffer | undefined>;
+
+  clear(): Promise<void>;
+
   close(): Promise<void>;
   readonly closed: boolean;
 }
 
+export type Kvps = // NonNullable<BatchOpts['preWrite']> with strong kv types
+  (batch: AbstractChainedBatch<string, Buffer>) => Promise<unknown> | unknown;
+
 export interface TxnResult {
-  patch?: Patch,
+  patch?: Patch;
+  kvps?: Kvps;
   after?(): unknown | Promise<unknown>;
   return?: unknown;
 }
@@ -143,7 +151,7 @@ export class QuadStoreDataset implements Dataset {
   async initialise(): Promise<QuadStoreDataset> {
     const activeCtx = await this.activeCtx;
     this.store = new Quadstore({
-      backend : this.backend,
+      backend: this.backend,
       dataFactory,
       indexes: [
         [TermName.GRAPH, TermName.SUBJECT, TermName.PREDICATE, TermName.OBJECT],
@@ -181,24 +189,54 @@ export class QuadStoreDataset implements Dataset {
       const result = await txn.prepare({ id, sw: sw.lap });
       sw.next('apply');
       if (result.patch != null)
-        await this.apply(result.patch);
+        await this.applyQuads(result.patch, { preWrite: result.kvps });
+      else if (result.kvps != null)
+        await this.applyKvps(result.kvps);
       sw.stop();
       await result.after?.();
       return <T>result.return;
     });
   }
 
-  private async apply(patch: Patch) {
+  private async applyKvps(kvps: Kvps) {
+    const batch = this.store.db.batch();
+    await kvps(batch);
+    return new Promise<unknown>((resolve, reject) =>
+      batch.write(err => err ? reject(err) : resolve()));
+  }
+
+  private async applyQuads(patch: Patch, opts?: BatchOpts) {
     if (Array.isArray(patch.oldQuads)) {
-      await this.store.multiPatch(patch.oldQuads, patch.newQuads);
+      await this.store.multiPatch(patch.oldQuads, patch.newQuads, opts);
     } else {
       // FIXME: Not atomic! – Rarely used
       const { subject, predicate, object, graph } = patch.oldQuads;
       await new Promise((resolve, reject) =>
         this.store.removeMatches(subject, predicate, object, graph)
           .on('end', resolve).on('error', reject));
-      await this.store.multiPut(patch.newQuads);
+      await this.store.multiPut(patch.newQuads, opts);
     }
+  }
+
+  @notClosed.async
+  get(key: string): Promise<Buffer | undefined> {
+    return new Promise<Buffer>((resolve, reject) =>
+      this.store.db.get(key, { asBuffer: true }, (err, buf) => {
+        if (err) {
+          if (err.message.startsWith('NotFound'))
+            resolve();
+          else
+            reject(err);
+        } else {
+          resolve(buf);
+        }
+      }));
+  }
+
+  @notClosed.async
+  clear(): Promise<void> {
+    return new Promise<void>((resolve, reject) =>
+      this.store.db.clear(err => err ? reject(err) : resolve()));
   }
 
   @notClosed.async
