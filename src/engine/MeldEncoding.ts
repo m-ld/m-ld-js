@@ -97,18 +97,18 @@ export class MeldEncoding {
   newDelta = async (delta: Omit<MeldDelta, 'encoded'>): Promise<MeldDelta> => {
     const [del, ins] = await Promise.all([delta.delete, delta.insert]
       .map(triples => this.jsonFromTriples(triples).then(EncodedDelta.encode)));
-    return { ...delta, encoded: [0, delta.tid, del, ins] };
+    return { ...delta, encoded: [1, del, ins] };
   }
 
   asDelta = async (delta: EncodedDelta): Promise<MeldDelta> => {
-    const [ver, tid, del, ins] = delta;
-    if (ver !== 0)
+    const [ver, del, ins] = delta;
+    if (ver !== 1)
       throw new Error(`Encoded delta version ${ver} not supported`);
     const jsons = await Promise.all([del, ins].map(EncodedDelta.decode));
     const [delTriples, insTriples] = await Promise.all(jsons.map(this.triplesFromJson));
     return ({
-      tid, insert: insTriples, delete: delTriples, encoded: delta,
-      toString: () => `${tid}: ${JSON.stringify(jsons)}`
+      insert: insTriples, delete: delTriples, encoded: delta,
+      toString: () => `${JSON.stringify(jsons)}`
     });
   }
 

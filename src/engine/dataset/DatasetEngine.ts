@@ -218,8 +218,8 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
           }
         });
         // The applys will enqueue in order on the dataset's transaction lock
-        await Promise.all(applys.map(async ([msg, arrivalTime, localTime]) => {
-          const cxUpdate = await this.dataset.apply(msg, arrivalTime, localTime);
+        await Promise.all(applys.map(async ([msg, localTime, cxnTime]) => {
+          const cxUpdate = await this.dataset.apply(msg, localTime, cxnTime);
           if (cxUpdate != null)
             this.nextUpdate(cxUpdate);
           msg.delivered.resolve();

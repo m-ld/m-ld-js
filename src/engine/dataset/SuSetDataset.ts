@@ -11,11 +11,10 @@ import { MeldEncoding, unreify, toDomainQuad, reifyTriplesTids } from '../MeldEn
 import { Observable, from, Subject as Source, EMPTY } from 'rxjs';
 import { bufferCount, mergeMap, reduce, map, filter, takeWhile, expand } from 'rxjs/operators';
 import { flatten, Future, tapComplete, getIdLogger, check } from '../util';
-import { generate as uuid } from 'short-uuid';
 import { Logger } from 'loglevel';
 import { MeldError } from '../MeldError';
 import { LocalLock } from '../local';
-import { SUSET_CONTEXT, qsName, tripleId } from './SuSetGraph';
+import { SUSET_CONTEXT, qsName, tripleId, txnId } from './SuSetGraph';
 import { SuSetJournalDataset, SuSetJournalEntry } from './SuSetJournal';
 import { MeldConfig, Read } from '../..';
 import { QuadMap, TripleMap, Triple } from '../quads';
@@ -183,7 +182,6 @@ export class SuSetDataset extends JrqlGraph {
   @SuSetDataset.checkNotClosed.async
   async transact(prepare: () => Promise<[TreeClock, PatchQuads]>): Promise<DeltaMessage | null> {
     return this.dataset.transact<DeltaMessage | null>({
-      id: uuid(), // New transaction ID
       prepare: async txc => {
         const [time, patch] = await prepare();
         if (patch.isEmpty)
@@ -195,11 +193,11 @@ export class SuSetDataset extends JrqlGraph {
 
         txc.sw.next('find-tids');
         const deletedTriplesTids = await this.findTriplesTids(patch.oldQuads);
-        const delta = await this.txnDelta(txc.id, patch.newQuads, asTriplesTids(deletedTriplesTids));
+        const delta = await this.txnDelta(patch.newQuads, asTriplesTids(deletedTriplesTids));
 
         // Include tid changes in final patch
         txc.sw.next('new-tids');
-        const tidPatch = await this.txnTidPatch(txc.id, patch.newQuads, deletedTriplesTids);
+        const tidPatch = await this.txnTidPatch(txnId(time), patch.newQuads, deletedTriplesTids);
 
         // Include journaling in final patch
         txc.sw.next('journal');
@@ -230,22 +228,21 @@ export class SuSetDataset extends JrqlGraph {
     return tidPatch;
   }
 
-  private txnDelta(tid: string, insert: Quad[], deletedTriplesTids: TripleMap<UUID[]>) {
+  private txnDelta(insert: Quad[], deletedTriplesTids: TripleMap<UUID[]>) {
     return this.meldEncoding.newDelta({
-      tid, insert,
+      insert,
       // Delta has reifications of old quads, which we infer from found triple tids
       delete: reifyTriplesTids(deletedTriplesTids)
     });
   }
 
   @SuSetDataset.checkNotClosed.async
-  async apply(msg: DeltaMessage, arrivalTime: TreeClock, localTime: TreeClock): Promise<DeltaMessage | null> {
+  async apply(msg: DeltaMessage, localTime: TreeClock, cxnTime: TreeClock): Promise<DeltaMessage | null> {
     return this.dataset.transact<DeltaMessage | null>({
-      id: msg.data[1],
       prepare: async txc => {
         // Check we haven't seen this transaction before
         txc.sw.next('find-tids');
-        this.log.debug(`Applying tid: ${txc.id} @ ${arrivalTime}`);
+        this.log.debug(`Applying delta: ${msg.time} @ ${localTime}`);
 
         txc.sw.next('unreify');
         const delta = await this.meldEncoding.asDelta(msg.data);
@@ -253,9 +250,12 @@ export class SuSetDataset extends JrqlGraph {
         const tidPatch = await this.processSuDeletions(delta.delete, patch);
 
         txc.sw.next('apply-cx'); // "cx" = constraint
-        let { cxn, update } = await this.constrainUpdate(patch, arrivalTime, delta.tid);
+        const tid = txnId(msg.time);
+        let update = patch.isEmpty ? null : await this.asUpdate(localTime, patch);
+        const cxn = update == null ? null :
+          await this.applyConstraint({ update, patch, tid }, cxnTime);
         // After applying the constraint, patch new quads might have changed
-        tidPatch.append(await this.newTriplesTid(patch.newQuads, delta.tid));
+        tidPatch.append(await this.newTriplesTid(patch.newQuads, tid));
 
         // Done determining the applied delta patch. At this point we could
         // have an empty patch, but we still need to complete the journal
@@ -263,22 +263,22 @@ export class SuSetDataset extends JrqlGraph {
         txc.sw.next('journal');
         const journal = await this.journalData.journal(), tail = await journal.tail();
         const journaling = tail.builder(
-          journal, { delta, localTime: arrivalTime, remoteTime: msg.time });
+          journal, { delta, localTime, remoteTime: msg.time });
 
         // If the constraint has done anything, we need to merge its work
         if (cxn != null) {
           tidPatch.append(cxn.tidPatch);
           patch.append(cxn.patch);
           // Re-create the update with the constraint resolution included
-          update = patch.isEmpty ? null : await this.asUpdate(localTime, patch)
+          update = patch.isEmpty ? null : await this.asUpdate(cxnTime, patch)
           // Also create a journal entry for the constraint "transaction"
-          journaling.next({ delta: cxn.delta, localTime });
+          journaling.next({ delta: cxn.delta, localTime: cxnTime });
         }
         return {
           patch: this.transactionPatch(patch, tidPatch),
           kvps: journaling.commit,
           // FIXME: If this delta message exceeds max size, what to do?
-          return: cxn != null ? this.deltaMessage(tail, localTime, cxn.delta) : null,
+          return: cxn != null ? this.deltaMessage(tail, cxnTime, cxn.delta) : null,
           after: () => update && this.updateSource.next(update)
         };
       }
@@ -300,19 +300,14 @@ export class SuSetDataset extends JrqlGraph {
       }, Promise.resolve(new PatchQuads()));
   }
 
-  private async constrainUpdate(patch: PatchQuads, arrivalTime: TreeClock, tid: string) {
-    const update = patch.isEmpty ? null : await this.asUpdate(arrivalTime, patch);
-    const cxn = update == null ? null : await this.applyConstraint({ patch, update, tid });
-    return { cxn, update };
-  }
-
   /**
    * Caution: mutates to.patch
    * @param to transaction details to apply the patch to
    * @param localTime local clock time
    */
   private async applyConstraint(
-    to: { patch: PatchQuads, update: MeldUpdate, tid: string }) {
+    to: { update: MeldUpdate, patch: PatchQuads, tid: string },
+    cxnTime: TreeClock) {
     const patch = new PatchQuads();
     const mutableUpdate: MutableMeldUpdate = {
       ...to.update,
@@ -322,7 +317,6 @@ export class SuSetDataset extends JrqlGraph {
     }
     await this.constraint.apply(this.state, mutableUpdate);
     if (!patch.isEmpty) {
-      const tid = uuid();
       // Triples that were inserted in the applied transaction may have been
       // deleted by the constraint - these need to be removed from the applied
       // transaction patch but still published in the constraint delta
@@ -335,8 +329,8 @@ export class SuSetDataset extends JrqlGraph {
       patch.remove('oldQuads', quad => deletedExistingTidQuads.get(quad) == null);
       return {
         patch,
-        delta: await this.txnDelta(tid, patch.newQuads, deletedTriplesTids),
-        tidPatch: await this.txnTidPatch(tid, patch.newQuads, deletedExistingTidQuads)
+        delta: await this.txnDelta(patch.newQuads, deletedTriplesTids),
+        tidPatch: await this.txnTidPatch(txnId(cxnTime), patch.newQuads, deletedExistingTidQuads)
       };
     }
     return null;

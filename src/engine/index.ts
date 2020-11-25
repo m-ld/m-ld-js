@@ -80,7 +80,6 @@ export interface Meld {
 }
 
 export interface MeldDelta extends Object {
-  readonly tid: UUID;
   readonly insert: Triple[];
   readonly delete: Triple[];
   /**
@@ -92,12 +91,12 @@ export interface MeldDelta extends Object {
 }
 
 /**
- * A tuple containing version, tid, delete and insert components of a
+ * A tuple containing encoding version, delete and insert components of a
  * {@link MeldDelta}. The delete and insert components are UTF-8 encoded JSON-LD
  * strings, which may be GZIP compressed into a Buffer if bigger than a
  * threshold. Intended to be efficiently serialised with MessagePack.
  */
-export type EncodedDelta = [0, string, string | Buffer, string | Buffer];
+export type EncodedDelta = [1, string | Buffer, string | Buffer];
 
 export namespace EncodedDelta {
   export async function encode(json: any): Promise<Buffer | string> {
