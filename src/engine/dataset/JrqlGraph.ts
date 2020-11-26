@@ -239,7 +239,7 @@ function asTermMatch<T extends Term>(term: T): T | undefined {
 
 function hideVars(values: Value | Value[], top: boolean = true) {
   array(values).forEach(value => {
-    // TODO: JSON-LD value object (with @value)
+    // FIXME: JSON-LD value object (with @value)
     if (typeof value === 'object' && !isValueObject(value)) {
       // If this is a Reference, we treat it as a Subject
       const subject: Subject = value as Subject;

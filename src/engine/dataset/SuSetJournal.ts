@@ -22,7 +22,7 @@ type JournalEntryJson = [
   /** Raw delta - may contain Buffers */
   EncodedDelta,
   /** JSON-encoded transaction message time */
-  any, // TODO: Push into delta as TID
+  any,
   /**
    * JSON-encoded public clock time ('global wall clock' or 'Great Westminster
    * Clock'). This has latest public ticks seen for all processes (not internal
