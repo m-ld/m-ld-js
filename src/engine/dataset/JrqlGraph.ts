@@ -239,7 +239,7 @@ function asTermMatch<T extends Term>(term: T): T | undefined {
 
 function hideVars(values: Value | Value[], top: boolean = true) {
   array(values).forEach(value => {
-    // FIXME: JSON-LD value object (with @value)
+    // JSON-LD value object (with @value) cannot contain a variable
     if (typeof value === 'object' && !isValueObject(value)) {
       // If this is a Reference, we treat it as a Subject
       const subject: Subject = value as Subject;
@@ -340,7 +340,7 @@ function genVar() {
 }
 
 function hiddenVar(name: string) {
-  return 'http://json-rql.org/var#' + name;
+  return `http://json-rql.org/var#${name}`;
 }
 
 function isSelected(results: Result[] | Result, key: string) {

@@ -1,15 +1,21 @@
-const { fork, spawn } = require('child_process');
+const { fork } = require('child_process');
 const { createWriteStream } = require('fs');
 const { join } = require('path');
 const inspector = require('inspector');
 const LOG = require('loglevel');
 const httpUrl = new URL('http://localhost:3000');
+const Jasmine = require('jasmine');
+const jasmine = new Jasmine();
 
-LOG.setLevel(LOG.levels.WARN);
-let testDebugPort, orchestratorDebugPort, firstCloneDebugPort;
+const COMPLIANCE_DIR = '../node_modules/@m-ld/m-ld-spec/compliance'.split('/');
+
+// Expected spec glob, default "*/*" (everything)
+const [, , specs] = process.argv;
+
+LOG.setLevel(process.env.LOG_LEVEL = process.env.LOG_LEVEL || LOG.levels.WARN);
+let orchestratorDebugPort, firstCloneDebugPort;
 if (inspector.url() != null) {
   let debugPort = Number(new URL(inspector.url()).port);
-  testDebugPort = ++debugPort;
   orchestratorDebugPort = ++debugPort;
   firstCloneDebugPort = ++debugPort;
 }
@@ -26,16 +32,18 @@ orchestrator.stderr.pipe(logFile);
 orchestrator.on('message', message => {
   switch (message) {
     case 'listening':
-      spawn('npm', ['run', 'test'], {
-        cwd: join(__dirname, '..', 'node_modules', '@m-ld', 'm-ld-spec'),
-        env: { ...process.env, MELD_ORCHESTRATOR_URL: httpUrl.toString(), LOG_LEVEL: `${LOG.getLevel()}` },
-        stdio: 'inherit',
-        execArgv: inspector.url() ? [`--inspect-brk=${testDebugPort}`] : []
-      }).on('exit', code => {
-        LOG.info(`Test process exited with code ${code}`);
-        orchestrator.kill(); // Try to shut down normally
-        process.exit(code);
-      });
+      try {
+        process.env.MELD_ORCHESTRATOR_URL = httpUrl.toString();
+        jasmine.loadConfig({
+          spec_files: [join(__dirname, ...COMPLIANCE_DIR, `${specs || '*/*'}.spec.js`)]
+        });
+        // Try to shut down normally when done
+        jasmine.onComplete(() => orchestrator.kill());
+        jasmine.execute();
+      } catch (err) {
+        LOG.error(err)
+        orchestrator.kill()
+      }
   }
 });
 orchestrator.on('exit', code => {

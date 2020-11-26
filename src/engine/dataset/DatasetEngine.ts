@@ -1,7 +1,7 @@
 import { LiveStatus, MeldStatus, MeldConstraint } from '../../api';
 import { Snapshot, DeltaMessage, MeldRemotes, MeldLocal, Revup, Recovery } from '..';
 import { liveRollup } from "../LiveValue";
-import { Subject, Read, Write } from '../../jrql-support';
+import { Subject, Read, Write, Pattern } from '../../jrql-support';
 import {
   Observable, merge, from, EMPTY,
   concat, BehaviorSubject, Subscription, interval, of, Subscriber, OperatorFunction, partition
@@ -189,7 +189,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
   }
 
   private async acceptRemoteDelta(delta: DeltaMessage): Promise<DeltaOutcome> {
-    const logBody = this.log.getLevel() < levels.DEBUG ? delta : `tid: ${delta.data[1]}`;
+    const logBody = this.log.getLevel() < levels.DEBUG ? delta : `${delta.time}`;
     this.log.debug('Receiving', logBody);
     // Grab the state lock, per CloneEngine contract and to ensure that all
     // clock ticks are immediately followed by their respective transactions.
@@ -449,10 +449,13 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
   @AbstractMeld.checkNotClosed.rx
   read(request: Read): Observable<Subject> {
     return new Observable<Subject>(subs => {
-      this.lock.share('live', () => new Promise(resolve =>
+      this.lock.share('live', () => new Promise(resolve => {
+        this.logRequest('read', request);
         // Only leave the live-lock when the results have been fully streamed
-        this.dataset.read(request).pipe(finalize(resolve)).subscribe(subs)))
-        .catch(err => subs.error(err)); // Only if lock fails
+        return this.dataset.read(request).pipe(finalize(resolve)).subscribe(subs);
+      })).then(
+        () => this.log.debug('read complete'),
+        err => subs.error(err)); // Only if lock fails
     });
   }
 
@@ -460,6 +463,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
   async write(request: Write): Promise<unknown> {
     // For a write, execute immediately.
     return this.lock.share('live', async () => {
+      this.logRequest('write', request);
       // Take the send timestamp just before enqueuing the transaction. This
       // ensures that transaction stamps increase monotonically.
       const sendTime = this.messageService.event();
@@ -469,6 +473,12 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
       if (update != null)
         this.nextUpdate(update);
     });
+  }
+
+  private logRequest(type: 'read'|'write', request: Pattern) {
+    if (this.log.getLevel() <= levels.DEBUG)
+      this.log.debug(type, 'request',
+        JSON.stringify({ ...request, '@context': undefined }));
   }
 
   private createStatus(): Observable<MeldStatus> & LiveStatus {
