@@ -10,9 +10,14 @@ describe('Meld State API', () => {
   let api: ApiStateMachine;
 
   beforeEach(async () => {
-    let clone = new DatasetEngine({ dataset: await memStore(), remotes: mockRemotes(), config: testConfig() });
+    const context = new DomainContext('test.m-ld.org');
+    let clone = new DatasetEngine({
+      dataset: await memStore({ context }),
+      remotes: mockRemotes(),
+      config: testConfig()
+    });
     await clone.initialise();
-    api = new ApiStateMachine(new DomainContext('test.m-ld.org'), clone);
+    api = new ApiStateMachine(context, clone);
   });
 
   test('retrieves a JSON-LD subject', async () => {

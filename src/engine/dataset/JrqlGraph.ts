@@ -12,9 +12,10 @@ import { Graph, PatchQuads } from '.';
 import { toArray, mergeMap, map, filter, distinct } from 'rxjs/operators';
 import { from, of, EMPTY, Observable, throwError } from 'rxjs';
 import { flatten, fromArrayPromise } from '../util';
-import { QuadSolution, VarValues, TriplePos } from './QuadSolution';
+import { QuadSolution, VarValues } from './QuadSolution';
 import { array, shortId } from '../../util';
-import { jsonToRdf, rdfToJson } from '../quads';
+import { TriplePos } from '../quads';
+import { activeCtx, expandTerm, jsonToRdf, rdfToJson } from "../jsonld";
 
 /**
  * A graph wrapper that provides low-level json-rql handling for queries. The
@@ -222,12 +223,8 @@ export async function toSubject(quads: Quad[], context: Context): Promise<object
   return compact(await rdfToJson(quads), context || {}) as unknown as Subject;
 }
 
-export async function resolve(iri: Iri, context?: Context): Promise<NamedNode> {
-  return namedNode(context ? (await compact({
-    '@id': iri,
-    'http://json-rql.org/predicate': 1,
-    '@context': context
-  }, {}) as any)['@id'] : iri);
+async function resolve(iri: Iri, context?: Context): Promise<NamedNode> {
+  return namedNode(context ? expandTerm(iri, await activeCtx(context)) : iri);
 }
 
 function asMatchTerms(quad: Quad):
@@ -242,7 +239,7 @@ function asTermMatch<T extends Term>(term: T): T | undefined {
 
 function hideVars(values: Value | Value[], top: boolean = true) {
   array(values).forEach(value => {
-    // TODO: JSON-LD value object (with @value)
+    // JSON-LD value object (with @value) cannot contain a variable
     if (typeof value === 'object' && !isValueObject(value)) {
       // If this is a Reference, we treat it as a Subject
       const subject: Subject = value as Subject;
@@ -343,7 +340,7 @@ function genVar() {
 }
 
 function hiddenVar(name: string) {
-  return 'http://json-rql.org/var#' + name;
+  return `http://json-rql.org/var#${name}`;
 }
 
 function isSelected(results: Result[] | Result, key: string) {

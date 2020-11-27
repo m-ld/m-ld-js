@@ -90,7 +90,7 @@ function updateProperty(value: any, insertVal: any, deleteVal: any): any {
  * @param value the value to find in the set
  */
 export function includesValue(set: Value[], value: Value): boolean {
-  // TODO support value objects
+  // FIXME support value objects
   if (isSubjectOrRef(value)) {
     return !!value['@id'] && set.filter(isSubjectOrRef).map(v => v['@id']).includes(value['@id']);
   } else {

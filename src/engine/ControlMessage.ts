@@ -1,4 +1,3 @@
-import { Hash } from './hash';
 import { TreeClock } from './clocks';
 import { MeldError, MeldErrorStatus } from './MeldError';
 const inspect = Symbol.for('nodejs.util.inspect.custom');
@@ -76,7 +75,6 @@ export namespace Response {
     constructor(
       readonly lastTime: TreeClock,
       readonly quadsAddress: string,
-      readonly lastHash: Hash,
       readonly updatesAddress: string) {
     }
 
@@ -84,11 +82,10 @@ export namespace Response {
       '@type': 'http://control.m-ld.org/response/snapshot',
       lastTime: this.lastTime.toJson(),
       quadsAddress: this.quadsAddress,
-      lastHash: this.lastHash.encode(),
       updatesAddress: this.updatesAddress
     });
 
-    toString = () => `Snapshot at ${this.lastTime} with ${this.lastHash}`;
+    toString = () => `Snapshot at ${this.lastTime}`;
     [inspect] = () => this.toString();
   }
 
@@ -145,7 +142,6 @@ export namespace Response {
           if (lastTime)
             return new Snapshot(
               lastTime, json.quadsAddress,
-              Hash.decode(json.lastHash),
               json.updatesAddress);
           break;
         case 'http://control.m-ld.org/response/revup':

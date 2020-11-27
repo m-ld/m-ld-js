@@ -1,10 +1,10 @@
-import { Snapshot, DeltaMessage, MeldRemotes, MeldLocal, UUID, Revup } from '.';
-import { Observable, Subject as Source, BehaviorSubject, identity } from 'rxjs';
+import { Snapshot, DeltaMessage, MeldRemotes, MeldLocal, Revup } from '.';
+import { Observable, Subject as Source, BehaviorSubject, identity, defer, Observer } from 'rxjs';
 import { TreeClock } from './clocks';
 import { generate as uuid } from 'short-uuid';
 import { Response, Request } from './ControlMessage';
 import { MsgPack, Future, toJson, Stopwatch } from './util';
-import { finalize, flatMap, reduce, toArray, first, concatMap, materialize, timeout } from 'rxjs/operators';
+import { finalize, flatMap, reduce, toArray, first, concatMap, materialize, timeout, share } from 'rxjs/operators';
 import { MeldEncoding } from './MeldEncoding';
 import { MeldError, MeldErrorStatus } from './MeldError';
 import { AbstractMeld } from './AbstractMeld';
@@ -45,7 +45,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     [messageId: string]: [(res: Response | null) => void, PromiseLike<void> | null]
   } = {};
   private readonly recentlySentTo: Set<string> = new Set;
-  private readonly consuming: { [address: string]: Source<Buffer> } = {};
+  private readonly consuming: { [address: string]: Observer<Buffer> } = {};
   private readonly sendTimeout: number;
   private readonly activity: Set<PromiseLike<void>> = new Set;
   /**
@@ -154,10 +154,12 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
       this.consume(res.quadsAddress, this.triplesFromBuffer, 'failIfSlow'),
       this.consume(res.updatesAddress, DeltaMessage.decode)
     ]);
-    // Ack the response to start the streams
-    ack.resolve();
     sw.stop();
-    return { lastTime: res.lastTime, lastHash: res.lastHash, quads, updates };
+    return { lastTime: res.lastTime, quads: defer(() => {
+      // Ack the response to start the streams
+      ack.resolve();
+      return quads;
+    }), updates };
   }
 
   private triplesFromBuffer = (payload: Buffer) =>
@@ -174,10 +176,12 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
       sw.next('consume');
       const updates = await this.consume(
         res.updatesAddress, DeltaMessage.decode, 'failIfSlow');
-      // Ack the response to start the streams
-      ack.resolve();
       sw.stop();
-      return { lastTime: res.lastTime, updates };
+      return { lastTime: res.lastTime, updates: defer(() => {
+        // Ack the response to start the streams
+        ack.resolve();
+        return updates;
+      }) };
     } // else return undefined
     sw.stop();
   }
@@ -365,10 +369,10 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
   }
 
   private async replySnapshot(sentParams: DirectParams, snapshot: Snapshot): Promise<void> {
-    const { lastTime, lastHash, quads, updates } = snapshot;
+    const { lastTime, quads, updates } = snapshot;
     const quadsAddress = uuid(), updatesAddress = uuid();
     await this.reply(sentParams, new Response.Snapshot(
-      lastTime, quadsAddress, lastHash, updatesAddress
+      lastTime, quadsAddress, updatesAddress
     ), 'expectAck');
     // Ack has been sent, start streaming the data and updates concurrently
     await Promise.all([
@@ -399,7 +403,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     const src = this.consuming[notifier.id] = new Source;
     await notifier.subscribe();
     const consumed = src.pipe(
-      // Unsubscribe from the sub-channel when a complete or error arrives
+      // Unsubscribe from the sub-channel when a complete or error arrives.
       finalize(() => {
         notifier.unsubscribe();
         delete this.consuming[notifier.id];
@@ -409,7 +413,9 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     // are streamed directly from the dataset. So if there is a pause in the
     // delivery this probably indicates a failure e.g. the collaborator is dead.
     // TODO unit test this
-    return failIfSlow ? consumed.pipe(timeout(this.sendTimeout)) : consumed;
+    return (failIfSlow ? consumed.pipe(timeout(this.sendTimeout)) : consumed)
+      // Share so that the finalize on the Source is only done once
+      .pipe(share()); // TODO unit test this
   }
 
   private produce<T>(data: Observable<T>, toId: string, subAddress: string,

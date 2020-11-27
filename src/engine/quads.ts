@@ -1,9 +1,9 @@
 import { Quad, Term, Literal } from 'rdf-js';
 import { namedNode, defaultGraph, variable, blankNode, literal, quad as newQuad } from '@rdfjs/data-model';
-import { fromRDF, toRDF } from 'jsonld';
 import { IndexMap, IndexSet } from "./indices";
 
 export type Triple = Omit<Quad, 'graph'>;
+export type TriplePos = 'subject' | 'predicate' | 'object';
 
 export class QuadMap<T> extends IndexMap<Quad, T> {
   protected getIndex(key: Quad): string {
@@ -54,16 +54,6 @@ function quadIndexKey(quad: Quad): string {
   return [quad.graph.value].concat(tripleKey(quad)).join('^');
 }
 
-export function rdfToJson(quads: Quad[]): Promise<any> {
-  // Using native types to avoid unexpected value objects
-  return fromRDF(quads, { useNativeTypes: true });
-}
-
-export function jsonToRdf(json: any): Promise<Quad[]> {
-  // jsonld produces quad members without equals
-  return toRDF(json).then((quads: Quad[]) => quads.map(cloneQuad));
-}
-
 export function cloneQuad(quad: Quad): Quad {
   return newQuad(
     cloneTerm(quad.subject),
@@ -74,6 +64,8 @@ export function cloneQuad(quad: Quad): Quad {
 
 export function cloneTerm<T extends Term>(term: T): T {
   switch (term.termType) {
+    case 'Quad':
+      return <T>cloneQuad(<Quad>term);
     case 'BlankNode':
       return <T>blankNode(term.value);
     case 'DefaultGraph':
