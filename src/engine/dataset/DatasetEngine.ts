@@ -449,7 +449,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
   @AbstractMeld.checkNotClosed.rx
   read(request: Read): Observable<Subject> {
     return new Observable<Subject>(subs => {
-      this.lock.share('live', () => new Promise(resolve => {
+      this.lock.share('live', () => new Promise<void>(resolve => {
         this.logRequest('read', request);
         // Only leave the live-lock when the results have been fully streamed
         return this.dataset.read(request).pipe(finalize(resolve)).subscribe(subs);

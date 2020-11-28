@@ -201,7 +201,7 @@ export class QuadStoreDataset implements Dataset {
   private async applyKvps(kvps: Kvps) {
     const batch = this.store.db.batch();
     await kvps(batch);
-    return new Promise<unknown>((resolve, reject) =>
+    return new Promise<void>((resolve, reject) =>
       batch.write(err => err ? reject(err) : resolve()));
   }
 
@@ -220,11 +220,11 @@ export class QuadStoreDataset implements Dataset {
 
   @notClosed.async
   get(key: string): Promise<Buffer | undefined> {
-    return new Promise<Buffer>((resolve, reject) =>
+    return new Promise<Buffer | undefined>((resolve, reject) =>
       this.store.db.get(key, { asBuffer: true }, (err, buf) => {
         if (err) {
           if (err.message.startsWith('NotFound'))
-            resolve();
+            resolve(undefined);
           else
             reject(err);
         } else {

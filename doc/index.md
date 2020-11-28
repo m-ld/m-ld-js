@@ -61,9 +61,6 @@ the clone has the most recent data, you can add:
 await meld.status.becomes({ online: true, outdated: false });
 ```
 
-As soon as the [clone](#clone) function's return promise has resolved, it is
-safe to make data transactions. 
-
 [[include:mqtt-remotes.md]]
 
 [[include:ably-remotes.md]]
