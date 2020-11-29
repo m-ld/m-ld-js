@@ -78,7 +78,7 @@
     "loglevel": "^1.7.1",
     "marky": "^1.2.1",
     "mqtt-pattern": "^1.2.0",
-    "quadstore": "^7.1.0-beta.2",
+    "quadstore": "^7.1.0",
     "rxjs": "^6.6.3",
     "short-uuid": "^4.1.0"
   }
