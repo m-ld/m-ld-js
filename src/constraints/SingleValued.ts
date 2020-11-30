@@ -1,7 +1,7 @@
-import { MeldConstraint, MeldUpdate, MeldReader } from '..';
+import { MeldConstraint, MeldUpdate, MeldReadState, asSubjectUpdates, updateSubject, MutableMeldUpdate } from '..';
 import { Iri } from 'jsonld/jsonld-spec';
-import { MeldApi, DeleteInsert } from '../MeldApi';
-import { map, filter, take, reduce, flatMap, defaultIfEmpty } from 'rxjs/operators';
+import { DeleteInsert } from '..';
+import { map, filter, take, reduce, mergeMap, defaultIfEmpty, concatMap } from 'rxjs/operators';
 import { Subject, Select, Update, Value, isValueObject } from '../jrql-support';
 import { Observable, EMPTY, concat, defer, from } from 'rxjs';
 
@@ -26,32 +26,31 @@ export class SingleValued implements MeldConstraint {
       comparable(value) > comparable(maxValue) ? value : maxValue);
   }
 
-  async check(update: MeldUpdate, read: MeldReader): Promise<unknown> {
+  async check(state: MeldReadState, update: MeldUpdate): Promise<unknown> {
     // Fail early and report the first failure
-    const failed = await this.affected(update, read, 'failEarly').pipe(
+    const failed = await this.affected(state, update, 'failEarly').pipe(
       filter(subject => isMultiValued(subject[this.property])),
       take(1)).toPromise();
     return failed != null ? Promise.reject(this.failure(failed)) : Promise.resolve();
   }
 
-  async apply(update: MeldUpdate, read: MeldReader): Promise<Update | null> {
-    return await this.affected(update, read).pipe(
-      reduce<Subject, Promise<DeleteInsert<Subject[]> | null>>(async (accPattern, subject) => {
+  apply(state: MeldReadState, update: MutableMeldUpdate): Promise<unknown> {
+    return this.affected(state, update).pipe(
+      concatMap(async subject => {
         const values = subject[this.property];
         if (isMultiValued(values)) {
           const resolvedValue = await this.resolve(values);
-          const pattern = await accPattern ?? { '@insert': [], '@delete': [] };
-          pattern['@delete'].push({
-            '@id': subject['@id'],
-            [this.property]: values.filter(v => v !== resolvedValue)
+          await update.append({
+            '@delete': {
+              '@id': subject['@id'],
+              [this.property]: values.filter(v => v !== resolvedValue)
+            }
           });
-          return pattern;
         }
-        return accPattern;
-      }, Promise.resolve(null))).toPromise();
+      })).toPromise();
   }
 
-  private affected(update: MeldUpdate, read: MeldReader, failEarly?: 'failEarly'): Observable<Subject> {
+  private affected(state: MeldReadState, update: MeldUpdate, failEarly?: 'failEarly'): Observable<Subject> {
     const hasProperty = (subject: Subject): boolean => subject[this.property] != null;
     const propertyInserts = update['@insert'].filter(hasProperty);
     // 'Fail early' means we pipe the raw inserts through the filter first,
@@ -59,20 +58,20 @@ export class SingleValued implements MeldConstraint {
     return !propertyInserts.length ? EMPTY :
       concat(failEarly ? from(propertyInserts) : EMPTY, defer(() => {
         // Reformulate the update per-(subject with the target property)
-        const subjectUpdates = MeldApi.asSubjectUpdates({
+        const subjectUpdates = asSubjectUpdates({
           '@delete': update['@delete'].filter(hasProperty),
           '@insert': propertyInserts
         });
         return from(Object.keys(subjectUpdates)).pipe(
-          flatMap(sid => read<Select>({
+          mergeMap(sid => state.read<Select>({
             '@select': '?o', '@where': { '@id': sid, [this.property]: '?o' }
           }).pipe(
-            defaultIfEmpty({ '?o': undefined }),
+            defaultIfEmpty({ '@id': '_:b0', '?o': undefined }),
             map(selectResult => {
               // Weirdness to construct a subject from the select result
               // TODO: Support `@construct`
               const subject = { '@id': sid, [this.property]: selectResult['?o'] };
-              MeldApi.update(subject, subjectUpdates[sid]);
+              updateSubject(subject, subjectUpdates[sid]);
               // Side-effect to prevent duplicate processing
               delete subjectUpdates[sid];
               return subject;

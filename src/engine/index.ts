@@ -4,12 +4,11 @@
 import { TreeClock } from './clocks';
 import { Observable } from 'rxjs';
 import { Message } from './messages';
-import { Quad } from 'rdf-js';
-import { Hash } from './hash';
 import { MsgPack, Future } from './util';
 import { LiveValue } from './LiveValue';
 import { MeldError } from './MeldError';
 import { gzip as gzipCb, gunzip as gunzipCb, InputType } from 'zlib';
+import { Triple } from './quads';
 const gzip = (input: InputType) => new Promise<Buffer>((resolve, reject) =>
   gzipCb(input, (err, buf) => err ? reject(err) : resolve(buf)));
 const gunzip = (input: InputType) => new Promise<Buffer>((resolve, reject) =>
@@ -18,39 +17,37 @@ const inspect = Symbol.for('nodejs.util.inspect.custom');
 
 const COMPRESS_THRESHOLD_BYTES = 1024;
 
-/**
- * The graph is implicit in m-ld operations.
- */
-export type Triple = Omit<Quad, 'graph'>;
-
 export class DeltaMessage implements Message<TreeClock, EncodedDelta> {
   readonly delivered = new Future;
 
   constructor(
+    readonly prev: number,
     readonly time: TreeClock,
     readonly data: EncodedDelta) {
   }
 
   encode(): Buffer {
-    return MsgPack.encode({ time: this.time.toJson(), data: this.data });
+    return MsgPack.encode({
+      time: this.time.toJson(), prev: this.prev, data: this.data
+    });
   }
 
   static decode(enc: Buffer): DeltaMessage {
     const json = MsgPack.decode(enc);
     const time = TreeClock.fromJson(json.time);
     if (time && json.data)
-      return new DeltaMessage(time, json.data);
+      return new DeltaMessage(json.prev, time, json.data);
     else
       throw new MeldError('Bad update');
   }
 
-  size() {
+  get size() {
     return this.encode().length;
   }
 
   toString() {
     return `${JSON.stringify(this.data)}
-    @ ${this.time}`;
+    @ ${this.time}, prev ${this.prev}`;
   }
 
   // v8(chrome/nodejs) console
@@ -79,11 +76,10 @@ export interface Meld {
 
   newClock(): Promise<TreeClock>;
   snapshot(): Promise<Snapshot>;
-  revupFrom(time: TreeClock): Promise<Observable<DeltaMessage> | undefined>;
+  revupFrom(time: TreeClock): Promise<Revup | undefined>;
 }
 
 export interface MeldDelta extends Object {
-  readonly tid: UUID;
   readonly insert: Triple[];
   readonly delete: Triple[];
   /**
@@ -95,12 +91,12 @@ export interface MeldDelta extends Object {
 }
 
 /**
- * A tuple containing version, tid, delete and insert components of a
+ * A tuple containing encoding version, delete and insert components of a
  * {@link MeldDelta}. The delete and insert components are UTF-8 encoded JSON-LD
  * strings, which may be GZIP compressed into a Buffer if bigger than a
  * threshold. Intended to be efficiently serialised with MessagePack.
  */
-export type EncodedDelta = [0, string, string | Buffer, string | Buffer];
+export type EncodedDelta = [1, string | Buffer, string | Buffer];
 
 export namespace EncodedDelta {
   export async function encode(json: any): Promise<Buffer | string> {
@@ -116,19 +112,20 @@ export namespace EncodedDelta {
   }
 }
 
-export interface Snapshot {
+export interface Recovery {
   readonly lastTime: TreeClock;
+  readonly updates: Observable<DeltaMessage>;
+}
+
+export interface Revup extends Recovery {
+}
+
+export interface Snapshot extends Recovery {
   /**
    * An observable of reified quad arrays. Reified quads include their observed
    * TIDs. Arrays for batching (sender decides array size).
    */
   readonly quads: Observable<Triple[]>;
-  /**
-   * All observed TIDs, for detecting duplicates.
-   */
-  readonly tids: Observable<UUID[]>;
-  readonly lastHash: Hash;
-  readonly updates: Observable<DeltaMessage>;
 }
 
 export interface MeldRemotes extends Meld {

@@ -10,6 +10,7 @@ import { observeOn } from 'rxjs/operators';
 import { MeldConfig } from '../src';
 import { AbstractLevelDOWN } from 'abstract-leveldown';
 import { LiveValue } from '../src/engine/LiveValue';
+import { Context } from 'jsonld/jsonld-spec';
 
 export function testConfig(config?: Partial<MeldConfig>): MeldConfig {
   return { '@id': 'test', '@domain': 'test.m-ld.org', genesis: true, ...config };
@@ -35,9 +36,11 @@ export function hotLive(lives: Array<boolean | null>): BehaviorSubject<boolean |
   return live;
 }
 
-export async function memStore(
-  leveldown: AbstractLevelDOWN = new MemDown): Promise<Dataset> {
-  return new QuadStoreDataset(leveldown);
+export async function memStore(opts?: {
+  backend?: AbstractLevelDOWN,
+  context?: Context
+}): Promise<Dataset> {
+  return new QuadStoreDataset(opts?.backend ?? new MemDown, opts?.context).initialise();
 }
 
 export function mockLocal(

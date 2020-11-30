@@ -1,12 +1,12 @@
-import { MeldDelta, EncodedDelta, UUID, Triple } from '.';
+import { MeldDelta, EncodedDelta, UUID } from '.';
 import { NamedNode, Quad } from 'rdf-js';
 import { literal, namedNode, blankNode, triple as newTriple, defaultGraph, quad as newQuad } from '@rdfjs/data-model';
-import { HashBagBlock } from './blocks';
-import { Hash } from './hash';
 import { compact } from 'jsonld';
-import { rdfToJson, flatten, jsonToRdf } from './util';
+import { flatten } from './util';
 import { Context, ExpandedTermDef } from '../jrql-support';
 import { Iri } from 'jsonld/jsonld-spec';
+import { Triple, TripleMap } from './quads';
+import { rdfToJson, jsonToRdf } from "./jsonld";
 
 export class DomainContext implements Context {
   '@base': Iri;
@@ -37,43 +37,16 @@ namespace rdf {
   export const object = namedNode($id + 'object');
 }
 
-export function hashTriple(triple: Triple): Hash {
-  switch (triple.object.termType) {
-    case 'Literal': return Hash.digest(
-      triple.subject.value,
-      triple.predicate.value,
-      triple.object.termType,
-      triple.object.value || '',
-      triple.object.datatype.value || '',
-      triple.object.language || '');
-    default: return Hash.digest(
-      triple.subject.value,
-      triple.predicate.value,
-      triple.object.termType,
-      triple.object.value);
-  }
-}
-
-export class TripleTids {
-  constructor(
-    readonly triple: Triple,
-    readonly tids: UUID[]) {
-  }
-
-  // See https://jena.apache.org/documentation/notes/reification.html
-  reify(): Triple[] {
+export function reifyTriplesTids(triplesTids: TripleMap<UUID[]>): Triple[] {
+  return flatten([...triplesTids].map(([triple, tids]) => {
     const rid = blankNode();
     return [
       newTriple(rid, rdf.type, rdf.Statement),
-      newTriple(rid, rdf.subject, this.triple.subject),
-      newTriple(rid, rdf.predicate, this.triple.predicate),
-      newTriple(rid, rdf.object, this.triple.object)
-    ].concat(this.tids.map(tid => newTriple(rid, meld.tid, literal(tid))));
-  }
-
-  static reify(triplesTids: TripleTids[]): Triple[] {
-    return flatten(triplesTids.map(tripleTids => tripleTids.reify()));
-  }
+      newTriple(rid, rdf.subject, triple.subject),
+      newTriple(rid, rdf.predicate, triple.predicate),
+      newTriple(rid, rdf.object, triple.object)
+    ].concat(tids.map(tid => newTriple(rid, meld.tid, literal(tid))));
+  }));
 }
 
 export function unreify(reifications: Triple[]): [Triple, UUID[]][] {
@@ -101,22 +74,11 @@ export function unreify(reifications: Triple[]): [Triple, UUID[]][] {
   }, {} as { [rid: string]: [Triple, UUID[]] }));
 }
 
-export class JsonDeltaBagBlock extends HashBagBlock<EncodedDelta> {
-  constructor(id: Hash, data?: EncodedDelta) { super(id, data); }
-  protected construct = (id: Hash, data: EncodedDelta) => new JsonDeltaBagBlock(id, data);
-  protected hash = (data: EncodedDelta) => {
-    const [ver, tid, del, ins] = data;
-    if (ver !== 0)
-      throw new Error(`Encoded delta version ${ver} not supported`);
-    return Hash.digest(tid, ins, del); // Note delete insert reversed (historical)
-  };
-}
-
 /**
  * TODO: re-sync with Java
  * @see m-ld/m-ld-core/src/main/java/org/m_ld/MeldResource.java
  */
-const DEFAULT_CONTEXT = {
+const DELTA_CONTEXT = {
   rdf: rdf.$id,
   xs: 'http://www.w3.org/2001/XMLSchema#',
   tid: meld.tid.value,
@@ -129,24 +91,24 @@ export class MeldEncoding {
   context: DomainContext;
 
   constructor(readonly domain: string) {
-    this.context = new DomainContext(domain, DEFAULT_CONTEXT);
+    this.context = new DomainContext(domain, DELTA_CONTEXT);
   }
 
   newDelta = async (delta: Omit<MeldDelta, 'encoded'>): Promise<MeldDelta> => {
     const [del, ins] = await Promise.all([delta.delete, delta.insert]
       .map(triples => this.jsonFromTriples(triples).then(EncodedDelta.encode)));
-    return { ...delta, encoded: [0, delta.tid, del, ins] };
+    return { ...delta, encoded: [1, del, ins] };
   }
 
   asDelta = async (delta: EncodedDelta): Promise<MeldDelta> => {
-    const [ver, tid, del, ins] = delta;
-    if (ver !== 0)
+    const [ver, del, ins] = delta;
+    if (ver !== 1)
       throw new Error(`Encoded delta version ${ver} not supported`);
     const jsons = await Promise.all([del, ins].map(EncodedDelta.decode));
     const [delTriples, insTriples] = await Promise.all(jsons.map(this.triplesFromJson));
     return ({
-      tid, insert: insTriples, delete: delTriples, encoded: delta,
-      toString: () => `${tid}: ${JSON.stringify(jsons)}`
+      insert: insTriples, delete: delTriples, encoded: delta,
+      toString: () => `${JSON.stringify(jsons)}`
     });
   }
 

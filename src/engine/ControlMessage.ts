@@ -1,4 +1,3 @@
-import { Hash } from './hash';
 import { TreeClock } from './clocks';
 import { MeldError, MeldErrorStatus } from './MeldError';
 const inspect = Symbol.for('nodejs.util.inspect.custom');
@@ -76,8 +75,6 @@ export namespace Response {
     constructor(
       readonly lastTime: TreeClock,
       readonly quadsAddress: string,
-      readonly tidsAddress: string,
-      readonly lastHash: Hash,
       readonly updatesAddress: string) {
     }
 
@@ -85,33 +82,34 @@ export namespace Response {
       '@type': 'http://control.m-ld.org/response/snapshot',
       lastTime: this.lastTime.toJson(),
       quadsAddress: this.quadsAddress,
-      tidsAddress: this.tidsAddress,
-      lastHash: this.lastHash.encode(),
       updatesAddress: this.updatesAddress
     });
 
-    toString = () => `Snapshot at ${this.lastTime} with hash ${this.lastHash}`;
+    toString = () => `Snapshot at ${this.lastTime}`;
     [inspect] = () => this.toString();
   }
 
   export class Revup implements Response {
     constructor(
-      readonly canRevup: boolean,
       /**
-       * If !canRevup this should be a stable identifier of the answering clone,
-       * to allow detection of a re-send.
+       * `null` indicates this clone cannot collaborate on the rev-up request
+       */
+      readonly lastTime: TreeClock | null,
+      /**
+       * If lastTime == null this should be a stable identifier of the answering
+       * clone, to allow detection of a re-send.
        */
       readonly updatesAddress: string) {
     }
 
     readonly toJson = () => ({
       '@type': 'http://control.m-ld.org/response/revup',
-      canRevup: this.canRevup,
+      lastTime: this.lastTime == null ? null : this.lastTime.toJson(),
       updatesAddress: this.updatesAddress
     })
 
-    toString = () => this.canRevup ?
-      `Can revup from ${this.updatesAddress}` :
+    toString = () => this.lastTime != null ?
+      `Can revup from ${this.updatesAddress} @ ${this.lastTime}` :
       `${this.updatesAddress} can't provide revup`;
     [inspect] = () => this.toString();
   }
@@ -132,23 +130,27 @@ export namespace Response {
 
   export function fromJson(json: any): Response {
     if (typeof json === 'object' && typeof json['@type'] === 'string') {
+      let lastTime: TreeClock | null;
       switch (json['@type']) {
         case 'http://control.m-ld.org/response/clock':
           const clock = TreeClock.fromJson(json.clock);
           if (clock)
             return new NewClock(clock);
+          break;
         case 'http://control.m-ld.org/response/snapshot':
-          const lastTime = TreeClock.fromJson(json.lastTime);
+          lastTime = TreeClock.fromJson(json.lastTime);
           if (lastTime)
             return new Snapshot(
-              lastTime, json.quadsAddress, json.tidsAddress,
-              Hash.decode(json.lastHash), json.updatesAddress);
+              lastTime, json.quadsAddress,
+              json.updatesAddress);
+          break;
         case 'http://control.m-ld.org/response/revup':
-          return new Revup(json.canRevup, json.updatesAddress);
+          lastTime = TreeClock.fromJson(json.lastTime);
+          return new Revup(lastTime, json.updatesAddress);
         case 'http://control.m-ld.org/response/rejected':
           return new Rejected(<MeldErrorStatus><number>json.status);
       }
     }
-    throw new MeldError('Bad response');
+    throw new MeldError('Bad response', JSON.stringify(json));
   }
 }

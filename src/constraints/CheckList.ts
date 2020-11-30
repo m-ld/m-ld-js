@@ -1,6 +1,7 @@
-import { MeldConstraint, MeldUpdate, MeldReader } from '..';
+import { MeldConstraint, MeldUpdate, MeldReadState, MutableMeldUpdate } from '..';
 import { Update, Subject } from '../jrql-support';
-import { DeleteInsert } from '../MeldApi';
+import { DeleteInsert } from '..';
+import { constraintFromConfig } from '.';
 
 /** @internal */
 export class CheckList implements MeldConstraint {
@@ -8,23 +9,13 @@ export class CheckList implements MeldConstraint {
     readonly list: MeldConstraint[]) {
   }
 
-  check(update: MeldUpdate, read: MeldReader): Promise<unknown> {
-    return Promise.all(this.list.map(constraint => constraint.check(update, read)));
+  check(state: MeldReadState, update: MeldUpdate) {
+    return Promise.all(this.list.map(
+      constraint => constraint.check(state, update)));
   }
 
-  apply(update: MeldUpdate, read: MeldReader): Promise<Update | null> {
-    return this.list.reduce<Promise<DeleteInsert<Subject[]> | null>>(async (acc, constraint) => {
-      const soFar = await acc, inserts = soFar?.['@insert'] ?? [], deletes = soFar?.['@delete'] ?? [];
-      const result = await constraint.apply({
-        // Construct an accumulated update
-        '@ticks': update['@ticks'],
-        '@insert': update['@insert'].concat(inserts),
-        '@delete': update['@delete'].concat(deletes)
-      }, read);
-      return result != null ? {
-        '@insert': inserts.concat(result['@insert'] ?? []),
-        '@delete': deletes.concat(result['@delete'] ?? [])
-      } : soFar;
-    }, Promise.resolve(null));
+  async apply(state: MeldReadState, update: MutableMeldUpdate) {
+    for (let constraint of this.list)
+      await constraint.apply(state, update);
   }
 }

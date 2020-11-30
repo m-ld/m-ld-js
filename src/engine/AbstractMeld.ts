@@ -1,10 +1,10 @@
-import { Meld, Snapshot, DeltaMessage } from '.';
+import { Meld, Snapshot, DeltaMessage, Revup } from '.';
 import { LiveValue } from "./LiveValue";
 import { TreeClock } from './clocks';
 import { Observable, Subject as Source, BehaviorSubject, asapScheduler, of } from 'rxjs';
 import { observeOn, tap, distinctUntilChanged, first, skip, catchError } from 'rxjs/operators';
 import { LogLevelDesc, Logger } from 'loglevel';
-import { getIdLogger, check } from './util';
+import { getIdLogger, check, HotSwitch, delayUntil, PauseableSource } from './util';
 import { MeldError } from './MeldError';
 
 export abstract class AbstractMeld implements Meld {
@@ -14,11 +14,12 @@ export abstract class AbstractMeld implements Meld {
     check((m: AbstractMeld) => !m.closed, () => new MeldError('Clone has closed'));
 
   readonly updates: Observable<DeltaMessage>;
+  readonly live: LiveValue<boolean | null>;
 
-  private readonly updateSource: Source<DeltaMessage> = new Source;
+  private readonly updateSource = new PauseableSource<DeltaMessage>();
   private readonly liveSource: BehaviorSubject<boolean | null> = new BehaviorSubject(null);
+  
   private closed = false;
-
   protected readonly log: Logger;
 
   constructor(readonly id: string, logLevel: LogLevelDesc = 'info') {
@@ -28,19 +29,20 @@ export abstract class AbstractMeld implements Meld {
     this.updates = this.updateSource.pipe(observeOn(asapScheduler),
       tap(msg => this.log.debug('has update', msg)));
 
+    // Live notifications are distinct, only transitions are notified; an error
+    // indicates a return to undecided liveness followed by completion.
+    this.live = Object.defineProperties(
+      this.liveSource.pipe(catchError(() => of(null)), distinctUntilChanged()),
+      { value: { get: () => this.liveSource.value } });
+
     // Log liveness
     this.live.pipe(skip(1)).subscribe(
       live => this.log.debug('is', live == null ? 'gone' : live ? 'live' : 'dead'));
   }
 
-  get live(): LiveValue<boolean | null> {
-    // Live notifications are distinct, only transitions are notified; an error
-    // indicates a return to undecided liveness followed by completion.
-    const source = this.liveSource.pipe(catchError(() => of(null)), distinctUntilChanged());
-    return Object.defineProperty(source, 'value', { get: () => this.liveSource.value });
-  }
-
   protected nextUpdate = (update: DeltaMessage) => this.updateSource.next(update);
+  protected pauseUpdates = (until: PromiseLike<unknown>) => this.updateSource.pause(until);
+
   protected warnError = (err: any) => this.log.warn(err);
 
   protected setLive(live: boolean | null) {
@@ -49,7 +51,7 @@ export abstract class AbstractMeld implements Meld {
 
   abstract newClock(): Promise<TreeClock>;
   abstract snapshot(): Promise<Snapshot>;
-  abstract revupFrom(time: TreeClock): Promise<Observable<DeltaMessage> | undefined>;
+  abstract revupFrom(time: TreeClock): Promise<Revup | undefined>;
 
   close(err?: any) {
     this.closed = true;

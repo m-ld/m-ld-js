@@ -1,15 +1,12 @@
-import { Quad, Term, Literal } from 'rdf-js';
-import { namedNode, defaultGraph, variable, blankNode, literal, quad as newQuad } from '@rdfjs/data-model';
-import { fromRDF, toRDF } from 'jsonld';
 import {
   concat, Observable, OperatorFunction, Subscription, throwError,
-  AsyncSubject, ObservableInput, onErrorResumeNext, NEVER, from
+  AsyncSubject, ObservableInput, onErrorResumeNext, NEVER, from, BehaviorSubject, Subject, SubscriptionLike, Observer
 } from "rxjs";
-import { publish, tap, flatMap } from "rxjs/operators";
-import AsyncLock = require('async-lock');
+import { publish, tap, mergeMap, switchAll } from "rxjs/operators";
 import { LogLevelDesc, getLogger, getLoggers } from 'loglevel';
 import * as performance from 'marky';
 import { encode as rawEncode, decode as rawDecode } from '@ably/msgpack-js';
+import { Source } from 'rdf-js';
 
 export namespace MsgPack {
   export const encode = (value: any) => Buffer.from(rawEncode(value).buffer);
@@ -22,11 +19,7 @@ export function flatten<T>(bumpy: T[][]): T[] {
 
 export function fromArrayPromise<T>(reEmits: Promise<T[]>): Observable<T> {
   // Rx weirdness exemplified in 26 characters
-  return from(reEmits).pipe(flatMap(from));
-}
-
-export function jsonFrom(payload: Buffer): any {
-  return JSON.parse(payload.toString());
+  return from(reEmits).pipe(mergeMap(from));
 }
 
 export function toJson(thing: any): any {
@@ -40,38 +33,8 @@ export function toJson(thing: any): any {
     return thing;
 }
 
-export function rdfToJson(quads: Quad[]): Promise<any> {
-  // Using native types to avoid unexpected value objects
-  return fromRDF(quads, { useNativeTypes: true });
-}
-
-export function jsonToRdf(json: any): Promise<Quad[]> {
-  // jsonld produces quad members without equals
-  return toRDF(json).then((quads: Quad[]) => quads.map(cloneQuad));
-}
-
-export function cloneQuad(quad: Quad): Quad {
-  return newQuad(
-    cloneTerm(quad.subject),
-    cloneTerm(quad.predicate),
-    cloneTerm(quad.object),
-    cloneTerm(quad.graph));
-}
-
-export function cloneTerm<T extends Term>(term: T): T {
-  switch (term.termType) {
-    case 'BlankNode':
-      return <T>blankNode(term.value);
-    case 'DefaultGraph':
-      return <T>defaultGraph();
-    case 'Literal':
-      const lit = <Literal>term;
-      return <T>literal(term.value, lit.language != null ? lit.language : cloneTerm(lit.datatype));
-    case 'NamedNode':
-      return <T>namedNode(term.value);
-    case 'Variable':
-      return <T>variable(term.value);
-  }
+export function settled(result: PromiseLike<unknown>): Promise<unknown> {
+  return new Promise(done => result.then(done, done));
 }
 
 export class Future<T = void> implements PromiseLike<T> {
@@ -82,6 +45,14 @@ export class Future<T = void> implements PromiseLike<T> {
       this.subject.next(value);
       this.subject.complete();
     }
+  }
+
+  get pending() {
+    return !this.subject.isStopped;
+  }
+
+  get settle() {
+    return [this.resolve, this.reject];
   }
 
   resolve = (value: T) => {
@@ -124,7 +95,7 @@ export function tapComplete<T>(done: Future): OperatorFunction<T, T> {
  * Delays notifications from a source until a signal is received from a notifier.
  * @see https://ncjamieson.com/how-to-write-delayuntil/
  */
-export function delayUntil<T>(notifier: Observable<any>): OperatorFunction<T, T> {
+export function delayUntil<T>(notifier: ObservableInput<unknown>): OperatorFunction<T, T> {
   return source =>
     source.pipe(
       publish(published => {
@@ -133,7 +104,7 @@ export function delayUntil<T>(notifier: Observable<any>): OperatorFunction<T, T>
           const buffer: T[] = [];
           const subscription = new Subscription();
           subscription.add(
-            notifier.subscribe(
+            from(notifier).subscribe(
               () => {
                 buffer.forEach(value => subscriber.next(value));
                 subscriber.complete();
@@ -161,35 +132,41 @@ export function delayUntil<T>(notifier: Observable<any>): OperatorFunction<T, T>
     );
 }
 
-export function onErrorNever<T, R>(v: ObservableInput<T>): Observable<R> {
+export function onErrorNever<T>(v: ObservableInput<T>): Observable<T> {
   return onErrorResumeNext(v, NEVER);
 }
 
-export class SharableLock extends AsyncLock {
-  private readonly refs: { [key: string]: { count: number, unref: Future } } = {};
-
-  enter(key: string): Promise<void> {
-    if (key in this.refs) {
-      this.refs[key].count++;
-      return Promise.resolve();
-    } else {
-      return new Promise((resolve, reject) => {
-        this.acquire(key, () => {
-          const unref = new Future;
-          this.refs[key] = { count: 1, unref };
-          resolve(); // Return control to caller as soon as lock acquired
-          return unref;
-        }).catch(reject); // Should only ever be due to lock acquisition
-      });
-    }
+export class HotSwitch<T> extends Observable<T> {
+  private readonly in: BehaviorSubject<Observable<T>>;
+  
+  constructor(position: Observable<T> = NEVER) {
+    super(subs => this.in.pipe(switchAll()).subscribe(subs));
+    this.in = new BehaviorSubject<Observable<T>>(position);
   }
 
-  leave(key: string) {
-    if (key in this.refs && --this.refs[key].count == 0) {
-      const unref = this.refs[key].unref;
-      delete this.refs[key];
-      unref.resolve();
-    }
+  switch(to: Observable<T>) {
+    this.in.next(to);
+  }
+}
+
+export class PauseableSource<T> extends Observable<T> implements Observer<T> {
+  private readonly subject = new Subject<T>();
+  private readonly switch = new HotSwitch<T>(this.subject);
+
+  constructor() {
+    super(subs => this.switch.subscribe(subs));
+  }
+  
+  get closed() {
+    return this.subject.closed;
+  };
+
+  next = (value: T) => this.subject.next(value);
+  error = (err: any) => this.subject.error(err);
+  complete = () => this.subject.complete();
+
+  pause(until: ObservableInput<unknown>) {
+    this.switch.switch(this.subject.pipe(delayUntil(until)));
   }
 }
 
@@ -208,11 +185,13 @@ export function getIdLogger(ctor: Function, id: string, logLevel: LogLevelDesc =
   return log;
 }
 
+type SyncMethod<T> = (this: T, ...args: any[]) => any;
 type AsyncMethod<T> = (this: T, ...args: any[]) => Promise<any>;
 type RxMethod<T> = (this: T, ...args: any[]) => Observable<any>;
 
 export function check<T>(assertion: (t: T) => boolean, otherwise: () => Error) {
   return {
+    sync: checkWith<T, SyncMethod<T>>(assertion, otherwise, err => { throw err; }),
     async: checkWith<T, AsyncMethod<T>>(assertion, otherwise, Promise.reject.bind(Promise)),
     rx: checkWith<T, RxMethod<T>>(assertion, otherwise, throwError)
   };
@@ -254,4 +233,12 @@ export class Stopwatch {
       this.lap.stop();
     return this.entry = performance.stop(this.name);
   }
+}
+
+export function poisson(mean: number) {
+  const threshold = Math.exp(-mean);
+  let rtn = 0;
+  for (let p = 1.0; p > threshold; p *= Math.random())
+    rtn++;
+  return rtn - 1;
 }

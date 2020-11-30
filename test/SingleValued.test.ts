@@ -1,125 +1,142 @@
-import { Subject, Describe } from '../src';
-import { DatasetClone } from '../src/engine/dataset/DatasetClone';
-import { memStore, mockRemotes, testConfig } from './testClones';
+import { MeldReadState, MutableMeldUpdate } from '../src/api';
+import { memStore } from './testClones';
 import { SingleValued } from '../src/constraints/SingleValued';
+import { JrqlGraph } from '../src/engine/dataset/JrqlGraph';
+import { GraphState } from '../src/engine/dataset/SuSetDataset';
+import { Dataset } from '../src/engine/dataset';
+import { mock, mockFn } from 'jest-mock-extended';
 
 describe('Single-valued constraint', () => {
-  let data: DatasetClone;
+  let data: Dataset;
+  let graph: JrqlGraph;
+  let state: MeldReadState;
 
   beforeEach(async () => {
-    data = new DatasetClone({
-      dataset: await memStore(),
-      remotes: mockRemotes(),
-      config: testConfig()
-    });
-    await data.initialise();
+    data = await memStore();
+    graph = new JrqlGraph(data.graph());
+    state = new GraphState(graph);
   });
 
   test('Passes an empty update', async () => {
     const constraint = new SingleValued('http://test.m-ld.org/#name');
-    await expect(constraint.check({
+    await expect(constraint.check(state, {
       '@ticks': 0,
       '@delete': [],
       '@insert': []
-    }, query => data.transact(query))).resolves.toBeUndefined();
+    })).resolves.toBeUndefined();
   });
 
   test('Passes a missing property update', async () => {
     const constraint = new SingleValued('http://test.m-ld.org/#name');
-    await expect(constraint.check({
+    await expect(constraint.check(state, {
       '@ticks': 0,
       '@delete': [],
       '@insert': [{ '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#height': 5 }]
-    }, query => data.transact(query))).resolves.toBeUndefined();
+    })).resolves.toBeUndefined();
   });
 
   test('Passes a single-valued property update', async () => {
     const constraint = new SingleValued('http://test.m-ld.org/#name');
-    await expect(constraint.check({
+    await expect(constraint.check(state, {
       '@ticks': 0,
       '@delete': [],
       '@insert': [{ '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Fred' }]
-    }, query => data.transact(query))).resolves.toBeUndefined();
+    })).resolves.toBeUndefined();
   });
 
   test('Fails a multi-valued property update', async () => {
     const constraint = new SingleValued('http://test.m-ld.org/#name');
-    await expect(constraint.check({
+    await expect(constraint.check(state, {
       '@ticks': 0,
       '@delete': [],
       '@insert': [{ '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': ['Fred', 'Flintstone'] }]
-    }, query => data.transact(query))).rejects.toBeDefined();
+    })).rejects.toBeDefined();
   });
 
   test('Fails a single-valued additive property update', async () => {
-    await data.transact(<Subject>{
-      '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Fred'
-    }).toPromise();
-
+    await data.transact({
+      prepare: async () => ({
+        patch: await graph.insert({
+          '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Fred'
+        })
+      })
+    });
     const constraint = new SingleValued('http://test.m-ld.org/#name');
-    await expect(constraint.check({
+    await expect(constraint.check(state, {
       '@ticks': 0,
       '@delete': [],
       '@insert': [{ '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Flintstone' }]
-    }, query => data.transact(query))).rejects.toBeDefined();
+    })).rejects.toBeDefined();
   });
 
   test('does not apply to a single-valued property update', async () => {
     const constraint = new SingleValued('http://test.m-ld.org/#name');
-    await expect(constraint.apply({
+    const update = mock<MutableMeldUpdate>({
       '@ticks': 0,
       '@delete': [],
       '@insert': [{ '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Fred' }]
-    }, query => data.transact(query))).resolves.toBeNull();
+    });
+    await constraint.apply(state, update);
+    expect(update.append.mock.calls).toEqual([]);
   });
 
   test('applies to a multi-valued property update', async () => {
     const constraint = new SingleValued('http://test.m-ld.org/#name');
-    await expect(constraint.apply({
+    const update = mock<MutableMeldUpdate>({
       '@ticks': 0,
       '@delete': [],
       '@insert': [{ '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': ['Fred', 'Flintstone'] }]
-    }, query => data.transact(query))).resolves.toEqual({
+    });
+    await constraint.apply(state, update);
+    expect(update.append.calledWith({
       '@delete': [{ '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': ['Flintstone'] }],
       '@insert': []
-    });
+    }));
   });
 
   test('applies to a single-valued additive property update', async () => {
-    await data.transact(<Subject>{
-      '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Fred'
-    }).toPromise();
-
+    await data.transact({
+      prepare: async () => ({
+        patch: await graph.insert({
+          '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Fred'
+        })
+      })
+    });
     const constraint = new SingleValued('http://test.m-ld.org/#name');
-    await expect(constraint.apply({
+    const update = mock<MutableMeldUpdate>({
       '@ticks': 0,
       '@delete': [],
       '@insert': [{ '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Flintstone' }]
-    }, query => data.transact(query))).resolves.toEqual({
+    });
+    await constraint.apply(state, update);
+    expect(update.append.calledWith({
       '@delete': [{ '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': ['Flintstone'] }],
       '@insert': []
-    });
+    }));
   });
 
   test('applies selectively to existing data', async () => {
     // Test case arose from compliance tests
-    await data.transact(<Subject>{
-      '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Fred'
-    }).toPromise();
-    await data.transact(<Subject>{
-      '@id': 'http://test.m-ld.org/wilma', 'http://test.m-ld.org/#name': 'Wilma'
-    }).toPromise();
-
+    await data.transact({
+      prepare: async () => ({
+        patch: await graph.insert([
+          { '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Fred' },
+          { '@id': 'http://test.m-ld.org/wilma', 'http://test.m-ld.org/#name': 'Wilma' }
+        ])
+      })
+    });
     const constraint = new SingleValued('http://test.m-ld.org/#name');
-    await constraint.apply({
+    const update = mock<MutableMeldUpdate>({
       '@ticks': 0,
       '@delete': [],
       '@insert': [{ '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Flintstone' }]
-    }, query => data.transact(query));
+    });
+    await constraint.apply(state, update);
+    // FIXME: not applied to the dataset!
 
-    await expect(data.transact(<Describe>{ '@describe': 'http://test.m-ld.org/fred' }).toPromise())
+    await expect(graph.describe1('http://test.m-ld.org/fred'))
       .resolves.toMatchObject({ 'http://test.m-ld.org/#name': 'Fred' });
-    await expect(data.transact(<Describe>{ '@describe': 'http://test.m-ld.org/wilma' }).toPromise())
+    await expect(graph.describe1('http://test.m-ld.org/wilma'))
       .resolves.toMatchObject({ 'http://test.m-ld.org/#name': 'Wilma' });
   });
 });

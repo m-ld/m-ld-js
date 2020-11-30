@@ -1,52 +1,39 @@
-import { Subject } from '../../jrql-support';
 import { toPrefixedId } from './SuSetGraph';
-import { Iri } from 'jsonld/jsonld-spec';
-import { UUID, MeldDelta, EncodedDelta } from '..';
-import { JsonDeltaBagBlock } from '../MeldEncoding';
+import { MeldDelta, EncodedDelta } from '..';
 import { TreeClock } from '../clocks';
-import { PatchQuads, Patch } from '.';
-import { JrqlGraph } from './JrqlGraph';
-import { Hash } from '../hash';
 import { MsgPack } from '../util';
+import { Dataset, Kvps } from '.';
 
-interface Journal {
-  '@id': 'qs:journal', // Singleton object
-  body: string; // JSON-encoded body
+/** There is only one journal with a fixed key */
+const JOURNAL_KEY = '_qs:journal';
+
+/** Journal entries are keyed as `_qs:entry:#tick`. */
+type EntryKey = ReturnType<typeof entryKey>;
+function entryKey(tick: number) {
+  return toPrefixedId('_qs:entry', tick.toString());
 }
 
-interface JournalBody {
-  tail: JournalEntry['@id'];
+interface JournalJson {
+  tail: EntryKey;
   time: any; // JSON-encoded TreeClock (the local clock)
 }
 
-/**
- * Journal entries are queryable by ticks. Otherwise they bundle properties into
- * a body for storage, to minimise triple count.
- */
-interface JournalEntry {
-  /** entry:<encoded block hash> */
-  '@id': Iri;
+type JournalEntryJson = [
+  /** Raw delta - may contain Buffers */
+  EncodedDelta,
+  /** JSON-encoded transaction message time */
+  any,
   /**
-   * Base64-encoded message-packed body
-   * FIXME: This will get converted back to binary by encoding-down
+   * JSON-encoded public clock time ('global wall clock' or 'Great Westminster
+   * Clock'). This has latest public ticks seen for all processes (not internal
+   * ticks), unlike the message time, which may be causally related to older
+   * messages from third parties, and the journal time, which has internal ticks
+   * for the local clone identity. This clock has no identity.
    */
-  body: string;
-  /**
-   * Local clock ticks for which this entry was the Journal tail. This includes
-   * any tick that has been exposed to the outside world, NOT ticks that were
-   * only ever seen internally.
-   */
-  ticks: number | number[];
-}
-
-interface JournalEntryBody {
-  tid: UUID; // Transaction ID
-  hash: string; // Encoded Hash
-  delta: EncodedDelta; // Raw delta - may contain Buffers
-  remote: boolean; // Whether this entry was a remote transaction
-  time: any; // JSON-encoded TreeClock (the remote clock)
-  next?: JournalEntry['@id'];
-}
+  any,
+  /** Next entry key */
+  EntryKey | undefined
+];
 
 export interface EntryCreateDetails {
   delta: MeldDelta;
@@ -54,222 +41,192 @@ export interface EntryCreateDetails {
   remoteTime?: TreeClock;
 }
 
+/** Immutable */
 export class SuSetJournalEntry {
-  private readonly body: JournalEntryBody;
-
   constructor(
-    private readonly journal: SuSetJournal,
-    private readonly data: JournalEntry) {
-    try {
-      this.body = MsgPack.decode(Buffer.from(data.body, 'base64'));
-    } catch (err) {
-      // This might be a v0.2 format
-      const body = JSON.parse(data.body);
-      if (typeof body.delta?.tid == 'string')
-        this.body = { ...body, delta: [0, body.delta.tid, body.delta.delete, body.delta.insert] };
-      else
-        throw err;
-    }
-  }
-
-  get id(): Iri {
-    return this.data['@id'];
-  }
-
-  get hash(): Hash {
-    return Hash.decode(this.body.hash);
-  }
-
-  get remote(): boolean {
-    return this.body.remote;
-  }
-
-  get time(): TreeClock {
-    return TreeClock.fromJson(this.body.time) as TreeClock;
-  }
-
-  get delta(): EncodedDelta {
-    return this.body.delta;
+    private readonly dataset: SuSetJournalDataset,
+    private readonly json: JournalEntryJson,
+    readonly key: EntryKey,
+    readonly delta = json[0],  // undefined iff head
+    readonly time = TreeClock.fromJson(json[1]) as TreeClock, // null iff temporary head
+    readonly gwc = TreeClock.fromJson(json[2]) as TreeClock,
+    readonly nextKey = json[3]) { // null iff temporary head
   }
 
   async next(): Promise<SuSetJournalEntry | undefined> {
-    if (this.body.next)
-      return this.journal.entry(this.body.next);
+    if (this.nextKey != null)
+      return this.dataset.entry(this.nextKey);
   }
 
-  static headEntry(startingHash: Hash, localTime?: TreeClock, startingTime?: TreeClock): Subject {
-    const encodedHash = startingHash.encode();
-    const headEntryId = SuSetJournalEntry.id(encodedHash);
-    const body: Partial<JournalEntryBody> = { hash: encodedHash };
-    if (startingTime != null)
-      body.time = startingTime.toJson();
-    const entry: Partial<JournalEntry> = {
-      '@id': headEntryId,
-      body: SuSetJournalEntry.encodeBody(body),
-      ticks: localTime?.ticks
-    };
-    return entry;
+  static head(localTime?: TreeClock, gwc?: TreeClock): [EntryKey, Partial<JournalEntryJson>] {
+    return [entryKey(localTime?.ticks ?? -1), [
+      undefined, // No delta for head
+      localTime?.toJson(),
+      gwc?.toJson()
+    ]];
   }
 
-  private static encodeBody(body: Partial<JournalEntryBody>): string {
-    return MsgPack.encode(body).toString('base64');
-  }
-
-  private static createEntry(
-    hash: Hash,
-    delta: MeldDelta,
-    localTime: TreeClock,
-    remoteTime?: TreeClock,
-    nextHash?: Hash): JournalEntry & Subject {
-    const encodedHash = hash.encode();
-    const body: JournalEntryBody = {
-      remote: remoteTime != null,
-      hash: encodedHash,
-      tid: delta.tid,
-      time: (remoteTime ?? localTime).toJson(),
-      delta: delta.encoded, // may contain buffers
-      next: nextHash != null ? SuSetJournalEntry.id(nextHash.encode()) : undefined
-    };
-    return {
-      '@id': SuSetJournalEntry.id(encodedHash),
-      body: SuSetJournalEntry.encodeBody(body),
-      ticks: localTime.ticks
-    };
-  }
-
-  private static id(encodedHash: string) {
-    return toPrefixedId('entry', encodedHash);
-  }
-
-  private static nextHash(prevHash: Hash, delta: MeldDelta) {
-    return new JsonDeltaBagBlock(prevHash).next(delta.encoded).id;
-  }
-
-  async setHeadTime(localTime: TreeClock): Promise<PatchQuads> {
-    const patchBody = await this.updateBody({ time: localTime.toJson() });
-    const patchTicks = await this.journal.graph.insert({ '@id': this.id, ticks: localTime.ticks });
-    return patchBody.concat(patchTicks);
-  }
-
-  async createNext(...next: EntryCreateDetails[]): Promise<{ patch: PatchQuads, tailId: Iri }> {
-    if (!next.length)
-      throw new Error('next required');
-    // First create the hashes from previous or this
-    const hashes = next.reduce<Hash[]>((hashes, next) =>
-      hashes.concat(SuSetJournalEntry.nextHash(
-        hashes.length ? hashes.slice(-1)[0] : this.hash, next.delta)), []);
-    // Then create the entries
-    const entries = next.map((next, i) =>
-      SuSetJournalEntry.createEntry(
-        hashes[i], next.delta, next.localTime, next.remoteTime, hashes[i + 1]));
-
-    const patch = await this.journal.graph.insert(entries);
-    return {
-      patch: patch.concat(await this.updateBody({ next: entries[0]['@id'] })),
-      tailId: entries.slice(-1)[0]['@id']
-    };
-  }
-
-  private updateBody(update: Partial<JournalEntryBody>): Promise<PatchQuads> {
-    return this.journal.graph.write({
-      '@delete': { '@id': this.id, body: this.data.body },
-      '@insert': { '@id': this.id, body: SuSetJournalEntry.encodeBody({ ...this.body, ...update }) }
-    });
-  }
-}
-
-export class SuSetJournalState {
-  private readonly body: JournalBody;
-
-  constructor(
-    private readonly journal: SuSetJournal,
-    private readonly data: Journal) {
-    this.body = JSON.parse(data.body);
-  }
-
-  get maybeTime() {
-    return this.body.time != null ? TreeClock.fromJson(this.body.time) : null;
-  }
-
-  get time() {
-    return TreeClock.fromJson(this.body.time) as TreeClock;
-  }
-
-  async tail(): Promise<SuSetJournalEntry> {
-    if (this.body.tail == null)
-      throw new Error('Journal has no tail yet');
-    return this.journal.entry(this.body.tail);
-  }
-
-  async findEntry(ticks: number) {
-    const foundId = await this.journal.graph.find1<JournalEntry>({ ticks });
-    return foundId ? this.journal.entry(foundId) : null;
-  }
-
-  async setLocalTime(localTime: TreeClock, newClone?: boolean): Promise<PatchQuads> {
-    const patch = await this.updateBody({ time: localTime.toJson() });
-    if (newClone) {
-      // For a new clone, the journal's dummy tail does not have a timestamp
-      const tail = await this.tail();
-      return patch.concat(await tail.setHeadTime(localTime));
-    } else {
-      // This time might be seen by the outside world, so ensure that the tail
-      // entry is marked as covering it
-      return patch.concat(await this.journal.graph.insert({ '@id': this.body.tail, ticks: localTime.ticks }));
+  builder(journal: SuSetJournal, entry: EntryCreateDetails): {
+    next: (entry: EntryCreateDetails) => void, commit: Kvps
+  } {
+    const dataset = this.dataset;
+    class EntryBuild {
+      key: EntryKey;
+      tick: number;
+      gwc: TreeClock;
+      time: TreeClock;
+      next?: EntryBuild;
+      constructor(prevGwc: TreeClock, readonly details: EntryCreateDetails) {
+        this.tick = details.localTime.ticks;
+        this.key = entryKey(this.tick);
+        this.time = details.remoteTime ?? details.localTime;
+        this.gwc = prevGwc.update(this.time);
+      }
+      *build(): Iterable<SuSetJournalEntry> {
+        const nextKey = this.next != null ? this.next.key : undefined;
+        const json: JournalEntryJson = [
+          this.details.delta.encoded,
+          this.time.toJson(),
+          this.gwc.toJson(),
+          nextKey
+        ];
+        yield new SuSetJournalEntry(dataset, json, this.key,
+          this.details.delta.encoded, this.time, this.gwc, nextKey);
+        if (this.next)
+          yield* this.next.build();
+      }
     }
-  }
-
-  static initState(headEntry: Partial<JournalEntry>, localTime?: TreeClock): Subject {
-    const body: Partial<JournalBody> = { tail: headEntry['@id'] };
-    if (localTime != null)
-      body.time = localTime.toJson();
-    return { '@id': 'qs:journal', body: JSON.stringify(body) };
-  }
-
-  async setTail(tailId: Iri, localTime: TreeClock): Promise<PatchQuads> {
-    return this.updateBody({ tail: tailId, time: localTime.toJson() });
-  }
-
-  private updateBody(update: Partial<JournalBody>): Promise<PatchQuads> {
-    return this.journal.graph.write({
-      '@delete': { '@id': 'qs:journal', body: this.data.body },
-      '@insert': { '@id': 'qs:journal', body: JSON.stringify({ ...this.body, ...update }) }
-    });
+    let head = new EntryBuild(this.gwc, entry), tail = head;
+    return {
+      /**
+       * Adds another journal entry to this builder
+       */
+      next: entry => {
+        tail = tail.next = new EntryBuild(tail.gwc, entry);
+      },
+      /**
+       * Commits the built journal entries to the journal
+       */
+      commit: batch => {
+        const entries = Array.from(head.build());
+        const newJson: JournalEntryJson = [...this.json];
+        newJson[3] = entries[0].key; // Next key
+        batch.put(this.key, MsgPack.encode(newJson));
+        entries.forEach(entry => batch.put(entry.key, MsgPack.encode(entry.json)));
+        journal.commit(entries.slice(-1)[0], tail.details.localTime)(batch);
+      }
+    };
   }
 }
 
 export class SuSetJournal {
+  /** Tail state cache */
+  _tail: SuSetJournalEntry | null = null;
+
   constructor(
-    readonly graph: JrqlGraph) {
+    private readonly dataset: SuSetJournalDataset,
+    json: JournalJson,
+    readonly tailKey = json.tail,
+    readonly time = json.time != null ? TreeClock.fromJson(json.time) : null) {
   }
 
-  async initialise(): Promise<Patch | undefined> {
+  get safeTime() {
+    if (this.time == null)
+      throw new Error('Journal time not available');
+    return this.time;
+  }
+
+  async tail(): Promise<SuSetJournalEntry> {
+    if (this._tail == null) {
+      if (this.tailKey == null)
+        throw new Error('Journal has no tail yet');
+      this._tail = await this.dataset.entry(this.tailKey) ?? null;
+      if (this._tail == null)
+        throw new Error('Journal tail is missing');
+    }
+    return this._tail;
+  }
+
+  entry(tick: number) {
+    return this.dataset.entry(entryKey(tick));
+  }
+
+  setLocalTime(localTime: TreeClock, newClone?: boolean): Kvps {
+    return async batch => {
+      let tailKey = this.tailKey;
+      if (newClone) {
+        // For a new clone, the journal's temp tail does not have a timestamp
+        batch.del(this.tailKey);
+        // The dummy head time will only ever be used for a genesis clone, as all
+        // other clones will have their journal reset with a snapshot. So, it's safe
+        // to use the local time as the gwc, which is needed for subsequent entries.
+        const [headKey, headJson] = SuSetJournalEntry.head(localTime, localTime.scrubId());
+        batch.put(headKey, MsgPack.encode(headJson));
+        tailKey = headKey;
+      }
+      const json: JournalJson = { tail: tailKey, time: localTime.toJson() };
+      batch.put(JOURNAL_KEY, MsgPack.encode(json));
+      // Not updating caches for rare time update
+      this.dataset._journal = null;
+      this._tail = null;
+    };
+  }
+
+  static initJson(headKey: EntryKey, localTime?: TreeClock): Partial<JournalJson> {
+    return { tail: headKey, time: localTime?.toJson() };
+  }
+
+  /**
+   * Commits a new tail and time, with updates to the journal and tail cache
+   */
+  commit(tail: SuSetJournalEntry, localTime: TreeClock): Kvps {
+    return batch => {
+      const json: JournalJson = { tail: tail.key, time: localTime.toJson() };
+      batch.put(JOURNAL_KEY, MsgPack.encode(json));
+      this.dataset._journal = new SuSetJournal(this.dataset, json, tail.key, localTime);
+      this.dataset._journal._tail = tail;
+    }
+  }
+}
+
+export class SuSetJournalDataset {
+  /** Journal state cache */
+  _journal: SuSetJournal | null = null;
+
+  constructor(
+    private ds: Dataset) {
+  }
+
+  async initialise(): Promise<Kvps | undefined> {
     // Create the Journal if not exists
-    const journal = await this.graph.describe1<Journal>('qs:journal');
+    const journal = await this.ds.get(JOURNAL_KEY);
     if (journal == null)
-      return this.reset(Hash.random());
+      return this.reset();
   }
 
-  async reset(startingHash: Hash,
-    startingTime?: TreeClock, localTime?: TreeClock): Promise<Patch> {
-    const entry = SuSetJournalEntry.headEntry(startingHash, localTime, startingTime);
-    const journal = SuSetJournalState.initState(entry, localTime);
-    const insert = await this.graph.insert([journal, entry]);
-    // Delete matches everything in all graphs
-    return { oldQuads: {}, newQuads: insert.newQuads };
+  reset(gwc?: TreeClock, localTime?: TreeClock): Kvps {
+    const [headKey, headJson] = SuSetJournalEntry.head(localTime, gwc);
+    const journalJson = SuSetJournal.initJson(headKey, localTime);
+    return batch => {
+      batch.put(JOURNAL_KEY, MsgPack.encode(journalJson));
+      batch.put(headKey, MsgPack.encode(headJson));
+      this._journal = null; // Not caching one-time change
+    };
   }
 
-  async state() {
-    const journal = await this.graph.describe1<Journal>('qs:journal');
-    if (journal == null)
-      throw new Error('Missing journal');
-    return new SuSetJournalState(this, journal);
+  async journal() {
+    if (this._journal == null) {
+      const value = await this.ds.get(JOURNAL_KEY);
+      if (value == null)
+        throw new Error('Missing journal');
+      this._journal = new SuSetJournal(this, MsgPack.decode(value));
+    }
+    return this._journal;
   }
 
-  async entry(id: JournalEntry['@id']) {
-    const entry = await this.graph.describe1<JournalEntry>(id);
-    if (entry == null)
-      throw new Error('Missing entry');
-    return new SuSetJournalEntry(this, entry);
+  async entry(key: EntryKey) {
+    const value = await this.ds.get(key);
+    if (value != null)
+      return new SuSetJournalEntry(this, MsgPack.decode(value), key);
   }
 }

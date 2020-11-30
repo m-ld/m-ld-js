@@ -1,18 +1,25 @@
 import { Quad, DefaultGraph, NamedNode, Quad_Subject, Quad_Predicate, Quad_Object } from 'rdf-js';
 import { defaultGraph } from '@rdfjs/data-model';
-import { RdfStore, MatchTerms } from 'quadstore';
-import AsyncLock = require('async-lock');
-import { AbstractLevelDOWN, AbstractOpenOptions } from 'abstract-leveldown';
+import { Quadstore } from 'quadstore';
+import { AbstractChainedBatch, AbstractLevelDOWN } from 'abstract-leveldown';
 import { Observable } from 'rxjs';
 import { generate as uuid } from 'short-uuid';
 import { check, Stopwatch } from '../util';
+import { LockManager } from '../locks';
+import { QuadSet } from '../quads';
+import { Filter } from '../indices';
+import dataFactory = require('@rdfjs/data-model');
+import { BatchOpts, TermName } from 'quadstore/dist/lib/types';
+import { Context } from 'jsonld/jsonld-spec';
+import { activeCtx, compactIri, expandTerm } from '../jsonld';
+import { ActiveContext } from 'jsonld/lib/context';
 
 /**
  * Atomically-applied patch to a quad-store.
  */
 export interface Patch {
-  oldQuads: Quad[] | MatchTerms<Quad>;
-  newQuads: Quad[];
+  readonly oldQuads: Quad[] | Partial<Quad>;
+  readonly newQuads: Quad[];
 }
 
 /**
@@ -20,27 +27,40 @@ export interface Patch {
  * Requires that the oldQuads are concrete Quads and not a MatchTerms.
  */
 export class PatchQuads implements Patch {
+  private readonly sets: { [key in keyof Patch]: QuadSet };
+
   constructor(
-    readonly oldQuads: Quad[] = [],
-    readonly newQuads: Quad[] = []) {
+    oldQuads: Iterable<Quad> = [],
+    newQuads: Iterable<Quad> = []) {
+    this.sets = { oldQuads: new QuadSet(oldQuads), newQuads: new QuadSet(newQuads) };
+    this.ensureMinimal();
   }
 
-  concat({ oldQuads, newQuads }: { oldQuads?: Quad[], newQuads?: Quad[] }) {
-    return new PatchQuads(
-      oldQuads ? this.oldQuads.concat(oldQuads) : this.oldQuads,
-      newQuads ? this.newQuads.concat(newQuads) : this.newQuads);
+  get oldQuads() {
+    return [...this.sets.oldQuads];
   }
 
-  removeAll(key: keyof Patch, quads: Quad[]): Quad[] {
-    const removed: Quad[] = [];
-    for (let i = 0; i < this[key].length;) {
-      const myQuad = this[key][i];
-      if (quads.some(quad => quad.equals(myQuad)))
-        this[key].splice(i, 1);
-      else
-        i++;
-    }
-    return removed;
+  get newQuads() {
+    return [...this.sets.newQuads];
+  }
+
+  get isEmpty() {
+    return this.sets.newQuads.size === 0 && this.sets.oldQuads.size === 0;
+  }
+
+  append(patch: { [key in keyof Patch]?: Iterable<Quad> }) {
+    this.sets.oldQuads.addAll(patch.oldQuads);
+    this.sets.newQuads.addAll(patch.newQuads);
+    this.ensureMinimal();
+    return this;
+  }
+
+  remove(key: keyof Patch, quads: Iterable<Quad> | Filter<Quad>): Quad[] {
+    return [...this.sets[key].deleteAll(quads)];
+  }
+
+  private ensureMinimal() {
+    this.sets.newQuads.deleteAll(this.sets.oldQuads.deleteAll(this.sets.newQuads));
   }
 }
 
@@ -63,18 +83,26 @@ export interface Dataset {
   transact(txn: TxnOptions<TxnResult>): Promise<void>;
   transact<T>(txn: TxnOptions<TxnValueResult<T>>): Promise<T>;
 
+  get(key: string): Promise<Buffer | undefined>;
+
+  clear(): Promise<void>;
+
   close(): Promise<void>;
   readonly closed: boolean;
 }
 
+export type Kvps = // NonNullable<BatchOpts['preWrite']> with strong kv types
+  (batch: AbstractChainedBatch<string, Buffer>) => Promise<unknown> | unknown;
+
 export interface TxnResult {
-  patch?: Patch,
-  after?(): void | Promise<void>;
-  value?: unknown;
+  patch?: Patch;
+  kvps?: Kvps;
+  after?(): unknown | Promise<unknown>;
+  return?: unknown;
 }
 
 export interface TxnValueResult<T> extends TxnResult {
-  value: T
+  return: T
 }
 
 export interface TxnOptions<T extends TxnResult> extends Partial<TxnContext> {
@@ -97,18 +125,46 @@ export interface Graph {
   match(subject?: Quad_Subject, predicate?: Quad_Predicate, object?: Quad_Object): Observable<Quad>;
 }
 
+/**
+ * Context for Quadstore dataset storage. Mix in with a domain context to
+ * optimise (minimise) both control and user content.
+ */
+export const STORAGE_CONTEXT: Context = {
+  qs: 'http://qs.m-ld.org/',
+  xs: 'http://www.w3.org/2001/XMLSchema#',
+  rdf: 'http://www.w3.org/1999/02/22-rdf-syntax-ns#'
+}
+
 export class QuadStoreDataset implements Dataset {
   readonly location: string;
-  private readonly store: RdfStore;
-  private readonly lock = new AsyncLock;
+  private /* readonly */ store: Quadstore;
+  private readonly activeCtx?: Promise<ActiveContext>;
+  private readonly lock = new LockManager;
   private isClosed: boolean = false;
 
-  constructor(
-    private readonly leveldown: AbstractLevelDOWN,
-    opts?: AbstractOpenOptions) {
-    this.store = new RdfStore(leveldown, opts);
+  constructor(private readonly backend: AbstractLevelDOWN, context?: Context) {
     // Internal of level-js and leveldown
-    this.location = (<any>leveldown).location ?? uuid();
+    this.location = (<any>backend).location ?? uuid();
+    this.activeCtx = activeCtx(Object.assign({}, STORAGE_CONTEXT, context));
+  }
+
+  async initialise(): Promise<QuadStoreDataset> {
+    const activeCtx = await this.activeCtx;
+    this.store = new Quadstore({
+      backend: this.backend,
+      dataFactory,
+      indexes: [
+        [TermName.GRAPH, TermName.SUBJECT, TermName.PREDICATE, TermName.OBJECT],
+        [TermName.GRAPH, TermName.OBJECT, TermName.SUBJECT, TermName.PREDICATE],
+        [TermName.GRAPH, TermName.PREDICATE, TermName.OBJECT, TermName.SUBJECT]
+      ],
+      prefixes: activeCtx == null ? undefined : {
+        expandTerm: term => expandTerm(term, activeCtx),
+        compactIri: iri => compactIri(iri, activeCtx)
+      }
+    });
+    await this.store.open();
+    return this;
   }
 
   graph(name?: GraphName): Graph {
@@ -123,27 +179,72 @@ export class QuadStoreDataset implements Dataset {
     // transaction (e.g. evaluating the @where clause) are not affected by
     // concurrent transactions (fully serialiseable consistency). This is
     // particularly important for SU-Set operation.
-    // TODO: This could be improved with snapshots
-    // https://github.com/Level/leveldown/issues/486
+    /*
+    TODO: This could be improved with snapshots, if all the reads were on the
+    same event loop tick, see https://github.com/Level/leveldown/issues/486
+    */
     sw.next('lock-wait');
-    return this.lock.acquire('txn', async () => {
+    return this.lock.exclusive('txn', async () => {
       sw.next('prepare');
       const result = await txn.prepare({ id, sw: sw.lap });
       sw.next('apply');
       if (result.patch != null)
-        await this.store.patch(result.patch.oldQuads, result.patch.newQuads);
+        await this.applyQuads(result.patch, { preWrite: result.kvps });
+      else if (result.kvps != null)
+        await this.applyKvps(result.kvps);
       sw.stop();
       await result.after?.();
-      return <T>result.value;
+      return <T>result.return;
     });
+  }
+
+  private async applyKvps(kvps: Kvps) {
+    const batch = this.store.db.batch();
+    await kvps(batch);
+    return new Promise<void>((resolve, reject) =>
+      batch.write(err => err ? reject(err) : resolve()));
+  }
+
+  private async applyQuads(patch: Patch, opts?: BatchOpts) {
+    if (Array.isArray(patch.oldQuads)) {
+      await this.store.multiPatch(patch.oldQuads, patch.newQuads, opts);
+    } else {
+      // FIXME: Not atomic! – Rarely used
+      const { subject, predicate, object, graph } = patch.oldQuads;
+      await new Promise((resolve, reject) =>
+        this.store.removeMatches(subject, predicate, object, graph)
+          .on('end', resolve).on('error', reject));
+      await this.store.multiPut(patch.newQuads, opts);
+    }
+  }
+
+  @notClosed.async
+  get(key: string): Promise<Buffer | undefined> {
+    return new Promise<Buffer | undefined>((resolve, reject) =>
+      this.store.db.get(key, { asBuffer: true }, (err, buf) => {
+        if (err) {
+          if (err.message.startsWith('NotFound'))
+            resolve(undefined);
+          else
+            reject(err);
+        } else {
+          resolve(buf);
+        }
+      }));
+  }
+
+  @notClosed.async
+  clear(): Promise<void> {
+    return new Promise<void>((resolve, reject) =>
+      this.store.db.clear(err => err ? reject(err) : resolve()));
   }
 
   @notClosed.async
   close(): Promise<void> {
     // Make efforts to ensure no transactions are running
-    return this.lock.acquire('txn', done => {
+    return this.lock.exclusive('txn', () => {
       this.isClosed = true;
-      this.leveldown.close(done);
+      return this.store.close();
     });
   }
 
@@ -154,7 +255,7 @@ export class QuadStoreDataset implements Dataset {
 
 class QuadStoreGraph implements Graph {
   constructor(
-    readonly store: RdfStore,
+    readonly store: Quadstore,
     readonly name: GraphName) {
   }
 
@@ -172,3 +273,4 @@ class QuadStoreGraph implements Graph {
     });
   }
 }
+

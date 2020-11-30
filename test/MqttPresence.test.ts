@@ -76,19 +76,16 @@ describe('MQTT presence', () => {
     await expect(nextChange(presence)).resolves.toEqual(['consumer2']);
   });
 
-  test('when racing, lower client wins', async () => {
+  test('when racing, neither client sees the other', async () => {
     const presence2 = new MqttPresence(mqtt, 'test.m-ld.org', 'client2');
     presence.initialise();
     presence2.initialise();
     presence.join('consumer1', 'address');
     presence2.join('consumer2', 'address');
-
+    // First change sees no presences
     await expect(Promise.all([
       nextChange(presence),
       nextChange(presence2)
-    ])).resolves.toEqual([
-      ['consumer1'],
-      ['consumer1', 'consumer2']
-    ]);
+    ])).resolves.toEqual([[], []]);
   });
 });

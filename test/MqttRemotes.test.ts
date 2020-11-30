@@ -112,8 +112,9 @@ describe('New MQTT remotes', () => {
         '{"consumer2":"test.m-ld.org/control"}');
       await comesAlive(remotes);
 
-      const entry = new DeltaMessage(
-        TreeClock.GENESIS.forked().left, [0, 't1', '{}', '{}']);
+      const time = TreeClock.GENESIS.forked().left;
+      const entry = new DeltaMessage(time.ticks,
+        time.ticked(), [1, '{}', '{}']);
       const updates = new Source<DeltaMessage>();
       remotes.setLocal(mockLocal({ updates }));
       // Setting retained presence on the channel
@@ -138,8 +139,9 @@ describe('New MQTT remotes', () => {
 
       mqtt.publish.mockReturnValue(<any>Promise.reject('Delivery failed'));
 
-      updates.next(new DeltaMessage(
-        TreeClock.GENESIS.forked().left, [0, 't1', '{}', '{}']));
+      const time = TreeClock.GENESIS.forked().left;
+      updates.next(new DeltaMessage(time.ticks,
+        time.ticked(), [1, '{}', '{}']));
 
       await expect(remotes.updates.toPromise()).rejects.toBe('Delivery failed');
     });
@@ -167,11 +169,11 @@ describe('New MQTT remotes', () => {
 
     test('can provide revup', async () => {
       // Local clone provides a rev-up on any request
-      const localTime = TreeClock.GENESIS.forked().left;
-      const local = mockLocal({ revupFrom: () => Promise.resolve(of(revupUpdate)) });
-      const revupUpdate = new DeltaMessage(
-        TreeClock.GENESIS.forked().left, [0, 't1', '{}', '{}']);
-      remotes.setLocal(local);
+      const { left: localTime, right: remoteTime } = TreeClock.GENESIS.forked();
+      const revupUpdate = new DeltaMessage(remoteTime.ticks, remoteTime.ticked(), [1, '{}', '{}']);
+      remotes.setLocal(mockLocal({
+        revupFrom: () => Promise.resolve({ lastTime: remoteTime.ticked(), updates: of(revupUpdate) })
+      }));
 
       // Send a rev-up request from an imaginary client2
       mqtt.mockPublish('__send/client1/client2/send1/test.m-ld.org/control',
@@ -276,7 +278,7 @@ describe('New MQTT remotes', () => {
           expect(domain).toBe('test.m-ld.org');
           mqtt.mockPublish('__reply/client1/consumer2/reply1/' + messageId, MsgPack.encode({
             '@type': 'http://control.m-ld.org/response/revup',
-            canRevup: false,
+            lastTime: null,
             updatesAddress: 'consumer2'
           }));
         }
@@ -293,7 +295,7 @@ describe('New MQTT remotes', () => {
         if (type === '__send' && json['@type'] === 'http://control.m-ld.org/request/revup') {
           mqtt.mockPublish('__reply/client1/consumer2/reply1/' + messageId, MsgPack.encode({
             '@type': 'http://control.m-ld.org/response/revup',
-            canRevup: true,
+            lastTime: TreeClock.GENESIS.forked().right.toJson(),
             updatesAddress: 'subChannel1'
           }));
         }
@@ -314,13 +316,13 @@ describe('New MQTT remotes', () => {
             first = false;
             mqtt.mockPublish(`__reply/client1/${toId}/reply1/${messageId}`, MsgPack.encode({
               '@type': 'http://control.m-ld.org/response/revup',
-              canRevup: false,
+              lastTime: null,
               updatesAddress: toId
             }));
           } else {
             mqtt.mockPublish(`__reply/client1/${toId}/reply2/${messageId}`, MsgPack.encode({
               '@type': 'http://control.m-ld.org/response/revup',
-              canRevup: true,
+              lastTime: TreeClock.GENESIS.forked().right.toJson(),
               updatesAddress: 'subChannel1'
             }));
           }

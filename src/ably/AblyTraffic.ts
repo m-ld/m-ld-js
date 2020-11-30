@@ -26,7 +26,7 @@ class ChannelMessage {
   }
 
   publish = () => this.channel.publish(this.name, this.data)
-    .then(this.published.resolve, this.published.reject);
+    .then(...this.published.settle);
 }
 
 export class AblyTraffic {
