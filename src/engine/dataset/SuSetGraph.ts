@@ -1,4 +1,5 @@
 import { Context } from '../../jrql-support';
+// FIXME: Get the data factory from somewhere
 import { namedNode } from '@rdfjs/data-model';
 import { NamedNode } from 'rdf-js';
 import { Iri } from 'jsonld/jsonld-spec';

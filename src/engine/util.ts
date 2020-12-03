@@ -1,12 +1,12 @@
 import {
   concat, Observable, OperatorFunction, Subscription, throwError,
-  AsyncSubject, ObservableInput, onErrorResumeNext, NEVER, from, BehaviorSubject, Subject, SubscriptionLike, Observer
+  AsyncSubject, ObservableInput, onErrorResumeNext, NEVER, from, BehaviorSubject, Subject, Observer
 } from "rxjs";
 import { publish, tap, mergeMap, switchAll } from "rxjs/operators";
 import { LogLevelDesc, getLogger, getLoggers } from 'loglevel';
 import * as performance from 'marky';
 import { encode as rawEncode, decode as rawDecode } from '@ably/msgpack-js';
-import { Source } from 'rdf-js';
+import { EventEmitter } from 'events';
 
 export namespace MsgPack {
   export const encode = (value: any) => Buffer.from(rawEncode(value).buffer);
@@ -136,9 +136,34 @@ export function onErrorNever<T>(v: ObservableInput<T>): Observable<T> {
   return onErrorResumeNext(v, NEVER);
 }
 
+export function observeStream<T>(stream: EventEmitter): Observable<T> {
+  return new Observable<T>(subs => {
+    let active = true;
+    function teardown() {
+      if (typeof (<any>stream).close == 'function')
+        (<any>stream).close();
+      active = false;
+    }
+    stream
+      .on('data', datum => {
+        if (active)
+          subs.next(datum);
+      })
+      .on('error', err => {
+        active = false;
+        subs.error(err);
+      })
+      .on('end', () => {
+        active = false;
+        subs.complete();
+      });
+    return teardown;
+  });
+}
+
 export class HotSwitch<T> extends Observable<T> {
   private readonly in: BehaviorSubject<Observable<T>>;
-  
+
   constructor(position: Observable<T> = NEVER) {
     super(subs => this.in.pipe(switchAll()).subscribe(subs));
     this.in = new BehaviorSubject<Observable<T>>(position);
@@ -156,7 +181,7 @@ export class PauseableSource<T> extends Observable<T> implements Observer<T> {
   constructor() {
     super(subs => this.switch.subscribe(subs));
   }
-  
+
   get closed() {
     return this.subject.closed;
   };

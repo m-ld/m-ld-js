@@ -107,6 +107,14 @@ describe('Meld State API', () => {
     });
   });
 
+  test('inserts an anonymous subject', async () => {
+    await api.write<Update>({ '@insert': { name: 'Fred' } });
+    await expect(api.read({
+      '@describe': '?s',
+      '@where': { '@id': '?s', name: 'Fred' }
+    })).resolves.toMatchObject([{ name: 'Fred' }]);
+  });
+
   test('deletes a subject by path', async () => {
     await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
     const captureUpdate = new Future<MeldUpdate>();

@@ -1,5 +1,6 @@
 import { MeldDelta, EncodedDelta, UUID } from '.';
 import { NamedNode, Quad } from 'rdf-js';
+// FIXME: Make this a data factory field of the MeldEncoding
 import { literal, namedNode, blankNode, triple as newTriple, defaultGraph, quad as newQuad } from '@rdfjs/data-model';
 import { compact } from 'jsonld';
 import { flatten } from './util';

@@ -1,4 +1,7 @@
-import { MeldUpdate, MeldConstraint, MeldReadState, readResult, Resource, ReadResult, MutableMeldUpdate } from '../../api';
+import {
+  MeldUpdate, MeldConstraint, MeldReadState, Resource,
+  ReadResult, MutableMeldUpdate, readResult
+} from '../../api';
 import { Snapshot, UUID, DeltaMessage, MeldDelta } from '..';
 import { Quad } from 'rdf-js';
 import { TreeClock } from '../clocks';
@@ -9,7 +12,7 @@ import { Iri } from 'jsonld/jsonld-spec';
 import { JrqlGraph } from './JrqlGraph';
 import { MeldEncoding, unreify, toDomainQuad, reifyTriplesTids } from '../MeldEncoding';
 import { Observable, from, Subject as Source, EMPTY } from 'rxjs';
-import { bufferCount, mergeMap, reduce, map, filter, takeWhile, expand } from 'rxjs/operators';
+import { bufferCount, mergeMap, reduce, map, filter, takeWhile, expand, toArray } from 'rxjs/operators';
 import { flatten, Future, tapComplete, getIdLogger, check } from '../util';
 import { Logger } from 'loglevel';
 import { MeldError } from '../MeldError';
@@ -392,8 +395,9 @@ export class SuSetDataset extends JrqlGraph {
     return quadTriplesTids;
   }
 
-  private findTripleTids(tripleId: string): Promise<Quad[]> {
-    return this.tidsGraph.findQuads({ '@id': tripleId } as Partial<HashTid>);
+  private findTripleTids(tripleId: string): PromiseLike<Quad[]> {
+    return this.tidsGraph.findQuads({ '@id': tripleId } as Partial<HashTid>)
+      .pipe(toArray()).toPromise();
   }
 
   /**

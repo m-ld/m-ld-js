@@ -2,7 +2,10 @@ import { Context, Subject, Describe, Pattern, Update, Read, Write } from '../jrq
 import { Observable, Subscription } from 'rxjs';
 import { map, take } from 'rxjs/operators';
 import { flatten } from 'jsonld';
-import { MeldUpdate, MeldState, Resource, any, MeldStateMachine, ReadResult, readResult, StateProc, UpdateProc } from '../api';
+import {
+  MeldUpdate, MeldState, Resource, any, MeldStateMachine,
+  ReadResult, StateProc, UpdateProc, readResult
+} from '../api';
 import { CloneEngine, EngineState, EngineUpdateProc, StateEngine } from './StateEngine';
 
 abstract class ApiState implements MeldState {
