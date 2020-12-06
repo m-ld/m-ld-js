@@ -136,28 +136,33 @@ export function onErrorNever<T>(v: ObservableInput<T>): Observable<T> {
   return onErrorResumeNext(v, NEVER);
 }
 
-export function observeStream<T>(stream: EventEmitter): Observable<T> {
+export function observeStream<T>(startStream: () => EventEmitter): Observable<T> {
   return new Observable<T>(subs => {
     let active = true;
-    function teardown() {
-      if (typeof (<any>stream).close == 'function')
-        (<any>stream).close();
-      active = false;
+    try {
+      const stream = startStream();
+      function teardown() {
+        if (typeof (<any>stream).close == 'function')
+          (<any>stream).close();
+        active = false;
+      }
+      stream
+        .on('data', datum => {
+          if (active)
+            subs.next(datum);
+        })
+        .on('error', err => {
+          active = false;
+          subs.error(err);
+        })
+        .on('end', () => {
+          active = false;
+          subs.complete();
+        });
+      return teardown;
+    } catch (err) {
+      subs.error(err);
     }
-    stream
-      .on('data', datum => {
-        if (active)
-          subs.next(datum);
-      })
-      .on('error', err => {
-        active = false;
-        subs.error(err);
-      })
-      .on('end', () => {
-        active = false;
-        subs.complete();
-      });
-    return teardown;
   });
 }
 

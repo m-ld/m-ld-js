@@ -21,7 +21,7 @@ describe('json-rql Graph handler', () => {
   test('quadifies anonymous subject', async () => {
     const quads = await jrqlGraph.quads({ 'name': 'Fred' }, { query: true });
     expect(quads.length).toBe(1);
-    expect(quads[0].subject.termType).toBe('Variable');
+    expect(quads[0].subject.termType).toBe('BlankNode');
     expect(dataFactory.namedNode('http://test.m-ld.org/#name').equals(quads[0].predicate)).toBe(true);
     expect(quads[0].object.termType).toBe('Literal');
     expect(quads[0].object.value).toBe('Fred');
@@ -30,7 +30,7 @@ describe('json-rql Graph handler', () => {
   test('quadifies anonymous variable predicate', async () => {
     const quads = await jrqlGraph.quads({ '?': 'Fred' }, { query: true });
     expect(quads.length).toBe(1);
-    expect(quads[0].subject.termType).toBe('Variable');
+    expect(quads[0].subject.termType).toBe('BlankNode');
     expect(quads[0].predicate.termType).toBe('Variable');
     expect(quads[0].object.termType).toBe('Literal');
     expect(quads[0].object.value).toBe('Fred');
@@ -39,7 +39,7 @@ describe('json-rql Graph handler', () => {
   test('quadifies anonymous reference predicate', async () => {
     const quads = await jrqlGraph.quads({ '?': { '@id': 'fred' } }, { query: true });
     expect(quads.length).toBe(1);
-    expect(quads[0].subject.termType).toBe('Variable');
+    expect(quads[0].subject.termType).toBe('BlankNode');
     expect(quads[0].predicate.termType).toBe('Variable');
     expect(quads[0].object.termType).toBe('NamedNode');
     expect(quads[0].object.value).toBe('http://test.m-ld.org/fred');

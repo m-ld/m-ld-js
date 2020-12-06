@@ -131,6 +131,7 @@ export interface Graph {
   match(subject?: Quad_Subject, predicate?: Quad_Predicate, object?: Quad_Object): Observable<Quad>;
 
   query(query: Algebra.Construct): Observable<Quad>;
+  query(query: Algebra.Describe): Observable<Quad>;
   query(query: Algebra.Project): Observable<Binding>;
 }
 
@@ -278,11 +279,13 @@ class QuadStoreGraph implements Graph {
   };
 
   query(query: Algebra.Construct): Observable<Quad>;
+  query(query: Algebra.Describe): Observable<Quad>;
   query(query: Algebra.Project): Observable<Binding>;
-  query(query: Algebra.Project | Algebra.Construct): Observable<Binding | Quad> {
+  query(query: Algebra.Project | Algebra.Describe | Algebra.Construct): Observable<Binding | Quad> {
     return from(this.store.sparqlStream(query)).pipe(mergeMap(result => {
       if (result.type === ResultType.BINDINGS || result.type === ResultType.QUADS)
-        return observeStream<Binding | Quad>(result.iterator);
+        // TODO: the stream may already be emitting, bad quadstore API?
+        return observeStream<Binding | Quad>(() => result.iterator);
       else
         throw new Error('Expected bindings or quads');
     }));
@@ -291,7 +294,7 @@ class QuadStoreGraph implements Graph {
   match(subject?: Quad_Subject, predicate?: Quad_Predicate, object?: Quad_Object): Observable<Quad> {
     // Match can throw
     try {
-      return observeStream(this.store.match(subject, predicate, object, this.name));
+      return observeStream(() => this.store.match(subject, predicate, object, this.name));
     } catch (err) {
       return throwError(err);
     }

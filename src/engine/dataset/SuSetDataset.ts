@@ -59,7 +59,6 @@ export class SuSetDataset extends JrqlGraph {
   private static checkNotClosed =
     check((d: SuSetDataset) => !d.dataset.closed, () => new MeldError('Clone has closed'));
 
-  private readonly meldEncoding: MeldEncoding;
   private readonly tidsGraph: JrqlGraph;
   private readonly journalData: SuSetJournalDataset;
   private readonly updateSource: Source<MeldUpdate> = new Source;
@@ -71,9 +70,9 @@ export class SuSetDataset extends JrqlGraph {
   constructor(
     private readonly dataset: Dataset,
     private readonly constraint: MeldConstraint,
-    config: MeldConfig) {
-    super(dataset.graph());
-    this.meldEncoding = new MeldEncoding(config['@domain']);
+    private readonly encoding: MeldEncoding,
+    config: Pick<MeldConfig, '@id' | 'maxDeltaSize' | 'logLevel'>) {
+    super(dataset.graph(), {}, encoding.context['@base']);
     this.journalData = new SuSetJournalDataset(dataset);
     this.tidsGraph = new JrqlGraph(
       dataset.graph(qsName('tids')), SUSET_CONTEXT);
@@ -162,9 +161,7 @@ export class SuSetDataset extends JrqlGraph {
         if (lastTime != null)
           journal.tail().then(tail => tail.gwc).then(...lastTime.settle);
         const found = tick != null ? await journal.entry(tick) : '';
-        async function nextEntry(entry: SuSetJournalEntry) {
-          return [entry, await entry.next()];
-        }
+        const nextEntry = async (entry: SuSetJournalEntry) => [entry, await entry.next()];
         return {
           return: !found ? undefined : from(nextEntry(found)).pipe(
             expand(([_, entry]) => {
@@ -232,7 +229,7 @@ export class SuSetDataset extends JrqlGraph {
   }
 
   private txnDelta(insert: Quad[], deletedTriplesTids: TripleMap<UUID[]>) {
-    return this.meldEncoding.newDelta({
+    return this.encoding.newDelta({
       insert,
       // Delta has reifications of old quads, which we infer from found triple tids
       delete: reifyTriplesTids(deletedTriplesTids)
@@ -248,7 +245,7 @@ export class SuSetDataset extends JrqlGraph {
         this.log.debug(`Applying delta: ${msg.time} @ ${localTime}`);
 
         txc.sw.next('unreify');
-        const delta = await this.meldEncoding.asDelta(msg.data);
+        const delta = await this.encoding.asDelta(msg.data);
         const patch = new PatchQuads([], delta.insert.map(toDomainQuad));
         const tidPatch = await this.processSuDeletions(delta.delete, patch);
 

@@ -132,7 +132,9 @@ describe('Dataset engine', () => {
     });
 
     test('answers rev-up from the new clone', async () => {
-      await expect(clone.revupFrom(remoteTime)).resolves.toBeDefined();
+      const revup = await clone.revupFrom(remoteTime);
+      expect(revup).toBeDefined();
+      await expect(revup?.updates.toPromise()).resolves.toBeUndefined();
     });
 
     test('comes online as not silo', async () => {
