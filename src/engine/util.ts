@@ -1,12 +1,12 @@
 import {
   concat, Observable, OperatorFunction, Subscription, throwError,
-  AsyncSubject, ObservableInput, onErrorResumeNext, NEVER, from, BehaviorSubject, Subject, SubscriptionLike, Observer
+  AsyncSubject, ObservableInput, onErrorResumeNext, NEVER, from, BehaviorSubject, Subject, Observer
 } from "rxjs";
-import { publish, tap, mergeMap, switchAll } from "rxjs/operators";
+import { publish, tap, mergeMap, switchAll, scan, endWith, pluck, filter } from "rxjs/operators";
 import { LogLevelDesc, getLogger, getLoggers } from 'loglevel';
 import * as performance from 'marky';
 import { encode as rawEncode, decode as rawDecode } from '@ably/msgpack-js';
-import { Source } from 'rdf-js';
+import { EventEmitter } from 'events';
 
 export namespace MsgPack {
   export const encode = (value: any) => Buffer.from(rawEncode(value).buffer);
@@ -17,9 +17,9 @@ export function flatten<T>(bumpy: T[][]): T[] {
   return ([] as T[]).concat(...bumpy);
 }
 
-export function fromArrayPromise<T>(reEmits: Promise<T[]>): Observable<T> {
+export function fromArrayPromise<T>(promise: Promise<T[]>): Observable<T> {
   // Rx weirdness exemplified in 26 characters
-  return from(reEmits).pipe(mergeMap(from));
+  return from(promise).pipe(mergeMap(from));
 }
 
 export function toJson(thing: any): any {
@@ -91,6 +91,24 @@ export function tapComplete<T>(done: Future): OperatorFunction<T, T> {
   return tap({ complete: () => done.resolve(), error: done.reject });
 }
 
+export function toArrays<T>(groupBy: (value: T) => unknown): OperatorFunction<T, T[]> {
+  return source => source.pipe(
+    endWith(null),
+    scan<T, { out: T[] | null, buf: T[] }>(({ buf }, value) => {
+      if (value == null) // Terminator
+        return { out: buf.length ? buf : null, buf: [] };
+      else if (!buf.length) // First value
+        return { out: null, buf: [value] };
+      else if (groupBy(buf[buf.length - 1]) !== groupBy(value))
+        return { out: buf, buf: [value] };
+      else
+        return { out: null, buf: [...buf, value] };
+    }, { out: null, buf: [] }),
+    pluck('out'),
+    filter<T[]>(out => out != null)
+  );
+}
+
 /**
  * Delays notifications from a source until a signal is received from a notifier.
  * @see https://ncjamieson.com/how-to-write-delayuntil/
@@ -136,9 +154,31 @@ export function onErrorNever<T>(v: ObservableInput<T>): Observable<T> {
   return onErrorResumeNext(v, NEVER);
 }
 
+export function observeStream<T>(startStream: () => Promise<EventEmitter>): Observable<T> {
+  return new Observable<T>(subs => {
+    const subscription = new Subscription;
+    startStream().then(stream => {
+      if (!subscription.closed) {
+        subscription.add(() => {
+          if (typeof (<any>stream)?.close == 'function')
+            (<any>stream).close();
+        });
+        stream
+          .on('data', datum => {
+            if (!subscription.closed)
+              subs.next(datum);
+          })
+          .on('error', err => subs.error(err))
+          .on('end', () => subs.complete());
+      }
+    }).catch(err => subs.error(err));
+    return subscription;
+  });
+}
+
 export class HotSwitch<T> extends Observable<T> {
   private readonly in: BehaviorSubject<Observable<T>>;
-  
+
   constructor(position: Observable<T> = NEVER) {
     super(subs => this.in.pipe(switchAll()).subscribe(subs));
     this.in = new BehaviorSubject<Observable<T>>(position);
@@ -156,7 +196,7 @@ export class PauseableSource<T> extends Observable<T> implements Observer<T> {
   constructor() {
     super(subs => this.switch.subscribe(subs));
   }
-  
+
   get closed() {
     return this.subject.closed;
   };
