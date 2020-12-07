@@ -3,16 +3,16 @@ import {
   Context, Read, Subject, Update, isDescribe, isGroup, isSubject, isUpdate,
   Group, isSelect, Result, Variable, Value, isValueObject, isReference, Write
 } from '../../jrql-support';
-import { NamedNode, Quad, Term } from 'rdf-js';
+import { DataFactory, NamedNode, Quad, Term } from 'rdf-js';
 import { compact } from 'jsonld';
 import { Graph, PatchQuads } from '.';
-import { toArray, mergeMap, filter, take, groupBy } from 'rxjs/operators';
+import { toArray, mergeMap, filter, take, groupBy, catchError } from 'rxjs/operators';
 import { EMPTY, from, Observable, throwError } from 'rxjs';
 import { array, uuid } from '../../util';
 import { TriplePos } from '../quads';
 import { activeCtx, expandTerm, jsonToRdf, rdfToJson } from "../jsonld";
 import { Binding } from 'quadstore';
-import { Algebra, Factory } from 'sparqlalgebrajs';
+import { Algebra, Factory as SparqlFactory } from 'sparqlalgebrajs';
 import { any } from '../../api';
 
 /**
@@ -21,7 +21,7 @@ import { any } from '../../api';
  * be applied to a Dataset.
  */
 export class JrqlGraph {
-  sparqlFactory: Factory;
+  sparql: SparqlFactory;
 
   /**
    * @param graph a quads graph to operate on
@@ -33,7 +33,12 @@ export class JrqlGraph {
     readonly graph: Graph,
     readonly defaultContext: Context = {},
     readonly base?: Iri) {
-    this.sparqlFactory = new Factory(graph.dataFactory);
+    this.sparql = new SparqlFactory(graph.dataFactory);
+  }
+
+  /** Convenience for RDF algebra construction */
+  get rdf(): Required<DataFactory> {
+    return this.graph.dataFactory;
   }
 
   read(query: Read,
@@ -72,13 +77,23 @@ export class JrqlGraph {
     context: Context = this.defaultContext): Observable<Subject> {
     const sVarName = matchVar(describe);
     if (sVarName) {
+      const outerVar = this.rdf.variable(genVarName());
       return this.solutions(asGroup(where ?? {}), op =>
-        this.graph.query(this.sparqlFactory.createDescribe(op,
-          [this.graph.dataFactory.variable(sVarName)])), context).pipe(
+        // Sub-select using DISTINCT to fetch subject ids
+        this.graph.query(this.sparql.createDescribe(
+          this.sparql.createDistinct(
+            this.sparql.createProject(
+              this.sparql.createExtend(op, outerVar,
+                this.sparql.createTermExpression(this.rdf.variable(sVarName))),
+              [outerVar])),
+          [outerVar])), context).pipe(
+            // TODO: Comunica bug? Cannot read property 'close' of undefined, if stream empty
+            catchError(err => err instanceof TypeError ? EMPTY : throwError(err)),
+            // TODO: Comunica bug? Describe sometimes interleaves subjects, so cannot use
+            // toArrays(quad => quad.subject.value),
             groupBy(quad => quad.subject.value),
-            mergeMap(async subjectQuads => toSubject(
-              // FIXME: This borks streaming. Use ordering to go subject-by-subject.
-              await subjectQuads.pipe(toArray()).toPromise(), context)));
+            mergeMap(subjectQuads => subjectQuads.pipe(toArray())),
+            mergeMap(subjectQuads => toSubject(subjectQuads, context)));
     } else {
       return from(this.describe1(describe, context)).pipe(
         filter<Subject>(subject => subject != null));
@@ -87,7 +102,7 @@ export class JrqlGraph {
 
   async describe1<T extends object>(describe: Iri, context: Context = this.defaultContext): Promise<T | undefined> {
     const quads = await this.graph.match(await this.resolve(describe, context)).pipe(toArray()).toPromise();
-    quads.forEach(quad => quad.graph = this.graph.dataFactory.defaultGraph());
+    quads.forEach(quad => quad.graph = this.rdf.defaultGraph());
     return quads.length ? <T>await toSubject(quads, context) : undefined;
   }
 
@@ -164,15 +179,15 @@ export class JrqlGraph {
   }
 
   private toPattern = (quad: Quad): Algebra.Pattern => {
-    return this.sparqlFactory.createPattern(
+    return this.sparql.createPattern(
       quad.subject, quad.predicate, quad.object, quad.graph);
   }
 
   private matchQuads(quads: Quad[]): Observable<Quad> {
     const patterns = quads.map(this.toPattern);
     // CONSTRUCT <quads> WHERE <quads>
-    return this.graph.query(this.sparqlFactory.createConstruct(
-      this.sparqlFactory.createBgp(patterns), patterns));
+    return this.graph.query(this.sparql.createConstruct(
+      this.sparql.createBgp(patterns), patterns));
   }
 
   private solutions<T>(where: Group,
@@ -182,14 +197,14 @@ export class JrqlGraph {
     return from(unions(where).reduce<Promise<Algebra.Operation | null>>(async (opSoFar, graph) => {
       const left = await opSoFar;
       const quads = await this.quads(graph, { query: true, vars }, context);
-      const right = this.sparqlFactory.createBgp(quads.map(this.toPattern));
-      return left != null ? this.sparqlFactory.createUnion(left, right) : right;
+      const right = this.sparql.createBgp(quads.map(this.toPattern));
+      return left != null ? this.sparql.createUnion(left, right) : right;
     }, Promise.resolve(null))).pipe(mergeMap(op => op == null ? EMPTY : exec(op, vars)));
   }
 
   private project = (op: Algebra.Operation, vars: Iterable<string>): Observable<Binding> => {
-    return this.graph.query(this.sparqlFactory.createProject(op,
-      [...vars].map(varName => this.graph.dataFactory.variable(varName))));
+    return this.graph.query(this.sparql.createProject(op,
+      [...vars].map(varName => this.rdf.variable(varName))));
   }
 
   private async hiddenVarQuads(graph: Subject | Subject[],
@@ -229,22 +244,16 @@ export class JrqlGraph {
         });
         // References at top level => implicit wildcard p-o
         if (top && query && isReference(subject))
-          (<any>subject)[genVar(vars)] = { '@id': genVar(vars) };
+          (<any>subject)[genHiddenVar(vars)] = { '@id': genHiddenVar(vars) };
         // Anonymous query subjects => blank node subject (match any) or skolem
         if (!subject['@id'])
-          subject['@id'] = query ? this.blankId() : skolem(this.base);
+          subject['@id'] = query ? hiddenVar(genVarName(), vars) : skolem(this.base);
       }
     });
   }
 
-  private blankId(): string {
-    // Opinions differ whether the `value` of a blank node should have the
-    // protocol prefix (jsonld does not add it). Always include, for safety.
-    return `_:${this.graph.dataFactory.blankNode().value}`;
-  }
-
   private unhideVars(quads: Quad[], varValues: Binding): Quad[] {
-    return quads.map(quad => this.graph.dataFactory.quad(
+    return quads.map(quad => this.rdf.quad(
       this.unhideVar('subject', quad.subject, varValues),
       this.unhideVar('predicate', quad.predicate, varValues),
       this.unhideVar('object', quad.object, varValues),
@@ -258,23 +267,23 @@ export class JrqlGraph {
         if (varName) {
           const value = varValues[`?${varName}`];
           return value != null && canPosition(pos, value) ?
-            value : this.graph.dataFactory.variable(varName);
+            value : this.rdf.variable(varName);
         }
     }
     return term;
   }
 
   private async resolve(iri: Iri, context?: Context): Promise<NamedNode> {
-    return this.graph.dataFactory.namedNode(context ? expandTerm(iri, await activeCtx(context)) : iri);
+    return this.rdf.namedNode(context ? expandTerm(iri, await activeCtx(context)) : iri);
   }
 
   private async solutionSubject(results: Result[] | Result, solution: Binding, context: Context) {
-    const solutionId = this.graph.dataFactory.blankNode();
+    const solutionId = this.rdf.blankNode();
     // Construct quads that represent the solution's variable values
     const subject = await toSubject(Object.entries(solution).map(([variable, term]) =>
-      this.graph.dataFactory.quad(
+      this.rdf.quad(
         solutionId,
-        this.graph.dataFactory.namedNode(hiddenVar(variable.slice(1))),
+        this.rdf.namedNode(hiddenVar(variable.slice(1))),
         inPosition('object', term))), context);
     // Unhide the variables and strip out anything that's not selected
     return Object.assign({}, ...Object.entries(subject).map(([key, value]) => {
@@ -334,7 +343,7 @@ function unions(where: Group): Subject[][] {
 function hideVar(token: string, vars?: Set<string>): string {
   const name = matchVar(token);
   // Allow anonymous variables as '?'
-  return name === '' ? genVar(vars) : name ? hiddenVar(name, vars) : token;
+  return name === '' ? genHiddenVar(vars) : name ? hiddenVar(name, vars) : token;
 }
 
 function matchVar(token: string): string | undefined {
@@ -366,8 +375,12 @@ function matchHiddenVar(value: string): string | undefined {
     return match[1];
 }
 
-function genVar(vars?: Set<string>) {
-  return hiddenVar(any().slice(1), vars);
+function genHiddenVar(vars?: Set<string>) {
+  return hiddenVar(genVarName(), vars);
+}
+
+function genVarName() {
+  return any().slice(1);
 }
 
 function hiddenVar(name: string, vars?: Set<string>) {

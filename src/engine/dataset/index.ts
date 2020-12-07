@@ -282,21 +282,16 @@ class QuadStoreGraph implements Graph {
   query(query: Algebra.Describe): Observable<Quad>;
   query(query: Algebra.Project): Observable<Binding>;
   query(query: Algebra.Project | Algebra.Describe | Algebra.Construct): Observable<Binding | Quad> {
-    return from(this.store.sparqlStream(query)).pipe(mergeMap(result => {
-      if (result.type === ResultType.BINDINGS || result.type === ResultType.QUADS)
-        // TODO: the stream may already be emitting, bad quadstore API?
-        return observeStream<Binding | Quad>(() => result.iterator);
+    return observeStream(async () => {
+      const stream = await this.store.sparqlStream(query);
+      if (stream.type === ResultType.BINDINGS || stream.type === ResultType.QUADS)
+        return stream.iterator;
       else
         throw new Error('Expected bindings or quads');
-    }));
+    })
   }
 
   match(subject?: Quad_Subject, predicate?: Quad_Predicate, object?: Quad_Object): Observable<Quad> {
-    // Match can throw
-    try {
-      return observeStream(() => this.store.match(subject, predicate, object, this.name));
-    } catch (err) {
-      return throwError(err);
-    }
+    return observeStream(async () => this.store.match(subject, predicate, object, this.name));
   }
 }

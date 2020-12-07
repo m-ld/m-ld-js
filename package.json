@@ -13,12 +13,11 @@
     "link-locals": "npm link ../m-ld-spec ../json-rql ../typedoc-theme",
     "clean": "rm -rf dist _site",
     "build": "npm run clean && jest --silent && tsc && typedoc",
-    "tsc+watch": "tsc --watch",
-    "dev": "jest --watch --silent",
+    "dev": "concurrently -r -k \"jest --watch --silent\" \"tsc --watch\"",
     "dev+log": "jest --watch",
     "compliance": "tsc --incremental && node compliance/test.js",
     "prepublishOnly": "npm run build && npm version $VERSION && git push",
-    "doc-dev": "onchange 'src/**/*.ts' 'doc/**/*.*' -- typedoc & browser-sync start --server _site --files _site"
+    "doc-dev": "concurrently \"onchange 'src/**/*.ts' 'doc/**/*.*' -- typedoc\" \"browser-sync start --server _site --files _site\""
   },
   "repository": {
     "type": "git",
@@ -37,6 +36,7 @@
     "@types/readable-stream": "^2.3.9",
     "aedes": "^0.44.0",
     "browser-sync": "^2.26.13",
+    "concurrently": "^5.3.0",
     "jest": "^26.6.3",
     "jest-mock-extended": "^1.0.10",
     "leveldown": "^5.6.0",
@@ -76,7 +76,7 @@
     "loglevel": "^1.7.1",
     "marky": "^1.2.1",
     "mqtt-pattern": "^1.2.0",
-    "quadstore": "^7.1.0",
+    "quadstore": "^7.1.1",
     "rxjs": "^6.6.3",
     "short-uuid": "^4.1.0"
   }

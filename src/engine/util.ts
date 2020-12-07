@@ -2,7 +2,7 @@ import {
   concat, Observable, OperatorFunction, Subscription, throwError,
   AsyncSubject, ObservableInput, onErrorResumeNext, NEVER, from, BehaviorSubject, Subject, Observer
 } from "rxjs";
-import { publish, tap, mergeMap, switchAll } from "rxjs/operators";
+import { publish, tap, mergeMap, switchAll, scan, endWith, pluck, filter } from "rxjs/operators";
 import { LogLevelDesc, getLogger, getLoggers } from 'loglevel';
 import * as performance from 'marky';
 import { encode as rawEncode, decode as rawDecode } from '@ably/msgpack-js';
@@ -17,9 +17,9 @@ export function flatten<T>(bumpy: T[][]): T[] {
   return ([] as T[]).concat(...bumpy);
 }
 
-export function fromArrayPromise<T>(reEmits: Promise<T[]>): Observable<T> {
+export function fromArrayPromise<T>(promise: Promise<T[]>): Observable<T> {
   // Rx weirdness exemplified in 26 characters
-  return from(reEmits).pipe(mergeMap(from));
+  return from(promise).pipe(mergeMap(from));
 }
 
 export function toJson(thing: any): any {
@@ -91,6 +91,24 @@ export function tapComplete<T>(done: Future): OperatorFunction<T, T> {
   return tap({ complete: () => done.resolve(), error: done.reject });
 }
 
+export function toArrays<T>(groupBy: (value: T) => unknown): OperatorFunction<T, T[]> {
+  return source => source.pipe(
+    endWith(null),
+    scan<T, { out: T[] | null, buf: T[] }>(({ buf }, value) => {
+      if (value == null) // Terminator
+        return { out: buf.length ? buf : null, buf: [] };
+      else if (!buf.length) // First value
+        return { out: null, buf: [value] };
+      else if (groupBy(buf[buf.length - 1]) !== groupBy(value))
+        return { out: buf, buf: [value] };
+      else
+        return { out: null, buf: [...buf, value] };
+    }, { out: null, buf: [] }),
+    pluck('out'),
+    filter<T[]>(out => out != null)
+  );
+}
+
 /**
  * Delays notifications from a source until a signal is received from a notifier.
  * @see https://ncjamieson.com/how-to-write-delayuntil/
@@ -136,33 +154,25 @@ export function onErrorNever<T>(v: ObservableInput<T>): Observable<T> {
   return onErrorResumeNext(v, NEVER);
 }
 
-export function observeStream<T>(startStream: () => EventEmitter): Observable<T> {
+export function observeStream<T>(startStream: () => Promise<EventEmitter>): Observable<T> {
   return new Observable<T>(subs => {
-    let active = true;
-    try {
-      const stream = startStream();
-      function teardown() {
-        if (typeof (<any>stream).close == 'function')
-          (<any>stream).close();
-        active = false;
-      }
-      stream
-        .on('data', datum => {
-          if (active)
-            subs.next(datum);
-        })
-        .on('error', err => {
-          active = false;
-          subs.error(err);
-        })
-        .on('end', () => {
-          active = false;
-          subs.complete();
+    const subscription = new Subscription;
+    startStream().then(stream => {
+      if (!subscription.closed) {
+        subscription.add(() => {
+          if (typeof (<any>stream)?.close == 'function')
+            (<any>stream).close();
         });
-      return teardown;
-    } catch (err) {
-      subs.error(err);
-    }
+        stream
+          .on('data', datum => {
+            if (!subscription.closed)
+              subs.next(datum);
+          })
+          .on('error', err => subs.error(err))
+          .on('end', () => subs.complete());
+      }
+    }).catch(err => subs.error(err));
+    return subscription;
   });
 }
 
