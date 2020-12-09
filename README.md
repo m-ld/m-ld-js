@@ -3,8 +3,8 @@
 
 - [Documentation](https://js.m-ld.org/)
 
-- [Contributing](https://github.com/m-ld/m-ld-js/blob/master/CONTRIBUTING)
+- [Contributing](./CONTRIBUTING)
 
-- [Development](https://github.com/m-ld/m-ld-js/blob/master/DEVELOPMENT.md)
+- [Development](./DEVELOPMENT.md)
 
-- [Change Log](https://github.com/m-ld/m-ld-js/blob/master/CHANGELOG.md)
+- [Change Log](./CHANGELOG.md)
