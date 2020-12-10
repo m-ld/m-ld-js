@@ -17,6 +17,7 @@
     "dev+log": "jest --watch",
     "compliance": "tsc --incremental && node compliance/test.js",
     "prepublishOnly": "npm run build && npm version $VERSION && git push",
+    "postpublish": "npm dist-tag add \"@m-ld/m-ld@\"${npm_package_version} $(git branch --no-color --show-current)",
     "doc-dev": "concurrently \"onchange 'src/**/*.ts' 'doc/**/*.*' -- typedoc\" \"browser-sync start --server _site --files _site\""
   },
   "repository": {
