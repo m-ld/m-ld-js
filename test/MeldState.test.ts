@@ -187,63 +187,167 @@ describe('Meld State API', () => {
       .resolves.toMatchObject([{ '@id': 'fred', name: 'Fred', age: 40.5 }]);
   });
 
-  test('reads with a procedure', async done => {
-    await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
-    api.read(async state => {
-      await expect(state.read<Describe>({ '@describe': 'fred' }))
-        .resolves.toMatchObject([{ '@id': 'fred', name: 'Fred' }]);
-      done();
-    });
-  });
+  describe('anonymous subjects', () => {
+    function expectGenId(): any {
+      return expect.stringMatching(/^\.well-known\/genid\/.+/);
+    }
 
-  test('writes with a procedure', async done => {
-    api.write(async state => {
-      state = await state.write<Subject>({ '@id': 'fred', name: 'Fred' });
-      await expect(state.read<Describe>({ '@describe': 'fred' }))
-        .resolves.toMatchObject([{ '@id': 'fred', name: 'Fred' }]);
-      done();
+    test('describes an anonymous subject', async () => {
+      await api.write<Update>({ '@insert': { name: 'Fred', height: 5 } });
+      await expect(api.read<Describe>({
+        '@describe': '?s', '@where': { '@id': '?s', name: 'Fred' }
+      })).resolves.toEqual([{ '@id': expectGenId(), name: 'Fred', height: 5 }]);
     });
-  });
 
-  test('write state is predictable', async done => {
-    api.write(async state => {
-      state = await state.write<Subject>({ '@id': 'fred', age: 40 });
-      await expect(state.read<Describe>({
-        '@describe': '?id', '@where': { '@id': '?id', age: 40 }
-      }))
-        // We only expect one person of that age
-        .resolves.toMatchObject([{ '@id': 'fred', age: 40 }]);
-      done();
+    test('selects anonymous subject properties', async () => {
+      await api.write<Update>({ '@insert': { name: 'Fred', height: 5 } });
+      await expect(api.read<Select>({
+        '@select': '?h', '@where': { name: 'Fred', height: '?h' }
+      })).resolves.toMatchObject([{ '?h': 5 }]);
     });
-    // Immediately make another write which could affect the query
-    api.write(state => state.write<Subject>({ '@id': 'wilma', age: 40 }));
-  });
 
-  test('handler state follows writes', async done => {
-    let hadFred = false;
-    api.read(async state => {
-      await expect(state.read<Describe>({
-        '@describe': '?id', '@where': { '@id': '?id', age: 40 }
+    test('describes an anonymous nested subject', async () => {
+      await api.write<Subject>({ '@id': 'fred', stats: { height: 5, age: 40 } });
+      await expect(api.read<Describe>({
+        '@describe': '?stats', '@where': { '@id': 'fred', stats: { '@id': '?stats' } }
+      })).resolves.toEqual([{ '@id': expectGenId(), height: 5, age: 40 }]);
+    });
+
+    test('does not merge anonymous nested subjects', async () => {
+      await api.write<Subject>({ '@id': 'fred', stats: { height: 5 } });
+      await api.write<Subject>({ '@id': 'fred', stats: { age: 40 } });
+      await expect(api.read<Describe>({
+        '@describe': '?stats', '@where': { '@id': 'fred', stats: { '@id': '?stats' } }
+      })).resolves.toMatchObject(expect.arrayContaining([
+        { '@id': expectGenId(), height: 5 },
+        { '@id': expectGenId(), age: 40 }
+      ]));
+    });
+
+    test('matches anonymous subject property in delete-where', async () => {
+      await api.write<Subject>({ '@id': 'fred', height: 5, age: 40 });
+      await api.write<Update>({ '@delete': { height: 5 } })
+      await expect(api.read<Describe>({
+        '@describe': 'fred',
+      })).resolves.toEqual([{ '@id': 'fred', age: 40 }]);
+    });
+
+    test('matches nested property in delete-where', async () => {
+      await api.write<Subject>({ '@id': 'fred', stats: { height: 5, age: 40 } });
+      await api.write<Update>({ '@delete': { '@id': 'fred', stats: { height: 5 } } })
+      // Scary case for documentation: DELETEWHERE is aggressive
+      await expect(api.read<Describe>({
+        '@describe': '?stats', '@where': { '@id': 'fred', stats: { '@id': '?stats' } }
       })).resolves.toEqual([]);
-    }, async (_, state) => {
-      if (!hadFred) {
-        await expect(state.read<Describe>({
-          '@describe': '?id', '@where': { '@id': '?id', age: 40 }
-        })).resolves.toMatchObject([{ '@id': 'fred', age: 40 }]);
-        hadFred = true;
-      } else {
-        await expect(state.read<Describe>({
-          '@describe': '?id', '@where': { '@id': '?id', age: 40 }
-        })).resolves.toMatchObject([{ '@id': 'wilma', age: 40 }]);
-        done();
-      }
     });
-    api.write(async state => {
-      state = await state.write<Subject>({ '@id': 'fred', age: 40 });
-      await state.write<Subject>({
-        '@delete': { '@id': 'fred', age: 40 },
-        '@insert': { '@id': 'wilma', age: 40 }
+
+    test('matches nested property with explicit where', async () => {
+      await api.write<Subject>({ '@id': 'fred', stats: { height: 5, age: 40 } });
+      await api.write<Update>({
+        '@delete': { '@id': '?stats', height: 5 },
+        '@where': { '@id': 'fred', stats: { '@id': '?stats', height: 5 } }
+      })
+      await expect(api.read<Describe>({
+        '@describe': '?stats', '@where': { '@id': 'fred', stats: { '@id': '?stats' } }
+      })).resolves.toEqual([{ '@id': expectGenId(), age: 40 }]);
+    });
+
+    test('correctly imports web-app configuration', async () => {
+      await api.write<Subject>(require('./web-app.json'));
+      // Do some checks to ensure the data is present
+      await expect(api.read<Select>({
+        '@select': '?id',
+        '@where': { '@id': '?id' }
+      })).resolves.toMatchObject(
+        // Note 85 quads total (not distinct)
+        new Array(85).fill({ '?id': { '@id': expectGenId() } }));
+      await expect(api.read<Describe>({
+        '@describe': '?id',
+        '@where': { '@id': '?id' }
+      })).resolves.toMatchObject(
+        new Array(12).fill({ '@id': expectGenId() }));
+      await expect(api.read<Describe>({
+        '@describe': '?id',
+        '@where': { '@id': '?id', 'servlet-name': 'fileServlet' }
+      })).resolves.toEqual([{
+        '@id': expectGenId(),
+        'servlet-class': 'org.cofax.cds.FileServlet',
+        'servlet-name': 'fileServlet'
+      }]);
+      await expect(api.read<Select>({
+        '@select': '?a',
+        '@where': {
+          'servlet': {
+            'init-param': {
+              'dataStoreName': 'cofax',
+              'configGlossary:adminEmail': '?a'
+            }
+          }
+        }
+      })).resolves.toMatchObject([{ '?a': 'ksm@pobox.com' }]);
+    });
+  });
+
+  describe('state procedures', () => {
+    test('reads with a procedure', async done => {
+      await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
+      api.read(async state => {
+        await expect(state.read<Describe>({ '@describe': 'fred' }))
+          .resolves.toMatchObject([{ '@id': 'fred', name: 'Fred' }]);
+        done();
+      });
+    });
+
+    test('writes with a procedure', async done => {
+      api.write(async state => {
+        state = await state.write<Subject>({ '@id': 'fred', name: 'Fred' });
+        await expect(state.read<Describe>({ '@describe': 'fred' }))
+          .resolves.toMatchObject([{ '@id': 'fred', name: 'Fred' }]);
+        done();
+      });
+    });
+
+    test('write state is predictable', async done => {
+      api.write(async state => {
+        state = await state.write<Subject>({ '@id': 'fred', age: 40 });
+        await expect(state.read<Describe>({
+          '@describe': '?id', '@where': { '@id': '?id', age: 40 }
+        }))
+          // We only expect one person of that age
+          .resolves.toMatchObject([{ '@id': 'fred', age: 40 }]);
+        done();
+      });
+      // Immediately make another write which could affect the query
+      api.write(state => state.write<Subject>({ '@id': 'wilma', age: 40 }));
+    });
+
+    test('handler state follows writes', async done => {
+      let hadFred = false;
+      api.read(async state => {
+        await expect(state.read<Describe>({
+          '@describe': '?id', '@where': { '@id': '?id', age: 40 }
+        })).resolves.toEqual([]);
+      }, async (_, state) => {
+        if (!hadFred) {
+          await expect(state.read<Describe>({
+            '@describe': '?id', '@where': { '@id': '?id', age: 40 }
+          })).resolves.toMatchObject([{ '@id': 'fred', age: 40 }]);
+          hadFred = true;
+        } else {
+          await expect(state.read<Describe>({
+            '@describe': '?id', '@where': { '@id': '?id', age: 40 }
+          })).resolves.toMatchObject([{ '@id': 'wilma', age: 40 }]);
+          done();
+        }
+      });
+      api.write(async state => {
+        state = await state.write<Subject>({ '@id': 'fred', age: 40 });
+        await state.write<Subject>({
+          '@delete': { '@id': 'fred', age: 40 },
+          '@insert': { '@id': 'wilma', age: 40 }
+        });
       });
     });
   });
 });
+

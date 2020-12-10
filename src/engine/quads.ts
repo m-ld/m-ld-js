@@ -1,4 +1,5 @@
 import { Quad, Term, Literal } from 'rdf-js';
+// FIXME: Make this a data factory field of some class
 import { namedNode, defaultGraph, variable, blankNode, literal, quad as newQuad } from '@rdfjs/data-model';
 import { IndexMap, IndexSet } from "./indices";
 

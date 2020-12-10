@@ -23,7 +23,7 @@ export function any(): Variable {
   return `?${shortId((nextAny++).toString(16))}`;
 }
 /** @internal */
-let nextAny = 0;
+let nextAny = 0x1111;
 
 // Unchanged from m-ld-spec
 /** @see m-ld [specification](http://spec.m-ld.org/interfaces/livestatus.html) */
