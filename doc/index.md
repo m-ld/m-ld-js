@@ -2,7 +2,7 @@
 
 [![github](https://img.shields.io/badge/m--ld-m--ld--js-red?logo=github)](https://github.com/m-ld/m-ld-js)
 [![licence](https://img.shields.io/github/license/m-ld/m-ld-js)](https://github.com/m-ld/m-ld-js/blob/master/LICENSE)
-![npm (tag)](https://img.shields.io/npm/v/@m-ld/m-ld/master?label=npm)
+[![npm (tag)](https://img.shields.io/npm/v/@m-ld/m-ld/master?label=npm)](https://www.npmjs.com/package/@m-ld/m-ld)
 
 # **m-ld** Javascript clone engine
 The Javascript engine can be used in a modern browser or a server engine like
