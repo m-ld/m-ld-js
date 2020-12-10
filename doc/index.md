@@ -1,5 +1,8 @@
 🚧 *This documentation is for the [developer preview](http://m-ld.org/#developer-preview) of **m-ld**.*
 
+[![github](https://img.shields.io/badge/m--ld-m--ld--js-red?logo=github)](https://github.com/m-ld/m-ld-js)
+[![licence](https://img.shields.io/github/license/m-ld/m-ld-js)](https://github.com/m-ld/m-ld-js/blob/master/LICENSE)
+
 # **m-ld** Javascript clone engine
 The Javascript engine can be used in a modern browser or a server engine like
 [Node.js](https://nodejs.org/).
