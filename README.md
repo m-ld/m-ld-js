@@ -7,13 +7,14 @@
 <pre></pre>
 
 # **m-ld** Javascript Engine
-**m-ld** is a decentralised highly-replicable graph data store with a JSON-based
+**m-ld** is a decentralised live data sharing component with a JSON-based
 API.
 
 This repository is the code of the Javascript engine for **m-ld**, for node.js,
 modern browsers and other Javascript platforms. Typescript is supported and
 recommended.
 
+- [Discussion](https://github.com/m-ld/m-ld-spec/discussions)
 - [Change Log](./CHANGELOG.md)
 
 ## ci & website
