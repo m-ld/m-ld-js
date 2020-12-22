@@ -80,3 +80,20 @@ export function cloneTerm<T extends Term>(term: T): T {
       return <T>variable(term.value);
   }
 }
+
+export function canPosition<P extends TriplePos>(pos: P, value: Term): value is Quad[P] {
+  // Subjects and Predicate don't allow literals
+  if ((pos == 'subject' || pos == 'predicate') && value.termType == 'Literal')
+    return false;
+  // Predicates don't allow blank nodes
+  if (pos == 'predicate' && value.termType == 'BlankNode')
+    return false;
+  return true;
+}
+
+export function inPosition<P extends TriplePos>(pos: P, value: Term): Quad[P] {
+  if (canPosition(pos, value))
+    return value;
+  else
+    throw new Error(`${value} cannot be used in ${pos} position`);
+}

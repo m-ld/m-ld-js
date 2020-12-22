@@ -54,11 +54,18 @@ export type Variable = jrql.Variable;
  * @see https://json-rql.org/#value
  */
 export type Value = jrql.Value;
+/**
+ * Used to express an ordered or unordered container of data.
+ * @see https://json-rql.org/interfaces/container.html
+ */
+export type Container = jrql.Container;
 // Utility functions
 /** @internal */
 export const isValueObject = jrql.isValueObject;
 /** @internal */
 export const isReference = jrql.isReference;
+/** @internal */
+export const isContainer = jrql.isContainer;
 
 /**
  * Result declaration of a {@link Select} query.
@@ -117,7 +124,7 @@ export interface Subject extends Pattern {
    * Specifies a graph edge, that is, a mapping from the `@id` of this subject
    * to a set of one or more values.
    */
-  [key: string]: Value | Value[] | Context | undefined;
+  [key: string]: Value | Value[] | Container | Context | undefined;
 }
 
 /** @internal */

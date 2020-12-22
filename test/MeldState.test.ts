@@ -252,7 +252,7 @@ describe('Meld State API', () => {
       })).resolves.toEqual([{ '@id': expectGenId(), age: 40 }]);
     });
 
-    test('correctly imports web-app configuration', async () => {
+    test('imports web-app configuration', async () => {
       await api.write<Subject>(require('./web-app.json'));
       // Do some checks to ensure the data is present
       await expect(api.read<Select>({
@@ -285,6 +285,17 @@ describe('Meld State API', () => {
           }
         }
       })).resolves.toMatchObject([{ '?a': 'ksm@pobox.com' }]);
+    });
+  });
+
+  describe('lists', () => {
+    test('inserts a list', async () => {
+      await api.write<Subject>({
+        '@id': 'fred', shopping: { '@list': ['Bread', 'Milk'] }
+      });
+      await expect(api.read<Describe>({ '@describe': 'fred' })).resolves.toMatchObject([{
+        '@id': 'fred', shopping: { '@list': ['Bread', 'Milk'] }
+      }]);
     });
   });
 

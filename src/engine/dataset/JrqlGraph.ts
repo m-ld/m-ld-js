@@ -1,19 +1,17 @@
 import { Iri } from 'jsonld/jsonld-spec';
 import {
   Context, Read, Subject, Update, isDescribe, isGroup, isSubject, isUpdate,
-  Group, isSelect, Result, Variable, Value, isValueObject, isReference, Write
-} from '../../jrql-support';
-import { DataFactory, NamedNode, Quad, Term } from 'rdf-js';
-import { compact } from 'jsonld';
+  Group, isSelect, Result, Variable, Write} from '../../jrql-support';
+import { DataFactory, NamedNode, Quad } from 'rdf-js';
 import { Graph, PatchQuads } from '.';
 import { toArray, mergeMap, filter, take, groupBy, catchError } from 'rxjs/operators';
 import { EMPTY, from, Observable, throwError } from 'rxjs';
-import { array, uuid } from '../../util';
-import { TriplePos } from '../quads';
-import { activeCtx, expandTerm, jsonToRdf, rdfToJson } from "../jsonld";
+import { array } from '../../util';
+import { canPosition, TriplePos } from '../quads';
+import { activeCtx, expandTerm } from "../jsonld";
 import { Binding } from 'quadstore';
 import { Algebra, Factory as SparqlFactory } from 'sparqlalgebrajs';
-import { any } from '../../api';
+import { genVarName, JrqlQuads, matchVar, toSubject } from './JrqlQuads';
 
 /**
  * A graph wrapper that provides low-level json-rql handling for queries. The
@@ -22,6 +20,7 @@ import { any } from '../../api';
  */
 export class JrqlGraph {
   sparql: SparqlFactory;
+  jrql: JrqlQuads;
 
   /**
    * @param graph a quads graph to operate on
@@ -34,6 +33,7 @@ export class JrqlGraph {
     readonly defaultContext: Context = {},
     readonly base?: Iri) {
     this.sparql = new SparqlFactory(graph.dataFactory);
+    this.jrql = new JrqlQuads(this.rdf, this.graph.name, base);
   }
 
   /** Convenience for RDF algebra construction */
@@ -69,7 +69,7 @@ export class JrqlGraph {
     where: Subject | Subject[] | Group,
     context: Context = this.defaultContext): Observable<Subject> {
     return this.solutions(asGroup(where), this.project, context).pipe(
-      mergeMap(solution => this.solutionSubject(select, solution, context)));
+      mergeMap(solution => this.jrql.solutionSubject(select, solution, context)));
   }
 
   describe(describe: Iri | Variable,
@@ -113,7 +113,7 @@ export class JrqlGraph {
   }
 
   findQuads(jrqlPattern: Subject, context: Context = this.defaultContext): Observable<Quad> {
-    return from(this.quads(jrqlPattern, { query: true }, context)).pipe(
+    return from(this.jrql.quads(jrqlPattern, { query: true }, context)).pipe(
       mergeMap(quads => this.matchQuads(quads)));
   }
 
@@ -122,21 +122,21 @@ export class JrqlGraph {
     let patch = new PatchQuads([], []);
     // If there is a @where clause, use variable substitutions per solution.
     if (query['@where'] != null) {
-      const varDelete = query['@delete'] != null ?
-        await this.hiddenVarQuads(query['@delete'], { query: true }, context) : null;
-      const varInsert = query['@insert'] != null ?
-        await this.hiddenVarQuads(query['@insert'], { query: false }, context) : null;
+      const deleteTemplate = query['@delete'] != null ?
+        await this.jrql.quads(query['@delete'], { query: true }, context) : null;
+      const insertTemplate = query['@insert'] != null ?
+        await this.jrql.quads(query['@insert'], { query: false }, context) : null;
       await this.solutions(asGroup(query['@where']), this.project, context).forEach(solution => {
-        const matchingQuads = (hiddenVarQuads: Quad[] | null) => {
+        const matchingQuads = (template: Quad[] | null) => {
           // If there are variables in the update for which there is no value in the
           // solution, or if the solution value is not compatible with the quad
           // position, then this is treated as no-match, even if this is a
           // `@delete` (i.e. DELETEWHERE does not apply).
-          return hiddenVarQuads != null ? this.unhideVars(hiddenVarQuads, solution)
+          return template != null ? this.fillTemplate(template, solution)
             .filter(quad => !anyVarTerm(quad)) : [];
         }
         patch.append(new PatchQuads(
-          matchingQuads(varDelete), matchingQuads(varInsert)));
+          matchingQuads(deleteTemplate), matchingQuads(insertTemplate)));
       });
     } else {
       if (query['@delete'])
@@ -154,7 +154,7 @@ export class JrqlGraph {
   async insert(insert: Subject | Subject[],
     context: Context = this.defaultContext): Promise<PatchQuads> {
     const vars = new Set<string>();
-    const quads = await this.quads(insert, { query: false, vars }, context);
+    const quads = await this.jrql.quads(insert, { query: false, vars }, context);
     if (vars.size > 0)
       throw new Error('Cannot insert with variable content');
     return new PatchQuads([], quads);
@@ -167,15 +167,10 @@ export class JrqlGraph {
   async delete(dels: Subject | Subject[],
     context: Context = this.defaultContext): Promise<PatchQuads> {
     const vars = new Set<string>();
-    const patterns = await this.quads(dels, { query: true, vars }, context);
+    const patterns = await this.jrql.quads(dels, { query: true, vars }, context);
     // If there are no variables in the delete, we don't need to find solutions
     return new PatchQuads(vars.size > 0 ?
       await this.matchQuads(patterns).pipe(toArray()).toPromise() : patterns, []);
-  }
-
-  async quads(g: Subject | Subject[], opts: VariablesOptions,
-    context: Context = this.defaultContext): Promise<Quad[]> {
-    return this.unhideVars(await this.hiddenVarQuads(g, opts, context), {});
   }
 
   private toPattern = (quad: Quad): Algebra.Pattern => {
@@ -196,7 +191,7 @@ export class JrqlGraph {
     const vars = new Set<string>();
     return from(unions(where).reduce<Promise<Algebra.Operation | null>>(async (opSoFar, graph) => {
       const left = await opSoFar;
-      const quads = await this.quads(graph, { query: true, vars }, context);
+      const quads = await this.jrql.quads(graph, { query: true, vars }, context);
       const right = this.sparql.createBgp(quads.map(this.toPattern));
       return left != null ? this.sparql.createUnion(left, right) : right;
     }, Promise.resolve(null))).pipe(mergeMap(op => op == null ? EMPTY : exec(op, vars)));
@@ -207,68 +202,20 @@ export class JrqlGraph {
       [...vars].map(varName => this.rdf.variable(varName))));
   }
 
-  private async hiddenVarQuads(graph: Subject | Subject[],
-    opts: VariablesOptions, context: Context): Promise<Quad[]> {
-    // TODO: hideVars should not be in-place
-    const jsonld = { '@graph': JSON.parse(JSON.stringify(graph)), '@context': context };
-    this.hideVars(jsonld['@graph'], opts);
-    const quads = await jsonToRdf(this.graph.name.termType !== 'DefaultGraph' ?
-      { ...jsonld, '@id': this.graph.name.value } : jsonld) as Quad[];
-    return quads;
-  }
-
-  private hideVars(
-    values: Value | Value[],
-    { query, vars }: VariablesOptions,
-    top: boolean = true) {
-    array(values).forEach(value => {
-      // JSON-LD value object (with @value) cannot contain a variable
-      if (typeof value === 'object' && !isValueObject(value)) {
-        // If this is a Reference, we treat it as a Subject
-        const subject: Subject = value as Subject;
-        // Process predicates and objects
-        Object.entries(subject).forEach(([key, value]) => {
-          if (key !== '@context') {
-            const varKey = hideVar(key, vars);
-            if (typeof value === 'object') {
-              this.hideVars(value as Value | Value[], { query, vars }, false);
-            } else if (typeof value === 'string') {
-              const varVal = hideVar(value, vars);
-              if (varVal !== value)
-                value = !key.startsWith('@') ? { '@id': varVal } : varVal;
-            }
-            subject[varKey] = value;
-            if (varKey !== key)
-              delete subject[key];
-          }
-        });
-        // References at top level => implicit wildcard p-o
-        if (top && query && isReference(subject))
-          (<any>subject)[genHiddenVar(vars)] = { '@id': genHiddenVar(vars) };
-        // Anonymous query subjects => blank node subject (match any) or skolem
-        if (!subject['@id'])
-          subject['@id'] = query ? hiddenVar(genVarName(), vars) : skolem(this.base);
-      }
-    });
-  }
-
-  private unhideVars(quads: Quad[], varValues: Binding): Quad[] {
+  private fillTemplate(quads: Quad[], varValues: Binding): Quad[] {
     return quads.map(quad => this.rdf.quad(
-      this.unhideVar('subject', quad.subject, varValues),
-      this.unhideVar('predicate', quad.predicate, varValues),
-      this.unhideVar('object', quad.object, varValues),
+      this.fillTemplatePos('subject', quad.subject, varValues),
+      this.fillTemplatePos('predicate', quad.predicate, varValues),
+      this.fillTemplatePos('object', quad.object, varValues),
       quad.graph));
   }
 
-  private unhideVar<P extends TriplePos>(pos: P, term: Quad[P], varValues: Binding): Quad[P] {
+  private fillTemplatePos<P extends TriplePos>(pos: P, term: Quad[P], varValues: Binding): Quad[P] {
     switch (term.termType) {
-      case 'NamedNode':
-        const varName = matchHiddenVar(term.value);
-        if (varName) {
-          const value = varValues[`?${varName}`];
-          return value != null && canPosition(pos, value) ?
-            value : this.rdf.variable(varName);
-        }
+      case 'Variable':
+        const value = varValues[`?${term.value}`];
+        if (value != null && canPosition(pos, value))
+          return value;
     }
     return term;
   }
@@ -276,52 +223,11 @@ export class JrqlGraph {
   private async resolve(iri: Iri, context?: Context): Promise<NamedNode> {
     return this.rdf.namedNode(context ? expandTerm(iri, await activeCtx(context)) : iri);
   }
-
-  private async solutionSubject(results: Result[] | Result, solution: Binding, context: Context) {
-    const solutionId = this.rdf.blankNode();
-    // Construct quads that represent the solution's variable values
-    const subject = await toSubject(Object.entries(solution).map(([variable, term]) =>
-      this.rdf.quad(
-        solutionId,
-        this.rdf.namedNode(hiddenVar(variable.slice(1))),
-        inPosition('object', term))), context);
-    // Unhide the variables and strip out anything that's not selected
-    return Object.assign({}, ...Object.entries(subject).map(([key, value]) => {
-      if (key !== '@id') { // Strip out blank node identifier
-        const varName = matchHiddenVar(key), newKey = varName ? '?' + varName : key;
-        if (isSelected(results, newKey))
-          return { [newKey]: value };
-      }
-    }));
-  }
 }
 
 function anyVarTerm(quad: Quad) {
   return ['subject', 'predicate', 'object']
     .some((pos: TriplePos) => quad[pos].termType === 'Variable');
-}
-
-/**
- * @returns a single subject compacted against the given context
- */
-export async function toSubject(quads: Quad[], context: Context): Promise<Subject> {
-  return compact(await rdfToJson(quads), context || {}) as unknown as Subject;
-}
-
-interface VariablesOptions {
-  /** Whether this will be used to match quads or insert them */
-  query: boolean;
-  /** The variable names found (sans '?') */
-  vars?: Set<string>;
-}
-
-/**
- * Generates a new skolemization IRI for a blank node. The base is allowed to be
- * `undefined` but the function will throw a `TypeError` if it is.
- * @see https://www.w3.org/TR/rdf11-concepts/#h3_section-skolemization
- */
-function skolem(base: Iri | undefined): Iri {
-  return new URL(`/.well-known/genid/${uuid()}`, base).href;
 }
 
 function asGroup(where: Subject | Subject[] | Group): Group {
@@ -338,57 +244,4 @@ function unions(where: Group): Subject[][] {
   } else {
     return [graph];
   }
-}
-
-function hideVar(token: string, vars?: Set<string>): string {
-  const name = matchVar(token);
-  // Allow anonymous variables as '?'
-  return name === '' ? genHiddenVar(vars) : name ? hiddenVar(name, vars) : token;
-}
-
-function matchVar(token: string): string | undefined {
-  const match = /^\?([\d\w]*)$/g.exec(token);
-  if (match)
-    return match[1];
-}
-
-function canPosition<P extends TriplePos>(pos: P, value: Term): value is Quad[P] {
-  // Subjects and Predicate don't allow literals
-  if ((pos == 'subject' || pos == 'predicate') && value.termType == 'Literal')
-    return false;
-  // Predicates don't allow blank nodes
-  if (pos == 'predicate' && value.termType == 'BlankNode')
-    return false;
-  return true;
-}
-
-function inPosition<P extends TriplePos>(pos: P, value: Term): Quad[P] {
-  if (canPosition(pos, value))
-    return value;
-  else
-    throw new Error(`${value} cannot be used in ${pos} position`);
-}
-
-function matchHiddenVar(value: string): string | undefined {
-  const match = /^http:\/\/json-rql.org\/var#([\d\w]+)$/g.exec(value);
-  if (match)
-    return match[1];
-}
-
-function genHiddenVar(vars?: Set<string>) {
-  return hiddenVar(genVarName(), vars);
-}
-
-function genVarName() {
-  return any().slice(1);
-}
-
-function hiddenVar(name: string, vars?: Set<string>) {
-  vars && vars.add(name);
-  return `http://json-rql.org/var#${name}`;
-}
-
-function isSelected(results: Result[] | Result, key: string) {
-  return results === '*' || key.startsWith('@') ||
-    (Array.isArray(results) ? results.includes(key) : results === key);
 }
