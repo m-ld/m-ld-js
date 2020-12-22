@@ -65,7 +65,9 @@ export const isValueObject = jrql.isValueObject;
 /** @internal */
 export const isReference = jrql.isReference;
 /** @internal */
-export const isContainer = jrql.isContainer;
+export const isSet = jrql.isSet;
+/** @internal */
+export const isList = jrql.isList;
 
 /**
  * Result declaration of a {@link Select} query.
@@ -106,7 +108,7 @@ export type Result = '*' | Variable | Variable[];
  * @see https://json-rql.org/interfaces/subject.html
  */
 export interface Subject extends Pattern {
-  // No support for inline filters, @lists or @sets
+  // No support for inline filters
   /**
    * The unique identity of the subject in the domain.
    * > 🚧 *Subjects strictly need not be identified with an `@id`, but the data

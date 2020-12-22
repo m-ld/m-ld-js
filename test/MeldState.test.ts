@@ -5,6 +5,7 @@ import { DatasetEngine } from '../src/engine/dataset/DatasetEngine';
 import { Group, Subject, Select, Describe, Update } from '../src/jrql-support';
 import { DomainContext } from '../src/engine/MeldEncoding';
 import { Future } from '../src/engine/util';
+import { genIdRegex } from './testUtil';
 
 describe('Meld State API', () => {
   let api: ApiStateMachine;
@@ -188,15 +189,11 @@ describe('Meld State API', () => {
   });
 
   describe('anonymous subjects', () => {
-    function expectGenId(): any {
-      return expect.stringMatching(/^\.well-known\/genid\/.+/);
-    }
-
     test('describes an anonymous subject', async () => {
       await api.write<Update>({ '@insert': { name: 'Fred', height: 5 } });
       await expect(api.read<Describe>({
         '@describe': '?s', '@where': { '@id': '?s', name: 'Fred' }
-      })).resolves.toEqual([{ '@id': expectGenId(), name: 'Fred', height: 5 }]);
+      })).resolves.toEqual([{ '@id': expect.stringMatching(genIdRegex), name: 'Fred', height: 5 }]);
     });
 
     test('selects anonymous subject properties', async () => {
@@ -210,7 +207,7 @@ describe('Meld State API', () => {
       await api.write<Subject>({ '@id': 'fred', stats: { height: 5, age: 40 } });
       await expect(api.read<Describe>({
         '@describe': '?stats', '@where': { '@id': 'fred', stats: { '@id': '?stats' } }
-      })).resolves.toEqual([{ '@id': expectGenId(), height: 5, age: 40 }]);
+      })).resolves.toEqual([{ '@id': expect.stringMatching(genIdRegex), height: 5, age: 40 }]);
     });
 
     test('does not merge anonymous nested subjects', async () => {
@@ -219,8 +216,8 @@ describe('Meld State API', () => {
       await expect(api.read<Describe>({
         '@describe': '?stats', '@where': { '@id': 'fred', stats: { '@id': '?stats' } }
       })).resolves.toMatchObject(expect.arrayContaining([
-        { '@id': expectGenId(), height: 5 },
-        { '@id': expectGenId(), age: 40 }
+        { '@id': expect.stringMatching(genIdRegex), height: 5 },
+        { '@id': expect.stringMatching(genIdRegex), age: 40 }
       ]));
     });
 
@@ -249,7 +246,7 @@ describe('Meld State API', () => {
       })
       await expect(api.read<Describe>({
         '@describe': '?stats', '@where': { '@id': 'fred', stats: { '@id': '?stats' } }
-      })).resolves.toEqual([{ '@id': expectGenId(), age: 40 }]);
+      })).resolves.toEqual([{ '@id': expect.stringMatching(genIdRegex), age: 40 }]);
     });
 
     test('imports web-app configuration', async () => {
@@ -260,17 +257,17 @@ describe('Meld State API', () => {
         '@where': { '@id': '?id' }
       })).resolves.toMatchObject(
         // Note 85 quads total (not distinct)
-        new Array(85).fill({ '?id': { '@id': expectGenId() } }));
+        new Array(85).fill({ '?id': { '@id': expect.stringMatching(genIdRegex) } }));
       await expect(api.read<Describe>({
         '@describe': '?id',
         '@where': { '@id': '?id' }
       })).resolves.toMatchObject(
-        new Array(12).fill({ '@id': expectGenId() }));
+        new Array(12).fill({ '@id': expect.stringMatching(genIdRegex) }));
       await expect(api.read<Describe>({
         '@describe': '?id',
         '@where': { '@id': '?id', 'servlet-name': 'fileServlet' }
       })).resolves.toEqual([{
-        '@id': expectGenId(),
+        '@id': expect.stringMatching(genIdRegex),
         'servlet-class': 'org.cofax.cds.FileServlet',
         'servlet-name': 'fileServlet'
       }]);
@@ -293,8 +290,15 @@ describe('Meld State API', () => {
       await api.write<Subject>({
         '@id': 'fred', shopping: { '@list': ['Bread', 'Milk'] }
       });
-      await expect(api.read<Describe>({ '@describe': 'fred' })).resolves.toMatchObject([{
-        '@id': 'fred', shopping: { '@list': ['Bread', 'Milk'] }
+      const fred = (await api.read<Describe>({ '@describe': 'fred' }))[0];
+      expect(fred).toMatchObject({
+        '@id': 'fred', shopping: { '@id': expect.stringMatching(genIdRegex) }
+      });
+      const listId = (<any>fred.shopping)['@id'];
+      await expect(api.read<Describe>({ '@describe': listId })).resolves.toMatchObject([{
+        '@id': listId,
+        '@type': 'http://m-ld.org/RdfLseq'/*,
+        '@list': ['Bread', 'Milk']*/
       }]);
     });
   });

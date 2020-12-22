@@ -67,7 +67,9 @@
     "@types/abstract-leveldown": "^5.0.1",
     "@types/detect-node": "^2.0.0",
     "@types/jsonld": "^1.5.1",
+    "@types/n3": "^1.4.4",
     "@types/rdf-js": "^4.0.0",
+    "@types/valid-data-url": "^2.0.0",
     "ably": "^1.2.4",
     "async-mqtt": "^2.6.1",
     "detect-node": "^2.0.4",
@@ -79,6 +81,7 @@
     "mqtt-pattern": "^1.2.0",
     "quadstore": "^7.1.1",
     "rxjs": "^6.6.3",
-    "short-uuid": "^4.1.0"
+    "short-uuid": "^4.1.0",
+    "valid-data-url": "^3.0.1"
   }
 }

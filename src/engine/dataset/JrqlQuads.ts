@@ -1,15 +1,16 @@
 import { compact } from 'jsonld';
-import { Iri } from 'jsonld/jsonld-spec';
+import { Iri, Url } from 'jsonld/jsonld-spec';
 import { Binding } from 'quadstore';
 import { DataFactory, Quad } from 'rdf-js';
-import { uuid } from 'short-uuid';
+import validDataUrl = require('valid-data-url');
 import { GraphName } from '.';
-import { any, array } from '../..';
+import { any, array, uuid } from '../..';
 import {
-  Context, Subject, Result, Value, isValueObject, isReference, isContainer
+  Context, Subject, Result, Value, isValueObject, isReference, isSet
 } from '../../jrql-support';
 import { jsonToRdf, rdfToJson } from '../jsonld';
-import { canPosition, inPosition, TriplePos } from '../quads';
+import { meld } from '../MeldEncoding';
+import { inPosition, TriplePos } from '../quads';
 
 export interface JrqlQuadsOptions {
   /** Whether this will be used to match quads or insert them */
@@ -46,51 +47,14 @@ export class JrqlQuads {
   async quads(g: Subject | Subject[], opts: JrqlQuadsOptions, context: Context): Promise<Quad[]> {
     // TODO: hideVars should not be in-place
     const jsonld = { '@graph': JSON.parse(JSON.stringify(g)), '@context': context };
-    this.preProcess(jsonld['@graph'], opts);
+    new PreProcessor(opts, this.base).process(jsonld['@graph']);
     const quads = await jsonToRdf(this.graphName.termType !== 'DefaultGraph' ?
       { ...jsonld, '@id': this.graphName.value } : jsonld) as Quad[];
     return this.postProcess(quads);
   }
 
-  private preProcess(
-    values: Value | Value[],
-    { query, vars }: JrqlQuadsOptions,
-    top: boolean = true) {
-    array(values).forEach(value => {
-      // JSON-LD value object (with @value) cannot contain a variable
-      if (typeof value === 'object' && !isValueObject(value)) {
-        // If this is a Reference, we treat it as a Subject
-        const subject: Subject = value as Subject;
-        // Process predicates and objects
-        Object.entries(subject).forEach(([key, value]) => {
-          if (key !== '@context') {
-            const varKey = hideVar(key, vars);
-            if (isContainer(value)) {
-              // TODO: Explicit list is always converted to json-rql indexed format
-              this.preProcess('@list' in value ? value['@list'] : value['@set'], { query, vars }, false);
-            } else if (typeof value === 'object') {
-              this.preProcess(value as Value | Value[], { query, vars }, false);
-            } else if (typeof value === 'string') {
-              const varVal = hideVar(value, vars);
-              if (varVal !== value)
-                value = !key.startsWith('@') ? { '@id': varVal } : varVal;
-            }
-            subject[varKey] = value;
-            if (varKey !== key)
-              delete subject[key];
-          }
-        });
-        // References at top level => implicit wildcard p-o
-        if (top && query && isReference(subject))
-          (<any>subject)[genHiddenVar(vars)] = { '@id': genHiddenVar(vars) };
-        // Anonymous query subjects => blank node subject (match any) or skolem
-        if (!subject['@id'])
-          subject['@id'] = query ? hiddenVar(genVarName(), vars) : skolem(this.base);
-      }
-    });
-  }
-
   private postProcess(quads: Quad[]): Quad[] {
+    // TODO: Detect RDF lists and convert them to m-ld lists
     return quads.map(quad => this.rdf.quad(
       this.unhideVar('subject', quad.subject),
       this.unhideVar('predicate', quad.predicate),
@@ -106,6 +70,80 @@ export class JrqlQuads {
           return this.rdf.variable(varName);
     }
     return term;
+  }
+}
+
+class PreProcessor {
+  query: boolean;
+  vars?: Set<string>;
+
+  constructor(
+    { query, vars }: JrqlQuadsOptions,
+    readonly base?: Iri) {
+    this.query = query;
+    this.vars = vars;
+  }
+
+  process(values: Value | Value[], top: boolean = true) {
+    array(values).forEach(value => {
+      // JSON-LD value object (with @value) cannot contain a variable
+      if (typeof value === 'object' && !isValueObject(value)) {
+        // If this is a Reference, we treat it as a Subject
+        const subject: Subject = value as Subject;
+        // Normalise explicit list objects: expand fully to slots
+        if ('@list' in subject) {
+          if (typeof subject['@list'] === 'object') {
+            // This handles arrays as well as hashes
+            // Normalise indexes to data URLs (throw if not convertible)
+            Object.entries(subject['@list']).forEach(([index, item]) =>
+              addSlot(subject, toIndexDataUrl(index), item));
+          } else {
+            // Singleton list value
+            addSlot(subject, toIndexDataUrl(0), subject['@list']);
+          }
+          delete subject['@list'];
+          if (!this.query && subject['@type'] == null)
+            subject['@type'] = meld.rdflseq.value;
+        }
+        // Process predicates and objects
+        Object.entries(subject).forEach(([key, value]) => {
+          if (key !== '@context') {
+            const varKey = hideVar(key, this.vars);
+            if (isSet(value)) {
+              this.process(value['@set'], false);
+            } else if (typeof value === 'object') {
+              this.process(value as Value | Value[], false);
+            } else if (typeof value === 'string') {
+              const varVal = hideVar(value, this.vars);
+              if (varVal !== value)
+                value = !key.startsWith('@') ? { '@id': varVal } : varVal;
+            }
+            subject[varKey] = value;
+            if (varKey !== key)
+              delete subject[key];
+          }
+        });
+        // References at top level => implicit wildcard p-o
+        if (top && this.query && isReference(subject))
+          (<any>subject)[genHiddenVar(this.vars)] = { '@id': genHiddenVar(this.vars) };
+        // Anonymous query subjects => blank node subject (match any) or skolem
+        if (!subject['@id'])
+          subject['@id'] = this.query ? hiddenVar(genVarName(), this.vars) : skolem(this.base);
+      }
+    });
+  }
+}
+
+function addSlot(subject: Subject, index: string, item: any) {
+  if (index !== '@context') {
+    const slot = { 'http://json-rql.org/#item': item };
+    const existing = subject[index] as Exclude<Subject['any'], Context>;
+    if (isSet(existing))
+      existing['@set'] = array(existing['@set']).concat(slot);
+    else
+      subject[index] = array(existing).concat(slot);
+  } else {
+    throw new Error('Cannot include context in list');
   }
 }
 
@@ -159,4 +197,28 @@ function skolem(base: Iri | undefined): Iri {
 function isSelected(results: Result[] | Result, key: string) {
   return results === '*' || key.startsWith('@') ||
     (Array.isArray(results) ? results.includes(key) : results === key);
+}
+
+function toIndexDataUrl(index?: string | number): Url {
+  if (index == null || index === '') {
+    throw new Error('Malformed list index');
+  } else {
+    const n = Number(index);
+    if (Number.isSafeInteger(n))
+      return `data:,${n.toFixed(0)}`;
+    else if (typeof index == 'number')
+      throw new Error('Non-integer list index');
+    else
+      return toIndexDataUrl(dataUrlData(index, 'text/plain', 'application/json'));
+  }
+}
+
+function dataUrlData(url: Url, ...contentTypes: string[]): string | undefined {
+  const match = url.trim().match(validDataUrl.regex);
+  const data = match?.[match.length - 1];
+  if (data != null) {
+    const contentType = match?.[1]?.split(';')[0]?.toLowerCase() || 'text/plain';
+    if (contentTypes.includes(contentType))
+      return data;
+  }
 }
