@@ -297,8 +297,8 @@ describe('Meld State API', () => {
       const listId = (<any>fred.shopping)['@id'];
       await expect(api.read<Describe>({ '@describe': listId })).resolves.toMatchObject([{
         '@id': listId,
-        '@type': 'http://m-ld.org/RdfLseq'/*,
-        '@list': ['Bread', 'Milk']*/
+        '@type': 'http://m-ld.org/RdfLseq',
+        '@list': ['Bread', 'Milk']
       }]);
     });
   });

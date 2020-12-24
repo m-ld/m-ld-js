@@ -8,9 +8,17 @@ import { any, array, uuid } from '../..';
 import {
   Context, Subject, Result, Value, isValueObject, isReference, isSet
 } from '../../jrql-support';
-import { jsonToRdf, rdfToJson } from '../jsonld';
+import { activeCtx, compactIri, jsonToRdf, rdfToJson } from '../jsonld';
 import { meld } from '../MeldEncoding';
-import { inPosition, TriplePos } from '../quads';
+import { inPosition, TriplePos, rdf } from '../quads';
+
+export namespace jrql {
+  export const $id = 'http://json-rql.org';
+  export const list = `${$id}/#list`; // Temporary list property
+  export const item = `${$id}/#item`; // Slot item property
+  export const hiddenVar = (name: string) => `${$id}/var#${name}`;
+  export const hiddenVarRegex = new RegExp(`^${hiddenVar('([\\d\\w]+)')}$`);
+}
 
 export interface JrqlQuadsOptions {
   /** Whether this will be used to match quads or insert them */
@@ -26,14 +34,14 @@ export class JrqlQuads {
     private readonly base?: Iri) {
   }
 
-  async solutionSubject(results: Result[] | Result, solution: Binding, context: Context) {
+  async solutionSubject(results: Result[] | Result, binding: Binding, context: Context) {
     const solutionId = this.rdf.blankNode();
     // Construct quads that represent the solution's variable values
-    const subject = await toSubject(Object.entries(solution).map(([variable, term]) =>
+    const subject = await this.toSubject(Object.entries(binding).map(([variable, term]) =>
       this.rdf.quad(
         solutionId,
         this.rdf.namedNode(hiddenVar(variable.slice(1))),
-        inPosition('object', term))), context);
+        inPosition('object', term))), [/* TODO: list-items */], context);
     // Unhide the variables and strip out anything that's not selected
     return Object.assign({}, ...Object.entries(subject).map(([key, value]) => {
       if (key !== '@id') { // Strip out blank node identifier
@@ -70,6 +78,31 @@ export class JrqlQuads {
           return this.rdf.variable(varName);
     }
     return term;
+  }
+
+  /**
+   * @param propertyQuads subject-property-value quads
+   * @param listItemQuads subject-index-item quads for list-like subjects
+   * @returns a single subject compacted against the given context
+   */
+  async toSubject(
+    propertyQuads: Quad[], listItemQuads: Quad[], context: Context): Promise<Subject> {
+    const subject = (await compact(await rdfToJson(propertyQuads), context || {})) as Subject;
+    if (listItemQuads.length) {
+      const ctx = await activeCtx(context);
+      // Sort the list items by index and construct an rdf:List
+      const indexes = listItemQuads.map(iq => iq.predicate.value).sort((index1, index2) => {
+        // TODO: Use list implementation-specific ordering
+        const  data1 = dataUrlData(index1), data2 = dataUrlData(index2);
+        return data1 != null && data2 != null ?
+          data1.localeCompare(data2, undefined, { numeric: true }) :
+          index1.localeCompare(index2);
+      }).map(index => compactIri(index, ctx));
+      // Create a subject containing only the list items
+      const list = await this.toSubject(listItemQuads, [], context);
+      subject['@list'] = indexes.map(index => <Value>list[index]);
+    }
+    return subject;
   }
 }
 
@@ -136,7 +169,8 @@ class PreProcessor {
 
 function addSlot(subject: Subject, index: string, item: any) {
   if (index !== '@context') {
-    const slot = { 'http://json-rql.org/#item': item };
+    // Anonymous slot will have a variable or skolem @id added later
+    const slot = { [jrql.item]: item };
     const existing = subject[index] as Exclude<Subject['any'], Context>;
     if (isSet(existing))
       existing['@set'] = array(existing['@set']).concat(slot);
@@ -147,13 +181,6 @@ function addSlot(subject: Subject, index: string, item: any) {
   }
 }
 
-/**
- * @returns a single subject compacted against the given context
- */
-export async function toSubject(quads: Quad[], context: Context): Promise<Subject> {
-  return compact(await rdfToJson(quads), context || {}) as unknown as Subject;
-}
-
 function hideVar(token: string, vars?: Set<string>): string {
   const name = matchVar(token);
   // Allow anonymous variables as '?'
@@ -161,15 +188,11 @@ function hideVar(token: string, vars?: Set<string>): string {
 }
 
 export function matchVar(token: string): string | undefined {
-  const match = /^\?([\d\w]*)$/g.exec(token);
-  if (match)
-    return match[1];
+  return /^\?([\d\w]*)$/g.exec(token)?.[1];
 }
 
 function matchHiddenVar(value: string): string | undefined {
-  const match = /^http:\/\/json-rql.org\/var#([\d\w]+)$/g.exec(value);
-  if (match)
-    return match[1];
+  return jrql.hiddenVarRegex.exec(value)?.[1];
 }
 
 function genHiddenVar(vars?: Set<string>) {
@@ -182,7 +205,7 @@ export function genVarName() {
 
 function hiddenVar(name: string, vars?: Set<string>) {
   vars && vars.add(name);
-  return `http://json-rql.org/var#${name}`;
+  return jrql.hiddenVar(name);
 }
 
 /**

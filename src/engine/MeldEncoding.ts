@@ -6,7 +6,7 @@ import { compact } from 'jsonld';
 import { flatten } from './util';
 import { Context, ExpandedTermDef } from '../jrql-support';
 import { Iri } from 'jsonld/jsonld-spec';
-import { Triple, TripleMap } from './quads';
+import { rdf, Triple, TripleMap } from './quads';
 import { rdfToJson, jsonToRdf } from "./jsonld";
 
 export class DomainContext implements Context {
@@ -29,14 +29,6 @@ export namespace meld {
   export const $id = 'http://m-ld.org';
   export const tid: NamedNode = namedNode(`${$id}/#tid`); // TID property
   export const rdflseq: NamedNode = namedNode(`${$id}/RdfLseq`);
-}
-export namespace rdf {
-  export const $id = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#';
-  export const type = namedNode(`${$id}type`);
-  export const Statement = namedNode(`${$id}Statement`);
-  export const subject = namedNode(`${$id}subject`);
-  export const predicate = namedNode(`${$id}predicate`);
-  export const object = namedNode(`${$id}object`);
 }
 
 export function reifyTriplesTids(triplesTids: TripleMap<UUID[]>): Triple[] {

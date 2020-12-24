@@ -1,17 +1,18 @@
 import { Iri } from 'jsonld/jsonld-spec';
 import {
   Context, Read, Subject, Update, isDescribe, isGroup, isSubject, isUpdate,
-  Group, isSelect, Result, Variable, Write} from '../../jrql-support';
-import { DataFactory, NamedNode, Quad } from 'rdf-js';
+  Group, isSelect, Result, Variable, Write
+} from '../../jrql-support';
+import { DataFactory, NamedNode, Quad, Term } from 'rdf-js';
 import { Graph, PatchQuads } from '.';
 import { toArray, mergeMap, filter, take, groupBy, catchError } from 'rxjs/operators';
 import { EMPTY, from, Observable, throwError } from 'rxjs';
 import { array } from '../../util';
-import { canPosition, TriplePos } from '../quads';
+import { canPosition, inPosition, TriplePos } from '../quads';
 import { activeCtx, expandTerm } from "../jsonld";
 import { Binding } from 'quadstore';
 import { Algebra, Factory as SparqlFactory } from 'sparqlalgebrajs';
-import { genVarName, JrqlQuads, matchVar, toSubject } from './JrqlQuads';
+import { genVarName, jrql, JrqlQuads, matchVar } from './JrqlQuads';
 
 /**
  * A graph wrapper that provides low-level json-rql handling for queries. The
@@ -75,35 +76,85 @@ export class JrqlGraph {
   describe(describe: Iri | Variable,
     where?: Subject | Subject[] | Group,
     context: Context = this.defaultContext): Observable<Subject> {
-    const sVarName = matchVar(describe);
-    if (sVarName) {
-      const outerVar = this.rdf.variable(genVarName());
+    const describedVarName = matchVar(describe);
+    if (describedVarName) {
+      const vars = {
+        subject: this.any(), property: this.any(),
+        value: this.any(), item: this.any(),
+        described: this.rdf.variable(describedVarName)
+      };
       return this.solutions(asGroup(where ?? {}), op =>
-        // Sub-select using DISTINCT to fetch subject ids
-        this.graph.query(this.sparql.createDescribe(
-          this.sparql.createDistinct(
-            this.sparql.createProject(
-              this.sparql.createExtend(op, outerVar,
-                this.sparql.createTermExpression(this.rdf.variable(sVarName))),
-              [outerVar])),
-          [outerVar])), context).pipe(
+        this.graph.query(this.sparql.createProject(
+          this.sparql.createJoin(
+            // Sub-select DISTINCT to fetch subject ids
+            this.sparql.createDistinct(
+              this.sparql.createProject(
+                this.sparql.createExtend(op, vars.subject,
+                  this.sparql.createTermExpression(vars.described)),
+                [vars.subject])),
+            this.gatherSubjectData(vars)),
+          [vars.subject, vars.property, vars.value, vars.item])), context).pipe(
             // TODO: Comunica bug? Cannot read property 'close' of undefined, if stream empty
             catchError(err => err instanceof TypeError ? EMPTY : throwError(err)),
-            // TODO: Comunica bug? Describe sometimes interleaves subjects, so cannot use
-            // toArrays(quad => quad.subject.value),
-            groupBy(quad => quad.subject.value),
-            mergeMap(subjectQuads => subjectQuads.pipe(toArray())),
-            mergeMap(subjectQuads => toSubject(subjectQuads, context)));
+            // TODO: Ordering annoyance: sometimes subjects interleave, so
+            // cannot use toArrays(quad => quad.subject.value),
+            groupBy(binding => bound(binding, vars.subject)),
+            mergeMap(subjectBindings => subjectBindings.pipe(toArray())),
+            mergeMap(subjectBindings => this.toSubject(subjectBindings, vars, context)));
     } else {
       return from(this.describe1(describe, context)).pipe(
         filter<Subject>(subject => subject != null));
     }
   }
 
-  async describe1<T extends object>(describe: Iri, context: Context = this.defaultContext): Promise<T | undefined> {
-    const quads = await this.graph.match(await this.resolve(describe, context)).pipe(toArray()).toPromise();
-    quads.forEach(quad => quad.graph = this.rdf.defaultGraph());
-    return quads.length ? <T>await toSubject(quads, context) : undefined;
+  async describe1<T extends object>(describe: Iri,
+    context: Context = this.defaultContext): Promise<T | undefined> {
+    const subject = await this.resolve(describe, context);
+    const vars = { subject, property: this.any(), value: this.any(), item: this.any() };
+    const bindings = await this.graph.query(this.sparql.createProject(
+      this.gatherSubjectData(vars), [vars.property, vars.value, vars.item]))
+      .pipe(toArray()).toPromise();
+    return bindings.length ? <T>await this.toSubject(bindings, vars, context) : undefined;
+  }
+
+  private toSubject(bindings: Binding[], terms: SubjectTerms, context: Context): Promise<Subject> {
+    // Partition the bindings into plain properties and list items
+    return this.jrql.toSubject(...bindings.reduce<[Quad[], Quad[]]>((quads, binding) => {
+      const [propertyQuads, listItemQuads] = quads, item = bound(binding, terms.item);
+      (item == null ? propertyQuads : listItemQuads).push(this.rdf.quad(
+        inPosition('subject', bound(binding, terms.subject)),
+        inPosition('predicate', bound(binding, terms.property)),
+        inPosition('object', bound(binding, item == null ? terms.value : item)),
+        this.graph.name))
+      return quads;
+    }, [[], []]), context);
+  }
+
+  private gatherSubjectData({ subject, property, value, item }: SubjectTerms): Algebra.Operation {
+    /* {
+      ?subject ?prop ?value
+      optional {
+        filter(isiri(?value))
+        bind(?value AS ?slot)
+      }
+      optional {
+        ?slot <http://json-rql.org/#item> ?item
+      }
+    } */
+    const slot = this.any();
+    return this.sparql.createLeftJoin(
+      this.sparql.createLeftJoin(
+        // BGP to pick up all subject properties
+        this.sparql.createBgp([this.sparql.createPattern(
+          subject, property, value, this.graph.name)]),
+        // Optional bind of slot variable if value is IRI
+        this.sparql.createExtend(this.sparql.createBgp([]),
+          slot, this.sparql.createTermExpression(value)),
+        this.sparql.createOperatorExpression('isiri',
+          [this.sparql.createTermExpression(value)])),
+      // Optional BGP to pick up list slot items
+      this.sparql.createBgp([this.sparql.createPattern(
+        slot, this.rdf.namedNode(jrql.item), item, this.graph.name)]));
   }
 
   async find1<T>(jrqlPattern: Partial<T> & Subject,
@@ -202,18 +253,18 @@ export class JrqlGraph {
       [...vars].map(varName => this.rdf.variable(varName))));
   }
 
-  private fillTemplate(quads: Quad[], varValues: Binding): Quad[] {
+  private fillTemplate(quads: Quad[], binding: Binding): Quad[] {
     return quads.map(quad => this.rdf.quad(
-      this.fillTemplatePos('subject', quad.subject, varValues),
-      this.fillTemplatePos('predicate', quad.predicate, varValues),
-      this.fillTemplatePos('object', quad.object, varValues),
+      this.fillTemplatePos('subject', quad.subject, binding),
+      this.fillTemplatePos('predicate', quad.predicate, binding),
+      this.fillTemplatePos('object', quad.object, binding),
       quad.graph));
   }
 
-  private fillTemplatePos<P extends TriplePos>(pos: P, term: Quad[P], varValues: Binding): Quad[P] {
+  private fillTemplatePos<P extends TriplePos>(pos: P, term: Quad[P], binding: Binding): Quad[P] {
     switch (term.termType) {
       case 'Variable':
-        const value = varValues[`?${term.value}`];
+        const value = bound(binding, term);
         if (value != null && canPosition(pos, value))
           return value;
     }
@@ -222,6 +273,26 @@ export class JrqlGraph {
 
   private async resolve(iri: Iri, context?: Context): Promise<NamedNode> {
     return this.rdf.namedNode(context ? expandTerm(iri, await activeCtx(context)) : iri);
+  }
+
+  private any() {
+    return this.rdf.variable(genVarName());
+  }
+}
+
+interface SubjectTerms {
+  subject: Term;
+  property: Term;
+  value: Term;
+  item: Term;
+}
+
+function bound(binding: Binding, term: Term): Term {
+  switch (term.termType) {
+    case 'Variable':
+      return binding[`?${term.value}`];
+    default:
+      return term;
   }
 }
 

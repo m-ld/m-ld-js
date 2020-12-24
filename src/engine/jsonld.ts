@@ -7,7 +7,7 @@ import { compactIri as _compactIri } from 'jsonld/lib/compact';
 export { Options } from 'jsonld';
 export { ActiveContext } from 'jsonld/lib/context';
 
-export function rdfToJson(quads: Quad[]): Promise<any> {
+export function rdfToJson(quads: Iterable<Quad>): Promise<any> {
   // Using native types to avoid unexpected value objects
   return fromRDF(quads, { useNativeTypes: true });
 }

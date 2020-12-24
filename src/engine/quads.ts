@@ -6,6 +6,19 @@ import { IndexMap, IndexSet } from "./indices";
 export type Triple = Omit<Quad, 'graph'>;
 export type TriplePos = 'subject' | 'predicate' | 'object';
 
+export namespace rdf {
+  export const $id = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#';
+  export const type = namedNode(`${$id}type`);
+  export const Statement = namedNode(`${$id}Statement`);
+  export const subject = namedNode(`${$id}subject`);
+  export const predicate = namedNode(`${$id}predicate`);
+  export const object = namedNode(`${$id}object`);
+  export const List = namedNode(`${$id}List`);
+  export const first = namedNode(`${$id}first`);
+  export const rest = namedNode(`${$id}rest`);
+  export const nil = namedNode(`${$id}nil`);
+}
+
 export class QuadMap<T> extends IndexMap<Quad, T> {
   protected getIndex(key: Quad): string {
     return quadIndexKey(key);

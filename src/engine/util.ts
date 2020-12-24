@@ -160,7 +160,10 @@ export function observeStream<T>(startStream: () => Promise<EventEmitter>): Obse
     startStream().then(stream => {
       if (!subscription.closed) {
         subscription.add(() => {
-          if (typeof (<any>stream)?.close == 'function')
+          const maybeAsyncIterator = <any>stream;
+          if (maybeAsyncIterator != null &&
+            typeof maybeAsyncIterator.close == 'function' &&
+            !maybeAsyncIterator.ended)
             (<any>stream).close();
         });
         stream

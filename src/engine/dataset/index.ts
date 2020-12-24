@@ -4,7 +4,7 @@ import {
 } from 'rdf-js';
 import { Quadstore } from 'quadstore';
 import { AbstractChainedBatch, AbstractLevelDOWN } from 'abstract-leveldown';
-import { from, Observable, throwError } from 'rxjs';
+import { Observable } from 'rxjs';
 import { generate as uuid } from 'short-uuid';
 import { check, observeStream, Stopwatch } from '../util';
 import { LockManager } from '../locks';
@@ -16,7 +16,6 @@ import { Context } from 'jsonld/jsonld-spec';
 import { activeCtx, compactIri, expandTerm } from '../jsonld';
 import { ActiveContext } from 'jsonld/lib/context';
 import { Algebra } from 'sparqlalgebrajs';
-import { mergeMap } from 'rxjs/operators';
 
 /**
  * Atomically-applied patch to a quad-store.
