@@ -1,7 +1,4 @@
-import { MeldConstraint, MeldUpdate, MeldReadState, MutableMeldUpdate } from '..';
-import { Update, Subject } from '../jrql-support';
-import { DeleteInsert } from '..';
-import { constraintFromConfig } from '.';
+import { MeldConstraint, MeldReadState, MutableMeldUpdate } from '..';
 
 /** @internal */
 export class CheckList implements MeldConstraint {

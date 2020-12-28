@@ -74,7 +74,7 @@ describe('MeldClone utilities', () => {
   test('removes a deleted value', () => {
     const box: Resource<Box> = { '@id': 'foo', size: 10, label: 'My box' };
     updateSubject(box, { '@delete': { '@id': 'foo', size: 10 }, '@insert': {} });
-    expect(box).toEqual({ '@id': 'foo', size: [], label: 'My box' });
+    expect(box).toEqual({ '@id': 'foo', label: 'My box' });
   });
 
   test('updates a value', () => {

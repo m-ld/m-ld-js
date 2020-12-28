@@ -45,9 +45,9 @@ export interface MeldConfig {
    */
   '@context'?: Context;
   /**
-   * A constraint to apply to the domain data, usually a composite.
+   * Semantic constraints to apply to the domain data.
    */
-  constraint?: ConstraintConfig;
+  constraints?: ConstraintConfig[];
   /**
    * Set to `true` to indicate that this clone will be 'genesis'; that is, the
    * first new clone on a new domain. This flag will be ignored if the clone is
@@ -88,25 +88,25 @@ export interface MeldConfig {
  * This can be a configured object (e.g. `new MqttRemotes(config)`) or just the
  * class (`MqttRemotes`).
  * @param config the clone configuration
- * @param constraint a constraint implementation, overrides config constraint.
- * 🚧 Experimental: use with caution.
+ * @param constraints constraints in addition to those in the configuration. 🚧
+ * Experimental: use with caution.
  */
 export async function clone(
   backend: AbstractLevelDOWN,
   remotes: dist.mqtt.MqttRemotes | dist.ably.AblyRemotes,
   config: MeldConfig,
-  constraint?: MeldConstraint): Promise<MeldClone> {
+  constraints?: MeldConstraint[]): Promise<MeldClone> {
 
   const context = new DomainContext(config['@domain'], config['@context']);
   const dataset = await new QuadStoreDataset(backend, context).initialise();
 
   if (typeof remotes == 'function')
     remotes = new remotes(config);
+  
+  constraints = constraints ?? await Promise.all((config.constraints ?? [])
+    .map(item => constraintFromConfig(item, context)));
 
-  if (constraint == null && config.constraint != null)
-    constraint = await constraintFromConfig(config.constraint, context);
-
-  const engine = new DatasetEngine({ dataset, remotes, config, constraint });
+  const engine = new DatasetEngine({ dataset, remotes, config, constraints });
   await engine.initialise();
   return new DatasetClone(context, engine);
 }

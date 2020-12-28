@@ -4,6 +4,19 @@ import { map, filter, take, mergeMap, defaultIfEmpty, concatMap } from 'rxjs/ope
 import { Subject, Select, Value, isValueObject } from '../jrql-support';
 import { Observable, EMPTY, concat, defer, from } from 'rxjs';
 
+/**
+ * Configuration for a `SingleValued` constraint. The configured property should
+ * have only one value.
+ */
+export interface SingleValuedConfig {
+  '@type': 'single-valued';
+  /**
+   * The property can be given in unexpanded form, as it appears in JSON
+   * subjects when using the API, or as its full IRI reference.
+   */
+  property: string;
+}
+
 /** @internal */
 function isMultiValued(value: Subject['any']): value is Array<Value> {
   return Array.isArray(value) && value.length > 1;
@@ -65,7 +78,7 @@ export class SingleValued implements MeldConstraint {
           mergeMap(sid => state.read<Select>({
             '@select': '?o', '@where': { '@id': sid, [this.property]: '?o' }
           }).pipe(
-            defaultIfEmpty({ '@id': '_:b0', '?o': undefined }),
+            defaultIfEmpty({ '@id': '_:b0', '?o': [] }),
             map(selectResult => {
               // Weirdness to construct a subject from the select result
               // TODO: Support `@construct`

@@ -22,6 +22,8 @@ import { SuSetJournalDataset, SuSetJournalEntry } from './SuSetJournal';
 import { MeldConfig, Read } from '../..';
 import { QuadMap, TripleMap, Triple } from '../quads';
 import { rdfToJson } from "../jsonld";
+import { CheckList } from '../../constraints/CheckList';
+import { DefaultList } from '../../constraints/DefaultList';
 
 interface HashTid extends Subject {
   '@id': Iri; // hash:<hashed triple id>
@@ -66,10 +68,11 @@ export class SuSetDataset extends JrqlGraph {
   private readonly maxDeltaSize: number;
   private readonly log: Logger;
   private readonly state: MeldReadState;
+  private readonly constraint: CheckList;
 
   constructor(
     private readonly dataset: Dataset,
-    private readonly constraint: MeldConstraint,
+    constraints: MeldConstraint[],
     private readonly encoding: MeldEncoding,
     config: Pick<MeldConfig, '@id' | 'maxDeltaSize' | 'logLevel'>) {
     super(dataset.graph(), {}, encoding.context['@base']);
@@ -81,6 +84,7 @@ export class SuSetDataset extends JrqlGraph {
     this.maxDeltaSize = config.maxDeltaSize ?? Infinity;
     this.log = getIdLogger(this.constructor, config['@id'], config.logLevel);
     this.state = new GraphState(this);
+    this.constraint = new CheckList(constraints.concat(new DefaultList()));
   }
 
   @SuSetDataset.checkNotClosed.async

@@ -3,21 +3,28 @@ import { Iri, Url } from 'jsonld/jsonld-spec';
 import { clone } from 'jsonld/lib/util';
 import { Binding } from 'quadstore';
 import { DataFactory, Quad } from 'rdf-js';
-import validDataUrl = require('valid-data-url');
 import { GraphName } from '.';
 import { any, array, uuid } from '../..';
 import {
   Context, Subject, Result, Value, isValueObject, isReference, isSet, isList
 } from '../../jrql-support';
-import { activeCtx, compactIri, jsonToRdf, rdfToJson } from '../jsonld';
+import { activeCtx, compactIri, dataUrlData, jsonToRdf, rdfToJson } from '../jsonld';
 import { inPosition, TriplePos } from '../quads';
 
 export namespace jrql {
   export const $id = 'http://json-rql.org';
-  export const list = `${$id}/#list`; // Temporary list property
-  export const item = `${$id}/#item`; // Slot item property
+  export const item = 'http://json-rql.org/#item'; // Slot item property
   export const hiddenVar = (name: string) => `${$id}/var#${name}`;
   export const hiddenVarRegex = new RegExp(`^${hiddenVar('([\\d\\w]+)')}$`);
+
+  export interface Slot extends Subject {
+    '@id': Iri;
+    [item]: Value | Value[];
+  }
+
+  export function isSlot(s: Subject): s is Slot {
+    return s['@id'] != null && s[item] != null;
+  }
 }
 
 export interface JrqlQuadsOptions {
@@ -94,10 +101,9 @@ export class JrqlQuads {
       // Sort the list items by index and construct an rdf:List
       const indexes = listItemQuads.map(iq => iq.predicate.value).sort((index1, index2) => {
         // TODO: Use list implementation-specific ordering
-        const  data1 = dataUrlData(index1), data2 = dataUrlData(index2);
+        const data1 = toIndexNumber(index1), data2 = toIndexNumber(index2);
         return data1 != null && data2 != null ?
-          data1.localeCompare(data2, undefined, { numeric: true }) :
-          index1.localeCompare(index2);
+          data1 - data2 : index1.localeCompare(index2);
       }).map(index => compactIri(index, ctx));
       // Create a subject containing only the list items
       const list = await this.toSubject(listItemQuads, [], context);
@@ -228,26 +234,19 @@ function isSelected(results: Result[] | Result, key: string) {
     (Array.isArray(results) ? results.includes(key) : results === key);
 }
 
-function toIndexDataUrl(index?: string | number): Url {
-  if (index == null || index === '') {
-    throw new Error('Malformed list index');
-  } else {
-    const n = Number(index);
+export function toIndexNumber(indexKey?: string | number): number | undefined {
+  if (indexKey != null && indexKey !== '') { // Exclude Number('') === 0
+    const n = Number(indexKey);
     if (Number.isSafeInteger(n))
-      return `data:,${n.toFixed(0)}`;
-    else if (typeof index == 'number')
-      throw new Error('Non-integer list index');
-    else
-      return toIndexDataUrl(dataUrlData(index, 'text/plain', 'application/json'));
+      return n;
+    else if (typeof indexKey != 'number')
+      return toIndexNumber(dataUrlData(indexKey, 'text/plain', 'application/json'));
   }
 }
 
-function dataUrlData(url: Url, ...contentTypes: string[]): string | undefined {
-  const match = url.trim().match(validDataUrl.regex);
-  const data = match?.[match.length - 1];
-  if (data != null) {
-    const contentType = match?.[1]?.split(';')[0]?.toLowerCase() || 'text/plain';
-    if (contentTypes.includes(contentType))
-      return data;
-  }
+function toIndexDataUrl(index?: string | number): Url {
+  const indexData = toIndexNumber(index);
+  if (indexData == null)
+    throw new Error('Malformed list index');    
+  return `data:,${indexData.toFixed(0)}`;
 }

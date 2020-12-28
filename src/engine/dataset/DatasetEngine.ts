@@ -21,7 +21,6 @@ import { levels } from 'loglevel';
 import { AbstractMeld, comesAlive } from '../AbstractMeld';
 import { MeldConfig } from '../..';
 import { RemoteUpdates } from './RemoteUpdates';
-import { NO_CONSTRAINT } from '../../constraints';
 import { CloneEngine } from '../StateEngine';
 import { MeldError } from '../MeldError';
 import { MeldErrorStatus } from '@m-ld/m-ld-spec';
@@ -55,15 +54,15 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
   private readonly genesisClaim: boolean;
   readonly status: Observable<MeldStatus> & LiveStatus;
 
-  constructor({ dataset, remotes, constraint, config }: {
+  constructor({ dataset, remotes, constraints, config }: {
     dataset: Dataset;
     remotes: MeldRemotes;
-    constraint?: MeldConstraint;
+    constraints?: MeldConstraint[];
     config: MeldConfig;
   }) {
     super(config['@id'], config.logLevel);
     this.dataset = new SuSetDataset(dataset,
-      constraint ?? NO_CONSTRAINT,
+      constraints ?? [],
       new MeldEncoding(config['@domain']),
       config);
     this.subs.add(this.dataUpdates

@@ -8,7 +8,6 @@ import { DeltaMessage, EncodedDelta } from '../src/engine';
 import { Dataset } from '../src/engine/dataset';
 import { from } from 'rxjs';
 import { Describe, MeldConstraint } from '../src';
-import { NO_CONSTRAINT } from '../src/constraints';
 import { MeldEncoding } from '../src/engine/MeldEncoding';
 
 const fred = {
@@ -34,13 +33,13 @@ describe('SU-Set Dataset', () => {
 
     beforeEach(async () => {
       dataset = await memStore();
-      ssd = new SuSetDataset(dataset, NO_CONSTRAINT,
+      ssd = new SuSetDataset(dataset, [],
         new MeldEncoding('test.m-ld.org'), { '@id': 'test' });
       await ssd.initialise();
     });
 
     test('cannot share a dataset', async () => {
-      const otherSsd = new SuSetDataset(dataset, NO_CONSTRAINT,
+      const otherSsd = new SuSetDataset(dataset, [],
         new MeldEncoding('test.m-ld.org'), { '@id': 'boom' });
       await expect(otherSsd.initialise()).rejects.toThrow();
     });
@@ -355,7 +354,7 @@ describe('SU-Set Dataset', () => {
         check: () => Promise.resolve(),
         apply: () => Promise.resolve()
       };
-      ssd = new SuSetDataset(await memStore(), constraint,
+      ssd = new SuSetDataset(await memStore(), [constraint],
         new MeldEncoding('test.m-ld.org'), { '@id': 'test' });
       await ssd.initialise();
       await ssd.saveClock(() => localTime = localTime.ticked(), true);
@@ -504,7 +503,7 @@ describe('SU-Set Dataset', () => {
   });
 
   test('enforces delta size limit', async () => {
-    ssd = new SuSetDataset(await memStore(), NO_CONSTRAINT,
+    ssd = new SuSetDataset(await memStore(), [],
       new MeldEncoding('test.m-ld.org'), { '@id': 'test', maxDeltaSize: 1 });
     await ssd.initialise();
     await ssd.saveClock(() => TreeClock.GENESIS, true);
