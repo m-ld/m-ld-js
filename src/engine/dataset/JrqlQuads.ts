@@ -6,7 +6,7 @@ import validDataUrl = require('valid-data-url');
 import { GraphName } from '.';
 import { any, array, uuid } from '../..';
 import {
-  Context, Subject, Result, Value, isValueObject, isReference, isSet
+  Context, Subject, Result, Value, isValueObject, isReference, isSet, isList
 } from '../../jrql-support';
 import { activeCtx, compactIri, jsonToRdf, rdfToJson } from '../jsonld';
 import { meld } from '../MeldEncoding';
@@ -123,39 +123,10 @@ class PreProcessor {
       if (typeof value === 'object' && !isValueObject(value)) {
         // If this is a Reference, we treat it as a Subject
         const subject: Subject = value as Subject;
-        // Normalise explicit list objects: expand fully to slots
-        if ('@list' in subject) {
-          if (typeof subject['@list'] === 'object') {
-            // This handles arrays as well as hashes
-            // Normalise indexes to data URLs (throw if not convertible)
-            Object.entries(subject['@list']).forEach(([index, item]) =>
-              addSlot(subject, toIndexDataUrl(index), item));
-          } else {
-            // Singleton list value
-            addSlot(subject, toIndexDataUrl(0), subject['@list']);
-          }
-          delete subject['@list'];
-          if (!this.query && subject['@type'] == null)
-            subject['@type'] = meld.rdflseq.value;
-        }
+        if (isList(subject))
+          this.expandListSlots(subject);
         // Process predicates and objects
-        Object.entries(subject).forEach(([key, value]) => {
-          if (key !== '@context') {
-            const varKey = hideVar(key, this.vars);
-            if (isSet(value)) {
-              this.process(value['@set'], false);
-            } else if (typeof value === 'object') {
-              this.process(value as Value | Value[], false);
-            } else if (typeof value === 'string') {
-              const varVal = hideVar(value, this.vars);
-              if (varVal !== value)
-                value = !key.startsWith('@') ? { '@id': varVal } : varVal;
-            }
-            subject[varKey] = value;
-            if (varKey !== key)
-              delete subject[key];
-          }
-        });
+        this.processEntries(subject);
         // References at top level => implicit wildcard p-o
         if (top && this.query && isReference(subject))
           (<any>subject)[genHiddenVar(this.vars)] = { '@id': genHiddenVar(this.vars) };
@@ -164,6 +135,42 @@ class PreProcessor {
           subject['@id'] = this.query ? hiddenVar(genVarName(), this.vars) : skolem(this.base);
       }
     });
+  }
+
+  private processEntries(subject: Subject) {
+    Object.entries(subject).forEach(([key, value]) => {
+      if (key !== '@context') {
+        const varKey = hideVar(key, this.vars);
+        if (isSet(value)) {
+          this.process(value['@set'], false);
+        } else if (typeof value === 'object') {
+          this.process(value as Value | Value[], false);
+        } else if (typeof value === 'string') {
+          const varVal = hideVar(value, this.vars);
+          if (varVal !== value)
+            value = !key.startsWith('@') ? { '@id': varVal } : varVal;
+        }
+        subject[varKey] = value;
+        if (varKey !== key)
+          delete subject[key];
+      }
+    });
+  }
+
+  private expandListSlots(list: Subject) {
+    // Normalise explicit list objects: expand fully to slots
+    if (typeof list['@list'] === 'object') {
+      // This handles arrays as well as hashes
+      // Normalise indexes to data URLs (throw if not convertible)
+      Object.entries(list['@list']).forEach(([index, item]) =>
+        addSlot(list, toIndexDataUrl(index), item));
+    } else {
+      // Singleton list item at position zero
+      addSlot(list, toIndexDataUrl(0), list['@list']);
+    }
+    delete list['@list'];
+    if (!this.query && list['@type'] == null)
+      list['@type'] = meld.rdflseq.value;
   }
 }
 

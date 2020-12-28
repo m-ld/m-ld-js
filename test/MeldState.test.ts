@@ -286,7 +286,7 @@ describe('Meld State API', () => {
   });
 
   describe('lists', () => {
-    test('inserts a list', async () => {
+    test('inserts a list as a property', async () => {
       await api.write<Subject>({
         '@id': 'fred', shopping: { '@list': ['Bread', 'Milk'] }
       });
@@ -297,6 +297,56 @@ describe('Meld State API', () => {
       const listId = (<any>fred.shopping)['@id'];
       await expect(api.read<Describe>({ '@describe': listId })).resolves.toMatchObject([{
         '@id': listId,
+        '@type': 'http://m-ld.org/RdfLseq',
+        '@list': ['Bread', 'Milk']
+      }]);
+    });
+
+    test('inserts an identified list', async () => {
+      await api.write<Subject>({
+        '@id': 'shopping', '@list': ['Bread', 'Milk']
+      });
+      await expect(api.read<Describe>({ '@describe': 'shopping' })).resolves.toMatchObject([{
+        '@id': 'shopping',
+        '@type': 'http://m-ld.org/RdfLseq',
+        '@list': ['Bread', 'Milk']
+      }]);
+    });
+
+    test('inserts an identified with index notation', async () => {
+      await api.write<Subject>({
+        '@id': 'shopping', '@list': { 'data:,0': 'Bread', 'data:,1': 'Milk' }
+      });
+      await expect(api.read<Describe>({ '@describe': 'shopping' })).resolves.toMatchObject([{
+        '@id': 'shopping',
+        '@type': 'http://m-ld.org/RdfLseq',
+        '@list': ['Bread', 'Milk']
+      }]);
+    });
+
+    test('appends to a list', async () => {
+      await api.write<Subject>({
+        '@id': 'shopping', '@list': { 'data:,0': 'Bread' }
+      });
+      await api.write<Subject>({
+        '@id': 'shopping', '@list': { 'data:,1': 'Milk' }
+      });
+      await expect(api.read<Describe>({ '@describe': 'shopping' })).resolves.toMatchObject([{
+        '@id': 'shopping',
+        '@type': 'http://m-ld.org/RdfLseq',
+        '@list': ['Bread', 'Milk']
+      }]);
+    });
+
+    test.skip('prepends to a list', async () => {
+      await api.write<Subject>({
+        '@id': 'shopping', '@list': { 'data:,0': 'Milk' }
+      });
+      await api.write<Subject>({
+        '@id': 'shopping', '@list': { 'data:,0': 'Bread' }
+      });
+      await expect(api.read<Describe>({ '@describe': 'shopping' })).resolves.toMatchObject([{
+        '@id': 'shopping',
         '@type': 'http://m-ld.org/RdfLseq',
         '@list': ['Bread', 'Milk']
       }]);

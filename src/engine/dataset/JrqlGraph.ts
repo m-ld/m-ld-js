@@ -133,13 +133,8 @@ export class JrqlGraph {
   private gatherSubjectData({ subject, property, value, item }: SubjectTerms): Algebra.Operation {
     /* {
       ?subject ?prop ?value
-      optional {
-        filter(isiri(?value))
-        bind(?value AS ?slot)
-      }
-      optional {
-        ?slot <http://json-rql.org/#item> ?item
-      }
+      optional { filter(isiri(?value)) bind(?value AS ?slot) }
+      optional { ?slot <http://json-rql.org/#item> ?item }
     } */
     const slot = this.any();
     return this.sparql.createLeftJoin(
