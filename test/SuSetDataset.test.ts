@@ -2,7 +2,7 @@ import { SuSetDataset } from '../src/engine/dataset/SuSetDataset';
 import { txnId } from '../src/engine/dataset/SuSetGraph';
 import { memStore } from './testClones';
 import { TreeClock } from '../src/engine/clocks';
-import { first, toArray, isEmpty } from 'rxjs/operators';
+import { first, toArray, isEmpty, take } from 'rxjs/operators';
 import { Subject } from 'json-rql';
 import { DeltaMessage, EncodedDelta } from '../src/engine';
 import { Dataset } from '../src/engine/dataset';
@@ -128,7 +128,7 @@ describe('SU-Set Dataset', () => {
         const willUpdate = captureUpdate();
 
         const msg = await ssd.apply(new DeltaMessage(
-          remoteTime.ticks, 
+          remoteTime.ticks,
           remoteTime = remoteTime.ticked(), [1, '{}', '{}']),
           localTime = localTime.update(remoteTime).ticked(),
           localTime = localTime.ticked());
@@ -353,7 +353,7 @@ describe('SU-Set Dataset', () => {
     beforeEach(async () => {
       constraint = {
         check: () => Promise.resolve(),
-        apply: () => Promise.resolve(null)
+        apply: () => Promise.resolve()
       };
       ssd = new SuSetDataset(await memStore(), constraint,
         new MeldEncoding('test.m-ld.org'), { '@id': 'test' });
@@ -383,6 +383,21 @@ describe('SU-Set Dataset', () => {
         localTime = localTime.ticked(),
         await ssd.insert(fred)
       ])).resolves.toBeDefined();
+    });
+
+    test('provides a mutable update to the constraint', async () => {
+      constraint.check = async (_, update) => {
+        await update.append({ '@insert': wilma });
+        expect(update['@insert']).toMatchObject(expect.arrayContaining([wilma]));
+        await update.append({ '@insert': barney });
+        expect(update['@insert']).toMatchObject(expect.arrayContaining([wilma, barney]));
+      };
+      await expect(ssd.transact(async () => [
+        localTime = localTime.ticked(),
+        await ssd.insert(fred)
+      ])).resolves.toBeDefined();
+      await expect(ssd.read(<Describe>{ '@describe': wilma['@id'] })
+        .pipe(take(1)).toPromise()).resolves.toEqual(wilma);
     });
 
     test('applies an inserting constraint', async () => {
