@@ -1,5 +1,6 @@
 import { compact } from 'jsonld';
 import { Iri, Url } from 'jsonld/jsonld-spec';
+import { clone } from 'jsonld/lib/util';
 import { Binding } from 'quadstore';
 import { DataFactory, Quad } from 'rdf-js';
 import validDataUrl = require('valid-data-url');
@@ -9,8 +10,7 @@ import {
   Context, Subject, Result, Value, isValueObject, isReference, isSet, isList
 } from '../../jrql-support';
 import { activeCtx, compactIri, jsonToRdf, rdfToJson } from '../jsonld';
-import { meld } from '../MeldEncoding';
-import { inPosition, TriplePos, rdf } from '../quads';
+import { inPosition, TriplePos } from '../quads';
 
 export namespace jrql {
   export const $id = 'http://json-rql.org';
@@ -53,8 +53,8 @@ export class JrqlQuads {
   }
 
   async quads(g: Subject | Subject[], opts: JrqlQuadsOptions, context: Context): Promise<Quad[]> {
-    // TODO: hideVars should not be in-place
-    const jsonld = { '@graph': JSON.parse(JSON.stringify(g)), '@context': context };
+    // The pre-processor acts on the input graph in-place
+    const jsonld = { '@graph': clone(g), '@context': context };
     new PreProcessor(opts, this.base).process(jsonld['@graph']);
     const quads = await jsonToRdf(this.graphName.termType !== 'DefaultGraph' ?
       { ...jsonld, '@id': this.graphName.value } : jsonld) as Quad[];
@@ -62,7 +62,8 @@ export class JrqlQuads {
   }
 
   private postProcess(quads: Quad[]): Quad[] {
-    // TODO: Detect RDF lists and convert them to m-ld lists
+    // TODO: Detect RDF lists e.g. from '@container': '@list' in context, and
+    // convert them to m-ld lists
     return quads.map(quad => this.rdf.quad(
       this.unhideVar('subject', quad.subject),
       this.unhideVar('predicate', quad.predicate),
@@ -169,8 +170,6 @@ class PreProcessor {
       addSlot(list, toIndexDataUrl(0), list['@list']);
     }
     delete list['@list'];
-    if (!this.query && list['@type'] == null)
-      list['@type'] = meld.rdflseq.value;
   }
 }
 

@@ -2,6 +2,7 @@ import { Quad, Term, Literal } from 'rdf-js';
 // FIXME: Make this a data factory field of some class
 import { namedNode, defaultGraph, variable, blankNode, literal, quad as newQuad } from '@rdfjs/data-model';
 import { IndexMap, IndexSet } from "./indices";
+import { memoise } from './util';
 
 export type Triple = Omit<Quad, 'graph'>;
 export type TriplePos = 'subject' | 'predicate' | 'object';
@@ -60,13 +61,11 @@ export function tripleKey(triple: Triple): string[] {
   }
 }
 
-function tripleIndexKey(triple: Triple): string {
-  return tripleKey(triple).join('^');
-}
+const tripleIndexKey = memoise((triple: Triple) =>
+  tripleKey(triple).join('^'));
 
-function quadIndexKey(quad: Quad): string {
-  return [quad.graph.value].concat(tripleKey(quad)).join('^');
-}
+const quadIndexKey = memoise((quad: Quad) => 
+  [quad.graph.value].concat(tripleKey(quad)).join('^'));
 
 export function cloneQuad(quad: Quad): Quad {
   return newQuad(

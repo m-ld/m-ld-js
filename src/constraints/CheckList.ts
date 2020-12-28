@@ -9,7 +9,7 @@ export class CheckList implements MeldConstraint {
     readonly list: MeldConstraint[]) {
   }
 
-  check(state: MeldReadState, update: MeldUpdate) {
+  check(state: MeldReadState, update: MutableMeldUpdate) {
     return Promise.all(this.list.map(
       constraint => constraint.check(state, update)));
   }

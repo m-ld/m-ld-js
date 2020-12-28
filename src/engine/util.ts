@@ -285,3 +285,13 @@ export function poisson(mean: number) {
     rtn++;
   return rtn - 1;
 }
+
+export function memoise<K extends object, V extends {}>(fn: (key: K) => V): (key: K) => V {
+  const cache = new WeakMap<K, V>();
+  return key => {
+    let value = cache.get(key);
+    if (value == null)
+      cache.set(key, value = fn(key));
+    return value;
+  };
+}

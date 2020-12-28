@@ -1,8 +1,7 @@
 import { MeldConstraint, MeldUpdate, MeldReadState, asSubjectUpdates, updateSubject, MutableMeldUpdate } from '..';
 import { Iri } from 'jsonld/jsonld-spec';
-import { DeleteInsert } from '..';
-import { map, filter, take, reduce, mergeMap, defaultIfEmpty, concatMap } from 'rxjs/operators';
-import { Subject, Select, Update, Value, isValueObject } from '../jrql-support';
+import { map, filter, take, mergeMap, defaultIfEmpty, concatMap } from 'rxjs/operators';
+import { Subject, Select, Value, isValueObject } from '../jrql-support';
 import { Observable, EMPTY, concat, defer, from } from 'rxjs';
 
 /** @internal */

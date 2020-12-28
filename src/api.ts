@@ -290,7 +290,7 @@ export interface MeldConstraint {
    * @param update the provisional update, prior to application to the data
    * @returns a rejection if the constraint is violated (or fails)
    */
-  check(state: MeldReadState, update: MeldUpdate): Promise<unknown>;
+  check(state: MeldReadState, update: MutableMeldUpdate): Promise<unknown>;
   /**
    * Applies the constraint to an update being applied to the data. If the
    * update would cause a violation, this method must mutate the given update

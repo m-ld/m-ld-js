@@ -6,7 +6,7 @@ import { Snapshot, UUID, DeltaMessage, MeldDelta } from '..';
 import { Quad } from 'rdf-js';
 import { TreeClock } from '../clocks';
 import { Subject } from '../../jrql-support';
-import { Dataset, PatchQuads } from '.';
+import { Dataset, DefinitePatch, PatchQuads } from '.';
 import { flatten as flatJsonLd } from 'jsonld';
 import { Iri } from 'jsonld/jsonld-spec';
 import { JrqlGraph } from './JrqlGraph';
@@ -188,8 +188,9 @@ export class SuSetDataset extends JrqlGraph {
           return { return: null };
 
         txc.sw.next('check-constraints');
-        const update = await this.asUpdate(time, patch);
+        const [update, cxnPatch] = this.mutableUpdate(await this.asUpdate(time, patch), patch);
         await this.constraint.check(this.state, update);
+        patch.append(cxnPatch);
 
         txc.sw.next('find-tids');
         const deletedTriplesTids = await this.findTriplesTids(patch.oldQuads);
@@ -246,7 +247,7 @@ export class SuSetDataset extends JrqlGraph {
 
         txc.sw.next('unreify');
         const delta = await this.encoding.asDelta(msg.data);
-        const patch = new PatchQuads([], delta.insert.map(toDomainQuad));
+        const patch = new PatchQuads({ newQuads: delta.insert.map(toDomainQuad) });
         const tidPatch = await this.processSuDeletions(delta.delete, patch);
 
         txc.sw.next('apply-cx'); // "cx" = constraint
@@ -308,32 +309,44 @@ export class SuSetDataset extends JrqlGraph {
   private async applyConstraint(
     to: { update: MeldUpdate, patch: PatchQuads, tid: string },
     cxnTime: TreeClock) {
-    const patch = new PatchQuads();
-    const mutableUpdate: MutableMeldUpdate = {
-      ...to.update,
-      // FIXME: Inefficient, re-creates the update every time
-      append: async update => Object.assign(mutableUpdate,
-        await this.asDeleteInsert(patch.append(await this.write(update))))
-    }
+    const [mutableUpdate, cxnPatch] = this.mutableUpdate(to.update, to.patch);
     await this.constraint.apply(this.state, mutableUpdate);
-    if (!patch.isEmpty) {
+    if (!cxnPatch.isEmpty) {
       // Triples that were inserted in the applied transaction may have been
       // deleted by the constraint - these need to be removed from the applied
       // transaction patch but still published in the constraint delta
-      const deletedExistingTidQuads = await this.findTriplesTids(patch.oldQuads);
+      const deletedExistingTidQuads = await this.findTriplesTids(cxnPatch.oldQuads);
       const deletedTriplesTids = asTriplesTids(deletedExistingTidQuads);
-      to.patch.remove('newQuads', patch.oldQuads)
+      to.patch.remove('newQuads', cxnPatch.oldQuads)
         .forEach(delQuad => deletedTriplesTids.with(delQuad, () => []).push(to.tid));
       // Anything deleted by the constraint that did not exist before the
       // applied transaction can now be removed from the constraint patch
-      patch.remove('oldQuads', quad => deletedExistingTidQuads.get(quad) == null);
+      cxnPatch.remove('oldQuads', quad => deletedExistingTidQuads.get(quad) == null);
       return {
-        patch,
-        delta: await this.txnDelta(patch.newQuads, deletedTriplesTids),
-        tidPatch: await this.txnTidPatch(txnId(cxnTime), patch.newQuads, deletedExistingTidQuads)
+        patch: cxnPatch,
+        delta: await this.txnDelta(cxnPatch.newQuads, deletedTriplesTids),
+        tidPatch: await this.txnTidPatch(txnId(cxnTime), cxnPatch.newQuads, deletedExistingTidQuads)
       };
     }
     return null;
+  }
+
+  /**
+   * @param update the starting update (will not be mutated)
+   * @param patch the starting patch (will not be mutated)
+   */
+  private mutableUpdate(update: MeldUpdate, patch: DefinitePatch): [MutableMeldUpdate, PatchQuads] {
+    const deltaPatch = new PatchQuads();
+    const mutableUpdate: MutableMeldUpdate = {
+      ...update,
+      append: async update => {
+        deltaPatch.append(await this.write(update));
+        // FIXME: Inefficient, re-creates the whole update every time
+        const total = new PatchQuads(patch).append(deltaPatch);
+        Object.assign(mutableUpdate, await this.asDeleteInsert(total));
+      }
+    };
+    return [mutableUpdate, deltaPatch];
   }
 
   /**
@@ -344,7 +357,7 @@ export class SuSetDataset extends JrqlGraph {
    * @param tidPatch triple TID patch (inserts and deletes)
    */
   private transactionPatch(dataPatch: PatchQuads, tidPatch: PatchQuads): PatchQuads {
-    return new PatchQuads().append(dataPatch).append(tidPatch);
+    return new PatchQuads(dataPatch).append(tidPatch);
   }
 
   private async asUpdate(time: TreeClock, patch: PatchQuads): Promise<MeldUpdate> {

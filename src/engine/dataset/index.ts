@@ -26,15 +26,17 @@ export interface Patch {
 }
 
 /**
- * Specialised patch that allows concatenation.
  * Requires that the oldQuads are concrete Quads and not a MatchTerms.
  */
-export class PatchQuads implements Patch {
+export type DefinitePatch = { [key in keyof Patch]?: Iterable<Quad> };
+
+/**
+ * Specialised patch that allows concatenation.
+ */
+export class PatchQuads implements Patch, DefinitePatch {
   private readonly sets: { [key in keyof Patch]: QuadSet };
 
-  constructor(
-    oldQuads: Iterable<Quad> = [],
-    newQuads: Iterable<Quad> = []) {
+  constructor({ oldQuads = [], newQuads = [] }: DefinitePatch = {}) {
     this.sets = { oldQuads: new QuadSet(oldQuads), newQuads: new QuadSet(newQuads) };
     this.ensureMinimal();
   }
@@ -51,7 +53,7 @@ export class PatchQuads implements Patch {
     return this.sets.newQuads.size === 0 && this.sets.oldQuads.size === 0;
   }
 
-  append(patch: { [key in keyof Patch]?: Iterable<Quad> }) {
+  append(patch: DefinitePatch) {
     this.sets.oldQuads.addAll(patch.oldQuads);
     this.sets.newQuads.addAll(patch.newQuads);
     this.ensureMinimal();

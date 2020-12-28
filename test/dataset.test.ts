@@ -28,7 +28,7 @@ describe('Patch quads', () => {
   });
 
   test('Construct from quads', () => {
-    const patch = new PatchQuads([quads[0]], [quads[1]]);
+    const patch = new PatchQuads({ oldQuads: [quads[0]], newQuads: [quads[1]] });
     expect(patch.oldQuads.length).toBe(1);
     expect(patch.newQuads.length).toBe(1);
     expect(patch.oldQuads[0].equals(quads[0])).toBe(true);
@@ -37,7 +37,7 @@ describe('Patch quads', () => {
   });
 
   test('Constructor ensures minimal', () => {
-    const patch = new PatchQuads([quads[0]], [quads[0]]);
+    const patch = new PatchQuads({ oldQuads: [quads[0]], newQuads: [quads[0]] });
     expect(patch.oldQuads).toEqual([]);
     expect(patch.newQuads).toEqual([]);
     expect(patch.isEmpty).toBe(true);
@@ -73,7 +73,7 @@ describe('Patch quads', () => {
   });
 
   test('Remove mutates', () => {
-    const patch = new PatchQuads([quads[0]], [quads[1]]);
+    const patch = new PatchQuads({ oldQuads: [quads[0]], newQuads: [quads[1]] });
     const removals = patch.remove('oldQuads', [quads[0]]);
     expect(removals.length).toBe(1);
     expect(removals[0].equals(quads[0])).toBe(true);
@@ -83,7 +83,7 @@ describe('Patch quads', () => {
   });
 
   test('Remove by filter', () => {
-    const patch = new PatchQuads([quads[0]], [quads[1]]);
+    const patch = new PatchQuads({ oldQuads: [quads[0]], newQuads: [quads[1]] });
     const removals = patch.remove('oldQuads', quad => quad.equals(quads[0]));
     expect(removals.length).toBe(1);
     expect(removals[0].equals(quads[0])).toBe(true);

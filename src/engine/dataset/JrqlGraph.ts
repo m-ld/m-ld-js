@@ -165,7 +165,7 @@ export class JrqlGraph {
 
   async update(query: Update,
     context: Context = query['@context'] || this.defaultContext): Promise<PatchQuads> {
-    let patch = new PatchQuads([], []);
+    let patch = new PatchQuads();
     // If there is a @where clause, use variable substitutions per solution.
     if (query['@where'] != null) {
       const deleteTemplate = query['@delete'] != null ?
@@ -181,8 +181,10 @@ export class JrqlGraph {
           return template != null ? this.fillTemplate(template, solution)
             .filter(quad => !anyVarTerm(quad)) : [];
         }
-        patch.append(new PatchQuads(
-          matchingQuads(deleteTemplate), matchingQuads(insertTemplate)));
+        patch.append(new PatchQuads({
+          oldQuads: matchingQuads(deleteTemplate),
+          newQuads: matchingQuads(insertTemplate)
+        }));
       });
     } else {
       if (query['@delete'])
@@ -203,7 +205,7 @@ export class JrqlGraph {
     const quads = await this.jrql.quads(insert, { query: false, vars }, context);
     if (vars.size > 0)
       throw new Error('Cannot insert with variable content');
-    return new PatchQuads([], quads);
+    return new PatchQuads({ newQuads: quads });
   }
 
   /**
@@ -215,8 +217,10 @@ export class JrqlGraph {
     const vars = new Set<string>();
     const patterns = await this.jrql.quads(dels, { query: true, vars }, context);
     // If there are no variables in the delete, we don't need to find solutions
-    return new PatchQuads(vars.size > 0 ?
-      await this.matchQuads(patterns).pipe(toArray()).toPromise() : patterns, []);
+    return new PatchQuads({
+        oldQuads: vars.size > 0 ?
+          await this.matchQuads(patterns).pipe(toArray()).toPromise() : patterns, newQuads: []
+      });
   }
 
   private toPattern = (quad: Quad): Algebra.Pattern => {
