@@ -88,6 +88,17 @@ export function updateSubject<T>(subject: Resource<T>, update: DeleteInsert<Subj
 }
 
 /**
+ * Includes the given value in the Subject property, respecting **m-ld** data
+ * semantics by expanding the property to an array, if necessary.
+ * @param subject the subject to add the value to.
+ * @param property the property that relates the value to the subject.
+ * @param value the value to add.
+ */
+export function includeValue(subject: Subject, property: string, value: Value) {
+  addValue(subject, property, value, valueOptions(subject, property));
+}
+
+/**
  * Determines whether the given set of values contains the given value. This
  * method accounts for the identity semantics of {@link Reference}s and
  * {@link Subject}s.

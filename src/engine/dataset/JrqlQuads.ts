@@ -182,6 +182,7 @@ class PreProcessor {
 function addSlot(subject: Subject, index: string, item: any) {
   if (index !== '@context') {
     // Anonymous slot will have a variable or skolem @id added later
+    // FIXME: If item is an array, this loses ordering
     const slot = { [jrql.item]: item };
     const existing = subject[index] as Exclude<Subject['any'], Context>;
     if (isSet(existing))

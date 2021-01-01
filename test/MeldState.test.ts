@@ -338,7 +338,7 @@ describe('Meld State API', () => {
       }]);
     });
 
-    test.skip('prepends to a list', async () => {
+    test('prepends to a list', async () => {
       await api.write<Subject>({
         '@id': 'shopping', '@list': { 'data:,0': 'Milk' }
       });

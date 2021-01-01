@@ -1,12 +1,16 @@
 /**
- * LSEQ CRDT helper class, for generating list positions (indexes).
+ * LSEQ-like CRDT helper class, for generating list position identifiers.
  *
  * 🚧 Not strictly an LSEQ:
  * - the base grows by multiples of the radix (not of two)
- * - uses a skewed distribution, not an alternating boundary
+ * - uses a consistently skewed distribution, not an alternating boundary (and
+ *   therefore not as adaptable)
  *
  * @see LSEQ an Adaptive Structure for Sequences in Distributed Collaborative
  * Editing (https://hal.archives-ouvertes.fr/hal-00921633/document)
+ * @see Logoot: A Scalable Optimistic Replication Algorithm for Collaborative
+ * Editing on P2P Networks (https://hal.inria.fr/inria-00432368/document) §4.1.
+ * Logoot model _provides much of the basic structure and terminology used here._
  */
 export class LseqDef {
   /**
@@ -25,11 +29,11 @@ export class LseqDef {
   siteLength: number = 16;
 
   get min() {
-    return new LseqIndex([{ pos: 0, site: null }], this);
+    return new LseqPosId([{ pos: 0, site: null }], this);
   }
 
   get max() {
-    return new LseqIndex([{ pos: this.radix, site: null }], this);
+    return new LseqPosId([{ pos: this.radix, site: null }], this);
   }
 
   /**
@@ -37,9 +41,9 @@ export class LseqDef {
    * - id length must be a natural number from the sequence 1 + 2 + 3 + ...
    * - id characters must be valid for the given radix
    * - last id part must be >0
-   * @param id index identity
+   * @param id position identifier as string
    */
-  parse(id: string): LseqIndex {
+  parse(id: string): LseqPosId {
     const ids = [];
     assert(id, 'badId');
     for (let idStart = 0, len = 1; idStart < id.length; idStart += (len++ + this.siteLength)) {
@@ -51,7 +55,7 @@ export class LseqDef {
       ids.push({ pos, site });
     }
     assert(ids[ids.length - 1].pos > 0, 'badId');
-    return new LseqIndex(ids, this);
+    return new LseqPosId(ids, this);
   }
 
   compatible(that: LseqDef) {
@@ -60,13 +64,13 @@ export class LseqDef {
   }
 }
 
-class LseqIndex {
+class LseqPosId {
   constructor(
     readonly ids: { pos: number, site: string | null }[],
     readonly lseq: LseqDef) {
   }
 
-  equals(that: LseqIndex): boolean {
+  equals(that: LseqPosId): boolean {
     return this.ids.length === that.ids.length &&
       this.ids.every((id, level) => id === that.ids[level]);
   }
@@ -75,9 +79,10 @@ class LseqIndex {
    * `this` and `that` assumed to be adjacent in LSEQ.
    * @param that 
    */
-  between(that: LseqIndex, site: string): LseqIndex {
+  // TODO: Make this method able to return multiple positions, and allocate the
+  // range of positions optimally
+  between(that: LseqPosId, site: string): LseqPosId {
     assert(this.lseq.compatible(that.lseq), 'incompatibleLseq');
-    assert(site.length >= this.lseq.siteLength, 'badSite');
     for (let level = 0; level < this.ids.length || level < that.ids.length; level++) {
       if (this.pos(level) > that.pos(level)) {
         return that.between(this, site);
@@ -97,7 +102,8 @@ class LseqIndex {
         return this.cloneWith(level, this.pos(level), that.pos(level), site);
       }
     }
-    throw new Error(ERRORS.equalIndex);
+    // FIXME: could be equal position identifiers but different sites
+    throw new Error(ERRORS.equalPosId);
   }
 
   toString(): string {
@@ -105,10 +111,10 @@ class LseqIndex {
       str + id.pos.toString(this.lseq.radix).padStart(i + 1, '0') + id.site, '');
   }
 
-  private cloneWith(level: number, lbound: number, ubound: number, site: string): LseqIndex {
-    return new LseqIndex(this.ids.slice(0, level).concat({
+  private cloneWith(level: number, lbound: number, ubound: number, site: string): LseqPosId {
+    return new LseqPosId(this.ids.slice(0, level).concat({
       pos: this.newPos(lbound, ubound),
-      site: site.slice(0, this.lseq.siteLength)
+      site: site.slice(0, this.lseq.siteLength).padEnd(this.lseq.siteLength, '_')
     }), this.lseq);
   }
 
@@ -126,10 +132,9 @@ class LseqIndex {
 }
 
 const ERRORS = {
-  badId: 'Bad LSEQ index id',
+  badId: 'Bad LSEQ position identifier',
   incompatibleLseq: 'LSEQ definitions are not compatible',
-  equalIndex: 'No space between indexes',
-  badSite: 'Site has insufficient entropy'
+  equalPosId: 'No space between positions'
 };
 
 function assert(condition: any, err: keyof typeof ERRORS) {

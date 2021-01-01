@@ -29,6 +29,7 @@ export namespace meld {
   export const $id = 'http://m-ld.org';
   export const tid: NamedNode = namedNode(`${$id}/#tid`); // TID property
   export const rdflseq: NamedNode = namedNode(`${$id}/RdfLseq`);
+  export const rdflseqPosIdPre = `${rdflseq.value}/?=`;
 }
 
 export function reifyTriplesTids(triplesTids: TripleMap<UUID[]>): Triple[] {

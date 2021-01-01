@@ -84,7 +84,7 @@ export class SuSetDataset extends JrqlGraph {
     this.maxDeltaSize = config.maxDeltaSize ?? Infinity;
     this.log = getIdLogger(this.constructor, config['@id'], config.logLevel);
     this.state = new GraphState(this);
-    this.constraint = new CheckList(constraints.concat(new DefaultList()));
+    this.constraint = new CheckList(constraints.concat(new DefaultList(config['@id'])));
   }
 
   @SuSetDataset.checkNotClosed.async
