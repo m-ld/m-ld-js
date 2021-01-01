@@ -82,12 +82,42 @@ describe('LSEQ', () => {
       expect(posId.ids[1].pos).toBeLessThan(256);
     });
 
+    test('overflows if no headroom', () => {
+      const posId = lseq.parse('1xffx').between(lseq.parse('2x01x'), 'x');
+      expect(posId.ids.length).toBe(3);
+      expect(posId.ids[0].pos).toBe(1);
+      expect(posId.ids[1].pos).toBe(255);
+      expect(posId.ids[2].pos).toBeGreaterThan(0);
+      expect(posId.ids[2].pos).toBeLessThan(4096);
+    });
+
     test('prefers shorter between', () => {
       const posId = lseq.parse('1xffx001x').between(lseq.parse('2xffx'), 'x');
-      // Could correctly generate 1xffx002x-1xffxfffx or 2x01x-2xfex, prefers latter
+      // Could correctly generate 1xffx002x-1xffxfffx, prefers or 2x01x-2xfex
       expect(posId.ids.length).toBe(2);
       expect(posId.ids[0].pos).toBe(2);
       expect(posId.ids[1].pos).toBeGreaterThan(0);
+      expect(posId.ids[1].pos).toBeLessThan(255);
+    });
+
+    test('cannot position between same index if same site', () => {
+      expect(() => lseq.parse('1x').between(lseq.parse('1x'), 'x')).toThrowError();
+    });
+
+    test('can position between same index if different site', () => {
+      const posId = lseq.parse('1x').between(lseq.parse('1y'), 'x');
+      expect(posId.ids.length).toBe(2);
+      expect(posId.ids[0].pos).toBe(1);
+      expect(posId.ids[1].pos).toBeGreaterThan(0);
+      expect(posId.ids[1].pos).toBeLessThan(255);
+    });
+
+    test('correctly orders different sites', () => {
+      const posId = lseq.parse('1x01x').between(lseq.parse('1y'), 'x');
+      expect(posId.ids.length).toBe(2);
+      expect(posId.ids[0].pos).toBe(1);
+      expect(posId.ids[0].site).toBe('x');
+      expect(posId.ids[1].pos).toBeGreaterThan(1);
       expect(posId.ids[1].pos).toBeLessThan(255);
     });
   });
