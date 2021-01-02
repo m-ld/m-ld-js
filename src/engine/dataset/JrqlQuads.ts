@@ -98,13 +98,10 @@ export class JrqlQuads {
     const subject = (await compact(await rdfToJson(propertyQuads), context || {})) as Subject;
     if (listItemQuads.length) {
       const ctx = await activeCtx(context);
-      // Sort the list items by index and construct an rdf:List
-      const indexes = listItemQuads.map(iq => iq.predicate.value).sort((index1, index2) => {
-        // TODO: Use list implementation-specific ordering
-        const data1 = toIndexNumber(index1), data2 = toIndexNumber(index2);
-        return data1 != null && data2 != null ?
-          data1 - data2 : index1.localeCompare(index2);
-      }).map(index => compactIri(index, ctx));
+      // Sort the list items lexically by index and construct an rdf:List
+      // TODO: Use list implementation-specific ordering
+      const indexes = listItemQuads.map(iq => iq.predicate.value).sort()
+        .map(index => compactIri(index, ctx));
       // Create a subject containing only the list items
       const list = await this.toSubject(listItemQuads, [], context);
       subject['@list'] = indexes.map(index => <Value>list[index]);
@@ -169,8 +166,18 @@ class PreProcessor {
     if (typeof list['@list'] === 'object') {
       // This handles arrays as well as hashes
       // Normalise indexes to data URLs (throw if not convertible)
-      Object.entries(list['@list']).forEach(([index, item]) =>
-        addSlot(list, toIndexDataUrl(index), item));
+      Object.entries(list['@list']).forEach(([indexKey, item]) => {
+        const i = toIndexNumber(indexKey);
+        if (i == null)
+          throw new Error('Malformed list index');
+        if (!Array.isArray(i) && Array.isArray(item) && !Array.isArray(list['@list'])) {
+          // Inserting multiple sub-items at one index
+          item.forEach((subItem, subIndex) =>
+            addSlot(list, toIndexDataUrl([i, subIndex]), subItem));
+        } else {
+          addSlot(list, toIndexDataUrl(i), item);
+        }
+      });
     } else {
       // Singleton list item at position zero
       addSlot(list, toIndexDataUrl(0), list['@list']);
@@ -235,19 +242,28 @@ function isSelected(results: Result[] | Result, key: string) {
     (Array.isArray(results) ? results.includes(key) : results === key);
 }
 
-export function toIndexNumber(indexKey?: string | number): number | undefined {
-  if (indexKey != null && indexKey !== '') { // Exclude Number('') === 0
-    const n = Number(indexKey);
-    if (Number.isSafeInteger(n))
-      return n;
-    else if (typeof indexKey != 'number')
-      return toIndexNumber(dataUrlData(indexKey, 'text/plain', 'application/json'));
+export function toIndexNumber(indexKey: any): number | [number, number] | undefined {
+  const isNaturalNumber = (n: any) =>
+    typeof n == 'number' && Number.isSafeInteger(n) && n >= 0;
+  if (indexKey != null && indexKey !== '') {
+    if (isNaturalNumber(indexKey)) // ℕ
+      return indexKey;
+    switch (typeof indexKey) {
+      case 'string':
+        return toIndexNumber(indexKey.startsWith('data') ?
+          dataUrlData(indexKey, 'text/plain') : // 'data:,ℕ' or 'data:,ℕ,ℕ'
+          indexKey.includes(',') ?
+            indexKey.split(',').map(Number) : // 'ℕ,ℕ'
+            Number(indexKey)); // 'ℕ'
+      case 'object': // [ℕ,ℕ]
+        if (Array.isArray(indexKey) &&
+          indexKey.length == 2 &&
+          indexKey.every(isNaturalNumber))
+          return indexKey as [number, number];
+    }
   }
 }
 
-function toIndexDataUrl(index?: string | number): Url {
-  const indexData = toIndexNumber(index);
-  if (indexData == null)
-    throw new Error('Malformed list index');    
-  return `data:,${indexData.toFixed(0)}`;
+function toIndexDataUrl(index: number | [number, number]): Url {
+  return `data:,${array(index).map(i => i.toFixed(0)).join(',')}`;
 }

@@ -1,5 +1,5 @@
 import rdf = require('@rdfjs/data-model');
-import { JrqlQuads } from '../src/engine/dataset/JrqlQuads';
+import { JrqlQuads, toIndexNumber } from '../src/engine/dataset/JrqlQuads';
 import * as N3 from 'n3';
 import { genIdRegex } from './testUtil';
 
@@ -63,6 +63,30 @@ describe('json-rql Quads translation', () => {
   });
 
   describe('lists', () => {
+    test('converts key to index number', () => {
+      expect(toIndexNumber(undefined)).toBeUndefined();
+      expect(toIndexNumber(null)).toBeUndefined();
+      expect(toIndexNumber('a')).toBeUndefined();
+      expect(toIndexNumber([0])).toBeUndefined();
+      expect(toIndexNumber('[0]')).toBeUndefined();
+
+      // Allow numeric keys (Javascript object)
+      expect(toIndexNumber(0)).toBe(0);
+      expect(toIndexNumber(10)).toBe(10);
+
+      expect(toIndexNumber('0')).toBe(0);
+      expect(toIndexNumber('10')).toBe(10);
+
+      expect(toIndexNumber('0,0')).toEqual([0, 0]);
+      expect(toIndexNumber('0,10')).toEqual([0, 10]);
+
+      expect(toIndexNumber('data:,0')).toBe(0);
+      expect(toIndexNumber('data:,10')).toBe(10);
+
+      expect(toIndexNumber('data:,0,0')).toEqual([0, 0]);
+      expect(toIndexNumber('data:,0,10')).toEqual([0, 10]);
+    });
+
     test('quadifies a top-level singleton list', async () => {
       const store = new N3.Store();
       store.addQuads(await jrql.quads({
@@ -157,6 +181,35 @@ describe('json-rql Quads translation', () => {
         rdf.namedNode('http://json-rql.org/#item'),
         rdf.literal('Bread'), null)[0];
       expect(breadSlot).toBeDefined();
+    });
+
+    test('quadifies a top-level indexed hash list with multiple items', async () => {
+      const store = new N3.Store();
+      store.addQuads(await jrql.quads({
+        '@id': 'shopping',
+        '@list': { '1': ['Bread', 'Milk'] }
+      }, { query: true }, context));
+      expect(store.size).toBe(4);
+
+      const shoppingBread = store.getQuads(
+        rdf.namedNode('http://test.m-ld.org/shopping'),
+        rdf.namedNode('data:,1,0'), null, null)[0];
+      expect(shoppingBread.object.termType).toBe('Variable');
+
+      expect(store.getQuads(
+        shoppingBread.object,
+        rdf.namedNode('http://json-rql.org/#item'),
+        rdf.literal('Bread'), null)[0]).toBeDefined();
+
+      const shoppingMilk = store.getQuads(
+        rdf.namedNode('http://test.m-ld.org/shopping'),
+        rdf.namedNode('data:,1,1'), null, null)[0];
+      expect(shoppingBread.object.termType).toBe('Variable');
+
+      expect(store.getQuads(
+        shoppingMilk.object,
+        rdf.namedNode('http://json-rql.org/#item'),
+        rdf.literal('Milk'), null)[0]).toBeDefined();
     });
 
     test('quadifies a top-level data URL indexed hash list', async () => {

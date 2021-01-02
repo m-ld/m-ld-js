@@ -351,6 +351,20 @@ describe('Meld State API', () => {
         '@list': ['Bread', 'Milk']
       }]);
     });
+
+    test('prepends multiple items to a list', async () => {
+      await api.write<Subject>({
+        '@id': 'shopping', '@list': { 'data:,0': 'Milk' }
+      });
+      await api.write<Subject>({
+        '@id': 'shopping', '@list': { 'data:,0': ['Bread', 'Candles'] }
+      });
+      await expect(api.read<Describe>({ '@describe': 'shopping' })).resolves.toMatchObject([{
+        '@id': 'shopping',
+        '@type': 'http://m-ld.org/RdfLseq',
+        '@list': ['Bread', 'Candles', 'Milk']
+      }]);
+    });
   });
 
   describe('state procedures', () => {

@@ -103,7 +103,7 @@ export async function clone(
   if (typeof remotes == 'function')
     remotes = new remotes(config);
   
-  constraints = constraints ?? await Promise.all((config.constraints ?? [])
+  constraints ??= await Promise.all((config.constraints ?? [])
     .map(item => constraintFromConfig(item, context)));
 
   const engine = new DatasetEngine({ dataset, remotes, config, constraints });

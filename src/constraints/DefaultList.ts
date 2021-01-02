@@ -22,7 +22,7 @@ export class DefaultList implements MeldConstraint {
       .filter(jrql.isSlot).map(slot => ({ '@id': slot['@id'] }));
     if (!slotsInInsert.length)
       return;
-    
+
     // TODO: Handle slots being deleted
 
     const { lseq, site } = this;
@@ -33,14 +33,17 @@ export class DefaultList implements MeldConstraint {
           includesValue(subject, '@type', { '@id': meld.rdflseq.value }))) {
           return Object.keys(subject).reduce<ListRewriter | undefined>((rewriter, index) => {
             // Key is a data URL
-            const i = toIndexNumber(index);
+            const indexNumber = toIndexNumber(index);
             // Value has a reference to slots
-            const slotRefs = i != null ? slotsInInsert.filter(
-              slot => includesValue(subject, index, slot)) : [];
+            const slotRef = indexNumber != null ? slotsInInsert.find(
+              slot => includesValue(subject, index, slot)) : null;
 
-            if (i != null && slotRefs.length) {
-              rewriter = rewriter ?? new ListRewriter(listId);
-              rewriter.slotRefs[i] = { index, slotRefs };
+            if (indexNumber != null && slotRef != null) {
+              rewriter ??= new ListRewriter(listId);
+              if (Array.isArray(indexNumber))
+                rewriter.addSlotRef(...indexNumber, index, slotRef);
+              else
+                rewriter.addSlotRef(indexNumber, 0, index, slotRef);
             }
             return rewriter;
           }, undefined);
@@ -48,8 +51,12 @@ export class DefaultList implements MeldConstraint {
       }
 
       private constructor(readonly listId: Iri) { }
-      /** A sparse array of slots inserted at indexes */
-      private slotRefs: { index: Iri, slotRefs: Reference[] }[] = [];
+      /** A sparse array of slots inserted at indexes and sub-indexes */
+      private slotRefs: { index: Iri, ref: Reference }[][] = [];
+
+      private addSlotRef(i: number, ii: number, index: Iri, slotRef: Reference) {
+        (this.slotRefs[i] ??= [])[ii] = { index, ref: slotRef };
+      }
 
       async doRewrite() {
         if (await this.isDefaultList())
@@ -89,16 +96,15 @@ export class DefaultList implements MeldConstraint {
         let del: Subject = { '@id': this.listId }, ins: Subject = { '@id': this.listId };
         // Generate LSEQ position identifiers for the inserted indexes
         let posId = lseq.min; // Next must always be bigger than previous
-        this.slotRefs.forEach((slotsAtIndex, i) => { // forEach skips empty
+        this.slotRefs.forEach((slots, i) => { // forEach skips empty
           posId = (i - 1) in existing.posIds ? lseq.parse(existing.posIds[i - 1]) : posId;
           let upper = i in existing.posIds ? lseq.parse(existing.posIds[i]) : lseq.max;
-          // TODO: Multiple insert slot ordering
-          slotsAtIndex.slotRefs.forEach(slotRef => {
+          slots.forEach(slot => {
             posId = posId.between(upper, site);
             // Remove the data index
-            includeValue(del, slotsAtIndex.index, slotRef);
+            includeValue(del, slot.index, slot.ref);
             // Add the position identifier
-            includeValue(ins, meld.rdflseqPosIdPre + posId.toString(), slotRef);
+            includeValue(ins, meld.rdflseqPosIdPre + posId.toString(), slot.ref);
             // TODO: If a slot has moved, ensure it is removed from the old position
           });
         });
