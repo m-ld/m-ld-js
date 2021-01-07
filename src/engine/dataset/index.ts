@@ -38,7 +38,8 @@ export class PatchQuads implements Patch, DefinitePatch {
 
   constructor({ oldQuads = [], newQuads = [] }: DefinitePatch = {}) {
     this.sets = { oldQuads: new QuadSet(oldQuads), newQuads: new QuadSet(newQuads) };
-    this.ensureMinimal();
+    // del(a), ins(a) == ins(a)
+    this.sets.oldQuads.deleteAll(this.sets.newQuads);
   }
 
   get oldQuads() {
@@ -54,18 +55,18 @@ export class PatchQuads implements Patch, DefinitePatch {
   }
 
   append(patch: DefinitePatch) {
+    // ins(a), del(a) == del(a)
+    this.sets.newQuads.deleteAll(patch.oldQuads);
+
     this.sets.oldQuads.addAll(patch.oldQuads);
     this.sets.newQuads.addAll(patch.newQuads);
-    this.ensureMinimal();
+    // del(a), ins(a) == ins(a)
+    this.sets.oldQuads.deleteAll(this.sets.newQuads);
     return this;
   }
 
   remove(key: keyof Patch, quads: Iterable<Quad> | Filter<Quad>): Quad[] {
     return [...this.sets[key].deleteAll(quads)];
-  }
-
-  private ensureMinimal() {
-    this.sets.newQuads.deleteAll(this.sets.oldQuads.deleteAll(this.sets.newQuads));
   }
 }
 
@@ -208,8 +209,9 @@ export class QuadStoreDataset implements Dataset {
         await this.applyQuads(result.patch, { preWrite: result.kvps });
       else if (result.kvps != null)
         await this.applyKvps(result.kvps);
-      sw.stop();
+      sw.next('after');
       await result.after?.();
+      sw.stop();
       return <T>result.return;
     });
   }

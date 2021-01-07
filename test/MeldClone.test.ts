@@ -1,4 +1,4 @@
-import { asSubjectUpdates, Reference, Resource, updateSubject } from '../src';
+import { asSubjectUpdates, includesValue, includeValue, Reference, Resource, Subject, updateSubject } from '../src';
 
 describe('MeldClone utilities', () => {
   test('converts simple group update to subject updates', () => {
@@ -34,6 +34,37 @@ describe('MeldClone utilities', () => {
     label?: string;
     contents?: Reference[];
   }
+
+  test('include single value in subject', () => {
+    const box: Resource<Box> = { '@id': 'bar', size: 10 };
+    includeValue(box, 'label', 'My Box');
+    expect(box.label).toBe('My Box');
+  });
+
+  test('include multiple values in subject', () => {
+    const box: Resource<Box> = { '@id': 'bar', size: 10 };
+    includeValue(box, 'label', 'My Box');
+    includeValue(box, 'label', 'Your Box');
+    expect(box.label).toEqual(['My Box', 'Your Box']);
+  });
+
+  test('include set values in subject', () => {
+    // Using a plain Subject here because Box doesn't admit a label @set
+    const box: Subject = { '@id': 'bar', size: 10, label: { '@set': 'My Box' } };
+    includeValue(box, 'label', 'Your Box');
+    expect(box.label).toEqual({ '@set': ['My Box', 'Your Box'] });
+  });
+
+  test('includes value in subject', () => {
+    const box: Resource<Box> = { '@id': 'bar', size: 10, label: 'My Box' };
+    expect(includesValue(box, 'label', 'My Box')).toBe(true);
+  });
+
+  test('set includes value in subject', () => {
+    // Using a plain Subject here because Box doesn't admit a label @set
+    const box: Subject = { '@id': 'bar', size: 10, label: { '@set': 'My Box' } };
+    expect(includesValue(box, 'label', 'My Box')).toBe(true);
+  });
 
   test('does not update mismatching ids', () => {
     const box: Resource<Box> = { '@id': 'bar', size: 10, label: 'My box' };

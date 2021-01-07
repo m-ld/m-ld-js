@@ -12,7 +12,7 @@ import { canPosition, inPosition, TriplePos } from '../quads';
 import { activeCtx, expandTerm } from "../jsonld";
 import { Binding } from 'quadstore';
 import { Algebra, Factory as SparqlFactory } from 'sparqlalgebrajs';
-import { genVarName, jrql, JrqlQuads, matchVar } from './JrqlQuads';
+import { genVarName, jrql, JrqlQuads, matchSubVarName, matchVar } from './JrqlQuads';
 
 /**
  * A graph wrapper that provides low-level json-rql handling for queries. The
@@ -98,7 +98,7 @@ export class JrqlGraph {
             catchError(err => err instanceof TypeError ? EMPTY : throwError(err)),
             // TODO: Ordering annoyance: sometimes subjects interleave, so
             // cannot use toArrays(quad => quad.subject.value),
-            groupBy(binding => bound(binding, vars.subject)),
+            groupBy(binding => this.bound(binding, vars.subject)),
             mergeMap(subjectBindings => subjectBindings.pipe(toArray())),
             mergeMap(subjectBindings => this.toSubject(subjectBindings, vars, context)));
     } else {
@@ -120,11 +120,11 @@ export class JrqlGraph {
   private toSubject(bindings: Binding[], terms: SubjectTerms, context: Context): Promise<Subject> {
     // Partition the bindings into plain properties and list items
     return this.jrql.toSubject(...bindings.reduce<[Quad[], Quad[]]>((quads, binding) => {
-      const [propertyQuads, listItemQuads] = quads, item = bound(binding, terms.item);
+      const [propertyQuads, listItemQuads] = quads, item = this.bound(binding, terms.item);
       (item == null ? propertyQuads : listItemQuads).push(this.rdf.quad(
-        inPosition('subject', bound(binding, terms.subject)),
-        inPosition('predicate', bound(binding, terms.property)),
-        inPosition('object', bound(binding, item == null ? terms.value : item)),
+        inPosition('subject', this.bound(binding, terms.subject)),
+        inPosition('predicate', this.bound(binding, terms.property)),
+        inPosition('object', this.bound(binding, item == null ? terms.value : item)),
         this.graph.name))
       return quads;
     }, [[], []]), context);
@@ -201,11 +201,16 @@ export class JrqlGraph {
    */
   async insert(insert: Subject | Subject[],
     context: Context = this.defaultContext): Promise<PatchQuads> {
+    return new PatchQuads({ newQuads: await this.definiteQuads(insert, context) });
+  }
+
+  async definiteQuads(pattern: Subject | Subject[],
+    context: Context = this.defaultContext) {
     const vars = new Set<string>();
-    const quads = await this.jrql.quads(insert, { query: false, vars }, context);
+    const quads = await this.jrql.quads(pattern, { query: false, vars }, context);
     if (vars.size > 0)
-      throw new Error('Cannot insert with variable content');
-    return new PatchQuads({ newQuads: quads });
+      throw new Error('Pattern has variable content');
+    return quads;
   }
 
   /**
@@ -218,9 +223,9 @@ export class JrqlGraph {
     const patterns = await this.jrql.quads(dels, { query: true, vars }, context);
     // If there are no variables in the delete, we don't need to find solutions
     return new PatchQuads({
-        oldQuads: vars.size > 0 ?
-          await this.matchQuads(patterns).pipe(toArray()).toPromise() : patterns, newQuads: []
-      });
+      oldQuads: vars.size > 0 ?
+        await this.matchQuads(patterns).pipe(toArray()).toPromise() : patterns, newQuads: []
+    });
   }
 
   private toPattern = (quad: Quad): Algebra.Pattern => {
@@ -263,7 +268,7 @@ export class JrqlGraph {
   private fillTemplatePos<P extends TriplePos>(pos: P, term: Quad[P], binding: Binding): Quad[P] {
     switch (term.termType) {
       case 'Variable':
-        const value = bound(binding, term);
+        const value = this.bound(binding, term);
         if (value != null && canPosition(pos, value))
           return value;
     }
@@ -272,6 +277,27 @@ export class JrqlGraph {
 
   private async resolve(iri: Iri, context?: Context): Promise<NamedNode> {
     return this.rdf.namedNode(context ? expandTerm(iri, await activeCtx(context)) : iri);
+  }
+
+  private bound(binding: Binding, term: Term): Term | undefined {
+    switch (term.termType) {
+      case 'Variable':
+        const value = binding[`?${term.value}`];
+        if (value != null)
+          return value;
+
+        // If this variable is a sub-variable, see if the parent variable is bound
+        const [varName, subVarName] = matchSubVarName(term.value);
+        const genValue = subVarName != null ?
+          this.jrql.genSubValue(binding[`?${varName}`], subVarName) : null;
+        if (genValue != null)
+          // Cache the generated value in the binding
+          return binding[`?${term.value}`] = genValue;
+        break; // Not bound
+      
+      default:
+        return term;
+    }
   }
 
   private any() {
@@ -284,15 +310,6 @@ interface SubjectTerms {
   property: Term;
   value: Term;
   item: Term;
-}
-
-function bound(binding: Binding, term: Term): Term {
-  switch (term.termType) {
-    case 'Variable':
-      return binding[`?${term.value}`];
-    default:
-      return term;
-  }
 }
 
 function anyVarTerm(quad: Quad) {

@@ -24,14 +24,24 @@ export class LseqDef {
   skew: number = 3;
   /**
    * Length of site identifier. Longer strings are right-trimmed. Shorter
-   * strings will error (insufficient entropy).
+   * strings will be padded (but this should only occur in testing – if a site
+   * identifiers are frequently shorter than this length, are they unique
+   * enough? And if so, make the length shorter).
    */
   siteLength: number = 16;
 
+  /**
+   * Below-lower bound position identifier used for generating a new list head.
+   * Do not use this value in a list (its `toString` method will throw).
+   */
   get min() {
     return new LseqPosId([{ pos: 0, site: null }], this);
   }
 
+  /**
+   * Above-upper bound position identifier used for generating a new list tail.
+   * Do not use this value in a list (its `toString` method will throw).
+   */
   get max() {
     return new LseqPosId([{ pos: this.radix, site: null }], this);
   }
@@ -76,8 +86,9 @@ class LseqPosId {
   }
 
   /**
-   * `this` and `that` assumed to be adjacent in LSEQ.
-   * @param that 
+   * `this` and `that` must be adjacent in the list.
+   * @this is the lower bound for the new position
+   * @param that the upper bound for the new position
    */
   // TODO: Make this method able to return multiple positions, and allocate the
   // range of positions optimally

@@ -152,7 +152,9 @@ describe('Dataset engine', () => {
       remoteUpdates.next(new DeltaMessage(remoteTime.ticks, remoteTime.ticked(),
         [1, '{}', '{"@id":"http://test.m-ld.org/wilma","http://test.m-ld.org/#name":"Wilma"}']));
       // Note extra tick for constraint application in remote update
-      await expect(updates).resolves.toEqual([1, 3]);
+      const received = await updates;
+      expect(received.length).toBe(2);
+      expect(received[0] < received[1]).toBe(true);
     });
 
     // Edge cases from system testing: newClock exposes the current clock state

@@ -53,21 +53,50 @@ export type Variable = jrql.Variable;
 /**
  * @see https://json-rql.org/#value
  */
-export type Value = jrql.Value;
+export type Value = jrql.Atom | Subject | Reference;
 /**
  * Used to express an ordered or unordered container of data.
  * @see https://json-rql.org/interfaces/container.html
  */
-export type Container = jrql.Container;
+export type Container = List | Set;
+
+/**
+ * Used to express an ordered set of data. A List object is reified to a Subject
+ * (unlike in JSON-LD) and so it has an @id, which can be set by the user.
+ *
+ * Note that this reification is only possible when using the `@list` keyword,
+ * and not if the active context specifies `"@container": "@list"` for a
+ * property, in which case the list itself is anonymous.
+ * @see https://json-rql.org/interfaces/list.html
+ */
+export interface List extends Subject {
+  '@list': Value | Value[];
+}
+
+/** @internal */
+export function isList(value: Subject['any']): value is List {
+  return typeof (value) === 'object' && '@list' in value;
+}
+
+/**
+ * Used to express an unordered set of data and to ensure that values are always
+ * represented as arrays.
+ * @see https://json-rql.org/interfaces/set.html
+ */
+export interface Set {
+  '@set': Value | Value[];
+}
+
+/** @internal */
+export function isSet(value: Subject['any']): value is Set {
+  return typeof (value) === 'object' && '@set' in value;
+}
+
 // Utility functions
 /** @internal */
 export const isValueObject = jrql.isValueObject;
 /** @internal */
 export const isReference = jrql.isReference;
-/** @internal */
-export const isSet = jrql.isSet;
-/** @internal */
-export const isList = jrql.isList;
 
 /**
  * Result declaration of a {@link Select} query.

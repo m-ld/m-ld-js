@@ -1,12 +1,12 @@
 import {
   MeldUpdate, MeldConstraint, MeldReadState, Resource,
-  ReadResult, MutableMeldUpdate, readResult
+  ReadResult, InterimUpdate, readResult
 } from '../../api';
 import { Snapshot, UUID, DeltaMessage, MeldDelta } from '..';
 import { Quad } from 'rdf-js';
 import { TreeClock } from '../clocks';
 import { Subject } from '../../jrql-support';
-import { Dataset, DefinitePatch, PatchQuads } from '.';
+import { Dataset, DefinitePatch, Patch, PatchQuads } from '.';
 import { flatten as flatJsonLd } from 'jsonld';
 import { Iri } from 'jsonld/jsonld-spec';
 import { JrqlGraph } from './JrqlGraph';
@@ -51,6 +51,13 @@ export class GraphState implements MeldReadState {
   get<S = Subject>(id: string): Promise<Resource<S> | undefined> {
     return this.graph.describe1(id);
   }
+}
+
+interface InterimUpdatePatch extends InterimUpdate {
+  /** Assertions made by the constraint (not including the app patch) */
+  assertions: PatchQuads;
+  /** Entailments made by the constraint */
+  entailments: PatchQuads;
 }
 
 /**
@@ -192,9 +199,8 @@ export class SuSetDataset extends JrqlGraph {
           return { return: null };
 
         txc.sw.next('check-constraints');
-        const [update, cxnPatch] = this.mutableUpdate(await this.asUpdate(time, patch), patch);
+        const update = await this.interimUpdate(time, patch, 'mutable');
         await this.constraint.check(this.state, update);
-        patch.append(cxnPatch);
 
         txc.sw.next('find-tids');
         const deletedTriplesTids = await this.findTriplesTids(patch.oldQuads);
@@ -210,13 +216,24 @@ export class SuSetDataset extends JrqlGraph {
         const journaling = tail.builder(journal, { delta, localTime: time });
 
         return {
-          patch: this.transactionPatch(patch, tidPatch),
+          patch: this.transactionPatch(patch, update.entailments, tidPatch),
           kvps: journaling.commit,
           return: this.deltaMessage(tail, time, delta),
-          after: () => this.updateSource.next(update)
+          after: () => this.emitUpdate(update)
         };
       }
     });
+  }
+
+  private emitUpdate(update: InterimUpdatePatch) {
+    if (update['@delete'].length || update['@insert'].length) {
+      // De-clutter the update for sanity
+      this.updateSource.next({
+        '@delete': update['@delete'],
+        '@insert': update['@insert'],
+        '@ticks': update['@ticks']
+      });
+    }
   }
 
   private deltaMessage(tail: SuSetJournalEntry, time: TreeClock, delta: MeldDelta) {
@@ -256,9 +273,9 @@ export class SuSetDataset extends JrqlGraph {
 
         txc.sw.next('apply-cx'); // "cx" = constraint
         const tid = txnId(msg.time);
-        let update = patch.isEmpty ? null : await this.asUpdate(localTime, patch);
-        const cxn = update == null ? null :
-          await this.applyConstraint({ update, patch, tid }, cxnTime);
+        const update = await this.interimUpdate(cxnTime, patch);
+        await this.constraint.apply(this.state, update);
+        const cxn = await this.constraintTxn(update.assertions, patch, tid, cxnTime);
         // After applying the constraint, patch new quads might have changed
         tidPatch.append(await this.newTriplesTid(patch.newQuads, tid));
 
@@ -272,19 +289,18 @@ export class SuSetDataset extends JrqlGraph {
 
         // If the constraint has done anything, we need to merge its work
         if (cxn != null) {
+          // update['@ticks'] = cxnTime.ticks;
           tidPatch.append(cxn.tidPatch);
-          patch.append(cxn.patch);
-          // Re-create the update with the constraint resolution included
-          update = patch.isEmpty ? null : await this.asUpdate(cxnTime, patch)
+          patch.append(update.assertions);
           // Also create a journal entry for the constraint "transaction"
           journaling.next({ delta: cxn.delta, localTime: cxnTime });
         }
         return {
-          patch: this.transactionPatch(patch, tidPatch),
+          patch: this.transactionPatch(patch, update.entailments, tidPatch),
           kvps: journaling.commit,
           // FIXME: If this delta message exceeds max size, what to do?
-          return: cxn != null ? this.deltaMessage(tail, cxnTime, cxn.delta) : null,
-          after: () => update && this.updateSource.next(update)
+          return: cxn?.delta != null ? this.deltaMessage(tail, cxnTime, cxn.delta) : null,
+          after: () => this.emitUpdate(update)
         };
       }
     });
@@ -310,71 +326,78 @@ export class SuSetDataset extends JrqlGraph {
    * @param to transaction details to apply the patch to
    * @param localTime local clock time
    */
-  private async applyConstraint(
-    to: { update: MeldUpdate, patch: PatchQuads, tid: string },
-    cxnTime: TreeClock) {
-    const [mutableUpdate, cxnPatch] = this.mutableUpdate(to.update, to.patch);
-    await this.constraint.apply(this.state, mutableUpdate);
-    if (!cxnPatch.isEmpty) {
+  private async constraintTxn(
+    assertions: PatchQuads, patch: PatchQuads, tid: string, cxnTime: TreeClock) {
+    if (!assertions.isEmpty) {
       // Triples that were inserted in the applied transaction may have been
       // deleted by the constraint - these need to be removed from the applied
       // transaction patch but still published in the constraint delta
-      const deletedExistingTidQuads = await this.findTriplesTids(cxnPatch.oldQuads);
+      const deletedExistingTidQuads = await this.findTriplesTids(assertions.oldQuads);
       const deletedTriplesTids = asTriplesTids(deletedExistingTidQuads);
-      to.patch.remove('newQuads', cxnPatch.oldQuads)
-        .forEach(delQuad => deletedTriplesTids.with(delQuad, () => []).push(to.tid));
+      patch.remove('newQuads', assertions.oldQuads)
+        .forEach(delQuad => deletedTriplesTids.with(delQuad, () => []).push(tid));
       // Anything deleted by the constraint that did not exist before the
       // applied transaction can now be removed from the constraint patch
-      cxnPatch.remove('oldQuads', quad => deletedExistingTidQuads.get(quad) == null);
+      assertions.remove('oldQuads', quad => deletedExistingTidQuads.get(quad) == null);
       return {
-        patch: cxnPatch,
-        delta: await this.txnDelta(cxnPatch.newQuads, deletedTriplesTids),
-        tidPatch: await this.txnTidPatch(txnId(cxnTime), cxnPatch.newQuads, deletedExistingTidQuads)
+        delta: await this.txnDelta(assertions.newQuads, deletedTriplesTids),
+        tidPatch: await this.txnTidPatch(
+          txnId(cxnTime), assertions.newQuads, deletedExistingTidQuads)
       };
     }
-    return null;
   }
 
   /**
-   * @param update the starting update (will not be mutated)
-   * @param patch the starting patch (will not be mutated)
+   * @param patch the starting app patch (will not be mutated unless 'mutable')
    */
-  private mutableUpdate(update: MeldUpdate, patch: DefinitePatch): [MutableMeldUpdate, PatchQuads] {
-    const deltaPatch = new PatchQuads();
-    const mutableUpdate: MutableMeldUpdate = {
-      ...update,
-      append: async update => {
-        deltaPatch.append(await this.write(update));
-        // FIXME: Inefficient, re-creates the whole update every time
-        const total = new PatchQuads(patch).append(deltaPatch);
-        Object.assign(mutableUpdate, await this.asDeleteInsert(total));
+  private async interimUpdate(time: TreeClock, patch: PatchQuads,
+    mutable?: 'mutable'): Promise<InterimUpdatePatch> {
+    // If mutable, we treat the app patch as assertions
+    const assertions = mutable ? patch : new PatchQuads(),
+      entailments = new PatchQuads();
+    const updateUpdate = async () => {
+      const newPatch = mutable ? assertions : new PatchQuads(patch).append(assertions);
+      // FIXME: Inefficient, re-creates the whole update every time
+      Object.assign(interimUpdate, await this.asDeleteInsert(newPatch));
+    }
+    const interimUpdate: InterimUpdatePatch = {
+      '@ticks': time.ticks,
+      ...await this.asDeleteInsert(patch),
+      assertions, entailments,
+      assert: async update => {
+        assertions.append(await this.write(update));
+        return updateUpdate();
+      },
+      entail: async update => {
+        entailments.append(await this.write(update));
+      },
+      remove: async (key, pattern) => {
+        const toRemove = await this.definiteQuads(pattern);
+        const patchKey: keyof Patch = key == '@delete' ? 'oldQuads' : 'newQuads';
+        if (assertions.remove(patchKey, toRemove).length)
+          await updateUpdate();
+        entailments.remove(patchKey, toRemove);
       }
     };
-    return [mutableUpdate, deltaPatch];
+    return interimUpdate;
   }
 
   /**
    * Rolls up the given transaction details into a single patch. This method is
    * just a type convenience for ensuring everything needed for a transaction is
    * present.
-   * @param dataPatch the transaction data patch
+   * @param assertions the transaction data patch
    * @param tidPatch triple TID patch (inserts and deletes)
    */
-  private transactionPatch(dataPatch: PatchQuads, tidPatch: PatchQuads): PatchQuads {
-    return new PatchQuads(dataPatch).append(tidPatch);
+  private transactionPatch(
+    assertions: DefinitePatch, entailments: DefinitePatch, tidPatch: DefinitePatch): PatchQuads {
+    return new PatchQuads(assertions).append(entailments).append(tidPatch);
   }
 
-  private async asUpdate(time: TreeClock, patch: PatchQuads): Promise<MeldUpdate> {
+  private async asDeleteInsert(patch: DefinitePatch) {
     return {
-      '@ticks': time.ticks,
-      ...await this.asDeleteInsert(patch)
-    };
-  }
-
-  private async asDeleteInsert(patch: PatchQuads) {
-    return {
-      '@delete': await this.toSubjects(patch.oldQuads),
-      '@insert': await this.toSubjects(patch.newQuads)
+      '@delete': await this.toSubjects(patch.oldQuads ?? []),
+      '@insert': await this.toSubjects(patch.newQuads ?? [])
     };
   }
 
@@ -382,7 +405,7 @@ export class SuSetDataset extends JrqlGraph {
    * @returns flattened subjects compacted with no context
    * @see https://www.w3.org/TR/json-ld11/#flattened-document-form
    */
-  private async toSubjects(quads: Quad[]): Promise<Subject[]> {
+  private async toSubjects(quads: Iterable<Quad>): Promise<Subject[]> {
     // The flatten function is guaranteed to create a graph object
     const graph: any = await flatJsonLd(await rdfToJson(quads), {});
     return graph['@graph'];

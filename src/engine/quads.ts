@@ -93,7 +93,9 @@ export function cloneTerm<T extends Term>(term: T): T {
   }
 }
 
-export function canPosition<P extends TriplePos>(pos: P, value: Term): value is Quad[P] {
+export function canPosition<P extends TriplePos>(pos: P, value?: Term): value is Quad[P] {
+  if (!value)
+    return false;
   // Subjects and Predicate don't allow literals
   if ((pos == 'subject' || pos == 'predicate') && value.termType == 'Literal')
     return false;
@@ -103,7 +105,7 @@ export function canPosition<P extends TriplePos>(pos: P, value: Term): value is 
   return true;
 }
 
-export function inPosition<P extends TriplePos>(pos: P, value: Term): Quad[P] {
+export function inPosition<P extends TriplePos>(pos: P, value?: Term): Quad[P] {
   if (canPosition(pos, value))
     return value;
   else

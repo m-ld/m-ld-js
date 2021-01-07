@@ -386,9 +386,9 @@ describe('SU-Set Dataset', () => {
 
     test('provides a mutable update to the constraint', async () => {
       constraint.check = async (_, update) => {
-        await update.append({ '@insert': wilma });
+        await update.assert({ '@insert': wilma });
         expect(update['@insert']).toMatchObject(expect.arrayContaining([wilma]));
-        await update.append({ '@insert': barney });
+        await update.assert({ '@insert': barney });
         expect(update['@insert']).toMatchObject(expect.arrayContaining([wilma, barney]));
       };
       await expect(ssd.transact(async () => [
@@ -400,7 +400,7 @@ describe('SU-Set Dataset', () => {
     });
 
     test('applies an inserting constraint', async () => {
-      constraint.apply = async (_, update) => update.append({ '@insert': wilma });
+      constraint.apply = async (_, update) => update.assert({ '@insert': wilma });
       const willUpdate = captureUpdate();
       const msg = await ssd.apply(new DeltaMessage(
         remoteTime.ticks,
@@ -434,7 +434,7 @@ describe('SU-Set Dataset', () => {
     });
 
     test('applies a deleting constraint', async () => {
-      constraint.apply = async (_, update) => update.append({ '@delete': wilma });
+      constraint.apply = async (_, update) => update.assert({ '@delete': wilma });
 
       await ssd.transact(async () => [
         localTime = localTime.ticked(),
@@ -457,7 +457,7 @@ describe('SU-Set Dataset', () => {
 
     test('applies a self-deleting constraint', async () => {
       // Constraint is going to delete the data we're inserting
-      constraint.apply = async (_, update) => update.append({ '@delete': wilma });
+      constraint.apply = async (_, update) => update.assert({ '@delete': wilma });
 
       const willUpdate = captureUpdate();
       await ssd.apply(new DeltaMessage(
@@ -470,14 +470,14 @@ describe('SU-Set Dataset', () => {
       await expect(ssd.find1({ '@id': 'http://test.m-ld.org/wilma' }))
         .resolves.toBeFalsy();
 
-      // The inserted data was deleted so no update happens
-      await expect(Promise.race([willUpdate, Promise.resolve()]))
-        .resolves.toBeUndefined();
+      // The inserted data was deleted, but Wilma may have existed before
+      await expect(willUpdate).resolves.toEqual(
+        { '@insert': [], '@delete': [wilma], '@ticks': localTime.ticks });
     });
 
     test('applies a self-inserting constraint', async () => {
       // Constraint is going to insert the data we're deleting
-      constraint.apply = async (_, update) => update.append({ '@insert': wilma });
+      constraint.apply = async (_, update) => update.assert({ '@insert': wilma });
 
       const tid = (await ssd.transact(async () => [
         localTime = localTime.ticked(),
@@ -496,9 +496,9 @@ describe('SU-Set Dataset', () => {
       await expect(ssd.find1({ '@id': 'http://test.m-ld.org/wilma' }))
         .resolves.toBeTruthy();
 
-      // The deleted data was re-inserted so no update happens
-      await expect(Promise.race([willUpdate, Promise.resolve()]))
-        .resolves.toBeUndefined();
+      // The deleted data was re-inserted, but Wilma may not have existed before
+      await expect(willUpdate).resolves.toEqual(
+        { '@insert': [wilma], '@delete': [], '@ticks': localTime.ticks });
     });
   });
 

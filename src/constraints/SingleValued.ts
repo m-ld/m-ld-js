@@ -1,4 +1,4 @@
-import { MeldConstraint, MeldUpdate, MeldReadState, asSubjectUpdates, updateSubject, MutableMeldUpdate } from '..';
+import { MeldConstraint, MeldUpdate, MeldReadState, asSubjectUpdates, updateSubject, InterimUpdate } from '..';
 import { Iri } from 'jsonld/jsonld-spec';
 import { map, filter, take, mergeMap, defaultIfEmpty, concatMap } from 'rxjs/operators';
 import { Subject, Select, Value, isValueObject } from '../jrql-support';
@@ -46,13 +46,13 @@ export class SingleValued implements MeldConstraint {
     return failed != null ? Promise.reject(this.failure(failed)) : Promise.resolve();
   }
 
-  apply(state: MeldReadState, update: MutableMeldUpdate): Promise<unknown> {
+  apply(state: MeldReadState, update: InterimUpdate): Promise<unknown> {
     return this.affected(state, update).pipe(
       concatMap(async subject => {
         const values = subject[this.property];
         if (isMultiValued(values)) {
           const resolvedValue = await this.resolve(values);
-          await update.append({
+          await update.assert({
             '@delete': {
               '@id': subject['@id'],
               [this.property]: values.filter(v => v !== resolvedValue)

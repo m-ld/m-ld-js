@@ -1,4 +1,4 @@
-import { MeldReadState, MutableMeldUpdate } from '../src/api';
+import { MeldReadState, InterimUpdate } from '../src/api';
 import { memStore } from './testClones';
 import { SingleValued } from '../src/constraints/SingleValued';
 import { JrqlGraph } from '../src/engine/dataset/JrqlGraph';
@@ -71,24 +71,24 @@ describe('Single-valued constraint', () => {
 
   test('does not apply to a single-valued property update', async () => {
     const constraint = new SingleValued('http://test.m-ld.org/#name');
-    const update = mock<MutableMeldUpdate>({
+    const update = mock<InterimUpdate>({
       '@ticks': 0,
       '@delete': [],
       '@insert': [{ '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Fred' }]
     });
     await constraint.apply(state, update);
-    expect(update.append.mock.calls).toEqual([]);
+    expect(update.assert.mock.calls).toEqual([]);
   });
 
   test('applies to a multi-valued property update', async () => {
     const constraint = new SingleValued('http://test.m-ld.org/#name');
-    const update = mock<MutableMeldUpdate>({
+    const update = mock<InterimUpdate>({
       '@ticks': 0,
       '@delete': [],
       '@insert': [{ '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': ['Fred', 'Flintstone'] }]
     });
     await constraint.apply(state, update);
-    expect(update.append.calledWith({
+    expect(update.assert.calledWith({
       '@delete': [{ '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': ['Flintstone'] }],
       '@insert': []
     }));
@@ -103,13 +103,13 @@ describe('Single-valued constraint', () => {
       })
     });
     const constraint = new SingleValued('http://test.m-ld.org/#name');
-    const update = mock<MutableMeldUpdate>({
+    const update = mock<InterimUpdate>({
       '@ticks': 0,
       '@delete': [],
       '@insert': [{ '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Flintstone' }]
     });
     await constraint.apply(state, update);
-    expect(update.append.calledWith({
+    expect(update.assert.calledWith({
       '@delete': [{ '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': ['Flintstone'] }],
       '@insert': []
     }));
@@ -126,7 +126,7 @@ describe('Single-valued constraint', () => {
       })
     });
     const constraint = new SingleValued('http://test.m-ld.org/#name');
-    const update = mock<MutableMeldUpdate>({
+    const update = mock<InterimUpdate>({
       '@ticks': 0,
       '@delete': [],
       '@insert': [{ '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Flintstone' }]

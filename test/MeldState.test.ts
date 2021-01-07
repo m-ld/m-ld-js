@@ -315,7 +315,7 @@ describe('Meld State API', () => {
 
     test('inserts an identified with index notation', async () => {
       await api.write<Subject>({
-        '@id': 'shopping', '@list': { 'data:,0': 'Bread', 'data:,1': 'Milk' }
+        '@id': 'shopping', '@list': { 0: 'Bread', 1: 'Milk' }
       });
       await expect(api.read<Describe>({ '@describe': 'shopping' })).resolves.toMatchObject([{
         '@id': 'shopping',
@@ -326,10 +326,10 @@ describe('Meld State API', () => {
 
     test('appends to a list', async () => {
       await api.write<Subject>({
-        '@id': 'shopping', '@list': { 'data:,0': 'Bread' }
+        '@id': 'shopping', '@list': { 0: 'Bread' }
       });
       await api.write<Subject>({
-        '@id': 'shopping', '@list': { 'data:,1': 'Milk' }
+        '@id': 'shopping', '@list': { 1: 'Milk' }
       });
       await expect(api.read<Describe>({ '@describe': 'shopping' })).resolves.toMatchObject([{
         '@id': 'shopping',
@@ -340,10 +340,10 @@ describe('Meld State API', () => {
 
     test('prepends to a list', async () => {
       await api.write<Subject>({
-        '@id': 'shopping', '@list': { 'data:,0': 'Milk' }
+        '@id': 'shopping', '@list': { 0: 'Milk' }
       });
       await api.write<Subject>({
-        '@id': 'shopping', '@list': { 'data:,0': 'Bread' }
+        '@id': 'shopping', '@list': { 0: 'Bread' }
       });
       await expect(api.read<Describe>({ '@describe': 'shopping' })).resolves.toMatchObject([{
         '@id': 'shopping',
@@ -354,15 +354,33 @@ describe('Meld State API', () => {
 
     test('prepends multiple items to a list', async () => {
       await api.write<Subject>({
-        '@id': 'shopping', '@list': { 'data:,0': 'Milk' }
+        '@id': 'shopping', '@list': { 0: 'Milk' }
       });
       await api.write<Subject>({
-        '@id': 'shopping', '@list': { 'data:,0': ['Bread', 'Candles'] }
+        '@id': 'shopping', '@list': { 0: ['Bread', 'Candles'] }
       });
       await expect(api.read<Describe>({ '@describe': 'shopping' })).resolves.toMatchObject([{
         '@id': 'shopping',
         '@type': 'http://m-ld.org/RdfLseq',
         '@list': ['Bread', 'Candles', 'Milk']
+      }]);
+    });
+
+    test('finds by index in a list', async () => {
+      await api.write<Group>({
+        '@graph': [
+          { '@id': 'shopping1', '@list': ['Bread', 'Milk'] },
+          { '@id': 'shopping2', '@list': ['Milk', 'Spam'] }
+        ]
+      });
+      await expect(api.read<Select>({
+        '@select': '?list',
+        '@where': {
+          '@id': '?list',
+          '@list': { 1: 'Milk' }
+        }
+      })).resolves.toMatchObject([{
+        '?list': { '@id': 'shopping1' }
       }]);
     });
   });

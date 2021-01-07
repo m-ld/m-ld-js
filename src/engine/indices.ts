@@ -88,7 +88,7 @@ export abstract class IndexSet<T> extends Index<T, T> {
     return this;
   }
 
-  deleteAll(ts: Iterable<T> | Filter<T>): IndexSet<T> {
+  deleteAll(ts: Iterable<T> | Filter<T> | undefined): IndexSet<T> {
     const removed = this.construct();
     let filter: Filter<T>;
     if (typeof ts == 'function') {

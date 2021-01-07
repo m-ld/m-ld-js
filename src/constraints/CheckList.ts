@@ -1,4 +1,4 @@
-import { MeldConstraint, MeldReadState, MutableMeldUpdate } from '..';
+import { MeldConstraint, MeldReadState, InterimUpdate } from '..';
 
 /** @internal */
 export class CheckList implements MeldConstraint {
@@ -6,12 +6,12 @@ export class CheckList implements MeldConstraint {
     readonly list: MeldConstraint[]) {
   }
 
-  check(state: MeldReadState, update: MutableMeldUpdate) {
+  check(state: MeldReadState, update: InterimUpdate) {
     return Promise.all(this.list.map(
       constraint => constraint.check(state, update)));
   }
 
-  async apply(state: MeldReadState, update: MutableMeldUpdate) {
+  async apply(state: MeldReadState, update: InterimUpdate) {
     for (let constraint of this.list)
       await constraint.apply(state, update);
   }

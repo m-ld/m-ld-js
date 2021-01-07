@@ -27,9 +27,21 @@ export class DomainContext implements Context {
 
 export namespace meld {
   export const $id = 'http://m-ld.org';
+  /** For serialisation of transaction IDs in delta messages */
   export const tid: NamedNode = namedNode(`${$id}/#tid`); // TID property
+
   export const rdflseq: NamedNode = namedNode(`${$id}/RdfLseq`);
-  export const rdflseqPosIdPre = `${rdflseq.value}/?=`;
+
+  const rdflseqPosIdPre = `${rdflseq.value}/?=`;
+
+  export function matchRdflseqPosId(predicate: Iri): string | undefined {
+    if (predicate.startsWith(rdflseqPosIdPre))
+      return predicate.slice(rdflseqPosIdPre.length);
+  }
+
+  export function rdflseqPosId(lseqPosId: string): Iri {
+    return rdflseqPosIdPre + lseqPosId;
+  }
 }
 
 export function reifyTriplesTids(triplesTids: TripleMap<UUID[]>): Triple[] {
