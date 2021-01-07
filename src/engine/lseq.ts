@@ -163,3 +163,62 @@ function assert(condition: any, err: keyof typeof ERRORS) {
   if (!condition)
     throw new Error(ERRORS[err]);
 }
+
+/**
+ * Utility to rewrite cached numeric indexes and positions of an LSEQ, based on
+ * inserts and deletions requested at given indexes.
+ */
+export class LseqIndexRewriter<T> {
+  /**
+   * _Sparse_ array of insertion requests. The second dimension is to capture
+   * multiple inserts at a position.
+   */
+  private inserts: T[][] = [];
+  private minInsertIndex = Infinity;
+
+  constructor(
+    readonly lseq: LseqDef,
+    readonly site: string) {
+  }
+
+  /**
+   * @param item opaque data to insert in the list
+   * @param i the index to insert at
+   * @param ii index in the collection of items to insert at `i`
+   */
+  addInsert(item: T, i: number, ii: number = 0) {
+    if (i < this.minInsertIndex)
+      this.minInsertIndex = i;
+    (this.inserts[i] ??= [])[ii] = item;
+  }
+
+  rewriteIndexes(existingPosIds: string[],
+    setPos: (item: T, posId: string, index: number) => void,
+    setIndex: (posId: string, index: number) => void) {
+    // Starting from the minimum inserted index, generate LSEQ position
+    // identifiers for the inserted indexes and rewrite existing indexes
+    let oldIndex = this.minInsertIndex, newIndex = oldIndex,
+      posId = (oldIndex - 1) in existingPosIds ? this.lseq.parse(existingPosIds[oldIndex - 1]) : this.lseq.min;
+    while (oldIndex < this.inserts.length ||
+      (oldIndex < existingPosIds.length && oldIndex !== newIndex)) {
+      // Insert items here if requested
+      if (this.inserts[oldIndex] != null) {
+        const upper = oldIndex in existingPosIds ?
+          this.lseq.parse(existingPosIds[oldIndex]) : this.lseq.max;
+        for (let insert of this.inserts[oldIndex]) {
+          posId = posId.between(upper, this.site);
+          setPos(insert, posId.toString(), newIndex);
+          newIndex++;
+        }
+      }
+      if (oldIndex in existingPosIds) {
+        if (newIndex !== oldIndex)
+          setIndex(existingPosIds[oldIndex], newIndex);
+        // Next loop iteration must jump over the old item
+        posId = this.lseq.parse(existingPosIds[oldIndex]);
+        newIndex++;
+      }
+      oldIndex++;
+    }
+  }
+}

@@ -1,4 +1,5 @@
-import { LseqDef } from '../src/engine/lseq';
+import { mockFn } from 'jest-mock-extended';
+import { LseqDef, LseqIndexRewriter } from '../src/engine/lseq';
 
 describe('LSEQ', () => {
   const lseq = new LseqDef();
@@ -97,7 +98,7 @@ describe('LSEQ', () => {
       expect(posId.ids.length).toBe(2);
       expect(posId.ids[0].pos).toBe(2);
       expect(posId.ids[1].pos).toBeGreaterThan(0);
-      expect(posId.ids[1].pos).toBeLessThan(255);
+      expect(posId.ids[1].pos).toBeLessThan(256);
     });
 
     test('cannot position between same index if same site', () => {
@@ -109,7 +110,7 @@ describe('LSEQ', () => {
       expect(posId.ids.length).toBe(2);
       expect(posId.ids[0].pos).toBe(1);
       expect(posId.ids[1].pos).toBeGreaterThan(0);
-      expect(posId.ids[1].pos).toBeLessThan(255);
+      expect(posId.ids[1].pos).toBeLessThan(256);
     });
 
     test('correctly orders different sites', () => {
@@ -118,7 +119,7 @@ describe('LSEQ', () => {
       expect(posId.ids[0].pos).toBe(1);
       expect(posId.ids[0].site).toBe('x');
       expect(posId.ids[1].pos).toBeGreaterThan(1);
-      expect(posId.ids[1].pos).toBeLessThan(255);
+      expect(posId.ids[1].pos).toBeLessThan(256);
     });
   });
 
@@ -209,6 +210,79 @@ describe('LSEQ', () => {
       x.apply(y.delete(1));
       expect(x.values.filter(v => v < 'm')).toEqual(['a', 'b', 'c']);
       expect(x.values.filter(v => v > 'm')).toEqual(['n', 'p']);
+    });
+  });
+
+  describe('Index rewriter', () => {
+    test('does nothing with no requests on empty list', () => {
+      const rw = new LseqIndexRewriter(lseq, 'x');
+      const setPos = mockFn(), setIndex = mockFn();
+      rw.rewriteIndexes([], setPos, setIndex);
+      expect(setPos.mock.calls.length).toBe(0);
+      expect(setIndex.mock.calls.length).toBe(0);
+    });
+
+    test('does nothing with no requests on a singleton list', () => {
+      const rw = new LseqIndexRewriter(lseq, 'x');
+      const setPos = mockFn(), setIndex = mockFn();
+      rw.rewriteIndexes([lseq.min.between(lseq.max, 'x').toString()], setPos, setIndex);
+      expect(setPos.mock.calls.length).toBe(0);
+      expect(setIndex.mock.calls.length).toBe(0);
+    });
+
+    test('inserts head on empty list', () => {
+      const rw = new LseqIndexRewriter<string>(lseq, 'x');
+      rw.addInsert('a', 0);
+      const setPos = mockFn(), setIndex = mockFn();
+      rw.rewriteIndexes([], setPos, setIndex);
+      expect(setPos.mock.calls.length).toBe(1);
+      expect(setPos.mock.calls[0][0]).toBe('a');
+      const head = lseq.parse(setPos.mock.calls[0][1]);
+      expect(head.ids.length).toBe(1);
+      expect(head.ids[0].pos).toBeGreaterThan(0);
+      expect(head.ids[0].pos).toBeLessThan(16);
+      expect(head.ids[0].site).toBe('x');
+      expect(setPos.mock.calls[0][2]).toBe(0);
+      expect(setIndex.mock.calls.length).toBe(0);
+    });
+
+    test('inserts tail on singleton list', () => {
+      const rw = new LseqIndexRewriter<string>(lseq, 'x');
+      const head = lseq.min.between(lseq.max, 'x').toString();
+      rw.addInsert('b', 1);
+      const setPos = mockFn(), setIndex = mockFn();
+      rw.rewriteIndexes([head], setPos, setIndex);
+      expect(setPos.mock.calls.length).toBe(1);
+      expect(setPos.mock.calls[0][0]).toBe('b');
+      expect(setPos.mock.calls[0][1] > head).toBe(true);
+      expect(setPos.mock.calls[0][2]).toBe(1);
+      expect(setIndex.mock.calls.length).toBe(0);
+    });
+
+    test('inserts two heads on singleton list', () => {
+      const rw = new LseqIndexRewriter<string>(lseq, 'x');
+      const head = lseq.min.between(lseq.max, 'x').toString();
+      rw.addInsert('a', 0, 0);
+      rw.addInsert('b', 0, 1);
+      const setPos = mockFn(), setIndex = mockFn();
+      rw.rewriteIndexes([head], setPos, setIndex);
+      
+      expect(setPos.mock.calls.length).toBe(2);
+      
+      expect(setPos.mock.calls[0][0]).toBe('a');
+      const aPos = setPos.mock.calls[0][1];
+      expect(aPos < head).toBe(true);
+      expect(setPos.mock.calls[0][2]).toBe(0);
+      
+      expect(setPos.mock.calls[1][0]).toBe('b');
+      const bPos = setPos.mock.calls[1][1];
+      expect(bPos > aPos).toBe(true);
+      expect(bPos < head).toBe(true);
+      expect(setPos.mock.calls[1][2]).toBe(1);
+
+      expect(setIndex.mock.calls.length).toBe(1);
+      expect(setIndex.mock.calls[0][0] > bPos).toBe(true);
+      expect(setIndex.mock.calls[0][1]).toBe(2);
     });
   });
 });
