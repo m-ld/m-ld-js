@@ -6,13 +6,17 @@ export class CheckList implements MeldConstraint {
     readonly list: MeldConstraint[]) {
   }
 
-  check(state: MeldReadState, update: InterimUpdate) {
-    return Promise.all(this.list.map(
-      constraint => constraint.check(state, update)));
+  async check(state: MeldReadState, update: InterimUpdate) {
+    for (let constraint of this.list) {
+      await update.ready;
+      await constraint.check(state, update);
+    }
   }
 
   async apply(state: MeldReadState, update: InterimUpdate) {
-    for (let constraint of this.list)
+    for (let constraint of this.list) {
+      await update.ready;
       await constraint.apply(state, update);
+    }
   }
 }

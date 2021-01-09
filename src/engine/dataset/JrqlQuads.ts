@@ -12,12 +12,15 @@ import { activeCtx, compactIri, dataUrlData, jsonToRdf, rdfToJson } from '../jso
 import { inPosition, TriplePos } from '../quads';
 const { isArray } = Array;
 
+const PN_CHARS_BASE = `[A-Za-z\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u02FF\u0370-\u037D\u037F-\u1FFF\u200C-\u200D\u2070-\u218F\u2C00-\u2FEF\u3001-\uD7FF\uF900-\uFDCF\uFDF0-\uFFFD]|[\uD800-\uDB7F][\uDC00-\uDFFF]`;
+const PN_CHARS_U = `(?:${PN_CHARS_BASE}|_)`;
+const VARNAME = `(?:${PN_CHARS_U}|[0-9])(?:${PN_CHARS_U}|[0-9]|\u00B7|[\u0300-\u036F\u203F-\u2040])*`;
+
 export namespace jrql {
   export const $id = 'http://json-rql.org';
   export const item = 'http://json-rql.org/#item'; // Slot item property
   export const index = 'http://json-rql.org/#index'; // Entailed slot index property
   export const hiddenVar = (name: string) => `${$id}/var#${name}`;
-  export const hiddenVarRegex = new RegExp(`^${hiddenVar('([\\d\\w]+)')}$`);
 
   export interface Slot extends Subject {
     '@id': Iri;
@@ -195,7 +198,7 @@ class PreProcessor {
         // Provided index is either a variable (string) or an index number
         const index = matchVar(indexKey) ?? toIndexNumber(indexKey);
         if (index == null)
-          throw new Error('List index must be a variable or number data');
+          throw new Error(`List index ${indexKey} is not a variable or number data`);
         // Check for inserting multiple sub-items at one index
         if (typeof index != 'string' && !this.query &&
           !isArray(index) && isArray(item) && !isArray(list['@list'])) {
@@ -213,15 +216,25 @@ class PreProcessor {
   }
 
   private addSlot(list: Subject, index: string | number | [number, number], item: Value) {
-    const indexKey = typeof index == 'string' ? subVar(index, 'listKey') :
+    let indexKey: string;
+    if (typeof index === 'string') {
+      index ||= genVarName(); // We need the var name now to generate sub-var names
+      indexKey = subVar(index, 'listKey');
+    } else {
       // If the index is specified numerically in query mode, the value will be
       // matched with the slot index, and the key index can be ?any
-      this.query ? '?' : toIndexDataUrl(index);
-    // Check if the item is already a slot (with an @item key)
-    const slot: Subject = typeof item == 'object' && '@item' in item ? item : {
+      indexKey = this.query ? '?' : toIndexDataUrl(index);
+    }
+    let slot: Subject;
+    if (typeof item == 'object' && '@item' in item) {
+      // The item is already a slot (with an @item key)
+      item[jrql.item] = item['@item'];
+      delete item['@item'];
+      slot = item;
+    } else {
       // TODO If the item is an array, it's an anonymous nested list
-      [jrql.item]: isArray(item) ? { '@list': item } : item
-    };
+      slot = { [jrql.item]: isArray(item) ? { '@list': item } : item };
+    }
     // If the index is a variable, generate the slot id variable
     if (typeof index == 'string' && !('@id' in slot))
       slot['@id'] = subVar(index, 'slotId');
@@ -237,11 +250,12 @@ class PreProcessor {
 export type SubVarName = 'listKey' | 'slotId';
 
 function subVar(varName: string, subVarName: SubVarName) {
-  return `?${varName}#${subVarName}`;
+  return `?${varName}__${subVarName}`;
 }
 
+const MATCH_SUBVARNAME = new RegExp(`^\\?(${VARNAME})__(listKey|slotId)$`);
 export function matchSubVarName(fullVarName: string): [string, SubVarName] | [] {
-  const match = /^([\d\w])#(listKey|slotId)$/g.exec(fullVarName);
+  const match = MATCH_SUBVARNAME.exec(fullVarName);
   return match != null ? [match[1], match[2] as SubVarName] : [];
 }
 
@@ -251,12 +265,14 @@ function hideVar(token: string, vars?: Set<string>): string {
   return name === '' ? genHiddenVar(vars) : name ? hiddenVar(name, vars) : token;
 }
 
+const MATCH_VAR = new RegExp(`^\\?(${VARNAME})$`);
 export function matchVar(token: string): string | undefined {
-  return /^\?([\d\w]*)$/g.exec(token)?.[1];
+  return token === '?' ? '' : MATCH_VAR.exec(token)?.[1];
 }
 
+export const MATCH_HIDDEN_VAR = new RegExp(`^${hiddenVar('(' + VARNAME + ')')}$`);
 function matchHiddenVar(value: string): string | undefined {
-  return jrql.hiddenVarRegex.exec(value)?.[1];
+  return MATCH_HIDDEN_VAR.exec(value)?.[1];
 }
 
 function genHiddenVar(vars?: Set<string>) {

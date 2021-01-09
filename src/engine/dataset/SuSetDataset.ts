@@ -1,11 +1,11 @@
 import {
   MeldUpdate, MeldConstraint, MeldReadState, Resource,
-  ReadResult, InterimUpdate, readResult
+  ReadResult, InterimUpdate, readResult, DeleteInsert
 } from '../../api';
 import { Snapshot, UUID, DeltaMessage, MeldDelta } from '..';
 import { Quad } from 'rdf-js';
 import { TreeClock } from '../clocks';
-import { Subject } from '../../jrql-support';
+import { Subject, Update } from '../../jrql-support';
 import { Dataset, DefinitePatch, Patch, PatchQuads } from '.';
 import { flatten as flatJsonLd } from 'jsonld';
 import { Iri } from 'jsonld/jsonld-spec';
@@ -53,11 +53,64 @@ export class GraphState implements MeldReadState {
   }
 }
 
-interface InterimUpdatePatch extends InterimUpdate {
+class InterimUpdatePatch implements InterimUpdate {
+  '@ticks': number;
+  '@delete': Subject[];
+  '@insert': Subject[];
   /** Assertions made by the constraint (not including the app patch) */
   assertions: PatchQuads;
   /** Entailments made by the constraint */
-  entailments: PatchQuads;
+  entailments = new PatchQuads();
+
+  ready: Promise<InterimUpdatePatch>;
+
+  /**
+   * @param patch the starting app patch (will not be mutated unless 'mutable')
+   */
+  constructor(
+    readonly graph: SuSetDataset,
+    time: TreeClock,
+    readonly patch: PatchQuads,
+    readonly mutable?: 'mutable') {
+    // If mutable, we treat the app patch as assertions
+    this.assertions = mutable ? patch : new PatchQuads();
+    this['@ticks'] = time.ticks;
+    this.ready = this.graph.asDeleteInsert(patch)
+      .then(delIns => Object.assign(this, delIns));
+  }
+
+  private async update() {
+    const newPatch = this.mutable ? this.assertions :
+      new PatchQuads(this.patch).append(this.assertions);
+    // FIXME: Inefficient, re-creates the whole update every time
+    Object.assign(this, await this.graph.asDeleteInsert(newPatch));
+    return this;
+  }
+
+  assert(update: Update) {
+    this.ready = this.ready
+      .then(() => this.graph.write(update))
+      .then(patch => this.assertions.append(patch))
+      .then(() => this.update());
+  }
+
+  entail(update: Update) {
+    this.ready = this.ready
+      .then(() => this.graph.write(update))
+      .then(patch => this.entailments.append(patch))
+      .then(() => this);
+  }
+
+  remove(key: keyof DeleteInsert<any>, pattern: Subject | Subject[]) {
+    this.ready = this.ready
+      .then(() => this.graph.definiteQuads(pattern))
+      .then(toRemove => {
+        const patchKey: keyof Patch = key == '@delete' ? 'oldQuads' : 'newQuads';
+        this.entailments.remove(patchKey, toRemove);
+        return this.assertions.remove(patchKey, toRemove).length ?
+          this.update() : this;
+      });
+  }
 }
 
 /**
@@ -199,8 +252,10 @@ export class SuSetDataset extends JrqlGraph {
           return { return: null };
 
         txc.sw.next('check-constraints');
-        const update = await this.interimUpdate(time, patch, 'mutable');
+        const update = await new InterimUpdatePatch(this, time, patch, 'mutable').ready;
         await this.constraint.check(this.state, update);
+        // Wait for all pending modifications
+        await update.ready;
 
         txc.sw.next('find-tids');
         const deletedTriplesTids = await this.findTriplesTids(patch.oldQuads);
@@ -225,7 +280,7 @@ export class SuSetDataset extends JrqlGraph {
     });
   }
 
-  private emitUpdate(update: InterimUpdatePatch) {
+  private emitUpdate(update: InterimUpdate) {
     if (update['@delete'].length || update['@insert'].length) {
       // De-clutter the update for sanity
       this.updateSource.next({
@@ -273,9 +328,9 @@ export class SuSetDataset extends JrqlGraph {
 
         txc.sw.next('apply-cx'); // "cx" = constraint
         const tid = txnId(msg.time);
-        const update = await this.interimUpdate(cxnTime, patch);
+        const update = await new InterimUpdatePatch(this, cxnTime, patch).ready;
         await this.constraint.apply(this.state, update);
-        const cxn = await this.constraintTxn(update.assertions, patch, tid, cxnTime);
+        const cxn = await this.constraintTxn((await update.ready).assertions, patch, tid, cxnTime);
         // After applying the constraint, patch new quads might have changed
         tidPatch.append(await this.newTriplesTid(patch.newQuads, tid));
 
@@ -348,41 +403,6 @@ export class SuSetDataset extends JrqlGraph {
   }
 
   /**
-   * @param patch the starting app patch (will not be mutated unless 'mutable')
-   */
-  private async interimUpdate(time: TreeClock, patch: PatchQuads,
-    mutable?: 'mutable'): Promise<InterimUpdatePatch> {
-    // If mutable, we treat the app patch as assertions
-    const assertions = mutable ? patch : new PatchQuads(),
-      entailments = new PatchQuads();
-    const updateUpdate = async () => {
-      const newPatch = mutable ? assertions : new PatchQuads(patch).append(assertions);
-      // FIXME: Inefficient, re-creates the whole update every time
-      Object.assign(interimUpdate, await this.asDeleteInsert(newPatch));
-    }
-    const interimUpdate: InterimUpdatePatch = {
-      '@ticks': time.ticks,
-      ...await this.asDeleteInsert(patch),
-      assertions, entailments,
-      assert: async update => {
-        assertions.append(await this.write(update));
-        return updateUpdate();
-      },
-      entail: async update => {
-        entailments.append(await this.write(update));
-      },
-      remove: async (key, pattern) => {
-        const toRemove = await this.definiteQuads(pattern);
-        const patchKey: keyof Patch = key == '@delete' ? 'oldQuads' : 'newQuads';
-        if (assertions.remove(patchKey, toRemove).length)
-          await updateUpdate();
-        entailments.remove(patchKey, toRemove);
-      }
-    };
-    return interimUpdate;
-  }
-
-  /**
    * Rolls up the given transaction details into a single patch. This method is
    * just a type convenience for ensuring everything needed for a transaction is
    * present.
@@ -394,7 +414,7 @@ export class SuSetDataset extends JrqlGraph {
     return new PatchQuads(assertions).append(entailments).append(tidPatch);
   }
 
-  private async asDeleteInsert(patch: DefinitePatch) {
+  async asDeleteInsert(patch: DefinitePatch) {
     return {
       '@delete': await this.toSubjects(patch.oldQuads ?? []),
       '@insert': await this.toSubjects(patch.newQuads ?? [])

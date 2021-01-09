@@ -317,8 +317,9 @@ export interface InterimUpdate extends MeldUpdate {
    * - Rewrite a list index predicate to a CRDT-specific form
    *
    * @param update the update to assert into the domain
+   * @see {@link ready}
    */
-  assert(update: Update): Promise<unknown>;
+  assert(update: Update): void;
   /**
    * An entailment is an update that maintains the data integrity of a domain by
    * changing only entailed data. Entailed data is data that can be deduced
@@ -330,8 +331,9 @@ export interface InterimUpdate extends MeldUpdate {
    * - Membership of a duck-type class
    *
    * @param update the update to entail into the domain
+   * @see {@link ready}
    */
-  entail(update: Update): Promise<unknown>;
+  entail(update: Update): void;
   /**
    * Removes assertions or entailments from this update, prior to application to
    * the dataset. This is used to rewrite assertions made by the application, or
@@ -345,8 +347,14 @@ export interface InterimUpdate extends MeldUpdate {
    *
    * @param key Whether to remove `@delete` or `@insert` components
    * @param pattern the Subject assertions or entailments to remove
+   * @see {@link ready}
    */
-  remove(key: keyof DeleteInsert<any>, pattern: Subject | Subject[]): Promise<unknown>;
+  remove(key: keyof DeleteInsert<any>, pattern: Subject | Subject[]): void;
+  /**
+   * A promise that resolves when all pending modifications made by the methods
+   * above have affected this updates `@insert` and `@delete` properties.
+   */
+  ready: Promise<unknown>;
 }
 
 /**

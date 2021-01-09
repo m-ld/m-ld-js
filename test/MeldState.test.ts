@@ -2,7 +2,7 @@ import { any, MeldUpdate } from '../src/api';
 import { ApiStateMachine } from '../src/engine/MeldState';
 import { memStore, mockRemotes, testConfig } from './testClones';
 import { DatasetEngine } from '../src/engine/dataset/DatasetEngine';
-import { Group, Subject, Select, Describe, Update } from '../src/jrql-support';
+import { Group, Subject, Select, Describe, Update, Reference } from '../src/jrql-support';
 import { DomainContext } from '../src/engine/MeldEncoding';
 import { Future } from '../src/engine/util';
 import { genIdRegex } from './testUtil';
@@ -382,6 +382,63 @@ describe('Meld State API', () => {
       })).resolves.toMatchObject([{
         '?list': { '@id': 'shopping1' }
       }]);
+    });
+
+    test('selects item from a list', async () => {
+      await api.write<Subject>({ '@id': 'shopping', '@list': ['Milk'] });
+      await expect(api.read<Select>({
+        '@select': '?item',
+        '@where': { '@id': 'shopping', '@list': { '?': '?item' } }
+      })).resolves.toMatchObject([{ '?item': 'Milk' }]);
+    });
+
+    test('selects index from a list', async () => {
+      await api.write<Subject>({ '@id': 'shopping', '@list': ['Milk'] });
+      await expect(api.read<Select>({
+        '@select': '?index',
+        '@where': { '@id': 'shopping', '@list': { '?index': '?' } }
+      })).resolves.toMatchObject([{ '?index': 0 }]);
+    });
+
+    test('selects slot from a list', async () => {
+      await api.write<Subject>({ '@id': 'shopping', '@list': ['Milk'] });
+      await expect(api.read<Select>({
+        '@select': '?slot',
+        '@where': { '@id': 'shopping', '@list': { '?': { '@id': '?slot', '@item': '?' } } }
+      })).resolves.toMatchObject([{
+        '?slot': { '@id': expect.stringMatching(genIdRegex) }
+      }]);
+    });
+
+    test('deletes a list with all slots', async () => {
+      await api.write<Subject>({ '@id': 'shopping', '@list': ['Milk'] });
+      const slotId: string = (<Reference>(await api.read<Select>({
+        '@select': '?slot',
+        '@where': { '@id': 'shopping', '@list': { '?': { '@id': '?slot', '@item': '?' } } }
+      }))[0]['?slot'])['@id'];
+
+      await api.write<Update>({ '@delete': { '@id': 'shopping' } });
+      await expect(api.read<Describe>({ '@describe': 'shopping' }))
+        .resolves.toEqual([]);
+      await expect(api.read<Describe>({ '@describe': slotId }))
+        .resolves.toEqual([]);
+    });
+
+    test('deletes a slot by index', async () => {
+      await api.write<Subject>({ '@id': 'shopping', '@list': ['Milk'] });
+      const slotId: string = (<Reference>(await api.read<Select>({
+        '@select': '?slot',
+        '@where': { '@id': 'shopping', '@list': { '?': { '@id': '?slot', '@item': '?' } } }
+      }))[0]['?slot'])['@id'];
+
+      await api.write<Update>({ '@delete': { '@id': 'shopping', '@list': { 0: '?' } } });
+      await expect(api.read<Describe>({ '@describe': 'shopping' }))
+        .resolves.toEqual([{
+          '@id': 'shopping',
+          '@type': 'http://m-ld.org/RdfLseq'
+        }]);
+      await expect(api.read<Describe>({ '@describe': slotId }))
+        .resolves.toEqual([]);
     });
   });
 

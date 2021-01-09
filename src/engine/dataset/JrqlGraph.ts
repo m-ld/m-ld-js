@@ -133,23 +133,14 @@ export class JrqlGraph {
   private gatherSubjectData({ subject, property, value, item }: SubjectTerms): Algebra.Operation {
     /* {
       ?subject ?prop ?value
-      optional { filter(isiri(?value)) bind(?value AS ?slot) }
-      optional { ?slot <http://json-rql.org/#item> ?item }
+      optional { ?value <http://json-rql.org/#item> ?item }
     } */
-    const slot = this.any();
     return this.sparql.createLeftJoin(
-      this.sparql.createLeftJoin(
-        // BGP to pick up all subject properties
-        this.sparql.createBgp([this.sparql.createPattern(
-          subject, property, value, this.graph.name)]),
-        // Optional bind of slot variable if value is IRI
-        this.sparql.createExtend(this.sparql.createBgp([]),
-          slot, this.sparql.createTermExpression(value)),
-        this.sparql.createOperatorExpression('isiri',
-          [this.sparql.createTermExpression(value)])),
-      // Optional BGP to pick up list slot items
+      // BGP to pick up all subject properties
       this.sparql.createBgp([this.sparql.createPattern(
-        slot, this.rdf.namedNode(jrql.item), item, this.graph.name)]));
+        subject, property, value, this.graph.name)]),
+      this.sparql.createBgp([this.sparql.createPattern(
+        value, this.rdf.namedNode(jrql.item), item, this.graph.name)]));
   }
 
   async find1<T>(jrqlPattern: Partial<T> & Subject,
@@ -294,7 +285,7 @@ export class JrqlGraph {
           // Cache the generated value in the binding
           return binding[`?${term.value}`] = genValue;
         break; // Not bound
-      
+
       default:
         return term;
     }

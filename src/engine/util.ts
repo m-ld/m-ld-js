@@ -295,3 +295,10 @@ export function memoise<K extends object, V extends {}>(fn: (key: K) => V): (key
     return value;
   };
 }
+
+export function minIndexOfSparse<T>(arr: T[]) {
+  let min = 0;
+  // some() skips empty array positions
+  arr.some((_, i) => (min = i) != null);
+  return min;
+}
