@@ -223,7 +223,7 @@ class PreProcessor {
     } else {
       // If the index is specified numerically in query mode, the value will be
       // matched with the slot index, and the key index can be ?any
-      indexKey = this.query ? '?' : toIndexDataUrl(index);
+      indexKey = this.query ? any() : toIndexDataUrl(index);
     }
     let slot: Subject;
     if (typeof item == 'object' && '@item' in item) {

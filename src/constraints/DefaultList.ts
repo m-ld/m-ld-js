@@ -4,7 +4,7 @@ import { jrql, toIndexNumber } from '../engine/dataset/JrqlQuads';
 import { LseqDef, LseqIndexRewriter } from '../engine/lseq';
 import { meld } from '../engine/MeldEncoding';
 import { isReference } from '../jrql-support';
-import { includesValue, includeValue } from '../updates';
+import { includesValue } from '../updates';
 
 /** @internal */
 export class DefaultList implements MeldConstraint {
@@ -107,7 +107,8 @@ class ListRewriter extends LseqIndexRewriter<SlotInList> {
       // Load position identifiers from min index
       // TODO: Load a minimal set of adjacent position identifiers & matching slots
       // Don't use Describe because that would generate an @list
-      const [existingPosIds] = await this.loadExistingSlotsInList(state, this.listId);
+      const [existingPosIds, existingSlots] =
+        await this.loadExistingSlotsInList(state, this.listId);
       this.rewriteIndexes(existingPosIds, {
         setDeleted: slotInList => {
           // Cascade the deletion of the slot in this position
@@ -134,7 +135,16 @@ class ListRewriter extends LseqIndexRewriter<SlotInList> {
           // TODO: If a slot has moved, ensure it is removed from the old position
         },
         setPosIndex: (posId, index) => {
-          // TODO: Setting the index of an existing position
+          update.assert({
+            '@delete': {
+              '@id': existingSlots[posId].slotId,
+              [jrql.index]: existingSlots[posId].index
+            },
+            '@insert': {
+              '@id': existingSlots[posId].slotId,
+              [jrql.index]: index
+            }
+          })
         }
       });
     }

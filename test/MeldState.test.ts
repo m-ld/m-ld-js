@@ -350,6 +350,14 @@ describe('Meld State API', () => {
         '@type': 'http://m-ld.org/RdfLseq',
         '@list': ['Bread', 'Milk']
       }]);
+      // This checks that the slots have been correctly re-numbered
+      await expect(api.read<Select>({
+        '@select': ['?0', '?1'],
+        '@where': { '@id': 'shopping', '@list': { 0: '?0', 1: '?1' } }
+      })).resolves.toMatchObject([{
+        '?0': 'Bread',
+        '?1': 'Milk'
+      }]);
     });
 
     test('prepends multiple items to a list', async () => {
@@ -412,6 +420,7 @@ describe('Meld State API', () => {
 
     test('deletes a list with all slots', async () => {
       await api.write<Subject>({ '@id': 'shopping', '@list': ['Milk'] });
+      // recover the slot ID
       const slotId: string = (<Reference>(await api.read<Select>({
         '@select': '?slot',
         '@where': { '@id': 'shopping', '@list': { '?': { '@id': '?slot', '@item': '?' } } }
@@ -426,6 +435,7 @@ describe('Meld State API', () => {
 
     test('deletes a slot by index', async () => {
       await api.write<Subject>({ '@id': 'shopping', '@list': ['Milk'] });
+      // recover the slot ID
       const slotId: string = (<Reference>(await api.read<Select>({
         '@select': '?slot',
         '@where': { '@id': 'shopping', '@list': { '?': { '@id': '?slot', '@item': '?' } } }
