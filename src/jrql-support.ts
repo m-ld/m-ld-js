@@ -55,6 +55,13 @@ export type Variable = jrql.Variable;
  */
 export type Value = jrql.Atom | Subject | Reference;
 /**
+ * The allowable types for a Subject property value, named awkwardly to avoid
+ * overloading `Object`. Represents the "object" of a property, in the sense of
+ * the object of discourse.
+ * @see https://json-rql.org/#SubjectPropertyObject
+ */
+export type SubjectPropertyObject = Value | Container | SubjectPropertyObject[];
+/**
  * Used to express an ordered or unordered container of data.
  * @see https://json-rql.org/interfaces/container.html
  */
@@ -70,12 +77,12 @@ export type Container = List | Set;
  * @see https://json-rql.org/interfaces/list.html
  */
 export interface List extends Subject {
-  '@list': Value | Value[];
+  '@list': SubjectPropertyObject[] | { [key in string | number]: SubjectPropertyObject };
 }
 
 /** @internal */
-export function isList(value: Subject['any']): value is List {
-  return typeof (value) === 'object' && '@list' in value;
+export function isList(object: SubjectPropertyObject): object is List {
+  return typeof object === 'object' && '@list' in object;
 }
 
 /**
@@ -84,12 +91,12 @@ export function isList(value: Subject['any']): value is List {
  * @see https://json-rql.org/interfaces/set.html
  */
 export interface Set {
-  '@set': Value | Value[];
+  '@set': SubjectPropertyObject;
 }
 
 /** @internal */
-export function isSet(value: Subject['any']): value is Set {
-  return typeof (value) === 'object' && '@set' in value;
+export function isSet(object: SubjectPropertyObject): object is Set {
+  return typeof object === 'object' && '@set' in object;
 }
 
 // Utility functions
@@ -155,7 +162,18 @@ export interface Subject extends Pattern {
    * Specifies a graph edge, that is, a mapping from the `@id` of this subject
    * to a set of one or more values.
    */
-  [key: string]: Value | Value[] | Container | Context | undefined;
+  [key: string]: SubjectPropertyObject | Context | undefined;
+}
+
+/**
+ * Determines whether the given property object from a well-formed Subject is a
+ * graph edge; i.e. not a `@context` or the Subject `@id`.
+ * @param property the Subject property in question
+ * @param object the object (value) of the property
+ */
+export function isPropertyObject(property: string, object: Subject['any']):
+  object is SubjectPropertyObject {
+  return property !== '@context' && property !== '@id' && object != null;
 }
 
 /** @internal */

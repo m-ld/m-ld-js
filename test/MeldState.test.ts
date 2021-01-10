@@ -450,6 +450,87 @@ describe('Meld State API', () => {
       await expect(api.read<Describe>({ '@describe': slotId }))
         .resolves.toEqual([]);
     });
+
+    test('move a slot by value', async () => {
+      await api.write<Subject>({ '@id': 'shopping', '@list': ['Milk', 'Bread', 'Spam'] });
+      await api.write<Update>({
+        '@insert': {
+          '@id': 'shopping',
+          '@list': { 0: { '@id': '?slot', '@item': 'Spam' } }
+        },
+        '@where': {
+          '@id': 'shopping',
+          '@list': { '?': { '@id': '?slot', '@item': 'Spam' } }
+        }
+      });
+      await expect(api.read<Describe>({ '@describe': 'shopping' }))
+        .resolves.toEqual([{
+          '@id': 'shopping',
+          '@type': 'http://m-ld.org/RdfLseq',
+          '@list': ['Spam', 'Milk', 'Bread']
+        }]);
+      // This checks that the slots have been correctly re-numbered
+      await expect(api.read<Select>({
+        '@select': ['?0', '?1', '?2'],
+        '@where': { '@id': 'shopping', '@list': { 0: '?0', 1: '?1', 2: '?2' } }
+      })).resolves.toMatchObject([{
+        '?0': 'Spam',
+        '?1': 'Milk',
+        '?2': 'Bread'
+      }]);
+    });
+
+    test('change an item', async () => {
+      await api.write<Subject>({ '@id': 'shopping', '@list': ['Milk', 'Bread'] });
+      await api.write<Update>({
+        '@delete': {
+          '@id': 'shopping',
+          '@list': { '?1': 'Bread' }
+        },
+        '@insert': {
+          '@id': 'shopping',
+          '@list': { '?1': 'Spam' }
+        },
+        '@where': {
+          '@id': 'shopping',
+          '@list': { '?1': 'Bread' }
+        }
+      });
+      await expect(api.read<Describe>({ '@describe': 'shopping' }))
+        .resolves.toEqual([{
+          '@id': 'shopping',
+          '@type': 'http://m-ld.org/RdfLseq',
+          '@list': ['Milk', 'Spam']
+        }]);
+    });
+
+    test('create a list with multi-valued item', async () => {
+      await api.write<Subject>({
+        '@id': 'shopping', '@list': ['Milk', ['Bread', 'Spam']]
+      });
+      await expect(api.read<Describe>({ '@describe': 'shopping' }))
+        .resolves.toMatchObject([{
+          '@list': ['Milk', expect.arrayContaining(['Bread', 'Spam'])]
+        }]);
+    });
+
+    test('make an item multi-valued', async () => {
+      await api.write<Subject>({ '@id': 'shopping', '@list': ['Milk', 'Bread'] });
+      await api.write<Update>({
+        '@insert': {
+          '@id': 'shopping',
+          '@list': { '?1': 'Spam' }
+        },
+        '@where': {
+          '@id': 'shopping',
+          '@list': { '?1': 'Bread' }
+        }
+      });
+      await expect(api.read<Describe>({ '@describe': 'shopping' }))
+        .resolves.toMatchObject([{
+          '@list': ['Milk', expect.arrayContaining(['Bread', 'Spam'])]
+        }]);
+    });
   });
 
   describe('state procedures', () => {

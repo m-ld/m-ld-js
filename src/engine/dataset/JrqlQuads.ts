@@ -6,7 +6,8 @@ import { DataFactory, Quad, Term } from 'rdf-js';
 import { GraphName } from '.';
 import { any, array, includeValue, uuid } from '../..';
 import {
-  Context, Subject, Result, Value, isValueObject, isReference, isSet, isList
+  Context, Subject, Result, Value, isValueObject, isReference,
+  isSet, isList, List, SubjectPropertyObject
 } from '../../jrql-support';
 import { activeCtx, compactIri, dataUrlData, jsonToRdf, rdfToJson } from '../jsonld';
 import { inPosition, TriplePos } from '../quads';
@@ -106,13 +107,13 @@ export class JrqlQuads {
     const subject = (await compact(await rdfToJson(propertyQuads), context || {})) as Subject;
     if (listItemQuads.length) {
       const ctx = await activeCtx(context);
-      // Sort the list items lexically by index and construct an rdf:List
-      // TODO: Use list implementation-specific ordering
-      const indexes = listItemQuads.map(iq => iq.predicate.value).sort()
-        .map(index => compactIri(index, ctx));
+      // Sort the list items lexically by index
+      // TODO: Allow for a list implementation-specific ordering
+      const indexes = new Set(listItemQuads.map(iq => iq.predicate.value).sort()
+        .map(index => compactIri(index, ctx)));
       // Create a subject containing only the list items
       const list = await this.toSubject(listItemQuads, [], context);
-      subject['@list'] = indexes.map(index => <Value>list[index]);
+      subject['@list'] = [...indexes].map(index => <Value>list[index]);
     }
     return subject;
   }
@@ -149,11 +150,13 @@ class PreProcessor {
     this.vars = vars;
   }
 
-  process(values: Value | Value[], top: boolean = true) {
-    array(values).forEach(value => {
-      // JSON-LD value object (with @value) cannot contain a variable
-      if (typeof value === 'object' && !isValueObject(value)) {
-        // If this is a Reference, we treat it as a Subject
+  process(object: SubjectPropertyObject, top: boolean = true) {
+    array(object).forEach(value => {
+      if (isArray(value)) {
+        this.process(value, top);
+      } else if (typeof value === 'object' && !isValueObject(value)) {
+        // JSON-LD value object (with @value) cannot contain a variable or a
+        // list, so ignore it. If this is a Reference, we treat it as a Subject.
         const subject: Subject = value as Subject;
         if (isList(subject))
           this.expandListSlots(subject);
@@ -170,13 +173,13 @@ class PreProcessor {
   }
 
   private processEntries(subject: Subject) {
-    Object.entries(subject).forEach(([key, value]) => {
-      if (key !== '@context') {
+    Object.entries(subject).forEach(([key, value]: [string, SubjectPropertyObject]) => {
+      if (key !== '@context' && value != null) {
         const varKey = hideVar(key, this.vars);
         if (isSet(value)) {
           this.process(value['@set'], false);
         } else if (typeof value === 'object') {
-          this.process(value as Value | Value[], false);
+          this.process(value, false);
         } else if (typeof value === 'string') {
           const varVal = hideVar(value, this.vars);
           if (varVal !== value)
@@ -189,7 +192,7 @@ class PreProcessor {
     });
   }
 
-  private expandListSlots(list: Subject) {
+  private expandListSlots(list: List) {
     // Normalise explicit list objects: expand fully to slots
     if (typeof list['@list'] === 'object') {
       // This handles arrays as well as hashes
@@ -212,10 +215,11 @@ class PreProcessor {
       // Singleton list item at position zero
       this.addSlot(list, 0, list['@list']);
     }
-    delete list['@list'];
+    // Degrade the list to a plain subject for further processing
+    delete (<Subject>list)['@list'];
   }
 
-  private addSlot(list: Subject, index: string | number | [number, number], item: Value) {
+  private addSlot(list: List, index: string | number | [number, number], item: SubjectPropertyObject) {
     let indexKey: string;
     if (typeof index === 'string') {
       index ||= genVarName(); // We need the var name now to generate sub-var names
@@ -232,8 +236,7 @@ class PreProcessor {
       delete item['@item'];
       slot = item;
     } else {
-      // TODO If the item is an array, it's an anonymous nested list
-      slot = { [jrql.item]: isArray(item) ? { '@list': item } : item };
+      slot = { [jrql.item]: item };
     }
     // If the index is a variable, generate the slot id variable
     if (typeof index == 'string' && !('@id' in slot))

@@ -1,4 +1,4 @@
-import { isSet, Subject, Value } from './jrql-support';
+import { isPropertyObject, isSet, Subject, Value } from './jrql-support';
 import { DeleteInsert, Resource } from './api';
 import { addValue, getValues, hasProperty, hasValue, removeValue, ValueOptions } from 'jsonld/lib/util';
 
@@ -95,9 +95,9 @@ export function updateSubject<T>(subject: Resource<T>, update: DeleteInsert<Subj
  * @param value the value to add.
  */
 export function includeValue(subject: Subject, property: string, value: Value) {
-  const maybeSet = subject[property];
-  if (isSet(maybeSet))
-    addValue(maybeSet, '@set', value, valueOptions(subject, property));
+  const object = subject[property];
+  if (isPropertyObject(property, object) && isSet(object))
+    addValue(object, '@set', value, valueOptions(subject, property));
   else
     addValue(subject, property, value, valueOptions(subject, property));
 }
@@ -112,9 +112,11 @@ export function includeValue(subject: Subject, property: string, value: Value) {
  */
 export function includesValue(subject: Subject, property: string, value?: Value): boolean {
   if (value != null) {
-    const maybeSet = subject[property];
-    if (isSet(maybeSet))
-      return hasValue(maybeSet, '@set', value);
+    const object = subject[property];
+    if (!isPropertyObject(property, object))
+      return false;
+    else if (isSet(object))
+      return hasValue(object, '@set', value);
     else
       return hasValue(subject, property, value);
   } else {

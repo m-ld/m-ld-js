@@ -218,19 +218,19 @@ describe('LSEQ', () => {
       const rw = new LseqIndexRewriter(lseq, 'x');
       const notify = mock<LseqIndexNotify<string>>();
       rw.rewriteIndexes([], notify);
-      expect(notify.setDeleted.mock.calls.length).toBe(0);
-      expect(notify.setInsertPos.mock.calls.length).toBe(0);
-      expect(notify.setPosIndex.mock.calls.length).toBe(0);
+      expect(notify.deleted.mock.calls.length).toBe(0);
+      expect(notify.inserted.mock.calls.length).toBe(0);
+      expect(notify.reindexed.mock.calls.length).toBe(0);
     });
 
     test('does nothing with no requests on a singleton list', () => {
       const rw = new LseqIndexRewriter(lseq, 'x');
       const notify = mock<LseqIndexNotify<string>>();
-      rw.rewriteIndexes([lseq.min.between(lseq.max, 'x').toString()],
+      rw.rewriteIndexes([{posId: lseq.min.between(lseq.max, 'x').toString(), item: 'a'}],
         notify);
-      expect(notify.setDeleted.mock.calls.length).toBe(0);
-      expect(notify.setInsertPos.mock.calls.length).toBe(0);
-      expect(notify.setPosIndex.mock.calls.length).toBe(0);
+      expect(notify.deleted.mock.calls.length).toBe(0);
+      expect(notify.inserted.mock.calls.length).toBe(0);
+      expect(notify.reindexed.mock.calls.length).toBe(0);
     });
 
     test('inserts head on empty list', () => {
@@ -238,16 +238,16 @@ describe('LSEQ', () => {
       rw.addInsert('a', 0);
       const notify = mock<LseqIndexNotify<string>>();
       rw.rewriteIndexes([], notify);
-      expect(notify.setDeleted.mock.calls.length).toBe(0);
-      expect(notify.setInsertPos.mock.calls.length).toBe(1);
-      expect(notify.setInsertPos.mock.calls[0][0]).toBe('a');
-      const head = lseq.parse(notify.setInsertPos.mock.calls[0][1]);
+      expect(notify.deleted.mock.calls.length).toBe(0);
+      expect(notify.inserted.mock.calls.length).toBe(1);
+      expect(notify.inserted.mock.calls[0][0]).toBe('a');
+      const head = lseq.parse(notify.inserted.mock.calls[0][1]);
       expect(head.ids.length).toBe(1);
       expect(head.ids[0].pos).toBeGreaterThan(0);
       expect(head.ids[0].pos).toBeLessThan(16);
       expect(head.ids[0].site).toBe('x');
-      expect(notify.setInsertPos.mock.calls[0][2]).toBe(0);
-      expect(notify.setPosIndex.mock.calls.length).toBe(0);
+      expect(notify.inserted.mock.calls[0][2]).toBe(0);
+      expect(notify.reindexed.mock.calls.length).toBe(0);
     });
 
     test('inserts tail on singleton list', () => {
@@ -255,13 +255,13 @@ describe('LSEQ', () => {
       const head = lseq.min.between(lseq.max, 'x').toString();
       rw.addInsert('b', 1);
       const notify = mock<LseqIndexNotify<string>>();
-      rw.rewriteIndexes([head], notify);
-      expect(notify.setDeleted.mock.calls.length).toBe(0);
-      expect(notify.setInsertPos.mock.calls.length).toBe(1);
-      expect(notify.setInsertPos.mock.calls[0][0]).toBe('b');
-      expect(notify.setInsertPos.mock.calls[0][1] > head).toBe(true);
-      expect(notify.setInsertPos.mock.calls[0][2]).toBe(1);
-      expect(notify.setPosIndex.mock.calls.length).toBe(0);
+      rw.rewriteIndexes([{posId: head, item: 'a'}], notify);
+      expect(notify.deleted.mock.calls.length).toBe(0);
+      expect(notify.inserted.mock.calls.length).toBe(1);
+      expect(notify.inserted.mock.calls[0][0]).toBe('b');
+      expect(notify.inserted.mock.calls[0][1] > head).toBe(true);
+      expect(notify.inserted.mock.calls[0][2]).toBe(1);
+      expect(notify.reindexed.mock.calls.length).toBe(0);
     });
 
     test('inserts two heads on singleton list', () => {
@@ -270,85 +270,86 @@ describe('LSEQ', () => {
       rw.addInsert('a', 0, 0);
       rw.addInsert('b', 0, 1);
       const notify = mock<LseqIndexNotify<string>>();
-      rw.rewriteIndexes([head], notify);
-      expect(notify.setDeleted.mock.calls.length).toBe(0);
+      rw.rewriteIndexes([{ posId: head, item: 'c' }], notify);
+      expect(notify.deleted.mock.calls.length).toBe(0);
       
-      expect(notify.setInsertPos.mock.calls.length).toBe(2);
+      expect(notify.inserted.mock.calls.length).toBe(2);
       
-      expect(notify.setInsertPos.mock.calls[0][0]).toBe('a');
-      const aPos = notify.setInsertPos.mock.calls[0][1];
+      expect(notify.inserted.mock.calls[0][0]).toBe('a');
+      const aPos = notify.inserted.mock.calls[0][1];
       expect(aPos < head).toBe(true);
-      expect(notify.setInsertPos.mock.calls[0][2]).toBe(0);
+      expect(notify.inserted.mock.calls[0][2]).toBe(0);
       
-      expect(notify.setInsertPos.mock.calls[1][0]).toBe('b');
-      const bPos = notify.setInsertPos.mock.calls[1][1];
+      expect(notify.inserted.mock.calls[1][0]).toBe('b');
+      const bPos = notify.inserted.mock.calls[1][1];
       expect(bPos > aPos).toBe(true);
       expect(bPos < head).toBe(true);
-      expect(notify.setInsertPos.mock.calls[1][2]).toBe(1);
+      expect(notify.inserted.mock.calls[1][2]).toBe(1);
 
-      expect(notify.setPosIndex.mock.calls.length).toBe(1);
-      expect(notify.setPosIndex.mock.calls[0][0] > bPos).toBe(true);
-      expect(notify.setPosIndex.mock.calls[0][1]).toBe(2);
+      expect(notify.reindexed.mock.calls.length).toBe(1);
+      expect(notify.reindexed.mock.calls[0][0]).toBe('c');
+      expect(notify.reindexed.mock.calls[0][1] > bPos).toBe(true);
+      expect(notify.reindexed.mock.calls[0][2]).toBe(2);
     });
 
     test('deletes head on a singleton list', () => {
       const rw = new LseqIndexRewriter<string>(lseq, 'x');
       const head = lseq.min.between(lseq.max, 'x').toString();
-      rw.addDelete('a', head);
+      rw.addDelete(head);
       const notify = mock<LseqIndexNotify<string>>();
-      rw.rewriteIndexes([head], notify);
-      expect(notify.setDeleted.mock.calls.length).toBe(1);
-      expect(notify.setDeleted.mock.calls[0][0]).toBe('a');
-      expect(notify.setDeleted.mock.calls[0][1]).toBe(head);
-      expect(notify.setInsertPos.mock.calls.length).toBe(0);
-      expect(notify.setPosIndex.mock.calls.length).toBe(0);
+      rw.rewriteIndexes([{ posId: head, item: 'a' }], notify);
+      expect(notify.deleted.mock.calls.length).toBe(1);
+      expect(notify.deleted.mock.calls[0][0]).toBe('a');
+      expect(notify.deleted.mock.calls[0][1]).toBe(head);
+      expect(notify.inserted.mock.calls.length).toBe(0);
+      expect(notify.reindexed.mock.calls.length).toBe(0);
     });
 
     test('does not delete non-existent position', () => {
       const rw = new LseqIndexRewriter<string>(lseq, 'x');
       const head = lseq.min.between(lseq.max, 'x').toString();
-      rw.addDelete('a', 'garbage');
+      rw.addDelete('garbage');
       const notify = mock<LseqIndexNotify<string>>();
-      rw.rewriteIndexes([head], notify);
-      expect(notify.setDeleted.mock.calls.length).toBe(0);
-      expect(notify.setInsertPos.mock.calls.length).toBe(0);
-      expect(notify.setPosIndex.mock.calls.length).toBe(0);
+      rw.rewriteIndexes([{ posId: head, item: 'a' }], notify);
+      expect(notify.deleted.mock.calls.length).toBe(0);
+      expect(notify.inserted.mock.calls.length).toBe(0);
+      expect(notify.reindexed.mock.calls.length).toBe(0);
     });
 
     test('replaces head on a singleton list', () => {
       const rw = new LseqIndexRewriter<string>(lseq, 'x');
       const head = lseq.min.between(lseq.max, 'x').toString();
-      rw.addDelete('a', head);
+      rw.addDelete(head);
       rw.addInsert('b', 0);
       const notify = mock<LseqIndexNotify<string>>();
-      rw.rewriteIndexes([head], notify);
-      expect(notify.setDeleted.mock.calls.length).toBe(1);
-      expect(notify.setDeleted.mock.calls[0][0]).toBe('a');
-      expect(notify.setDeleted.mock.calls[0][1]).toBe(head);
+      rw.rewriteIndexes([{ posId: head, item: 'a' }], notify);
+      expect(notify.deleted.mock.calls.length).toBe(1);
+      expect(notify.deleted.mock.calls[0][0]).toBe('a');
+      expect(notify.deleted.mock.calls[0][1]).toBe(head);
 
-      expect(notify.setInsertPos.mock.calls.length).toBe(1);
-      expect(notify.setInsertPos.mock.calls[0][0]).toBe('b');
-      const bPos = notify.setInsertPos.mock.calls[0][1];
+      expect(notify.inserted.mock.calls.length).toBe(1);
+      expect(notify.inserted.mock.calls[0][0]).toBe('b');
+      const bPos = notify.inserted.mock.calls[0][1];
       expect(bPos > lseq.min.toString()).toBe(true);
-      expect(notify.setInsertPos.mock.calls[0][2]).toBe(0);
+      expect(notify.inserted.mock.calls[0][2]).toBe(0);
       
-      expect(notify.setPosIndex.mock.calls.length).toBe(0);
+      expect(notify.reindexed.mock.calls.length).toBe(0);
     });
 
     test('does not renumber tail after replacing head', () => {
       const rw = new LseqIndexRewriter<string>(lseq, 'x');
       const head = lseq.min.between(lseq.max, 'x').toString(),
         tail = lseq.parse(head).between(lseq.max, 'x').toString();
-      rw.addDelete('a', head);
+      rw.addDelete(head);
       rw.addInsert('b', 0);
       const notify = mock<LseqIndexNotify<string>>();
-      rw.rewriteIndexes([head, tail], notify);
-      expect(notify.setDeleted.mock.calls.length).toBe(1);
-      expect(notify.setDeleted.mock.calls[0][0]).toBe('a');
-      expect(notify.setInsertPos.mock.calls.length).toBe(1);
-      expect(notify.setInsertPos.mock.calls[0][0]).toBe('b');
+      rw.rewriteIndexes([{ posId: head, item: 'a' }, { posId: tail, item: 'c' }], notify);
+      expect(notify.deleted.mock.calls.length).toBe(1);
+      expect(notify.deleted.mock.calls[0][0]).toBe('a');
+      expect(notify.inserted.mock.calls.length).toBe(1);
+      expect(notify.inserted.mock.calls[0][0]).toBe('b');
 
-      expect(notify.setPosIndex.mock.calls.length).toBe(0);
+      expect(notify.reindexed.mock.calls.length).toBe(0);
     });
   });
 });
