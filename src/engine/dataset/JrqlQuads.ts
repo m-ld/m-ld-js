@@ -219,7 +219,9 @@ class PreProcessor {
     delete (<Subject>list)['@list'];
   }
 
-  private addSlot(list: List, index: string | number | [number, number], item: SubjectPropertyObject) {
+  private addSlot(list: List,
+    index: string | number | [number, number],
+    item: SubjectPropertyObject) {
     let indexKey: string;
     if (typeof index === 'string') {
       index ||= genVarName(); // We need the var name now to generate sub-var names
@@ -236,7 +238,8 @@ class PreProcessor {
       delete item['@item'];
       slot = item;
     } else {
-      slot = { [jrql.item]: item };
+      // A nested list is a nested list (not flattened or a set)
+      slot = { [jrql.item]: isArray(item) ? { '@list': item } : item };
     }
     // If the index is a variable, generate the slot id variable
     if (typeof index == 'string' && !('@id' in slot))

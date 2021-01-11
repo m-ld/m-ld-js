@@ -455,12 +455,10 @@ describe('Meld State API', () => {
       await api.write<Subject>({ '@id': 'shopping', '@list': ['Milk', 'Bread', 'Spam'] });
       await api.write<Update>({
         '@insert': {
-          '@id': 'shopping',
-          '@list': { 0: { '@id': '?slot', '@item': 'Spam' } }
+          '@id': 'shopping', '@list': { 0: { '@id': '?slot', '@item': 'Spam' } }
         },
         '@where': {
-          '@id': 'shopping',
-          '@list': { '?': { '@id': '?slot', '@item': 'Spam' } }
+          '@id': 'shopping', '@list': { '?': { '@id': '?slot', '@item': 'Spam' } }
         }
       });
       await expect(api.read<Describe>({ '@describe': 'shopping' }))
@@ -483,18 +481,9 @@ describe('Meld State API', () => {
     test('change an item', async () => {
       await api.write<Subject>({ '@id': 'shopping', '@list': ['Milk', 'Bread'] });
       await api.write<Update>({
-        '@delete': {
-          '@id': 'shopping',
-          '@list': { '?1': 'Bread' }
-        },
-        '@insert': {
-          '@id': 'shopping',
-          '@list': { '?1': 'Spam' }
-        },
-        '@where': {
-          '@id': 'shopping',
-          '@list': { '?1': 'Bread' }
-        }
+        '@delete': { '@id': 'shopping', '@list': { '?1': 'Bread' } },
+        '@insert': { '@id': 'shopping', '@list': { '?1': 'Spam' } },
+        '@where': { '@id': 'shopping', '@list': { '?1': 'Bread' } }
       });
       await expect(api.read<Describe>({ '@describe': 'shopping' }))
         .resolves.toEqual([{
@@ -504,32 +493,23 @@ describe('Meld State API', () => {
         }]);
     });
 
-    test('create a list with multi-valued item', async () => {
+    test('nested lists are created', async () => {
       await api.write<Subject>({
         '@id': 'shopping', '@list': ['Milk', ['Bread', 'Spam']]
       });
       await expect(api.read<Describe>({ '@describe': 'shopping' }))
         .resolves.toMatchObject([{
-          '@list': ['Milk', expect.arrayContaining(['Bread', 'Spam'])]
+          '@list': ['Milk', { '@id': expect.stringMatching(genIdRegex) }]
         }]);
     });
 
-    test('make an item multi-valued', async () => {
+    test('cannot force an item to be multi-valued', async () => {
       await api.write<Subject>({ '@id': 'shopping', '@list': ['Milk', 'Bread'] });
-      await api.write<Update>({
-        '@insert': {
-          '@id': 'shopping',
-          '@list': { '?1': 'Spam' }
-        },
-        '@where': {
-          '@id': 'shopping',
-          '@list': { '?1': 'Bread' }
-        }
-      });
-      await expect(api.read<Describe>({ '@describe': 'shopping' }))
-        .resolves.toMatchObject([{
-          '@list': ['Milk', expect.arrayContaining(['Bread', 'Spam'])]
-        }]);
+      await expect(api.write<Update>({
+        // Do not @delete the old value
+        '@insert': { '@id': 'shopping', '@list': { '?1': 'Spam' } },
+        '@where': { '@id': 'shopping', '@list': { '?1': 'Bread' } }
+      })).rejects.toBeDefined();
     });
   });
 

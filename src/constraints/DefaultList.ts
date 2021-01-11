@@ -5,10 +5,12 @@ import { LseqDef, LseqIndexRewriter } from '../engine/lseq';
 import { meld } from '../engine/MeldEncoding';
 import { isPropertyObject, isReference } from '../jrql-support';
 import { includesValue } from '../updates';
+import { SingleValued } from './SingleValued';
 
 /** @internal */
 export class DefaultList implements MeldConstraint {
   private lseq = new LseqDef();
+  private itemSingleValued = new SingleValued(jrql.item);
 
   constructor(
     /** Unique clone ID, used as lseq site. */
@@ -16,6 +18,7 @@ export class DefaultList implements MeldConstraint {
   }
 
   async check(state: MeldReadState, update: InterimUpdate) {
+    await this.itemSingleValued.check(state, update);
     // Look for list slots being inserted
     const slotsInInsert: jrql.Slot[] = update['@insert'].filter(jrql.isSlot);
     // Go through the inserts looking for lists with inserted slots
@@ -26,10 +29,11 @@ export class DefaultList implements MeldConstraint {
     for (let subject of update['@delete'])
       this.createDeleteRewriter(subject, rewriters);
     return Promise.all(Object.values(rewriters).map(
-      rw => rw.doRewrite(state, update)));
+      rewriter => rewriter.doRewrite(state, update)));
   }
 
   async apply(state: MeldReadState, update: InterimUpdate) {
+    await this.itemSingleValued.apply(state, update);
     // TODO: If someone deletes the type of a list, re-insert the default?
     // TODO: Ensure slots appear only once (one of the moves wins)
     // TODO: Renumber the affected existing slots
