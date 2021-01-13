@@ -4,7 +4,7 @@ import { SingleValued } from '../src/constraints/SingleValued';
 import { JrqlGraph } from '../src/engine/dataset/JrqlGraph';
 import { GraphState } from '../src/engine/dataset/SuSetDataset';
 import { Dataset } from '../src/engine/dataset';
-import { mock, mockFn } from 'jest-mock-extended';
+import { mock } from 'jest-mock-extended';
 
 describe('Single-valued constraint', () => {
   let data: Dataset;
@@ -74,8 +74,10 @@ describe('Single-valued constraint', () => {
     const update = mock<InterimUpdate>({
       '@ticks': 0,
       '@delete': [],
+      // @ts-ignore - Type instantiation is excessively deep and possibly infinite. ts(2589)
       '@insert': [{ '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Fred' }]
     });
+    // @ts-ignore - Type instantiation is excessively deep and possibly infinite. ts(2589)
     await constraint.apply(state, update);
     expect(update.assert.mock.calls).toEqual([]);
   });

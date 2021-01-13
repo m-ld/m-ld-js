@@ -454,11 +454,14 @@ describe('Meld State API', () => {
     test('move a slot by value', async () => {
       await api.write<Subject>({ '@id': 'shopping', '@list': ['Milk', 'Bread', 'Spam'] });
       await api.write<Update>({
+        '@delete': {
+          '@id': 'shopping', '@list': { '?i': { '@id': '?slot', '@item': 'Spam' } }
+        },
         '@insert': {
           '@id': 'shopping', '@list': { 0: { '@id': '?slot', '@item': 'Spam' } }
         },
         '@where': {
-          '@id': 'shopping', '@list': { '?': { '@id': '?slot', '@item': 'Spam' } }
+          '@id': 'shopping', '@list': { '?i': { '@id': '?slot', '@item': 'Spam' } }
         }
       });
       await expect(api.read<Describe>({ '@describe': 'shopping' }))

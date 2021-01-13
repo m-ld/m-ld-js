@@ -93,7 +93,7 @@ describe('json-rql Quads translation', () => {
         '@id': 'shopping',
         '@list': 'Bread'
       }, { query: false }, context));
-      expect(store.size).toBe(3);
+      expect(store.size).toBe(2);
 
       const shoppingBread = store.getQuads(
         rdf.namedNode('http://test.m-ld.org/shopping'),
@@ -104,11 +104,6 @@ describe('json-rql Quads translation', () => {
         shoppingBread.object,
         rdf.namedNode('http://json-rql.org/#item'),
         rdf.literal('Bread'), null)[0]).toBeDefined();
-
-      expect(store.getQuads(
-        shoppingBread.object,
-        rdf.namedNode('http://json-rql.org/#index'),
-        rdf.literal('0', XSD_INTEGER), null)[0]).toBeDefined();
     });
 
     test('quadifies a singleton list property', async () => {
@@ -117,7 +112,7 @@ describe('json-rql Quads translation', () => {
         '@id': 'fred',
         shopping: { '@list': 'Bread' }
       }, { query: false }, context));
-      expect(store.size).toBe(4);
+      expect(store.size).toBe(3);
 
       const fredShopping = store.getQuads(
         rdf.namedNode('http://test.m-ld.org/fred'),
@@ -133,11 +128,6 @@ describe('json-rql Quads translation', () => {
         shoppingBread.object,
         rdf.namedNode('http://json-rql.org/#item'),
         rdf.literal('Bread'), null)[0]).toBeDefined();
-
-      expect(store.getQuads(
-        shoppingBread.object,
-        rdf.namedNode('http://json-rql.org/#index'),
-        rdf.literal('0', XSD_INTEGER), null)[0]).toBeDefined();
     });
 
     test('quadifies a top-level array list', async () => {
@@ -146,7 +136,7 @@ describe('json-rql Quads translation', () => {
         '@id': 'shopping',
         '@list': ['Bread', 'Jam']
       }, { query: false }, context));
-      expect(store.size).toBe(6);
+      expect(store.size).toBe(4);
 
       const shoppingBread = store.getQuads(
         rdf.namedNode('http://test.m-ld.org/shopping'),
@@ -164,19 +154,9 @@ describe('json-rql Quads translation', () => {
         rdf.literal('Bread'), null)[0]).toBeDefined();
 
       expect(store.getQuads(
-        shoppingBread.object,
-        rdf.namedNode('http://json-rql.org/#index'),
-        rdf.literal('0', XSD_INTEGER), null)[0]).toBeDefined();
-
-      expect(store.getQuads(
         shoppingJam.object,
         rdf.namedNode('http://json-rql.org/#item'),
         rdf.literal('Jam'), null)[0]).toBeDefined();
-
-      expect(store.getQuads(
-        shoppingJam.object,
-        rdf.namedNode('http://json-rql.org/#index'),
-        rdf.literal('1', XSD_INTEGER), null)[0]).toBeDefined();
     });
 
     test('quadifies a top-level indexed hash list', async () => {
@@ -185,7 +165,7 @@ describe('json-rql Quads translation', () => {
         '@id': 'shopping',
         '@list': { '1': 'Bread' }
       }, { query: false }, context));
-      expect(store.size).toBe(3);
+      expect(store.size).toBe(2);
 
       const shoppingBread = store.getQuads(
         rdf.namedNode('http://test.m-ld.org/shopping'),
@@ -196,11 +176,6 @@ describe('json-rql Quads translation', () => {
         shoppingBread.object,
         rdf.namedNode('http://json-rql.org/#item'),
         rdf.literal('Bread'), null)[0]).toBeDefined();
-
-      expect(store.getQuads(
-        shoppingBread.object,
-        rdf.namedNode('http://json-rql.org/#index'),
-        rdf.literal('1', XSD_INTEGER), null)[0]).toBeDefined();
     });
 
     test('quadifies a top-level indexed hash list with multiple items', async () => {
@@ -209,7 +184,7 @@ describe('json-rql Quads translation', () => {
         '@id': 'shopping',
         '@list': { '1': ['Bread', 'Milk'] }
       }, { query: false }, context));
-      expect(store.size).toBe(6);
+      expect(store.size).toBe(4);
 
       const shoppingBread = store.getQuads(
         rdf.namedNode('http://test.m-ld.org/shopping'),
@@ -221,11 +196,6 @@ describe('json-rql Quads translation', () => {
         rdf.namedNode('http://json-rql.org/#item'),
         rdf.literal('Bread'), null)[0]).toBeDefined();
 
-      expect(store.getQuads(
-        shoppingBread.object,
-        rdf.namedNode('http://json-rql.org/#index'),
-        rdf.literal('1', XSD_INTEGER), null)[0]).toBeDefined();
-
       const shoppingMilk = store.getQuads(
         rdf.namedNode('http://test.m-ld.org/shopping'),
         rdf.namedNode('data:,1,1'), null, null)[0];
@@ -235,11 +205,6 @@ describe('json-rql Quads translation', () => {
         shoppingMilk.object,
         rdf.namedNode('http://json-rql.org/#item'),
         rdf.literal('Milk'), null)[0]).toBeDefined();
-
-      expect(store.getQuads(
-        shoppingMilk.object,
-        rdf.namedNode('http://json-rql.org/#index'),
-        rdf.literal('1', XSD_INTEGER), null)[0]).toBeDefined();
     });
 
     test('quadifies a top-level data URL indexed hash list', async () => {
@@ -248,7 +213,7 @@ describe('json-rql Quads translation', () => {
         '@id': 'shopping',
         '@list': { 'data:,1': 'Bread' }
       }, { query: false }, context));
-      expect(store.size).toBe(3);
+      expect(store.size).toBe(2);
 
       const shoppingBread = store.getQuads(
         rdf.namedNode('http://test.m-ld.org/shopping'),
@@ -259,11 +224,6 @@ describe('json-rql Quads translation', () => {
         shoppingBread.object,
         rdf.namedNode('http://json-rql.org/#item'),
         rdf.literal('Bread'), null)[0]).toBeDefined();
-
-      expect(store.getQuads(
-        shoppingBread.object,
-        rdf.namedNode('http://json-rql.org/#index'),
-        rdf.literal('1', XSD_INTEGER), null)[0]).toBeDefined();
     });
 
     test('rejects a list with bad indexes', async () => {

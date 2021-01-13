@@ -26,13 +26,10 @@ export namespace jrql {
   export interface Slot extends Subject {
     '@id': Iri;
     [item]: Value | Value[];
-    [index]: number;
   }
 
   export function isSlot(s: Subject): s is Slot {
-    return s['@id'] != null &&
-      s[item] != null &&
-      isNaturalNumber(s[index]);
+    return s['@id'] != null && s[item] != null;
   }
 }
 
@@ -244,10 +241,11 @@ class PreProcessor {
     // If the index is a variable, generate the slot id variable
     if (typeof index == 'string' && !('@id' in slot))
       slot['@id'] = subVar(index, 'slotId');
-    // Slot index is partially redundant with index key in list (for insert)
-    slot[jrql.index] = typeof index == 'string' ? `?${index}` :
-      // Sub-index is not represented in index property
-      isArray(index) ? index[0] : index;
+    // Slot index is never asserted, only entailed
+    if (this.query)
+      slot[jrql.index] = typeof index == 'string' ? `?${index}` :
+        // Sub-index should never exist for a query
+        isArray(index) ? index[0] : index;
 
     includeValue(list, indexKey, slot);
   }

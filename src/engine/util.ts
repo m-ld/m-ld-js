@@ -296,8 +296,16 @@ export function memoise<K extends object, V extends {}>(fn: (key: K) => V): (key
   };
 }
 
+export function lazy<V>(create: (key: string) => V):
+  ((key: string) => V) & Iterable<V> {
+  const cache: { [key: string]: V } = {};
+  return Object.assign(
+    (key: string) => cache[key] ??= create(key),
+    { [Symbol.iterator]: () => Object.values(cache)[Symbol.iterator]() });
+}
+
 export function minIndexOfSparse<T>(arr: T[]) {
-  let min = 0;
+  let min: number | undefined;
   // some() skips empty array positions
   arr.some((_, i) => (min = i) != null);
   return min;

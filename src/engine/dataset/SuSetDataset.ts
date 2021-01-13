@@ -104,12 +104,8 @@ class InterimUpdatePatch implements InterimUpdate {
   remove(key: keyof DeleteInsert<any>, pattern: Subject | Subject[]) {
     this.ready = this.ready
       .then(() => this.graph.definiteQuads(pattern))
-      .then(toRemove => {
-        const patchKey: keyof Patch = key == '@delete' ? 'oldQuads' : 'newQuads';
-        this.entailments.remove(patchKey, toRemove);
-        return this.assertions.remove(patchKey, toRemove).length ?
-          this.update() : this;
-      });
+      .then(toRemove => this.assertions.remove(
+        key == '@delete' ? 'oldQuads' : 'newQuads', toRemove).length ? this.update() : this);
   }
 }
 

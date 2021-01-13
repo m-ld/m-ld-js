@@ -133,9 +133,9 @@ describe('LSEQ', () => {
       // Ordered position identifier-items
       private ordered = () => Object.entries(this.items)
         .sort((e1, e2) => e1[0].localeCompare(e2[0]))
-        .map(e => ({ posId: e[0], item: e[1] }));
+        .map(e => ({ posId: e[0], value: e[1] }));
       // Ordered values
-      get values() { return this.ordered().map(i => i.item); }
+      get values() { return this.ordered().map(i => i.value); }
       // Insert into list at given numeric index >=0, <= values.length
       // Returns an operation suitable for applying to another replica
       insert(i: number, value: T): { insert: [string, T] } {
@@ -226,16 +226,16 @@ describe('LSEQ', () => {
     test('does nothing with no requests on a singleton list', () => {
       const rw = new LseqIndexRewriter(lseq, 'x');
       const notify = mock<LseqIndexNotify<string>>();
-      rw.rewriteIndexes([{posId: lseq.min.between(lseq.max, 'x').toString(), item: 'a'}],
+      rw.rewriteIndexes([{posId: lseq.min.between(lseq.max, 'x').toString(), value: 'a'}],
         notify);
       expect(notify.deleted.mock.calls.length).toBe(0);
       expect(notify.inserted.mock.calls.length).toBe(0);
       expect(notify.reindexed.mock.calls.length).toBe(0);
     });
 
-    test('inserts head on empty list', () => {
+    test('inserts head by index on empty list', () => {
       const rw = new LseqIndexRewriter<string>(lseq, 'x');
-      rw.addInsert('a', 0);
+      rw.addInsert(['a'], 0);
       const notify = mock<LseqIndexNotify<string>>();
       rw.rewriteIndexes([], notify);
       expect(notify.deleted.mock.calls.length).toBe(0);
@@ -250,12 +250,12 @@ describe('LSEQ', () => {
       expect(notify.reindexed.mock.calls.length).toBe(0);
     });
 
-    test('inserts tail on singleton list', () => {
+    test('inserts tail by index on singleton list', () => {
       const rw = new LseqIndexRewriter<string>(lseq, 'x');
       const head = lseq.min.between(lseq.max, 'x').toString();
-      rw.addInsert('b', 1);
+      rw.addInsert(['b'], 1);
       const notify = mock<LseqIndexNotify<string>>();
-      rw.rewriteIndexes([{posId: head, item: 'a'}], notify);
+      rw.rewriteIndexes([{posId: head, value: 'a'}], notify);
       expect(notify.deleted.mock.calls.length).toBe(0);
       expect(notify.inserted.mock.calls.length).toBe(1);
       expect(notify.inserted.mock.calls[0][0]).toBe('b');
@@ -267,10 +267,9 @@ describe('LSEQ', () => {
     test('inserts two heads on singleton list', () => {
       const rw = new LseqIndexRewriter<string>(lseq, 'x');
       const head = lseq.min.between(lseq.max, 'x').toString();
-      rw.addInsert('a', 0, 0);
-      rw.addInsert('b', 0, 1);
+      rw.addInsert(['a', 'b'], 0);
       const notify = mock<LseqIndexNotify<string>>();
-      rw.rewriteIndexes([{ posId: head, item: 'c' }], notify);
+      rw.rewriteIndexes([{ posId: head, value: 'c' }], notify);
       expect(notify.deleted.mock.calls.length).toBe(0);
       
       expect(notify.inserted.mock.calls.length).toBe(2);
@@ -297,7 +296,7 @@ describe('LSEQ', () => {
       const head = lseq.min.between(lseq.max, 'x').toString();
       rw.addDelete(head);
       const notify = mock<LseqIndexNotify<string>>();
-      rw.rewriteIndexes([{ posId: head, item: 'a' }], notify);
+      rw.rewriteIndexes([{ posId: head, value: 'a' }], notify);
       expect(notify.deleted.mock.calls.length).toBe(1);
       expect(notify.deleted.mock.calls[0][0]).toBe('a');
       expect(notify.deleted.mock.calls[0][1]).toBe(head);
@@ -310,19 +309,19 @@ describe('LSEQ', () => {
       const head = lseq.min.between(lseq.max, 'x').toString();
       rw.addDelete('garbage');
       const notify = mock<LseqIndexNotify<string>>();
-      rw.rewriteIndexes([{ posId: head, item: 'a' }], notify);
+      rw.rewriteIndexes([{ posId: head, value: 'a' }], notify);
       expect(notify.deleted.mock.calls.length).toBe(0);
       expect(notify.inserted.mock.calls.length).toBe(0);
       expect(notify.reindexed.mock.calls.length).toBe(0);
     });
 
-    test('replaces head on a singleton list', () => {
+    test('replaces head by index on a singleton list', () => {
       const rw = new LseqIndexRewriter<string>(lseq, 'x');
       const head = lseq.min.between(lseq.max, 'x').toString();
       rw.addDelete(head);
-      rw.addInsert('b', 0);
+      rw.addInsert(['b'], 0);
       const notify = mock<LseqIndexNotify<string>>();
-      rw.rewriteIndexes([{ posId: head, item: 'a' }], notify);
+      rw.rewriteIndexes([{ posId: head, value: 'a' }], notify);
       expect(notify.deleted.mock.calls.length).toBe(1);
       expect(notify.deleted.mock.calls[0][0]).toBe('a');
       expect(notify.deleted.mock.calls[0][1]).toBe(head);
@@ -341,15 +340,85 @@ describe('LSEQ', () => {
       const head = lseq.min.between(lseq.max, 'x').toString(),
         tail = lseq.parse(head).between(lseq.max, 'x').toString();
       rw.addDelete(head);
-      rw.addInsert('b', 0);
+      rw.addInsert(['b'], 0);
       const notify = mock<LseqIndexNotify<string>>();
-      rw.rewriteIndexes([{ posId: head, item: 'a' }, { posId: tail, item: 'c' }], notify);
+      rw.rewriteIndexes([{ posId: head, value: 'a' }, { posId: tail, value: 'c' }], notify);
       expect(notify.deleted.mock.calls.length).toBe(1);
       expect(notify.deleted.mock.calls[0][0]).toBe('a');
       expect(notify.inserted.mock.calls.length).toBe(1);
       expect(notify.inserted.mock.calls[0][0]).toBe('b');
 
       expect(notify.reindexed.mock.calls.length).toBe(0);
+    });
+
+    test('inserts head by position ID on empty list', () => {
+      const rw = new LseqIndexRewriter<string>(lseq, 'x');
+      const head = lseq.min.between(lseq.max, 'x').toString();
+      rw.addInsert('a', head);
+      const notify = mock<LseqIndexNotify<string>>();
+      rw.rewriteIndexes([], notify);
+      expect(notify.deleted.mock.calls.length).toBe(0);
+      expect(notify.inserted.mock.calls.length).toBe(1);
+      expect(notify.inserted.mock.calls[0][0]).toBe('a');
+      expect(notify.inserted.mock.calls[0][1]).toBe(head);
+      expect(notify.inserted.mock.calls[0][2]).toBe(0);
+      expect(notify.reindexed.mock.calls.length).toBe(0);
+    });
+
+    test('inserts head by position ID on singleton list', () => {
+      const rw = new LseqIndexRewriter<string>(lseq, 'x');
+      const head = lseq.min.between(lseq.max, 'x').toString();
+      const newHead = lseq.min.between(lseq.parse(head), 'x').toString();
+      rw.addInsert('a', newHead);
+      const notify = mock<LseqIndexNotify<string>>();
+      rw.rewriteIndexes([{ posId: head, value: 'b' }], notify);
+      expect(notify.deleted.mock.calls.length).toBe(0);
+      
+      expect(notify.inserted.mock.calls.length).toBe(1);
+      expect(notify.inserted.mock.calls[0][0]).toBe('a');
+      expect(notify.inserted.mock.calls[0][1]).toBe(newHead);
+      expect(notify.inserted.mock.calls[0][2]).toBe(0);
+
+      expect(notify.reindexed.mock.calls.length).toBe(1);
+      expect(notify.reindexed.mock.calls[0][0]).toBe('b');
+      expect(notify.reindexed.mock.calls[0][1]).toBe(head);
+      expect(notify.reindexed.mock.calls[0][2]).toBe(1);
+    });
+
+    test('inserts tail by position ID on singleton list', () => {
+      const rw = new LseqIndexRewriter<string>(lseq, 'x');
+      const head = lseq.min.between(lseq.max, 'x').toString();
+      const tail = lseq.parse(head).between(lseq.max, 'x').toString();
+      rw.addInsert('b', tail);
+      const notify = mock<LseqIndexNotify<string>>();
+      rw.rewriteIndexes([{ posId: head, value: 'a' }], notify);
+      expect(notify.deleted.mock.calls.length).toBe(0);
+      expect(notify.inserted.mock.calls.length).toBe(1);
+      expect(notify.inserted.mock.calls[0][0]).toBe('b');
+      expect(notify.inserted.mock.calls[0][1]).toBe(tail);
+      expect(notify.inserted.mock.calls[0][2]).toBe(1);
+      expect(notify.reindexed.mock.calls.length).toBe(0);
+    });
+
+    test('inserts middle by position ID', () => {
+      const rw = new LseqIndexRewriter<string>(lseq, 'x');
+      const head = lseq.min.between(lseq.max, 'x').toString();
+      const tail = lseq.parse(head).between(lseq.max, 'x').toString();
+      const mid = lseq.parse(head).between(lseq.parse(tail), 'x').toString();
+      rw.addInsert('b', mid);
+      const notify = mock<LseqIndexNotify<string>>();
+      rw.rewriteIndexes([{ posId: head, value: 'a' }, { posId: tail, value: 'c' }], notify);
+      expect(notify.deleted.mock.calls.length).toBe(0);
+
+      expect(notify.inserted.mock.calls.length).toBe(1);
+      expect(notify.inserted.mock.calls[0][0]).toBe('b');
+      expect(notify.inserted.mock.calls[0][1]).toBe(mid);
+      expect(notify.inserted.mock.calls[0][2]).toBe(1);
+
+      expect(notify.reindexed.mock.calls.length).toBe(1);
+      expect(notify.reindexed.mock.calls[0][0]).toBe('c');
+      expect(notify.reindexed.mock.calls[0][1]).toBe(tail);
+      expect(notify.reindexed.mock.calls[0][2]).toBe(2);
     });
   });
 });

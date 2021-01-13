@@ -335,9 +335,9 @@ export interface InterimUpdate extends MeldUpdate {
    */
   entail(update: Update): void;
   /**
-   * Removes assertions or entailments from this update, prior to application to
-   * the dataset. This is used to rewrite assertions made by the application, or
-   * the work of prior constraints.
+   * Removes assertions (not entailments) from this update, prior to application
+   * to the dataset. This is used to rewrite assertions made by the application,
+   * or the work of prior constraints.
    *
    * Removal of an assertion is possible:
    * 1. during constraint checking,
@@ -346,7 +346,7 @@ export interface InterimUpdate extends MeldUpdate {
    *    update will be ignored, which may lead to unexpected results.
    *
    * @param key Whether to remove `@delete` or `@insert` components
-   * @param pattern the Subject assertions or entailments to remove
+   * @param pattern the Subject assertions to remove
    * @see {@link ready}
    */
   remove(key: keyof DeleteInsert<any>, pattern: Subject | Subject[]): void;
