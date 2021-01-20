@@ -22,8 +22,7 @@ import { AbstractMeld, comesAlive } from '../AbstractMeld';
 import { MeldConfig } from '../..';
 import { RemoteUpdates } from './RemoteUpdates';
 import { CloneEngine } from '../StateEngine';
-import { MeldError } from '../MeldError';
-import { MeldErrorStatus } from '@m-ld/m-ld-spec';
+import { MeldError, MeldErrorStatus } from '../MeldError';
 import { MeldEncoding } from '../MeldEncoding';
 
 enum ConnectStyle {

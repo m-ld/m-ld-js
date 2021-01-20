@@ -133,9 +133,24 @@ export interface MeldState extends MeldReadState {
 /**
  * @see m-ld [specification](http://spec.m-ld.org/interfaces/meldupdate.html)
  */
-export interface MeldUpdate extends spec.MeldUpdate {
+export interface MeldUpdate {
+  /**
+   * Partial subjects, containing properties that have been deleted from the
+   * domain. Note that deletion of a property (even of all properties) does not
+   * necessarily indicate that the subject's identity is not longer represented
+   * in the domain.
+   */
   readonly '@delete': Subject[];
+  /**
+   * Partial subjects, containing properties that have been inserted into the
+   * domain.
+   */
   readonly '@insert': Subject[];
+  /**
+   * Current local clock ticks at the time of the update.
+   * @see MeldStatus.ticks
+   */
+  readonly '@ticks': number;
 }
 
 /**

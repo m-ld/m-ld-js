@@ -80,6 +80,7 @@
     "marky": "^1.2.1",
     "mqtt-pattern": "^1.2.0",
     "quadstore": "^7.1.1",
+    "quadstore-comunica": "^0.2.1",
     "rxjs": "^6.6.3",
     "short-uuid": "^4.1.0",
     "valid-data-url": "^3.0.1"

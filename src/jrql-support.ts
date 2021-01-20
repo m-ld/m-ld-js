@@ -101,9 +101,14 @@ export function isSet(object: SubjectPropertyObject): object is Set {
 
 // Utility functions
 /** @internal */
-export const isValueObject = jrql.isValueObject;
+export function isValueObject(value: SubjectPropertyObject): value is jrql.ValueObject {
+  return typeof value == 'object' && '@value' in value;
+}
+
 /** @internal */
-export const isReference = jrql.isReference;
+export function isReference(value: SubjectPropertyObject): value is Reference {
+  return typeof value == 'object' && Object.keys(value).every(k => k === '@id');
+}
 
 /**
  * Result declaration of a {@link Select} query.

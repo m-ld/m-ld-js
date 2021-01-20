@@ -16,6 +16,7 @@ import { Context } from 'jsonld/jsonld-spec';
 import { activeCtx, compactIri, expandTerm } from '../jsonld';
 import { ActiveContext } from 'jsonld/lib/context';
 import { Algebra } from 'sparqlalgebrajs';
+import { newEngine } from 'quadstore-comunica';
 
 /**
  * Atomically-applied patch to a quad-store.
@@ -164,11 +165,12 @@ export class QuadStoreDataset implements Dataset {
     const activeCtx = await this.activeCtx;
     this.store = new Quadstore({
       backend: this.backend,
+      comunica: newEngine(),
       dataFactory,
       indexes: [
-        [TermName.GRAPH, TermName.SUBJECT, TermName.PREDICATE, TermName.OBJECT],
-        [TermName.GRAPH, TermName.OBJECT, TermName.SUBJECT, TermName.PREDICATE],
-        [TermName.GRAPH, TermName.PREDICATE, TermName.OBJECT, TermName.SUBJECT]
+        ['graph', 'subject', 'predicate', 'object'],
+        ['graph', 'object', 'subject', 'predicate'],
+        ['graph', 'predicate', 'object', 'subject']
       ],
       prefixes: activeCtx == null ? undefined : {
         expandTerm: term => expandTerm(term, activeCtx),

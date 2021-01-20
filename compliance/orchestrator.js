@@ -104,7 +104,11 @@ function start(req, res, next) {
     clones[cloneId] = {
       process: fork(join(__dirname, 'clone.js'),
         [JSON.stringify(config), tmpDir.name, req.id()],
-        { execArgv: inspector.url() ? [`--inspect-brk=${global.nextDebugPort++}`] : [] }),
+        {
+          // Strictly disallow unhandled promise rejections for compliance testing
+          execArgv: ['--unhandled-rejections=strict']
+            .concat(inspector.url() ? [`--inspect-brk=${global.nextDebugPort++}`] : [])
+        }),
       tmpDir,
       mqtt: { server: mqttServer, port: mqttPort }
     };
