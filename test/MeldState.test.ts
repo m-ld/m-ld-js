@@ -465,6 +465,27 @@ describe('Meld State API', () => {
         .resolves.toEqual([]);
     });
 
+    test('move a slot by index', async () => {
+      await api.write<Subject>({ '@id': 'shopping', '@list': ['Milk', 'Bread', 'Spam'] });
+      await api.write<Update>({
+        '@delete': {
+          '@id': 'shopping', '@list': { 1: { '@id': '?slot', '@item': '?item' } }
+        },
+        '@insert': {
+          '@id': 'shopping', '@list': { 0: { '@id': '?slot', '@item': '?item' } }
+        },
+        '@where': {
+          '@id': 'shopping', '@list': { 1: { '@id': '?slot', '@item': '?item' } }
+        }
+      });
+      await expect(api.read<Describe>({ '@describe': 'shopping' }))
+        .resolves.toEqual([{
+          '@id': 'shopping',
+          '@type': 'http://m-ld.org/RdfLseq',
+          '@list': ['Bread', 'Milk', 'Spam']
+        }]);
+    });
+
     test('move a slot by value', async () => {
       await api.write<Subject>({ '@id': 'shopping', '@list': ['Milk', 'Bread', 'Spam'] });
       await api.write<Update>({

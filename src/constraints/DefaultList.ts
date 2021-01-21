@@ -155,14 +155,14 @@ class ListRewriter extends LseqIndexRewriter<SlotInList> {
       if (prev == null) {
         (bySlot[slot.id] ??= {}).final = posId ?? index;
       } else if (prev !== (posId ?? index)) {
-        // - In check mode, throw if finally inserting in more than one position
+        // In check mode, throw if finally inserting in more than one position
         if (this.mode == 'check')
           throw 'Slot cannot appear more than once in list.';
-        // - In apply mode, choose the lowest final position as authoritative
-        if (posId != null && typeof prev == 'string' && prev > posId) {
-          bySlot[slot.id].final = posId;
-          // We will assert deletion of the other position later
-          this.addDelete(prev);
+        // In apply mode, choose the lowest final position as authoritative
+        if (posId != null && typeof prev == 'string' && prev !== posId) {
+          bySlot[slot.id].final = prev > posId ? posId : prev;
+          // We will actually assert deletion of the other position later
+          this.addDelete(prev > posId ? prev : posId);
         }
       }
     }

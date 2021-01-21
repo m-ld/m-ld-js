@@ -219,28 +219,24 @@ class PreProcessor {
   private addSlot(list: List,
     index: string | number | [number, number],
     item: SubjectPropertyObject) {
+    const slot = this.asSlot(item);
     let indexKey: string;
     if (typeof index === 'string') {
+      // Index is a variable
       index ||= genVarName(); // We need the var name now to generate sub-var names
       indexKey = subVar(index, 'listKey');
+      // Generate the slot id variable if not available
+      if (!('@id' in slot))
+        slot['@id'] = subVar(index, 'slotId');
+    } else if (!this.query) {
+      // Inserting at a numeric index
+      indexKey = toIndexDataUrl(index);
     } else {
-      // If the index is specified numerically in query mode, the value will be
-      // matched with the slot index, and the key index can be ?any
-      indexKey = this.query ? any() : toIndexDataUrl(index);
+      // Index is specified numerically in query mode. The value will be matched
+      // with the slot index below, and the key index with the slot ID, if present
+      const slotVarName = slot['@id'] != null && matchVar(slot['@id']);
+      indexKey = slotVarName ? subVar(slotVarName, 'listKey') : any();
     }
-    let slot: Subject;
-    if (typeof item == 'object' && '@item' in item) {
-      // The item is already a slot (with an @item key)
-      item[jrql.item] = item['@item'];
-      delete item['@item'];
-      slot = item;
-    } else {
-      // A nested list is a nested list (not flattened or a set)
-      slot = { [jrql.item]: isArray(item) ? { '@list': item } : item };
-    }
-    // If the index is a variable, generate the slot id variable
-    if (typeof index == 'string' && !('@id' in slot))
-      slot['@id'] = subVar(index, 'slotId');
     // Slot index is never asserted, only entailed
     if (this.query)
       slot[jrql.index] = typeof index == 'string' ? `?${index}` :
@@ -248,6 +244,18 @@ class PreProcessor {
         isArray(index) ? index[0] : index;
 
     includeValue(list, indexKey, slot);
+  }
+
+  private asSlot(item: SubjectPropertyObject): Subject {
+    if (typeof item == 'object' && '@item' in item) {
+      // The item is already a slot (with an @item key)
+      item[jrql.item] = item['@item'];
+      delete item['@item'];
+      return item;
+    } else {
+      // A nested list is a nested list (not flattened or a set)
+      return { [jrql.item]: isArray(item) ? { '@list': item } : item };
+    }
   }
 }
 
