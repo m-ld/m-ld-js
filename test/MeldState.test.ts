@@ -338,6 +338,20 @@ describe('Meld State API', () => {
       }]);
     });
 
+    test('appends beyond the end of a list', async () => {
+      await api.write<Subject>({
+        '@id': 'shopping', '@list': ['Bread']
+      });
+      await api.write<Subject>({
+        '@id': 'shopping', '@list': { 2: 'Milk' }
+      });
+      await expect(api.read<Describe>({ '@describe': 'shopping' })).resolves.toMatchObject([{
+        '@id': 'shopping',
+        '@type': 'http://m-ld.org/RdfLseq',
+        '@list': ['Bread', 'Milk']
+      }]);
+    });
+
     test('prepends to a list', async () => {
       await api.write<Subject>({
         '@id': 'shopping', '@list': { 0: 'Milk' }

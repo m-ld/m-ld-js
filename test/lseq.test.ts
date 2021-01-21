@@ -264,6 +264,20 @@ describe('LSEQ', () => {
       expect(notify.reindexed.mock.calls.length).toBe(0);
     });
 
+    test('inserts beyond tail index on singleton list', () => {
+      const rw = new LseqIndexRewriter<string>(lseq, 'x');
+      const head = lseq.min.between(lseq.max, 'x').toString();
+      rw.addInsert(['b'], 2); // Beyond tail
+      const notify = mock<LseqIndexNotify<string>>();
+      rw.rewriteIndexes([{ posId: head, value: 'a' }], notify);
+      expect(notify.deleted.mock.calls.length).toBe(0);
+      expect(notify.inserted.mock.calls.length).toBe(1);
+      expect(notify.inserted.mock.calls[0][0]).toBe('b');
+      expect(notify.inserted.mock.calls[0][1] > head).toBe(true);
+      expect(notify.inserted.mock.calls[0][2]).toBe(1);
+      expect(notify.reindexed.mock.calls.length).toBe(0);
+    });
+
     test('inserts two heads on singleton list', () => {
       const rw = new LseqIndexRewriter<string>(lseq, 'x');
       const head = lseq.min.between(lseq.max, 'x').toString();

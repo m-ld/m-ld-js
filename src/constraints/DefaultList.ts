@@ -21,7 +21,7 @@ export class DefaultList implements MeldConstraint {
   async check(state: MeldReadState, update: InterimUpdate) {
     await this.itemSingleValued.check(state, update);
     await this.doListRewrites('check', update, state);
-    // An index deletion can be asserted in a delete-where, so in
+    // An index deletion can also be asserted in a delete-where, so in
     // all cases, remove any index assertions
     update.remove('@delete', update['@delete']
       .filter(s => jrql.isSlot(s) && s[jrql.index] != null)
@@ -31,7 +31,6 @@ export class DefaultList implements MeldConstraint {
   async apply(state: MeldReadState, update: InterimUpdate) {
     await this.itemSingleValued.apply(state, update);
     // TODO: If someone deletes the type of a list, re-insert the default?
-    // TODO: Ensure slots appear only once (lowest position wins)
     return this.doListRewrites('apply', update, state);
   }
 
@@ -43,7 +42,7 @@ export class DefaultList implements MeldConstraint {
       new ListRewriter(mode, listId, this.lseq, this.site));
     // Go through the inserts looking for lists with inserted slots
     for (let subject of update['@insert'])
-      this.findListInserts('check', subject, rewriters, slotsInInsert);
+      this.findListInserts(mode, subject, rewriters, slotsInInsert);
     // Go though the deletes looking for lists with deleted indexes
     for (let subject of update['@delete'])
       this.findListDeletes(subject, rewriters);

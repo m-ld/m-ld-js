@@ -266,7 +266,6 @@ export class LseqIndexRewriter<T> {
    * - value >= domain.posId.min
    */
   rewriteIndexes(existing: PosItem<T>[], notify: LseqIndexNotify<T>) {
-    const domain = this.domain;
     let oldIndex = minIndexOfSparse(existing) ?? 0, newIndex = oldIndex;
     let posId = (oldIndex - 1) in existing ?
       this.lseq.parse(existing[oldIndex - 1].posId) : this.lseq.min;
@@ -274,7 +273,7 @@ export class LseqIndexRewriter<T> {
     const posIdInsertQueue: PosItem<T>[] = [...this.posIdInserts.entries()]
       .map(([posId, value]) => ({ posId, value }))
       .sort((e1, e2) => e1.posId.localeCompare(e2.posId));
-    while (posId.toString() !== prevPosId ||
+    while (posId.toString() !== prevPosId || oldIndex < this.indexInserts.length ||
       // Don't keep iterating if all inserts are processed and index done
       (oldIndex < existing.length && oldIndex !== newIndex)) {
       prevPosId = posId.toString();

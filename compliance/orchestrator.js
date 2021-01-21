@@ -121,6 +121,9 @@ function start(req, res, next) {
       updated: message => {
         return res.write(JSON.stringify(message));
       },
+      status: message => {
+        return res.write(JSON.stringify(message));
+      },
       closed: () => {
         res.end();
         next();
