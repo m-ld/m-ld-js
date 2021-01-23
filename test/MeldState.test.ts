@@ -473,9 +473,6 @@ describe('Meld State API', () => {
         },
         '@insert': {
           '@id': 'shopping', '@list': { 0: { '@id': '?slot', '@item': '?item' } }
-        },
-        '@where': {
-          '@id': 'shopping', '@list': { 1: { '@id': '?slot', '@item': '?item' } }
         }
       });
       await expect(api.read<Describe>({ '@describe': 'shopping' }))
@@ -494,9 +491,6 @@ describe('Meld State API', () => {
         },
         '@insert': {
           '@id': 'shopping', '@list': { 0: { '@id': '?slot', '@item': 'Spam' } }
-        },
-        '@where': {
-          '@id': 'shopping', '@list': { '?i': { '@id': '?slot', '@item': 'Spam' } }
         }
       });
       await expect(api.read<Describe>({ '@describe': 'shopping' }))
@@ -520,8 +514,7 @@ describe('Meld State API', () => {
       await api.write<Subject>({ '@id': 'shopping', '@list': ['Milk', 'Bread'] });
       await api.write<Update>({
         '@delete': { '@id': 'shopping', '@list': { '?1': 'Bread' } },
-        '@insert': { '@id': 'shopping', '@list': { '?1': 'Spam' } },
-        '@where': { '@id': 'shopping', '@list': { '?1': 'Bread' } }
+        '@insert': { '@id': 'shopping', '@list': { '?1': 'Spam' } }
       });
       await expect(api.read<Describe>({ '@describe': 'shopping' }))
         .resolves.toEqual([{

@@ -428,14 +428,16 @@ export class SuSetDataset extends JrqlGraph {
   }
 
   private newTriplesTid(triples: Triple[], tid: UUID): Promise<PatchQuads> {
-    return this.tidsGraph.insert(triples.map<HashTid>(
-      triple => ({ '@id': tripleId(triple), tid })));
+    return this.tidsGraph.update({
+      '@insert': triples.map<HashTid>(triple => ({ '@id': tripleId(triple), tid }))
+    });
   }
 
   private newTripleTids(triple: Triple, tids: UUID[]): Promise<PatchQuads> {
     const theTripleId = tripleId(triple);
-    return this.tidsGraph.insert(tids.map<HashTid>(
-      tid => ({ '@id': theTripleId, tid })));
+    return this.tidsGraph.update({
+      '@insert': tids.map<HashTid>(tid => ({ '@id': theTripleId, tid }))
+    });
   }
 
   private async findTriplesTids(quads: Quad[]): Promise<QuadMap<Quad[]>> {

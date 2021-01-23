@@ -157,42 +157,40 @@ export class JrqlGraph {
   async update(query: Update,
     context: Context = query['@context'] || this.defaultContext): Promise<PatchQuads> {
     let patch = new PatchQuads();
-    // If there is a @where clause, use variable substitutions per solution.
+
+    const vars = new Set<string>();
+    const deleteQuads = query['@delete'] != null ?
+      await this.jrql.quads(query['@delete'], { query: true, vars }, context) : undefined;
+    const insertQuads = query['@insert'] != null ?
+      await this.jrql.quads(query['@insert'], { query: false }, context) : undefined;
+
+    let solutions: Observable<Binding> | null = null;
     if (query['@where'] != null) {
-      const deleteTemplate = query['@delete'] != null ?
-        await this.jrql.quads(query['@delete'], { query: true }, context) : null;
-      const insertTemplate = query['@insert'] != null ?
-        await this.jrql.quads(query['@insert'], { query: false }, context) : null;
-      await this.solutions(asGroup(query['@where']), this.project, context).forEach(solution => {
-        const matchingQuads = (template: Quad[] | null) => {
-          // If there are variables in the update for which there is no value in the
-          // solution, or if the solution value is not compatible with the quad
-          // position, then this is treated as no-match, even if this is a
-          // `@delete` (i.e. DELETEWHERE does not apply).
-          return template != null ? this.fillTemplate(template, solution)
-            .filter(quad => !anyVarTerm(quad)) : [];
-        }
+      // If there is a @where clause, use variable substitutions per solution
+      solutions = this.solutions(asGroup(query['@where']), this.project, context);
+    } else if (deleteQuads != null && vars.size > 0) {
+      // A @delete clause with no @where may be used to bind variables
+      solutions = this.project(
+        this.sparql.createBgp(deleteQuads.map(this.toPattern)), vars);
+    }
+    if (solutions != null) {
+      await solutions.forEach(solution => {
+        // If there are variables in the update for which there is no value in the
+        // solution, or if the solution value is not compatible with the quad
+        // position, then this is treated as no-match, even if this is a
+        // @delete (i.e. DELETEWHERE does not apply if @where exists).
+        const matchingQuads = (template?: Quad[]) => template == null ? [] :
+          this.fillTemplate(template, solution).filter(quad => !anyVarTerm(quad));
         patch.append(new PatchQuads({
-          oldQuads: matchingQuads(deleteTemplate),
-          newQuads: matchingQuads(insertTemplate)
+          oldQuads: matchingQuads(deleteQuads),
+          newQuads: matchingQuads(insertQuads)
         }));
       });
     } else {
-      if (query['@delete'])
-        patch.append(await this.delete(query['@delete'], context));
-      if (query['@insert'])
-        patch.append(await this.insert(query['@insert'], context));
+      // Both @delete and @insert have fixed quads, just apply them
+      patch.append({ oldQuads: deleteQuads, newQuads: insertQuads });
     }
     return patch;
-  }
-
-  /**
-   * This is shorthand for a `@insert` update with no `@where`. It requires
-   * there to be no variables in the `@insert`.
-   */
-  async insert(insert: Subject | Subject[],
-    context: Context = this.defaultContext): Promise<PatchQuads> {
-    return new PatchQuads({ newQuads: await this.definiteQuads(insert, context) });
   }
 
   async definiteQuads(pattern: Subject | Subject[],
@@ -202,21 +200,6 @@ export class JrqlGraph {
     if (vars.size > 0)
       throw new Error('Pattern has variable content');
     return quads;
-  }
-
-  /**
-   * This is shorthand for a `@delete` update with no `@where`. It supports
-   * SPARQL DELETEWHERE semantics, matching any variables against the data.
-   */
-  async delete(dels: Subject | Subject[],
-    context: Context = this.defaultContext): Promise<PatchQuads> {
-    const vars = new Set<string>();
-    const patterns = await this.jrql.quads(dels, { query: true, vars }, context);
-    // If there are no variables in the delete, we don't need to find solutions
-    return new PatchQuads({
-      oldQuads: vars.size > 0 ?
-        await this.matchQuads(patterns).pipe(toArray()).toPromise() : patterns, newQuads: []
-    });
   }
 
   private toPattern = (quad: Quad): Algebra.Pattern => {
