@@ -38,7 +38,8 @@ declare module 'jsonld/lib/util' {
    *
    * @return all of the values for a subject's property as an array.
    */
-  function getValues(subject: object, property: string): Array<any>;
+  // DO NOT USE – ignores falsy values such as 0 and ''
+  //function getValues(subject: object, property: string): Array<any>;
 
   /** Options for {@link addValue} */
   interface ValueOptions {

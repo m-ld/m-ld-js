@@ -13,8 +13,7 @@ import { Filter } from '../indices';
 import dataFactory = require('@rdfjs/data-model');
 import { BatchOpts, Binding, DefaultGraphMode, ResultType, TermName } from 'quadstore/dist/lib/types';
 import { Context } from 'jsonld/jsonld-spec';
-import { activeCtx, compactIri, expandTerm } from '../jsonld';
-import { ActiveContext } from 'jsonld/lib/context';
+import { activeCtx, compactIri, expandTerm, ActiveContext } from '../jsonld';
 import { Algebra } from 'sparqlalgebrajs';
 import { newEngine } from 'quadstore-comunica';
 

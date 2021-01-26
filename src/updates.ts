@@ -1,6 +1,6 @@
 import { isPropertyObject, isSet, Subject, Value } from './jrql-support';
 import { DeleteInsert, Resource } from './api';
-import { addValue, getValues, hasProperty, hasValue, removeValue, ValueOptions } from 'jsonld/lib/util';
+import { addValue, getValues, hasProperty, hasValue, removeValue, ValueOptions } from './engine/jsonld';
 
 /**
  * Indexes a **m-ld** update notification by Subject.

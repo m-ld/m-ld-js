@@ -1,6 +1,5 @@
 import { compact } from 'jsonld';
 import { Iri, Url } from 'jsonld/jsonld-spec';
-import { clone } from 'jsonld/lib/util';
 import { Binding } from 'quadstore';
 import { DataFactory, Quad, Term } from 'rdf-js';
 import { GraphName } from '.';
@@ -9,7 +8,7 @@ import {
   Context, Subject, Result, Value, isValueObject, isReference,
   isSet, isList, List, SubjectPropertyObject
 } from '../../jrql-support';
-import { activeCtx, compactIri, dataUrlData, jsonToRdf, rdfToJson } from '../jsonld';
+import { activeCtx, compactIri, dataUrlData, jsonToRdf, rdfToJson, clone } from '../jsonld';
 import { inPosition, TriplePos } from '../quads';
 const { isArray } = Array;
 

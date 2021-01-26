@@ -83,6 +83,15 @@ describe('LSEQ', () => {
       expect(posId.ids[1].pos).toBeLessThan(256);
     });
 
+    test('overflows twice if no room', () => {
+      const posId = lseq.parse('1x').between(lseq.parse('1x01x'), 'x');
+      expect(posId.ids.length).toBe(3);
+      expect(posId.ids[0].pos).toBe(1);
+      expect(posId.ids[1].pos).toBe(0);
+      expect(posId.ids[2].pos).toBeGreaterThan(0);
+      expect(posId.ids[2].pos).toBeLessThan(4096);
+    });
+
     test('overflows if no headroom', () => {
       const posId = lseq.parse('1xffx').between(lseq.parse('2x01x'), 'x');
       expect(posId.ids.length).toBe(3);

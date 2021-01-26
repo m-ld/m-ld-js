@@ -143,11 +143,15 @@ class LseqPosId {
 
   private cloneWith(level: number, lbound: number, ubound: number, site: string): LseqPosId {
     site = site.slice(0, this.lseq.siteLength).padEnd(this.lseq.siteLength, '_');
-    return new LseqPosId(this.ids
-      .slice(0, level)
-      // If extending lseq.min, fill in a null site. Also clone for safety.
-      .map(({ pos, site: maybeSite }) => ({ pos, site: maybeSite ?? site }))
-      .concat({ pos: this.newPos(lbound, ubound), site }), this.lseq);
+    const ids: LseqPosId['ids'] = new Array(level);
+    // If extending lseq.min, fill in a null site. Also clone for safety.
+    for (let i = 0; i < level && i < this.ids.length; i++)
+      ids[i] = { pos: this.ids[i].pos, site: this.ids[i].site ?? site };
+    // Pad with zero up to the requested level
+    ids.fill({ pos: 0, site }, this.ids.length);
+    // Add the new level with a generated position
+    ids.push({ pos: this.newPos(lbound, ubound), site });
+    return new LseqPosId(ids, this.lseq);
   }
 
   private newPos(lbound: number, ubound: number): number {

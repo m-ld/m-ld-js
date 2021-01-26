@@ -8,6 +8,9 @@ export { Options } from 'jsonld';
 export { ActiveContext } from 'jsonld/lib/context';
 import validDataUrl = require('valid-data-url');
 
+export * from 'jsonld/lib/util';
+export * from 'jsonld/lib/context';
+
 export function rdfToJson(quads: Iterable<Quad>): Promise<any> {
   // Using native types to avoid unexpected value objects
   return fromRDF(quads, { useNativeTypes: true });
@@ -39,4 +42,16 @@ export function dataUrlData(url: Url, ...contentTypes: string[]): string | undef
     if (contentTypes.includes(contentType))
       return data;
   }
+}
+
+/**
+ * Gets all of the values for a subject's property as an array.
+ *
+ * @param subject the subject.
+ * @param property the property.
+ *
+ * @return all of the values for a subject's property as an array.
+ */
+export function getValues(subject: { [key: string]: any }, property: string): Array<any> {
+  return [].concat(subject[property] ?? []);
 }
