@@ -221,6 +221,7 @@ export class LseqIndexRewriter<T> {
    */
   addDelete(posId: string) {
     this.deletes.add(posId);
+    this.posIdInserts.delete(posId);
   }
 
   /**
@@ -234,10 +235,14 @@ export class LseqIndexRewriter<T> {
    */
   addInsert(value: T, posId: string): void;
   addInsert(data: T | T[], posIdOrIndex: number | string) {
-    if (typeof posIdOrIndex == 'number')
+    if (typeof posIdOrIndex == 'number') {
       Object.assign(this.indexInserts[posIdOrIndex] ??= [], data);
-    else
+    } else {
+      // TODO: This is a bit lame
+      if (this.deletes.has(posIdOrIndex))
+        throw new Error('Cannot insert at a deleted position');
       this.posIdInserts.set(posIdOrIndex, <T>data);
+    }
   }
 
   /**

@@ -146,7 +146,7 @@ class ListRewriter extends LseqIndexRewriter<SlotInList> {
    * affected slot ID, this determines the final position (posId or index), and
    * throws if not allowed.
    */
-  private preProcess(existing: PosItem<SlotInList>[]) {
+  private preProcess(existing: PosItem<SlotInList>[], update: InterimUpdate) {
     const bySlot: { [slotId: string]: { old?: SlotInList; final?: string | number; }; } = {};
     for (let { value: slot, posId } of existing)
       bySlot[slot.id] = { old: slot, final: this.deletes.has(posId) ? undefined : posId };
@@ -160,9 +160,14 @@ class ListRewriter extends LseqIndexRewriter<SlotInList> {
           throw 'Slot cannot appear more than once in list.';
         // In apply mode, choose the lowest final position as authoritative
         if (posId != null && typeof prev == 'string' && prev !== posId) {
-          bySlot[slot.id].final = prev > posId ? posId : prev;
-          // We will actually assert deletion of the other position later
-          this.addDelete(prev > posId ? prev : posId);
+          const [final, toDel] = [prev, posId].sort();
+          bySlot[slot.id].final = final;
+          // We need to register the deletion so re-indexing is correct
+          this.addDelete(toDel);
+          // Assert deletion of the redundant index key
+          update.assert({
+            '@delete': { '@id': this.listId, [meld.rdflseqPosId(toDel)]: { '@id': slot.id } }
+          });
         }
       }
     }
@@ -173,38 +178,39 @@ class ListRewriter extends LseqIndexRewriter<SlotInList> {
     if (await this.isDefaultList(state, update)) {
       const existing = await this.loadRelevantSlots(state);
       // Cache existing slots and their final positions, by slot ID
-      const bySlot = this.preProcess(existing);
+      const bySlot = this.preProcess(existing, update);
       // Re-write the indexes based on all deletions and insertions
       this.rewriteIndexes(existing, {
         deleted: slot => {
-          update.entail({ '@delete': { '@id': slot.id, [jrql.index]: slot.index } });
-          // Cascade the deletion of the slot in this position, if not moved
-          if (this.mode == 'check' && bySlot[slot.id].final == null)
-            update.assert({ '@delete': { '@id': slot.id } });
+          // If the slot is moving, we'll do the re-index in the insert
+          if (bySlot[slot.id].final == null) {
+            // Entail removal of the old slot index
+            update.entail({ '@delete': { '@id': slot.id, [jrql.index]: slot.index } });
+            // Cascade the deletion of the slot in this position
+            if (this.mode == 'check')
+              update.assert({ '@delete': { '@id': slot.id } });
+          }
         },
         inserted: (slot, posId, index) => {
-          const { old, final } = bySlot[slot.id];
+          const listKey = meld.rdflseqPosId(posId);
           if (this.mode == 'check') {
             // Remove the original inserted slot index from the update.
             update.remove('@insert', {
               '@id': this.listId, [slot.listKey]: { '@id': slot.id }
             });
-            // Add the new slot with updated details at the new position ID and index.
+            // Add the new slot with updated details at the new position ID.
             update.assert({ // Asserting the new slot position
-              '@insert': { '@id': this.listId, [meld.rdflseqPosId(posId)]: { '@id': slot.id } }
-            });
-          } else if (old != null && final != null && posId !== final) {
-            // This slot has become duplicated due to a concurrent move. Assert
-            // deletion of the old list key.
-            update.assert({
-              '@delete': { '@id': this.listId, [old.listKey]: { '@id': slot.id } }
+              '@insert': { '@id': this.listId, [listKey]: { '@id': slot.id } }
             });
           }
-          update.entail({ // Entailing the slot index
-            '@insert': { '@id': slot.id, [jrql.index]: index },
-            // Entail deletion of the old index if this slot has moved
-            '@delete': old != null ? { '@id': slot.id, [jrql.index]: old.index } : []
-          });
+          const { old } = bySlot[slot.id];
+          if (old?.index !== index) {
+            update.entail({ // Entailing the slot index
+              '@insert': { '@id': slot.id, [jrql.index]: index },
+              // Entail deletion of the old index if this slot has moved
+              '@delete': old != null ? { '@id': slot.id, [jrql.index]: old.index } : []
+            });
+          }
         },
         reindexed: (slot, _posId, index) => {
           update.entail({
@@ -217,6 +223,9 @@ class ListRewriter extends LseqIndexRewriter<SlotInList> {
   }
 
   private async isDefaultList(state: MeldReadState, update: InterimUpdate): Promise<boolean> {
+    // We only ever reach here in apply mode if we definitely have an RdfLseq
+    if (this.mode == 'apply')
+      return true;
     const sel = await state.read<Select>({
       '@select': '?type', '@where': { '@id': this.listId, '@type': '?type' }
     });

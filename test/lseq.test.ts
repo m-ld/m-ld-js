@@ -338,6 +338,27 @@ describe('LSEQ', () => {
       expect(notify.reindexed.mock.calls.length).toBe(0);
     });
 
+    test('does nothing if deleting an insert', () => {
+      const rw = new LseqIndexRewriter<string>(lseq, 'x');
+      const head = lseq.min.between(lseq.max, 'x').toString();
+      const tail = lseq.parse(head).between(lseq.max, 'x').toString();
+      rw.addInsert('b', tail);
+      rw.addDelete(tail);
+      const notify = mock<LseqIndexNotify<string>>();
+      rw.rewriteIndexes([{ posId: head, value: 'a' }], notify);
+      expect(notify.deleted.mock.calls.length).toBe(0);
+      expect(notify.inserted.mock.calls.length).toBe(0);
+      expect(notify.reindexed.mock.calls.length).toBe(0);
+    });
+
+    test('throws if inserting a delete', () => {
+      const rw = new LseqIndexRewriter<string>(lseq, 'x');
+      const head = lseq.min.between(lseq.max, 'x').toString();
+      const tail = lseq.parse(head).between(lseq.max, 'x').toString();
+      rw.addDelete(tail);
+      expect(() => rw.addInsert('b', tail)).toThrow();
+    });
+
     test('replaces head by index on a singleton list', () => {
       const rw = new LseqIndexRewriter<string>(lseq, 'x');
       const head = lseq.min.between(lseq.max, 'x').toString();

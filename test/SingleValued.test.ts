@@ -90,10 +90,9 @@ describe('Single-valued constraint', () => {
       '@insert': [{ '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': ['Fred', 'Flintstone'] }]
     });
     await constraint.apply(state, update);
-    expect(update.assert.calledWith({
-      '@delete': [{ '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': ['Flintstone'] }],
-      '@insert': []
-    }));
+    expect(update.assert).toBeCalledWith({
+      '@delete': { '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': ['Flintstone'] }
+    });
   });
 
   test('applies to a single-valued additive property update', async () => {
@@ -111,10 +110,9 @@ describe('Single-valued constraint', () => {
       '@insert': [{ '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Flintstone' }]
     });
     await constraint.apply(state, update);
-    expect(update.assert.calledWith({
-      '@delete': [{ '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': ['Flintstone'] }],
-      '@insert': []
-    }));
+    expect(update.assert).toBeCalledWith({
+      '@delete': { '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': ['Flintstone'] }
+    });
   });
 
   test('applies selectively to existing data', async () => {

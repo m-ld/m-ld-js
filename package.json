@@ -63,7 +63,7 @@
     }
   },
   "dependencies": {
-    "@m-ld/m-ld-spec": "^0.6.0-0",
+    "@m-ld/m-ld-spec": "^0.6.0-1",
     "@rdfjs/data-model": "^1.2.0",
     "@types/abstract-leveldown": "^5.0.1",
     "@types/detect-node": "^2.0.0",

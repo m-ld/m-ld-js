@@ -12,7 +12,9 @@ import { Iri } from 'jsonld/jsonld-spec';
 import { JrqlGraph } from './JrqlGraph';
 import { MeldEncoding, unreify, toDomainQuad, reifyTriplesTids } from '../MeldEncoding';
 import { Observable, from, Subject as Source, EMPTY } from 'rxjs';
-import { bufferCount, mergeMap, reduce, map, filter, takeWhile, expand, toArray } from 'rxjs/operators';
+import {
+  bufferCount, mergeMap, reduce, map, filter, takeWhile, expand, toArray
+} from 'rxjs/operators';
 import { flatten, Future, tapComplete, getIdLogger, check } from '../util';
 import { Logger } from 'loglevel';
 import { MeldError } from '../MeldError';
