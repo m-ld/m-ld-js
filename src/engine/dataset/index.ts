@@ -1,18 +1,21 @@
-import { Quad, DefaultGraph, NamedNode, Quad_Subject, Quad_Predicate, Quad_Object } from 'rdf-js';
-import { defaultGraph } from '@rdfjs/data-model';
+import {
+  Quad, DefaultGraph, NamedNode, Quad_Subject,
+  Quad_Predicate, Quad_Object, DataFactory
+} from 'rdf-js';
 import { Quadstore } from 'quadstore';
 import { AbstractChainedBatch, AbstractLevelDOWN } from 'abstract-leveldown';
 import { Observable } from 'rxjs';
 import { generate as uuid } from 'short-uuid';
-import { check, Stopwatch } from '../util';
+import { check, observeStream, Stopwatch } from '../util';
 import { LockManager } from '../locks';
 import { QuadSet } from '../quads';
 import { Filter } from '../indices';
 import dataFactory = require('@rdfjs/data-model');
-import { BatchOpts, TermName } from 'quadstore/dist/lib/types';
+import { BatchOpts, Binding, DefaultGraphMode, ResultType, TermName } from 'quadstore/dist/lib/types';
 import { Context } from 'jsonld/jsonld-spec';
-import { activeCtx, compactIri, expandTerm } from '../jsonld';
-import { ActiveContext } from 'jsonld/lib/context';
+import { activeCtx, compactIri, expandTerm, ActiveContext } from '../jsonld';
+import { Algebra } from 'sparqlalgebrajs';
+import { newEngine } from 'quadstore-comunica';
 
 /**
  * Atomically-applied patch to a quad-store.
@@ -23,17 +26,20 @@ export interface Patch {
 }
 
 /**
- * Specialised patch that allows concatenation.
  * Requires that the oldQuads are concrete Quads and not a MatchTerms.
  */
-export class PatchQuads implements Patch {
+export type DefinitePatch = { [key in keyof Patch]?: Iterable<Quad> };
+
+/**
+ * Specialised patch that allows concatenation.
+ */
+export class PatchQuads implements Patch, DefinitePatch {
   private readonly sets: { [key in keyof Patch]: QuadSet };
 
-  constructor(
-    oldQuads: Iterable<Quad> = [],
-    newQuads: Iterable<Quad> = []) {
+  constructor({ oldQuads = [], newQuads = [] }: DefinitePatch = {}) {
     this.sets = { oldQuads: new QuadSet(oldQuads), newQuads: new QuadSet(newQuads) };
-    this.ensureMinimal();
+    // del(a), ins(a) == ins(a)
+    this.sets.oldQuads.deleteAll(this.sets.newQuads);
   }
 
   get oldQuads() {
@@ -48,19 +54,19 @@ export class PatchQuads implements Patch {
     return this.sets.newQuads.size === 0 && this.sets.oldQuads.size === 0;
   }
 
-  append(patch: { [key in keyof Patch]?: Iterable<Quad> }) {
+  append(patch: DefinitePatch) {
+    // ins(a), del(a) == del(a)
+    this.sets.newQuads.deleteAll(patch.oldQuads);
+
     this.sets.oldQuads.addAll(patch.oldQuads);
     this.sets.newQuads.addAll(patch.newQuads);
-    this.ensureMinimal();
+    // del(a), ins(a) == ins(a)
+    this.sets.oldQuads.deleteAll(this.sets.newQuads);
     return this;
   }
 
   remove(key: keyof Patch, quads: Iterable<Quad> | Filter<Quad>): Quad[] {
     return [...this.sets[key].deleteAll(quads)];
-  }
-
-  private ensureMinimal() {
-    this.sets.newQuads.deleteAll(this.sets.oldQuads.deleteAll(this.sets.newQuads));
   }
 }
 
@@ -73,6 +79,7 @@ export type GraphName = DefaultGraph | NamedNode;
  */
 export interface Dataset {
   readonly location: string;
+  readonly dataFactory: Required<DataFactory>;
 
   graph(name?: GraphName): Graph;
 
@@ -121,8 +128,13 @@ const notClosed = check((d: Dataset) => !d.closed, () => new Error('Dataset clos
  */
 export interface Graph {
   readonly name: GraphName;
+  readonly dataFactory: Required<DataFactory>;
 
   match(subject?: Quad_Subject, predicate?: Quad_Predicate, object?: Quad_Object): Observable<Quad>;
+
+  query(query: Algebra.Construct): Observable<Quad>;
+  query(query: Algebra.Describe): Observable<Quad>;
+  query(query: Algebra.Project): Observable<Binding>;
 }
 
 /**
@@ -152,23 +164,29 @@ export class QuadStoreDataset implements Dataset {
     const activeCtx = await this.activeCtx;
     this.store = new Quadstore({
       backend: this.backend,
+      comunica: newEngine(),
       dataFactory,
       indexes: [
-        [TermName.GRAPH, TermName.SUBJECT, TermName.PREDICATE, TermName.OBJECT],
-        [TermName.GRAPH, TermName.OBJECT, TermName.SUBJECT, TermName.PREDICATE],
-        [TermName.GRAPH, TermName.PREDICATE, TermName.OBJECT, TermName.SUBJECT]
+        ['graph', 'subject', 'predicate', 'object'],
+        ['graph', 'object', 'subject', 'predicate'],
+        ['graph', 'predicate', 'object', 'subject']
       ],
       prefixes: activeCtx == null ? undefined : {
         expandTerm: term => expandTerm(term, activeCtx),
         compactIri: iri => compactIri(iri, activeCtx)
-      }
+      },
+      defaultGraphMode: DefaultGraphMode.DEFAULT
     });
     await this.store.open();
     return this;
   }
 
+  get dataFactory() {
+    return <Required<DataFactory>>this.store.dataFactory;
+  };
+
   graph(name?: GraphName): Graph {
-    return new QuadStoreGraph(this.store, name || defaultGraph());
+    return new QuadStoreGraph(this.store, name || this.dataFactory.defaultGraph());
   }
 
   @notClosed.async
@@ -192,8 +210,9 @@ export class QuadStoreDataset implements Dataset {
         await this.applyQuads(result.patch, { preWrite: result.kvps });
       else if (result.kvps != null)
         await this.applyKvps(result.kvps);
-      sw.stop();
+      sw.next('after');
       await result.after?.();
+      sw.stop();
       return <T>result.return;
     });
   }
@@ -259,18 +278,24 @@ class QuadStoreGraph implements Graph {
     readonly name: GraphName) {
   }
 
+  get dataFactory() {
+    return <Required<DataFactory>>this.store.dataFactory;
+  };
+
+  query(query: Algebra.Construct): Observable<Quad>;
+  query(query: Algebra.Describe): Observable<Quad>;
+  query(query: Algebra.Project): Observable<Binding>;
+  query(query: Algebra.Project | Algebra.Describe | Algebra.Construct): Observable<Binding | Quad> {
+    return observeStream(async () => {
+      const stream = await this.store.sparqlStream(query);
+      if (stream.type === ResultType.BINDINGS || stream.type === ResultType.QUADS)
+        return stream.iterator;
+      else
+        throw new Error('Expected bindings or quads');
+    })
+  }
+
   match(subject?: Quad_Subject, predicate?: Quad_Predicate, object?: Quad_Object): Observable<Quad> {
-    return new Observable(subs => {
-      try {
-        // match can throw! (Bug in quadstore)
-        this.store.match(subject, predicate, object, this.name)
-          .on('data', quad => subs.next(quad))
-          .on('error', err => subs.error(err))
-          .on('end', () => subs.complete());
-      } catch (err) {
-        subs.error(err);
-      }
-    });
+    return observeStream(async () => this.store.match(subject, predicate, object, this.name));
   }
 }
-

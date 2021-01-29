@@ -1,4 +1,4 @@
-import { expandTerm, compactIri, ActiveContext, activeCtx } from '../src/engine/jsonld';
+import { expandTerm, compactIri, ActiveContext, activeCtx, getValues } from '../src/engine/jsonld';
 
 describe('JSON-LD', () => {
   const context = {
@@ -46,5 +46,16 @@ describe('JSON-LD', () => {
     test('compacts using base', () => {
       expect(compactIri('http://example.org/hello', ctx)).toBe('hello');
     });
+  });
+
+  test('gets values from subject', () => {
+    expect(getValues({}, 'any')).toEqual([]);
+    expect(getValues({ any: null }, 'any')).toEqual([]);
+    expect(getValues({ any: undefined }, 'any')).toEqual([]);
+    expect(getValues({ any: 'any' }, 'any')).toEqual(['any']);
+    expect(getValues({ any: ['any'] }, 'any')).toEqual(['any']);
+    // Edge case: jsonld library incorrectly skips falsy values
+    expect(getValues({ any: '' }, 'any')).toEqual(['']);
+    expect(getValues({ any: [0, ''] }, 'any')).toEqual([0, '']);
   });
 });

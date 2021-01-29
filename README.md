@@ -7,7 +7,7 @@
 <pre></pre>
 
 # **m-ld** Javascript Engine
-**m-ld** is a decentralised live data sharing component with a JSON-based
+**m-ld** is a decentralised live information sharing component with a JSON-based
 API.
 
 This repository is the code of the Javascript engine for **m-ld**, for node.js,

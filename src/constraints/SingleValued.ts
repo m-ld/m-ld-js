@@ -1,9 +1,23 @@
-import { MeldConstraint, MeldUpdate, MeldReadState, asSubjectUpdates, updateSubject, MutableMeldUpdate } from '..';
+import {
+  MeldConstraint, MeldUpdate, MeldReadState, asSubjectUpdates, updateSubject, InterimUpdate
+} from '..';
 import { Iri } from 'jsonld/jsonld-spec';
-import { DeleteInsert } from '..';
-import { map, filter, take, reduce, mergeMap, defaultIfEmpty, concatMap } from 'rxjs/operators';
-import { Subject, Select, Update, Value, isValueObject } from '../jrql-support';
+import { map, filter, take, mergeMap, defaultIfEmpty, concatMap } from 'rxjs/operators';
+import { Subject, Select, Value, isValueObject } from '../jrql-support';
 import { Observable, EMPTY, concat, defer, from } from 'rxjs';
+
+/**
+ * Configuration for a `SingleValued` constraint. The configured property should
+ * have only one value.
+ */
+export interface SingleValuedConfig {
+  '@type': 'single-valued';
+  /**
+   * The property can be given in unexpanded form, as it appears in JSON
+   * subjects when using the API, or as its full IRI reference.
+   */
+  property: string;
+}
 
 /** @internal */
 function isMultiValued(value: Subject['any']): value is Array<Value> {
@@ -34,13 +48,13 @@ export class SingleValued implements MeldConstraint {
     return failed != null ? Promise.reject(this.failure(failed)) : Promise.resolve();
   }
 
-  apply(state: MeldReadState, update: MutableMeldUpdate): Promise<unknown> {
+  apply(state: MeldReadState, update: InterimUpdate): Promise<unknown> {
     return this.affected(state, update).pipe(
       concatMap(async subject => {
         const values = subject[this.property];
         if (isMultiValued(values)) {
           const resolvedValue = await this.resolve(values);
-          await update.append({
+          update.assert({
             '@delete': {
               '@id': subject['@id'],
               [this.property]: values.filter(v => v !== resolvedValue)
@@ -50,7 +64,8 @@ export class SingleValued implements MeldConstraint {
       })).toPromise();
   }
 
-  private affected(state: MeldReadState, update: MeldUpdate, failEarly?: 'failEarly'): Observable<Subject> {
+  private affected(state: MeldReadState, update: MeldUpdate, failEarly?: 'failEarly'):
+    Observable<Subject> {
     const hasProperty = (subject: Subject): boolean => subject[this.property] != null;
     const propertyInserts = update['@insert'].filter(hasProperty);
     // 'Fail early' means we pipe the raw inserts through the filter first,
@@ -64,9 +79,10 @@ export class SingleValued implements MeldConstraint {
         });
         return from(Object.keys(subjectUpdates)).pipe(
           mergeMap(sid => state.read<Select>({
+            // TODO: Only need to select where o is not equal to the insert
             '@select': '?o', '@where': { '@id': sid, [this.property]: '?o' }
           }).pipe(
-            defaultIfEmpty({ '@id': '_:b0', '?o': undefined }),
+            defaultIfEmpty({ '@id': '_:b0', '?o': [] }),
             map(selectResult => {
               // Weirdness to construct a subject from the select result
               // TODO: Support `@construct`

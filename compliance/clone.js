@@ -43,6 +43,7 @@ clone(leveldown(tmpDirName), new MqttRemotes(config), config).then(meld => {
   meld.follow(update => send(requestId, 'updated', { body: update }));
 
   meld.status.subscribe({
+    next: status => send(requestId, 'status', { body: status }),
     complete: () => send(requestId, 'closed'),
     error: err => sendError(requestId, err)
   })

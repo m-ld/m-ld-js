@@ -132,7 +132,9 @@ describe('Dataset engine', () => {
     });
 
     test('answers rev-up from the new clone', async () => {
-      await expect(clone.revupFrom(remoteTime)).resolves.toBeDefined();
+      const revup = await clone.revupFrom(remoteTime);
+      expect(revup).toBeDefined();
+      await expect(revup?.updates.toPromise()).resolves.toBeUndefined();
     });
 
     test('comes online as not silo', async () => {
@@ -150,7 +152,9 @@ describe('Dataset engine', () => {
       remoteUpdates.next(new DeltaMessage(remoteTime.ticks, remoteTime.ticked(),
         [1, '{}', '{"@id":"http://test.m-ld.org/wilma","http://test.m-ld.org/#name":"Wilma"}']));
       // Note extra tick for constraint application in remote update
-      await expect(updates).resolves.toEqual([1, 3]);
+      const received = await updates;
+      expect(received.length).toBe(2);
+      expect(received[0] < received[1]).toBe(true);
     });
 
     // Edge cases from system testing: newClock exposes the current clock state
@@ -166,8 +170,8 @@ describe('Dataset engine', () => {
     });
     // 2. a failed transaction
     test('answers rev-up from next new clone after failure', async () => {
-      // Insert with variables is not valid
-      await clone.write(<Update>{ '@insert': { '@id': '?s', '?p': '?o' } })
+      // Insert with union is not valid
+      await clone.write(<Update>{ '@union': [] })
         .then(() => fail('Expecting error'), () => { });
       const thirdTime = await clone.newClock();
       await expect(clone.revupFrom(thirdTime)).resolves.toBeDefined();

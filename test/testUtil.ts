@@ -20,3 +20,5 @@ export class TickableScheduler implements SchedulerLike {
     Object.values(this.work[this.ticks] ?? {}).forEach(execute => execute());
   }
 }
+
+export const genIdRegex = /^\.well-known\/genid\/.+/;
