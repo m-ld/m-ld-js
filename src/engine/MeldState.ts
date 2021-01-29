@@ -1,7 +1,7 @@
 import { Context, Subject, Describe, Pattern, Update, Read, Write } from '../jrql-support';
 import { Observable, Subscription } from 'rxjs';
 import { map, take } from 'rxjs/operators';
-import { flatten } from 'jsonld';
+import { flatten, JsonLdDocument } from 'jsonld';
 import {
   MeldUpdate, MeldState, Resource, any, MeldStateMachine,
   ReadResult, StateProc, UpdateProc, readResult
@@ -133,7 +133,9 @@ export class ApiStateMachine extends ApiState implements MeldStateMachine {
   }
 
   private async regroup(subjects: Subject[]): Promise<Subject[]> {
-    const graph: any = await flatten(subjects, this.context);
+    // TODO: Cast required due to
+    // https://github.com/DefinitelyTyped/DefinitelyTyped/issues/50909
+    const graph: any = await flatten(<JsonLdDocument>subjects, this.context);
     return graph['@graph'];
   }
 }
