@@ -170,8 +170,8 @@ describe('Dataset engine', () => {
     });
     // 2. a failed transaction
     test('answers rev-up from next new clone after failure', async () => {
-      // Insert with variables is not valid
-      await clone.write(<Update>{ '@insert': { '@id': '?s', '?p': '?o' } })
+      // Insert with union is not valid
+      await clone.write(<Update>{ '@union': [] })
         .then(() => fail('Expecting error'), () => { });
       const thirdTime = await clone.newClock();
       await expect(clone.revupFrom(thirdTime)).resolves.toBeDefined();

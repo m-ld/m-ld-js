@@ -75,6 +75,28 @@ describe('LSEQ', () => {
       expect(posId.ids[1].pos).toBeLessThan(256);
     });
 
+    test('generates between min and overflowed head', () => {
+      const posId = lseq.min.between(lseq.parse('0x02x'), 'x');
+      expect(posId.ids.length).toBe(2);
+      expect(posId.ids[0].pos).toBe(0);
+      expect(posId.ids[1].pos).toBe(1);
+    });
+
+    test('generates between min and double-overflowed head', () => {
+      const posId = lseq.min.between(lseq.parse('0x00x002x'), 'x');
+      expect(posId.ids.length).toBe(3);
+      expect(posId.ids[0].pos).toBe(0);
+      expect(posId.ids[1].pos).toBe(0);
+      expect(posId.ids[2].pos).toBe(1);
+    });
+
+    test('generates between overflowed and max', () => {
+      const posId = lseq.parse('fxfex').between(lseq.max, 'x');
+      expect(posId.ids.length).toBe(2);
+      expect(posId.ids[0].pos).toBe(15);
+      expect(posId.ids[1].pos).toBe(255);
+    });
+
     test('overflows if too close', () => {
       const posId = lseq.parse('1x').between(lseq.parse('2x'), 'x');
       expect(posId.ids.length).toBe(2);

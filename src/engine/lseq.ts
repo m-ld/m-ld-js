@@ -100,18 +100,19 @@ class LseqPosId {
       if (this.pos(level) > that.pos(level)) {
         return that.between(this, site);
       } else if (this.pos(level) === that.pos(level)) {
-        const thisId = this.ids[level], thatId = that.ids[level];
+        const thisSite = this.ids[level]?.site, thatSite = that.ids[level]?.site;
         // Check for different site at this level
-        // Sites can only be null if comparing min & min or max & max
-        if (thisId.site == null || thatId.site == null)
+        // Sites can be null if comparing min & min or max & max
+        if (thisSite == null && thatSite == null)
           throw new Error(ERRORS.equalPosId);
-        if (thisId.site > thatId.site)
-          return that.between(this, site);
-        else if (thisId.site < thatId.site)
-          // We can legitimately extend ourselves up to the base
-          for (level++; true; level++)
-            if (this.pos(level) < this.base(level) - 1)
-              return this.cloneWith(level, this.pos(level), this.base(level), site);
+        else if (thisSite != null && thatSite != null)
+          if (thisSite > thatSite)
+            return that.between(this, site);
+          else if (thisSite < thatSite)
+            // We can legitimately extend ourselves up to the base
+            for (level++; true; level++)
+              if (this.pos(level) < this.base(level) - 1)
+                return this.cloneWith(level, this.pos(level), this.base(level), site);
         // otherwise continue loop as equal pos and site
       } else if (this.pos(level) === that.pos(level) - 1) {
         // No gap at this level but space above this or below that.

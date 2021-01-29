@@ -13,6 +13,7 @@ import { activeCtx, expandTerm } from "../jsonld";
 import { Binding } from 'quadstore';
 import { Algebra, Factory as SparqlFactory } from 'sparqlalgebrajs';
 import { genVarName, jrql, JrqlQuads, matchSubVarName, matchVar } from './JrqlQuads';
+import { MeldError } from '../MeldError';
 
 /**
  * A graph wrapper that provides low-level json-rql handling for queries. The
@@ -49,7 +50,7 @@ export class JrqlGraph {
     } else if (isSelect(query) && query['@where'] != null) {
       return this.select(query['@select'], query['@where'], context);
     } else {
-      return throwError(new Error('Read type not supported.'));
+      return throwError(new MeldError('Unsupported pattern', 'Read type not supported.'));
     }
   }
 
@@ -63,7 +64,7 @@ export class JrqlGraph {
     } else if (isUpdate(query)) {
       return this.update(query, context);
     }
-    throw new Error('Write type not supported.');
+    throw new MeldError('Unsupported pattern', 'Write type not supported.');
   }
 
   select(select: Result,
@@ -186,7 +187,7 @@ export class JrqlGraph {
           newQuads: matchingQuads(insertQuads)
         }));
       });
-    } else {
+    } else if (!insertQuads?.some(anyVarTerm)) {
       // Both @delete and @insert have fixed quads, just apply them
       patch.append({ oldQuads: deleteQuads, newQuads: insertQuads });
     }
