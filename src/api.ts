@@ -133,9 +133,24 @@ export interface MeldState extends MeldReadState {
 /**
  * @see m-ld [specification](http://spec.m-ld.org/interfaces/meldupdate.html)
  */
-export interface MeldUpdate extends spec.MeldUpdate {
-  '@delete': Subject[];
-  '@insert': Subject[];
+export interface MeldUpdate {
+  /**
+   * Partial subjects, containing properties that have been deleted from the
+   * domain. Note that deletion of a property (even of all properties) does not
+   * necessarily indicate that the subject's identity is not longer represented
+   * in the domain.
+   */
+  readonly '@delete': Subject[];
+  /**
+   * Partial subjects, containing properties that have been inserted into the
+   * domain.
+   */
+  readonly '@insert': Subject[];
+  /**
+   * Current local clock ticks at the time of the update.
+   * @see MeldStatus.ticks
+   */
+  readonly '@ticks': number;
 }
 
 /**
@@ -277,7 +292,7 @@ export interface MeldClone extends MeldStateMachine {
  * > your use-case.*
  *
  * In this clone engine, constraints are checked and applied for updates prior
- * to their application to the data (the updates are 'provisional'). If the
+ * to their application to the data (the updates are 'interim'). If the
  * constraint requires to know the final state, it must infer it from the given
  * reader and the update.
  *
@@ -287,26 +302,74 @@ export interface MeldConstraint {
   /**
    * Check the given update does not violate this constraint.
    * @param state a read-only view of data from the clone prior to the update
-   * @param update the provisional update, prior to application to the data
+   * @param update the interim update, prior to application to the data
    * @returns a rejection if the constraint is violated (or fails)
    */
-  check(state: MeldReadState, update: MeldUpdate): Promise<unknown>;
+  check(state: MeldReadState, update: InterimUpdate): Promise<unknown>;
   /**
    * Applies the constraint to an update being applied to the data. If the
    * update would cause a violation, this method must mutate the given update
-   * using its `append` method, to resolve the violation.
+   * using its `assert` method, to resolve the violation.
    * @param state a read-only view of data from the clone prior to the update
-   * @param update the provisional update, prior to application to the data
+   * @param update the interim update, prior to application to the data
    * @returns a rejection only if the constraint application fails
    */
-  apply(state: MeldReadState, update: MutableMeldUpdate): Promise<unknown>;
+  apply(state: MeldReadState, update: InterimUpdate): Promise<unknown>;
 }
 
 /**
- * An update to which further updates can be appended.
+ * An update to which further updates can be asserted or entailed.
  */
-export interface MutableMeldUpdate extends MeldUpdate {
-  append(update: Update): Promise<unknown>;
+export interface InterimUpdate extends MeldUpdate {
+  /**
+   * An assertion is an update that maintains the data integrity of the domain
+   * by changing data that the app created, or that was the result of a prior
+   * assertion.
+   *
+   * An assertion is incorporated into the final update sent to other clones and
+   * echoed to the local app. Examples of assertions:
+   * - Delete previous value from a single-value register
+   * - Rewrite a list index predicate to a CRDT-specific form
+   *
+   * @param update the update to assert into the domain
+   * @see {@link ready}
+   */
+  assert(update: Update): void;
+  /**
+   * An entailment is an update that maintains the data integrity of a domain by
+   * changing only entailed data. Entailed data is data that can be deduced
+   * automatically, and can only be created by entailment, and not by an app.
+   *
+   * An entailment is not included in updates sent to other clones or to the
+   * local app. Examples of entailments:
+   * - The size of a collection
+   * - Membership of a duck-type class
+   *
+   * @param update the update to entail into the domain
+   * @see {@link ready}
+   */
+  entail(update: Update): void;
+  /**
+   * Removes assertions (not entailments) from this update, prior to application
+   * to the dataset. This is used to rewrite assertions made by the application,
+   * or the work of prior constraints.
+   *
+   * Removal of an assertion is possible:
+   * 1. during constraint checking,
+   * 2. during constraint application, if the assertion was made by another
+   *    constraint. An attempt to remove an assertion made in the original
+   *    update will be ignored, which may lead to unexpected results.
+   *
+   * @param key Whether to remove `@delete` or `@insert` components
+   * @param pattern the Subject assertions to remove
+   * @see {@link ready}
+   */
+  remove(key: keyof DeleteInsert<any>, pattern: Subject | Subject[]): void;
+  /**
+   * A promise that resolves when all pending modifications made by the methods
+   * above have affected this updates `@insert` and `@delete` properties.
+   */
+  ready: Promise<unknown>;
 }
 
 /**

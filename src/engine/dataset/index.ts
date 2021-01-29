@@ -4,7 +4,7 @@ import {
 } from 'rdf-js';
 import { Quadstore } from 'quadstore';
 import { AbstractChainedBatch, AbstractLevelDOWN } from 'abstract-leveldown';
-import { from, Observable, throwError } from 'rxjs';
+import { Observable } from 'rxjs';
 import { generate as uuid } from 'short-uuid';
 import { check, observeStream, Stopwatch } from '../util';
 import { LockManager } from '../locks';
@@ -13,10 +13,9 @@ import { Filter } from '../indices';
 import dataFactory = require('@rdfjs/data-model');
 import { BatchOpts, Binding, DefaultGraphMode, ResultType, TermName } from 'quadstore/dist/lib/types';
 import { Context } from 'jsonld/jsonld-spec';
-import { activeCtx, compactIri, expandTerm } from '../jsonld';
-import { ActiveContext } from 'jsonld/lib/context';
+import { activeCtx, compactIri, expandTerm, ActiveContext } from '../jsonld';
 import { Algebra } from 'sparqlalgebrajs';
-import { mergeMap } from 'rxjs/operators';
+import { newEngine } from 'quadstore-comunica';
 
 /**
  * Atomically-applied patch to a quad-store.
@@ -27,17 +26,20 @@ export interface Patch {
 }
 
 /**
- * Specialised patch that allows concatenation.
  * Requires that the oldQuads are concrete Quads and not a MatchTerms.
  */
-export class PatchQuads implements Patch {
+export type DefinitePatch = { [key in keyof Patch]?: Iterable<Quad> };
+
+/**
+ * Specialised patch that allows concatenation.
+ */
+export class PatchQuads implements Patch, DefinitePatch {
   private readonly sets: { [key in keyof Patch]: QuadSet };
 
-  constructor(
-    oldQuads: Iterable<Quad> = [],
-    newQuads: Iterable<Quad> = []) {
+  constructor({ oldQuads = [], newQuads = [] }: DefinitePatch = {}) {
     this.sets = { oldQuads: new QuadSet(oldQuads), newQuads: new QuadSet(newQuads) };
-    this.ensureMinimal();
+    // del(a), ins(a) == ins(a)
+    this.sets.oldQuads.deleteAll(this.sets.newQuads);
   }
 
   get oldQuads() {
@@ -52,19 +54,19 @@ export class PatchQuads implements Patch {
     return this.sets.newQuads.size === 0 && this.sets.oldQuads.size === 0;
   }
 
-  append(patch: { [key in keyof Patch]?: Iterable<Quad> }) {
+  append(patch: DefinitePatch) {
+    // ins(a), del(a) == del(a)
+    this.sets.newQuads.deleteAll(patch.oldQuads);
+
     this.sets.oldQuads.addAll(patch.oldQuads);
     this.sets.newQuads.addAll(patch.newQuads);
-    this.ensureMinimal();
+    // del(a), ins(a) == ins(a)
+    this.sets.oldQuads.deleteAll(this.sets.newQuads);
     return this;
   }
 
   remove(key: keyof Patch, quads: Iterable<Quad> | Filter<Quad>): Quad[] {
     return [...this.sets[key].deleteAll(quads)];
-  }
-
-  private ensureMinimal() {
-    this.sets.newQuads.deleteAll(this.sets.oldQuads.deleteAll(this.sets.newQuads));
   }
 }
 
@@ -162,11 +164,12 @@ export class QuadStoreDataset implements Dataset {
     const activeCtx = await this.activeCtx;
     this.store = new Quadstore({
       backend: this.backend,
+      comunica: newEngine(),
       dataFactory,
       indexes: [
-        [TermName.GRAPH, TermName.SUBJECT, TermName.PREDICATE, TermName.OBJECT],
-        [TermName.GRAPH, TermName.OBJECT, TermName.SUBJECT, TermName.PREDICATE],
-        [TermName.GRAPH, TermName.PREDICATE, TermName.OBJECT, TermName.SUBJECT]
+        ['graph', 'subject', 'predicate', 'object'],
+        ['graph', 'object', 'subject', 'predicate'],
+        ['graph', 'predicate', 'object', 'subject']
       ],
       prefixes: activeCtx == null ? undefined : {
         expandTerm: term => expandTerm(term, activeCtx),
@@ -207,8 +210,9 @@ export class QuadStoreDataset implements Dataset {
         await this.applyQuads(result.patch, { preWrite: result.kvps });
       else if (result.kvps != null)
         await this.applyKvps(result.kvps);
-      sw.stop();
+      sw.next('after');
       await result.after?.();
+      sw.stop();
       return <T>result.return;
     });
   }

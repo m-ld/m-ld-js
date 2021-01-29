@@ -53,12 +53,62 @@ export type Variable = jrql.Variable;
 /**
  * @see https://json-rql.org/#value
  */
-export type Value = jrql.Value;
+export type Value = jrql.Atom | Subject | Reference;
+/**
+ * The allowable types for a Subject property value, named awkwardly to avoid
+ * overloading `Object`. Represents the "object" of a property, in the sense of
+ * the object of discourse.
+ * @see https://json-rql.org/#SubjectPropertyObject
+ */
+export type SubjectPropertyObject = Value | Container | SubjectPropertyObject[];
+/**
+ * Used to express an ordered or unordered container of data.
+ * @see https://json-rql.org/interfaces/container.html
+ */
+export type Container = List | Set;
+
+/**
+ * Used to express an ordered set of data. A List object is reified to a Subject
+ * (unlike in JSON-LD) and so it has an @id, which can be set by the user.
+ *
+ * Note that this reification is only possible when using the `@list` keyword,
+ * and not if the active context specifies `"@container": "@list"` for a
+ * property, in which case the list itself is anonymous.
+ * @see https://json-rql.org/interfaces/list.html
+ */
+export interface List extends Subject {
+  '@list': SubjectPropertyObject[] | { [key in string | number]: SubjectPropertyObject };
+}
+
+/** @internal */
+export function isList(object: SubjectPropertyObject): object is List {
+  return typeof object === 'object' && '@list' in object;
+}
+
+/**
+ * Used to express an unordered set of data and to ensure that values are always
+ * represented as arrays.
+ * @see https://json-rql.org/interfaces/set.html
+ */
+export interface Set {
+  '@set': SubjectPropertyObject;
+}
+
+/** @internal */
+export function isSet(object: SubjectPropertyObject): object is Set {
+  return typeof object === 'object' && '@set' in object;
+}
+
 // Utility functions
 /** @internal */
-export const isValueObject = jrql.isValueObject;
+export function isValueObject(value: SubjectPropertyObject): value is jrql.ValueObject {
+  return typeof value == 'object' && '@value' in value;
+}
+
 /** @internal */
-export const isReference = jrql.isReference;
+export function isReference(value: SubjectPropertyObject): value is Reference {
+  return typeof value == 'object' && Object.keys(value).every(k => k === '@id');
+}
 
 /**
  * Result declaration of a {@link Select} query.
@@ -99,7 +149,7 @@ export type Result = '*' | Variable | Variable[];
  * @see https://json-rql.org/interfaces/subject.html
  */
 export interface Subject extends Pattern {
-  // No support for inline filters, @lists or @sets
+  // No support for inline filters
   /**
    * The unique identity of the subject in the domain.
    * > 🚧 *Subjects strictly need not be identified with an `@id`, but the data
@@ -117,7 +167,18 @@ export interface Subject extends Pattern {
    * Specifies a graph edge, that is, a mapping from the `@id` of this subject
    * to a set of one or more values.
    */
-  [key: string]: Value | Value[] | Context | undefined;
+  [key: string]: SubjectPropertyObject | Context | undefined;
+}
+
+/**
+ * Determines whether the given property object from a well-formed Subject is a
+ * graph edge; i.e. not a `@context` or the Subject `@id`.
+ * @param property the Subject property in question
+ * @param object the object (value) of the property
+ */
+export function isPropertyObject(property: string, object: Subject['any']):
+  object is SubjectPropertyObject {
+  return property !== '@context' && property !== '@id' && object != null;
 }
 
 /** @internal */

@@ -1,5 +1,5 @@
 declare module 'jsonld/lib/compact' {
-  import { Iri, Url } from 'jsonld/jsonld-spec';
+  import { Iri } from 'jsonld/jsonld-spec';
   import { ActiveContext } from 'jsonld/lib/context';
   import { Options } from 'jsonld';
 

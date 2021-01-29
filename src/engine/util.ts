@@ -160,7 +160,10 @@ export function observeStream<T>(startStream: () => Promise<EventEmitter>): Obse
     startStream().then(stream => {
       if (!subscription.closed) {
         subscription.add(() => {
-          if (typeof (<any>stream)?.close == 'function')
+          const maybeAsyncIterator = <any>stream;
+          if (maybeAsyncIterator != null &&
+            typeof maybeAsyncIterator.close == 'function' &&
+            !maybeAsyncIterator.ended)
             (<any>stream).close();
         });
         stream
@@ -281,4 +284,29 @@ export function poisson(mean: number) {
   for (let p = 1.0; p > threshold; p *= Math.random())
     rtn++;
   return rtn - 1;
+}
+
+export function memoise<K extends object, V extends {}>(fn: (key: K) => V): (key: K) => V {
+  const cache = new WeakMap<K, V>();
+  return key => {
+    let value = cache.get(key);
+    if (value == null)
+      cache.set(key, value = fn(key));
+    return value;
+  };
+}
+
+export function lazy<V>(create: (key: string) => V):
+  ((key: string) => V) & Iterable<V> {
+  const cache: { [key: string]: V } = {};
+  return Object.assign(
+    (key: string) => cache[key] ??= create(key),
+    { [Symbol.iterator]: () => Object.values(cache)[Symbol.iterator]() });
+}
+
+export function minIndexOfSparse<T>(arr: T[]) {
+  let min: number | undefined;
+  // some() skips empty array positions
+  arr.some((_, i) => (min = i) != null);
+  return min;
 }

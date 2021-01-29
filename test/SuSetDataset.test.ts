@@ -2,13 +2,12 @@ import { SuSetDataset } from '../src/engine/dataset/SuSetDataset';
 import { txnId } from '../src/engine/dataset/SuSetGraph';
 import { memStore } from './testClones';
 import { TreeClock } from '../src/engine/clocks';
-import { first, toArray, isEmpty } from 'rxjs/operators';
+import { first, toArray, isEmpty, take } from 'rxjs/operators';
 import { Subject } from 'json-rql';
 import { DeltaMessage, EncodedDelta } from '../src/engine';
 import { Dataset } from '../src/engine/dataset';
 import { from } from 'rxjs';
 import { Describe, MeldConstraint } from '../src';
-import { NO_CONSTRAINT } from '../src/constraints';
 import { MeldEncoding } from '../src/engine/MeldEncoding';
 
 const fred = {
@@ -34,13 +33,13 @@ describe('SU-Set Dataset', () => {
 
     beforeEach(async () => {
       dataset = await memStore();
-      ssd = new SuSetDataset(dataset, NO_CONSTRAINT,
+      ssd = new SuSetDataset(dataset, [],
         new MeldEncoding('test.m-ld.org'), { '@id': 'test' });
       await ssd.initialise();
     });
 
     test('cannot share a dataset', async () => {
-      const otherSsd = new SuSetDataset(dataset, NO_CONSTRAINT,
+      const otherSsd = new SuSetDataset(dataset, [],
         new MeldEncoding('test.m-ld.org'), { '@id': 'boom' });
       await expect(otherSsd.initialise()).rejects.toThrow();
     });
@@ -83,7 +82,7 @@ describe('SU-Set Dataset', () => {
         const willUpdate = captureUpdate();
         const msg = await ssd.transact(async () => [
           localTime = localTime.ticked(),
-          await ssd.insert([])
+          await ssd.update({ '@insert': [] })
         ]);
         expect(msg).toBeNull();
         await expect(Promise.race([willUpdate, Promise.resolve()]))
@@ -95,7 +94,7 @@ describe('SU-Set Dataset', () => {
 
         const msg = await ssd.transact(async () => [
           localTime = localTime.ticked(),
-          await ssd.insert(fred)
+          await ssd.update({ '@insert': fred })
         ]) ?? fail();
         // The update should happen in-transaction, so no 'await' here
         expect(willUpdate).resolves.toHaveProperty('@insert', [fred]);
@@ -128,7 +127,7 @@ describe('SU-Set Dataset', () => {
         const willUpdate = captureUpdate();
 
         const msg = await ssd.apply(new DeltaMessage(
-          remoteTime.ticks, 
+          remoteTime.ticks,
           remoteTime = remoteTime.ticked(), [1, '{}', '{}']),
           localTime = localTime.update(remoteTime).ticked(),
           localTime = localTime.ticked());
@@ -144,7 +143,7 @@ describe('SU-Set Dataset', () => {
         beforeEach(async () => {
           firstTid = txnId((await ssd.transact(async () => [
             localTime = localTime.ticked(),
-            await ssd.insert(fred)
+            await ssd.update({ '@insert': fred })
           ]) ?? fail()).time);
         });
 
@@ -174,7 +173,7 @@ describe('SU-Set Dataset', () => {
 
           const msg = await ssd.transact(async () => [
             localTime = localTime.ticked(),
-            await ssd.delete({ '@id': 'http://test.m-ld.org/fred' })
+            await ssd.update({ '@delete': { '@id': 'http://test.m-ld.org/fred' } })
           ]) ?? fail();
           expect(willUpdate).resolves.toHaveProperty('@delete', [fred]);
 
@@ -210,7 +209,7 @@ describe('SU-Set Dataset', () => {
         test('transacts another insert', async () => {
           const msg = await ssd.transact(async () => [
             localTime = localTime.ticked(),
-            await ssd.insert(barney)
+            await ssd.update({ '@insert': barney })
           ]) ?? fail();
           expect(msg.time.equals(localTime)).toBe(true);
 
@@ -223,7 +222,7 @@ describe('SU-Set Dataset', () => {
           // Create a new journal entry that the remote doesn't know
           await ssd.transact(async () => [
             localTime = localTime.ticked(),
-            await ssd.insert(barney)
+            await ssd.update({ '@insert': barney })
           ]);
           const ops = await ssd.operationsSince(remoteTime);
           expect(ops).not.toBeUndefined();
@@ -260,7 +259,7 @@ describe('SU-Set Dataset', () => {
           // New entry that the remote hasn't seen
           const localOp = await ssd.transact(async () => [
             localTime = localTime.ticked(),
-            await ssd.insert(barney)
+            await ssd.update({ '@insert': barney })
           ]) ?? fail();
           // Don't update remote time from local
           await ssd.apply(new DeltaMessage(
@@ -353,9 +352,9 @@ describe('SU-Set Dataset', () => {
     beforeEach(async () => {
       constraint = {
         check: () => Promise.resolve(),
-        apply: () => Promise.resolve(null)
+        apply: () => Promise.resolve()
       };
-      ssd = new SuSetDataset(await memStore(), constraint,
+      ssd = new SuSetDataset(await memStore(), [constraint],
         new MeldEncoding('test.m-ld.org'), { '@id': 'test' });
       await ssd.initialise();
       await ssd.saveClock(() => localTime = localTime.ticked(), true);
@@ -365,14 +364,14 @@ describe('SU-Set Dataset', () => {
       constraint.check = () => Promise.reject('Failed!');
       await expect(ssd.transact(async () => [
         localTime = localTime.ticked(),
-        await ssd.insert(fred)
+        await ssd.update({ '@insert': fred })
       ])).rejects.toBe('Failed!');
     });
 
     test('provides state to the constraint', async () => {
       await ssd.transact(async () => [
         localTime = localTime.ticked(),
-        await ssd.insert(wilma)
+        await ssd.update({ '@insert': wilma })
       ]);
       constraint.check = async state =>
         state.read<Describe>({ '@describe': 'http://test.m-ld.org/wilma' }).toPromise().then(wilma => {
@@ -381,12 +380,29 @@ describe('SU-Set Dataset', () => {
         });
       await expect(ssd.transact(async () => [
         localTime = localTime.ticked(),
-        await ssd.insert(fred)
+        await ssd.update({ '@insert': fred })
       ])).resolves.toBeDefined();
     });
 
+    test('provides a mutable update to the constraint', async () => {
+      constraint.check = async (_, update) => {
+        update.assert({ '@insert': wilma });
+        await update.ready;
+        expect(update['@insert']).toMatchObject(expect.arrayContaining([wilma]));
+        update.assert({ '@insert': barney });
+        await update.ready;
+        expect(update['@insert']).toMatchObject(expect.arrayContaining([wilma, barney]));
+      };
+      await expect(ssd.transact(async () => [
+        localTime = localTime.ticked(),
+        await ssd.update({ '@insert': fred })
+      ])).resolves.toBeDefined();
+      await expect(ssd.read(<Describe>{ '@describe': wilma['@id'] })
+        .pipe(take(1)).toPromise()).resolves.toEqual(wilma);
+    });
+
     test('applies an inserting constraint', async () => {
-      constraint.apply = async (_, update) => update.append({ '@insert': wilma });
+      constraint.apply = async (_, update) => update.assert({ '@insert': wilma });
       const willUpdate = captureUpdate();
       const msg = await ssd.apply(new DeltaMessage(
         remoteTime.ticks,
@@ -420,11 +436,11 @@ describe('SU-Set Dataset', () => {
     });
 
     test('applies a deleting constraint', async () => {
-      constraint.apply = async (_, update) => update.append({ '@delete': wilma });
+      constraint.apply = async (_, update) => update.assert({ '@delete': wilma });
 
       await ssd.transact(async () => [
         localTime = localTime.ticked(),
-        await ssd.insert(wilma)
+        await ssd.update({ '@insert': wilma })
       ]);
 
       const willUpdate = captureUpdate();
@@ -443,7 +459,7 @@ describe('SU-Set Dataset', () => {
 
     test('applies a self-deleting constraint', async () => {
       // Constraint is going to delete the data we're inserting
-      constraint.apply = async (_, update) => update.append({ '@delete': wilma });
+      constraint.apply = async (_, update) => update.assert({ '@delete': wilma });
 
       const willUpdate = captureUpdate();
       await ssd.apply(new DeltaMessage(
@@ -456,18 +472,18 @@ describe('SU-Set Dataset', () => {
       await expect(ssd.find1({ '@id': 'http://test.m-ld.org/wilma' }))
         .resolves.toBeFalsy();
 
-      // The inserted data was deleted so no update happens
-      await expect(Promise.race([willUpdate, Promise.resolve()]))
-        .resolves.toBeUndefined();
+      // The inserted data was deleted, but Wilma may have existed before
+      await expect(willUpdate).resolves.toEqual(
+        { '@insert': [], '@delete': [wilma], '@ticks': localTime.ticks });
     });
 
     test('applies a self-inserting constraint', async () => {
       // Constraint is going to insert the data we're deleting
-      constraint.apply = async (_, update) => update.append({ '@insert': wilma });
+      constraint.apply = async (_, update) => update.assert({ '@insert': wilma });
 
       const tid = (await ssd.transact(async () => [
         localTime = localTime.ticked(),
-        await ssd.insert(wilma)
+        await ssd.update({ '@insert': wilma })
       ]) ?? fail()).data[1];
 
       const willUpdate = captureUpdate();
@@ -482,20 +498,20 @@ describe('SU-Set Dataset', () => {
       await expect(ssd.find1({ '@id': 'http://test.m-ld.org/wilma' }))
         .resolves.toBeTruthy();
 
-      // The deleted data was re-inserted so no update happens
-      await expect(Promise.race([willUpdate, Promise.resolve()]))
-        .resolves.toBeUndefined();
+      // The deleted data was re-inserted, but Wilma may not have existed before
+      await expect(willUpdate).resolves.toEqual(
+        { '@insert': [wilma], '@delete': [], '@ticks': localTime.ticks });
     });
   });
 
   test('enforces delta size limit', async () => {
-    ssd = new SuSetDataset(await memStore(), NO_CONSTRAINT,
+    ssd = new SuSetDataset(await memStore(), [],
       new MeldEncoding('test.m-ld.org'), { '@id': 'test', maxDeltaSize: 1 });
     await ssd.initialise();
     await ssd.saveClock(() => TreeClock.GENESIS, true);
     await expect(ssd.transact(async () => [
       TreeClock.GENESIS.ticked(),
-      await ssd.insert(fred)
+      await ssd.update({ '@insert': fred })
     ])).rejects.toThrow();
   });
 });

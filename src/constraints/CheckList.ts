@@ -1,7 +1,4 @@
-import { MeldConstraint, MeldUpdate, MeldReadState, MutableMeldUpdate } from '..';
-import { Update, Subject } from '../jrql-support';
-import { DeleteInsert } from '..';
-import { constraintFromConfig } from '.';
+import { MeldConstraint, MeldReadState, InterimUpdate } from '..';
 
 /** @internal */
 export class CheckList implements MeldConstraint {
@@ -9,13 +6,17 @@ export class CheckList implements MeldConstraint {
     readonly list: MeldConstraint[]) {
   }
 
-  check(state: MeldReadState, update: MeldUpdate) {
-    return Promise.all(this.list.map(
-      constraint => constraint.check(state, update)));
+  async check(state: MeldReadState, update: InterimUpdate) {
+    for (let constraint of this.list) {
+      await update.ready;
+      await constraint.check(state, update);
+    }
   }
 
-  async apply(state: MeldReadState, update: MutableMeldUpdate) {
-    for (let constraint of this.list)
+  async apply(state: MeldReadState, update: InterimUpdate) {
+    for (let constraint of this.list) {
+      await update.ready;
       await constraint.apply(state, update);
+    }
   }
 }

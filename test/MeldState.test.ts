@@ -2,9 +2,10 @@ import { any, MeldUpdate } from '../src/api';
 import { ApiStateMachine } from '../src/engine/MeldState';
 import { memStore, mockRemotes, testConfig } from './testClones';
 import { DatasetEngine } from '../src/engine/dataset/DatasetEngine';
-import { Group, Subject, Select, Describe, Update } from '../src/jrql-support';
+import { Group, Subject, Select, Describe, Update, Reference } from '../src/jrql-support';
 import { DomainContext } from '../src/engine/MeldEncoding';
 import { Future } from '../src/engine/util';
+import { genIdRegex } from './testUtil';
 
 describe('Meld State API', () => {
   let api: ApiStateMachine;
@@ -188,15 +189,11 @@ describe('Meld State API', () => {
   });
 
   describe('anonymous subjects', () => {
-    function expectGenId(): any {
-      return expect.stringMatching(/^\.well-known\/genid\/.+/);
-    }
-
     test('describes an anonymous subject', async () => {
       await api.write<Update>({ '@insert': { name: 'Fred', height: 5 } });
       await expect(api.read<Describe>({
         '@describe': '?s', '@where': { '@id': '?s', name: 'Fred' }
-      })).resolves.toEqual([{ '@id': expectGenId(), name: 'Fred', height: 5 }]);
+      })).resolves.toEqual([{ '@id': expect.stringMatching(genIdRegex), name: 'Fred', height: 5 }]);
     });
 
     test('selects anonymous subject properties', async () => {
@@ -210,7 +207,7 @@ describe('Meld State API', () => {
       await api.write<Subject>({ '@id': 'fred', stats: { height: 5, age: 40 } });
       await expect(api.read<Describe>({
         '@describe': '?stats', '@where': { '@id': 'fred', stats: { '@id': '?stats' } }
-      })).resolves.toEqual([{ '@id': expectGenId(), height: 5, age: 40 }]);
+      })).resolves.toEqual([{ '@id': expect.stringMatching(genIdRegex), height: 5, age: 40 }]);
     });
 
     test('does not merge anonymous nested subjects', async () => {
@@ -219,8 +216,8 @@ describe('Meld State API', () => {
       await expect(api.read<Describe>({
         '@describe': '?stats', '@where': { '@id': 'fred', stats: { '@id': '?stats' } }
       })).resolves.toMatchObject(expect.arrayContaining([
-        { '@id': expectGenId(), height: 5 },
-        { '@id': expectGenId(), age: 40 }
+        { '@id': expect.stringMatching(genIdRegex), height: 5 },
+        { '@id': expect.stringMatching(genIdRegex), age: 40 }
       ]));
     });
 
@@ -249,10 +246,10 @@ describe('Meld State API', () => {
       })
       await expect(api.read<Describe>({
         '@describe': '?stats', '@where': { '@id': 'fred', stats: { '@id': '?stats' } }
-      })).resolves.toEqual([{ '@id': expectGenId(), age: 40 }]);
+      })).resolves.toEqual([{ '@id': expect.stringMatching(genIdRegex), age: 40 }]);
     });
 
-    test('correctly imports web-app configuration', async () => {
+    test('imports web-app configuration', async () => {
       await api.write<Subject>(require('./web-app.json'));
       // Do some checks to ensure the data is present
       await expect(api.read<Select>({
@@ -260,17 +257,17 @@ describe('Meld State API', () => {
         '@where': { '@id': '?id' }
       })).resolves.toMatchObject(
         // Note 85 quads total (not distinct)
-        new Array(85).fill({ '?id': { '@id': expectGenId() } }));
+        new Array(85).fill({ '?id': { '@id': expect.stringMatching(genIdRegex) } }));
       await expect(api.read<Describe>({
         '@describe': '?id',
         '@where': { '@id': '?id' }
       })).resolves.toMatchObject(
-        new Array(12).fill({ '@id': expectGenId() }));
+        new Array(12).fill({ '@id': expect.stringMatching(genIdRegex) }));
       await expect(api.read<Describe>({
         '@describe': '?id',
         '@where': { '@id': '?id', 'servlet-name': 'fileServlet' }
       })).resolves.toEqual([{
-        '@id': expectGenId(),
+        '@id': expect.stringMatching(genIdRegex),
         'servlet-class': 'org.cofax.cds.FileServlet',
         'servlet-name': 'fileServlet'
       }]);
@@ -285,6 +282,265 @@ describe('Meld State API', () => {
           }
         }
       })).resolves.toMatchObject([{ '?a': 'ksm@pobox.com' }]);
+    });
+  });
+
+  describe('lists', () => {
+    test('inserts a list as a property', async () => {
+      await api.write<Subject>({
+        '@id': 'fred', shopping: { '@list': ['Bread', 'Milk'] }
+      });
+      const fred = (await api.read<Describe>({ '@describe': 'fred' }))[0];
+      expect(fred).toMatchObject({
+        '@id': 'fred', shopping: { '@id': expect.stringMatching(genIdRegex) }
+      });
+      const listId = (<any>fred.shopping)['@id'];
+      await expect(api.read<Describe>({ '@describe': listId })).resolves.toMatchObject([{
+        '@id': listId,
+        '@type': 'http://m-ld.org/RdfLseq',
+        '@list': ['Bread', 'Milk']
+      }]);
+    });
+
+    test('inserts an identified list', async () => {
+      await api.write<Subject>({
+        '@id': 'shopping', '@list': ['Bread', 'Milk']
+      });
+      await expect(api.read<Describe>({ '@describe': 'shopping' })).resolves.toMatchObject([{
+        '@id': 'shopping',
+        '@type': 'http://m-ld.org/RdfLseq',
+        '@list': ['Bread', 'Milk']
+      }]);
+    });
+
+    test('inserts an identified with index notation', async () => {
+      await api.write<Subject>({
+        '@id': 'shopping', '@list': { 0: 'Bread', 1: 'Milk' }
+      });
+      await expect(api.read<Describe>({ '@describe': 'shopping' })).resolves.toMatchObject([{
+        '@id': 'shopping',
+        '@type': 'http://m-ld.org/RdfLseq',
+        '@list': ['Bread', 'Milk']
+      }]);
+    });
+
+    test('appends to a list', async () => {
+      await api.write<Subject>({
+        '@id': 'shopping', '@list': { 0: 'Bread' }
+      });
+      await api.write<Subject>({
+        '@id': 'shopping', '@list': { 1: 'Milk' }
+      });
+      await expect(api.read<Describe>({ '@describe': 'shopping' })).resolves.toMatchObject([{
+        '@id': 'shopping',
+        '@type': 'http://m-ld.org/RdfLseq',
+        '@list': ['Bread', 'Milk']
+      }]);
+    });
+
+    test('appends beyond the end of a list', async () => {
+      await api.write<Subject>({
+        '@id': 'shopping', '@list': ['Bread']
+      });
+      await api.write<Subject>({
+        '@id': 'shopping', '@list': { 2: 'Milk' }
+      });
+      await expect(api.read<Describe>({ '@describe': 'shopping' })).resolves.toMatchObject([{
+        '@id': 'shopping',
+        '@type': 'http://m-ld.org/RdfLseq',
+        '@list': ['Bread', 'Milk']
+      }]);
+    });
+
+    test('prepends to a list', async () => {
+      await api.write<Subject>({
+        '@id': 'shopping', '@list': { 0: 'Milk' }
+      });
+      await api.write<Subject>({
+        '@id': 'shopping', '@list': { 0: 'Bread' }
+      });
+      await expect(api.read<Describe>({ '@describe': 'shopping' })).resolves.toMatchObject([{
+        '@id': 'shopping',
+        '@type': 'http://m-ld.org/RdfLseq',
+        '@list': ['Bread', 'Milk']
+      }]);
+      // This checks that the slots have been correctly re-numbered
+      await expect(api.read<Select>({
+        '@select': ['?0', '?1'],
+        '@where': { '@id': 'shopping', '@list': { 0: '?0', 1: '?1' } }
+      })).resolves.toMatchObject([{
+        '?0': 'Bread',
+        '?1': 'Milk'
+      }]);
+    });
+
+    test('prepends multiple items to a list', async () => {
+      await api.write<Subject>({
+        '@id': 'shopping', '@list': { 0: 'Milk' }
+      });
+      await api.write<Subject>({
+        '@id': 'shopping', '@list': { 0: ['Bread', 'Candles'] }
+      });
+      await expect(api.read<Describe>({ '@describe': 'shopping' })).resolves.toMatchObject([{
+        '@id': 'shopping',
+        '@type': 'http://m-ld.org/RdfLseq',
+        '@list': ['Bread', 'Candles', 'Milk']
+      }]);
+    });
+
+    test('finds by index in a list', async () => {
+      await api.write<Group>({
+        '@graph': [
+          { '@id': 'shopping1', '@list': ['Bread', 'Milk'] },
+          { '@id': 'shopping2', '@list': ['Milk', 'Spam'] }
+        ]
+      });
+      await expect(api.read<Select>({
+        '@select': '?list',
+        '@where': {
+          '@id': '?list',
+          '@list': { 1: 'Milk' }
+        }
+      })).resolves.toMatchObject([{
+        '?list': { '@id': 'shopping1' }
+      }]);
+    });
+
+    test('selects item from a list', async () => {
+      await api.write<Subject>({ '@id': 'shopping', '@list': ['Milk'] });
+      await expect(api.read<Select>({
+        '@select': '?item',
+        '@where': { '@id': 'shopping', '@list': { '?': '?item' } }
+      })).resolves.toMatchObject([{ '?item': 'Milk' }]);
+    });
+
+    test('selects index from a list', async () => {
+      await api.write<Subject>({ '@id': 'shopping', '@list': ['Milk'] });
+      await expect(api.read<Select>({
+        '@select': '?index',
+        '@where': { '@id': 'shopping', '@list': { '?index': '?' } }
+      })).resolves.toMatchObject([{ '?index': 0 }]);
+    });
+
+    test('selects slot from a list', async () => {
+      await api.write<Subject>({ '@id': 'shopping', '@list': ['Milk'] });
+      await expect(api.read<Select>({
+        '@select': '?slot',
+        '@where': { '@id': 'shopping', '@list': { '?': { '@id': '?slot', '@item': '?' } } }
+      })).resolves.toMatchObject([{
+        '?slot': { '@id': expect.stringMatching(genIdRegex) }
+      }]);
+    });
+
+    test('deletes a list with all slots', async () => {
+      await api.write<Subject>({ '@id': 'shopping', '@list': ['Milk'] });
+      // recover the slot ID
+      const slotId: string = (<Reference>(await api.read<Select>({
+        '@select': '?slot',
+        '@where': { '@id': 'shopping', '@list': { '?': { '@id': '?slot', '@item': '?' } } }
+      }))[0]['?slot'])['@id'];
+
+      await api.write<Update>({ '@delete': { '@id': 'shopping' } });
+      await expect(api.read<Describe>({ '@describe': 'shopping' }))
+        .resolves.toEqual([]);
+      await expect(api.read<Describe>({ '@describe': slotId }))
+        .resolves.toEqual([]);
+    });
+
+    test('deletes a slot by index', async () => {
+      await api.write<Subject>({ '@id': 'shopping', '@list': ['Milk'] });
+      // recover the slot ID
+      const slotId: string = (<Reference>(await api.read<Select>({
+        '@select': '?slot',
+        '@where': { '@id': 'shopping', '@list': { '?': { '@id': '?slot', '@item': '?' } } }
+      }))[0]['?slot'])['@id'];
+
+      await api.write<Update>({ '@delete': { '@id': 'shopping', '@list': { 0: '?' } } });
+      await expect(api.read<Describe>({ '@describe': 'shopping' }))
+        .resolves.toEqual([{
+          '@id': 'shopping',
+          '@type': 'http://m-ld.org/RdfLseq'
+        }]);
+      await expect(api.read<Describe>({ '@describe': slotId }))
+        .resolves.toEqual([]);
+    });
+
+    test('move a slot by index', async () => {
+      await api.write<Subject>({ '@id': 'shopping', '@list': ['Milk', 'Bread', 'Spam'] });
+      await api.write<Update>({
+        '@delete': {
+          '@id': 'shopping', '@list': { 1: { '@id': '?slot', '@item': '?item' } }
+        },
+        '@insert': {
+          '@id': 'shopping', '@list': { 0: { '@id': '?slot', '@item': '?item' } }
+        }
+      });
+      await expect(api.read<Describe>({ '@describe': 'shopping' }))
+        .resolves.toEqual([{
+          '@id': 'shopping',
+          '@type': 'http://m-ld.org/RdfLseq',
+          '@list': ['Bread', 'Milk', 'Spam']
+        }]);
+    });
+
+    test('move a slot by value', async () => {
+      await api.write<Subject>({ '@id': 'shopping', '@list': ['Milk', 'Bread', 'Spam'] });
+      await api.write<Update>({
+        '@delete': {
+          '@id': 'shopping', '@list': { '?i': { '@id': '?slot', '@item': 'Spam' } }
+        },
+        '@insert': {
+          '@id': 'shopping', '@list': { 0: { '@id': '?slot', '@item': 'Spam' } }
+        }
+      });
+      await expect(api.read<Describe>({ '@describe': 'shopping' }))
+        .resolves.toEqual([{
+          '@id': 'shopping',
+          '@type': 'http://m-ld.org/RdfLseq',
+          '@list': ['Spam', 'Milk', 'Bread']
+        }]);
+      // This checks that the slots have been correctly re-numbered
+      await expect(api.read<Select>({
+        '@select': ['?0', '?1', '?2'],
+        '@where': { '@id': 'shopping', '@list': { 0: '?0', 1: '?1', 2: '?2' } }
+      })).resolves.toMatchObject([{
+        '?0': 'Spam',
+        '?1': 'Milk',
+        '?2': 'Bread'
+      }]);
+    });
+
+    test('change an item', async () => {
+      await api.write<Subject>({ '@id': 'shopping', '@list': ['Milk', 'Bread'] });
+      await api.write<Update>({
+        '@delete': { '@id': 'shopping', '@list': { '?1': 'Bread' } },
+        '@insert': { '@id': 'shopping', '@list': { '?1': 'Spam' } }
+      });
+      await expect(api.read<Describe>({ '@describe': 'shopping' }))
+        .resolves.toEqual([{
+          '@id': 'shopping',
+          '@type': 'http://m-ld.org/RdfLseq',
+          '@list': ['Milk', 'Spam']
+        }]);
+    });
+
+    test('nested lists are created', async () => {
+      await api.write<Subject>({
+        '@id': 'shopping', '@list': ['Milk', ['Bread', 'Spam']]
+      });
+      await expect(api.read<Describe>({ '@describe': 'shopping' }))
+        .resolves.toMatchObject([{
+          '@list': ['Milk', { '@id': expect.stringMatching(genIdRegex) }]
+        }]);
+    });
+
+    test('cannot force an item to be multi-valued', async () => {
+      await api.write<Subject>({ '@id': 'shopping', '@list': ['Milk', 'Bread'] });
+      await expect(api.write<Update>({
+        // Do not @delete the old value
+        '@insert': { '@id': 'shopping', '@list': { '?1': 'Spam' } },
+        '@where': { '@id': 'shopping', '@list': { '?1': 'Bread' } }
+      })).rejects.toBeDefined();
     });
   });
 

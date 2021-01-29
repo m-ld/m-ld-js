@@ -1,13 +1,17 @@
 import { Quad } from 'rdf-js';
 import { fromRDF, toRDF, Options, processContext } from 'jsonld';
 import { cloneQuad } from './quads';
-import { Context, Iri } from 'jsonld/jsonld-spec';
+import { Context, Iri, Url } from 'jsonld/jsonld-spec';
 import { getInitialContext, expandIri, ActiveContext } from 'jsonld/lib/context';
 import { compactIri as _compactIri } from 'jsonld/lib/compact';
 export { Options } from 'jsonld';
 export { ActiveContext } from 'jsonld/lib/context';
+import validDataUrl = require('valid-data-url');
 
-export function rdfToJson(quads: Quad[]): Promise<any> {
+export * from 'jsonld/lib/util';
+export * from 'jsonld/lib/context';
+
+export function rdfToJson(quads: Iterable<Quad>): Promise<any> {
   // Using native types to avoid unexpected value objects
   return fromRDF(quads, { useNativeTypes: true });
 }
@@ -28,4 +32,26 @@ export function compactIri(iri: Iri, ctx: ActiveContext, options?: Options.Compa
 
 export async function activeCtx(ctx: Context, options?: Options.DocLoader): Promise<ActiveContext> {
   return await processContext(getInitialContext({}), ctx, options ?? {});
+}
+
+export function dataUrlData(url: Url, ...contentTypes: string[]): string | undefined {
+  const match = url.trim().match(validDataUrl.regex);
+  const data = match?.[match.length - 1];
+  if (data != null) {
+    const contentType = match?.[1]?.split(';')[0]?.toLowerCase() || 'text/plain';
+    if (contentTypes.includes(contentType))
+      return data;
+  }
+}
+
+/**
+ * Gets all of the values for a subject's property as an array.
+ *
+ * @param subject the subject.
+ * @param property the property.
+ *
+ * @return all of the values for a subject's property as an array.
+ */
+export function getValues(subject: { [key: string]: any }, property: string): Array<any> {
+  return [].concat(subject[property] ?? []);
 }

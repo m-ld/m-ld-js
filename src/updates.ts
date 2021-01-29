@@ -1,6 +1,6 @@
-import { Subject, Value, isValueObject, Reference } from './jrql-support';
-import { array } from './util';
+import { isPropertyObject, isSet, Subject, Value } from './jrql-support';
 import { DeleteInsert, Resource } from './api';
+import { addValue, getValues, hasProperty, hasValue, removeValue, ValueOptions } from './engine/jsonld';
 
 /**
  * Indexes a **m-ld** update notification by Subject.
@@ -52,6 +52,14 @@ function bySubject(update: DeleteInsert<Subject[]>,
   return update[key].reduce((byId, subject) => ({ ...byId, [subject['@id'] ?? '*']: { ...byId[subject['@id'] ?? '*'], [key]: subject } }), bySubject);
 }
 
+/** @internal */
+const valueOptions = (subject: Subject, key: string): ValueOptions => ({
+  // m-ld semantics are strict on Set properties
+  allowDuplicate: false,
+  // Try to preserve the array-ness of keys, as far as possible
+  propertyIsArray: Array.isArray(subject[key])
+});
+
 /**
  * Applies a subject update to the given subject, expressed as a
  * {@link Resource}. This method will correctly apply the deleted and inserted
@@ -68,18 +76,30 @@ export function updateSubject<T>(subject: Resource<T>, update: DeleteInsert<Subj
   new Set(Object.keys(subject).concat(Object.keys(inserts))).forEach(key => {
     switch (key) {
       case '@id': break;
-      default: subject[key as keyof Resource<T>] =
-        updateProperty(subject[key], inserts[key], deletes[key]);
+      default:
+        const opts = valueOptions(subject, key);
+        for (let del of getValues(deletes, key))
+          removeValue(subject, key, del, opts);
+        for (let ins of getValues(inserts, key))
+          addValue(subject, key, ins, opts);
     }
   });
   return subject;
 }
 
-/** @internal */
-function updateProperty(value: any, insertVal: any, deleteVal: any): any {
-  let rtn = array(value).filter(v => !includesValue(array(deleteVal), v));
-  rtn = rtn.concat(array(insertVal).filter(v => !includesValue(rtn, v)));
-  return rtn.length == 1 && !Array.isArray(value) ? rtn[0] : rtn;
+/**
+ * Includes the given value in the Subject property, respecting **m-ld** data
+ * semantics by expanding the property to an array, if necessary.
+ * @param subject the subject to add the value to.
+ * @param property the property that relates the value to the subject.
+ * @param value the value to add.
+ */
+export function includeValue(subject: Subject, property: string, value: Value) {
+  const object = subject[property];
+  if (isPropertyObject(property, object) && isSet(object))
+    addValue(object, '@set', value, valueOptions(subject, property));
+  else
+    addValue(subject, property, value, valueOptions(subject, property));
 }
 
 /**
@@ -87,18 +107,19 @@ function updateProperty(value: any, insertVal: any, deleteVal: any): any {
  * method accounts for the identity semantics of {@link Reference}s and
  * {@link Subject}s.
  * @param set the set of values to inspect
- * @param value the value to find in the set
+ * @param value the value to find in the set. If `undefined`, then wildcard
+ * checks for any value at all.
  */
-export function includesValue(set: Value[], value: Value): boolean {
-  // FIXME support value objects
-  if (isSubjectOrRef(value)) {
-    return !!value['@id'] && set.filter(isSubjectOrRef).map(v => v['@id']).includes(value['@id']);
+export function includesValue(subject: Subject, property: string, value?: Value): boolean {
+  if (value != null) {
+    const object = subject[property];
+    if (!isPropertyObject(property, object))
+      return false;
+    else if (isSet(object))
+      return hasValue(object, '@set', value);
+    else
+      return hasValue(subject, property, value);
   } else {
-    return set.includes(value);
+    return hasProperty(subject, property)
   }
-}
-
-/** @internal */
-function isSubjectOrRef(value: Value): value is Subject | Reference {
-  return typeof value == 'object' && !isValueObject(value);
 }
