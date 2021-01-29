@@ -1,3 +1,11 @@
+## v0.5
+This version includes an overhaul of the experimental Constraints API and a
+prototype implementation of multi-collaborator editable Lists.
+
+Due to changes in the persistence library this version is not
+backwards-compatible with previous versions for storage, so it cannot be used
+with old persisted data or with other non-upgraded clones.
+
 ## v0.4
 This version introduces a new pattern for reads and writes to the clone, that
 better represents clone data state immutability guarantees, without relying on

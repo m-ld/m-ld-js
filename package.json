@@ -63,7 +63,7 @@
     }
   },
   "dependencies": {
-    "@m-ld/m-ld-spec": "^0.6.0-1",
+    "@m-ld/m-ld-spec": "^0.6.1",
     "@rdfjs/data-model": "^1.2.0",
     "@types/abstract-leveldown": "^5.0.1",
     "@types/detect-node": "^2.0.0",
@@ -74,7 +74,7 @@
     "ably": "^1.2.4",
     "async-mqtt": "^2.6.1",
     "detect-node": "^2.0.4",
-    "json-rql": "^0.6.0-2",
+    "json-rql": "^0.6.0",
     "jsonld": "^3.3.0",
     "local-storage": "^2.0.0",
     "loglevel": "^1.7.1",
