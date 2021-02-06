@@ -6,11 +6,11 @@ import { Snapshot, UUID, DeltaMessage, MeldDelta } from '..';
 import { Quad } from 'rdf-js';
 import { TreeClock } from '../clocks';
 import { Subject, Update } from '../../jrql-support';
-import { Dataset, DefinitePatch, Patch, PatchQuads } from '.';
+import { Dataset, DefinitePatch, PatchQuads } from '.';
 import { flatten as flatJsonLd } from 'jsonld';
 import { Iri } from 'jsonld/jsonld-spec';
 import { JrqlGraph } from './JrqlGraph';
-import { MeldEncoding, unreify, toDomainQuad, reifyTriplesTids } from '../MeldEncoding';
+import { MeldEncoding, unreify } from '../MeldEncoding';
 import { Observable, from, Subject as Source, EMPTY } from 'rxjs';
 import {
   bufferCount, mergeMap, reduce, map, filter, takeWhile, expand, toArray
@@ -19,13 +19,14 @@ import { flatten, Future, tapComplete, getIdLogger, check } from '../util';
 import { Logger } from 'loglevel';
 import { MeldError } from '../MeldError';
 import { LocalLock } from '../local';
-import { SUSET_CONTEXT, qsName, tripleId, txnId } from './SuSetGraph';
+import { SUSET_CONTEXT, tripleId, txnId } from './SuSetGraph';
 import { SuSetJournalDataset, SuSetJournalEntry } from './SuSetJournal';
 import { MeldConfig, Read } from '../..';
 import { QuadMap, TripleMap, Triple } from '../quads';
 import { rdfToJson } from "../jsonld";
 import { CheckList } from '../../constraints/CheckList';
 import { DefaultList } from '../../constraints/DefaultList';
+import { qs } from '../../ns';
 
 interface HashTid extends Subject {
   '@id': Iri; // hash:<hashed triple id>
@@ -136,7 +137,7 @@ export class SuSetDataset extends JrqlGraph {
     super(dataset.graph(), {}, encoding.context['@base']);
     this.journalData = new SuSetJournalDataset(dataset);
     this.tidsGraph = new JrqlGraph(
-      dataset.graph(qsName('tids')), SUSET_CONTEXT);
+      dataset.graph(encoding.dataFactory.namedNode(qs.tids)), SUSET_CONTEXT);
     // Update notifications are strictly ordered but don't hold up transactions
     this.datasetLock = new LocalLock(config['@id'], dataset.location);
     this.maxDeltaSize = config.maxDeltaSize ?? Infinity;
@@ -307,7 +308,7 @@ export class SuSetDataset extends JrqlGraph {
     return this.encoding.newDelta({
       insert,
       // Delta has reifications of old quads, which we infer from found triple tids
-      delete: reifyTriplesTids(deletedTriplesTids)
+      delete: this.encoding.reifyTriplesTids(deletedTriplesTids)
     });
   }
 
@@ -321,7 +322,7 @@ export class SuSetDataset extends JrqlGraph {
 
         txc.sw.next('unreify');
         const delta = await this.encoding.asDelta(msg.data);
-        const patch = new PatchQuads({ newQuads: delta.insert.map(toDomainQuad) });
+        const patch = new PatchQuads({ newQuads: delta.insert.map(this.encoding.toDomainQuad) });
         const tidPatch = await this.processSuDeletions(delta.delete, patch);
 
         txc.sw.next('apply-cx'); // "cx" = constraint
@@ -369,7 +370,7 @@ export class SuSetDataset extends JrqlGraph {
         const toRemove = ourTripleTids.filter(tripleTid => theirTids.includes(tripleTid.object.value));
         // If no tids are left, delete the triple in our graph
         if (toRemove.length > 0 && toRemove.length == ourTripleTids.length)
-          patch.append({ oldQuads: [toDomainQuad(triple)] });
+          patch.append({ oldQuads: [this.encoding.toDomainQuad(triple)] });
         return (await tripleTidPatch).append({ oldQuads: toRemove });
       }, Promise.resolve(new PatchQuads()));
   }
@@ -480,7 +481,7 @@ export class SuSetDataset extends JrqlGraph {
             // For each triple in the batch, insert the TIDs into the tids graph
             mergeMap(async ([triple, tids]) => (await this.newTripleTids(triple, tids))
               // And include the triple itself
-              .append({ newQuads: [toDomainQuad(triple)] })),
+              .append({ newQuads: [this.encoding.toDomainQuad(triple)] })),
             // Concat all of the resultant batch patches together
             reduce((batchPatch, entryPatch) => batchPatch.append(entryPatch)))
             .toPromise()
@@ -506,7 +507,7 @@ export class SuSetDataset extends JrqlGraph {
             lastTime: tail.gwc,
             quads: this.graph.match().pipe(
               bufferCount(10), // TODO batch size config
-              mergeMap(async batch => reifyTriplesTids(
+              mergeMap(async batch => this.encoding.reifyTriplesTids(
                 asTriplesTids(await this.findTriplesTids(batch)))),
               tapComplete(dataEmitted))
           });

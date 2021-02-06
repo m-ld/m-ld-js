@@ -1,4 +1,4 @@
-import { Quad } from 'rdf-js';
+import { DataFactory, Quad } from 'rdf-js';
 import { fromRDF, toRDF, Options, processContext } from 'jsonld';
 import { cloneQuad } from './quads';
 import { Context, Iri, Url } from 'jsonld/jsonld-spec';
@@ -16,10 +16,10 @@ export function rdfToJson(quads: Iterable<Quad>): Promise<any> {
   return fromRDF(quads, { useNativeTypes: true });
 }
 
-export async function jsonToRdf(json: any): Promise<Quad[]> {
+export async function jsonToRdf(json: any, rdf: Required<DataFactory>): Promise<Quad[]> {
   const quads = await toRDF(json) as Quad[];
   // jsonld produces quad members without equals
-  return quads.map(cloneQuad);
+  return quads.map(quad => cloneQuad(quad, rdf));
 }
 
 export function expandTerm(value: string, ctx: ActiveContext, options?: Options.Expand): Iri {

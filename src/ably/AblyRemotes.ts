@@ -67,7 +67,7 @@ export class AblyRemotes extends PubsubRemotes {
 
   private channelName(id: string) {
     // https://www.ably.io/documentation/realtime/channels#channel-namespaces
-    return `${this.meldEncoding.domain}:${id}`;
+    return `${this.domain}:${id}`;
   }
 
   private onDirectMessage = async (data: any, name: string, clientId: string) => {

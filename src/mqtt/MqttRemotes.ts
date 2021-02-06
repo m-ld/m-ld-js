@@ -34,7 +34,7 @@ export class MqttRemotes extends PubsubRemotes {
     connect: (opts: IClientOptions) => AsyncMqttClient = defaultConnect) {
     super(config);
 
-    const id = config['@id'], domain = config['@domain'];
+    const { id, domain } = this;
     this.operationsTopic = OPERATIONS_TOPIC.with({ domain });
     this.controlTopic = CONTROL_TOPIC.with({ domain });
     this.notifyTopic = NOTIFY_TOPIC.with({ domain });

@@ -10,12 +10,13 @@ import { check, observeStream, Stopwatch } from '../util';
 import { LockManager } from '../locks';
 import { QuadSet } from '../quads';
 import { Filter } from '../indices';
-import dataFactory = require('@rdfjs/data-model');
-import { BatchOpts, Binding, DefaultGraphMode, ResultType, TermName } from 'quadstore/dist/lib/types';
+import { BatchOpts, Binding, DefaultGraphMode, ResultType } from 'quadstore/dist/lib/types';
 import { Context } from 'jsonld/jsonld-spec';
 import { activeCtx, compactIri, expandTerm, ActiveContext } from '../jsonld';
 import { Algebra } from 'sparqlalgebrajs';
 import { newEngine } from 'quadstore-comunica';
+import { DataFactory as RdfDataFactory } from 'rdf-data-factory';
+import { mld, rdf, jrql, xs, qs } from '../../ns'
 
 /**
  * Atomically-applied patch to a quad-store.
@@ -142,9 +143,11 @@ export interface Graph {
  * optimise (minimise) both control and user content.
  */
 export const STORAGE_CONTEXT: Context = {
-  qs: 'http://qs.m-ld.org/',
-  xs: 'http://www.w3.org/2001/XMLSchema#',
-  rdf: 'http://www.w3.org/1999/02/22-rdf-syntax-ns#'
+  qs: qs.$base,
+  jrql: jrql.$base,
+  mld: mld.$base,
+  xs: xs.$base,
+  rdf: rdf.$base
 }
 
 export class QuadStoreDataset implements Dataset {
@@ -157,7 +160,7 @@ export class QuadStoreDataset implements Dataset {
   constructor(private readonly backend: AbstractLevelDOWN, context?: Context) {
     // Internal of level-js and leveldown
     this.location = (<any>backend).location ?? uuid();
-    this.activeCtx = activeCtx(Object.assign({}, STORAGE_CONTEXT, context));
+    this.activeCtx = activeCtx({ ...STORAGE_CONTEXT, ...context });
   }
 
   async initialise(): Promise<QuadStoreDataset> {
@@ -165,7 +168,7 @@ export class QuadStoreDataset implements Dataset {
     this.store = new Quadstore({
       backend: this.backend,
       comunica: newEngine(),
-      dataFactory,
+      dataFactory: new RdfDataFactory(),
       indexes: [
         ['graph', 'subject', 'predicate', 'object'],
         ['graph', 'object', 'subject', 'predicate'],

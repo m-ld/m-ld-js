@@ -9,6 +9,8 @@ import { Dataset } from '../src/engine/dataset';
 import { from } from 'rxjs';
 import { Describe, MeldConstraint } from '../src';
 import { MeldEncoding } from '../src/engine/MeldEncoding';
+import { DataFactory as RdfDataFactory } from 'rdf-data-factory';
+const rdf = new RdfDataFactory();
 
 const fred = {
   '@id': 'http://test.m-ld.org/fred',
@@ -34,13 +36,13 @@ describe('SU-Set Dataset', () => {
     beforeEach(async () => {
       dataset = await memStore();
       ssd = new SuSetDataset(dataset, [],
-        new MeldEncoding('test.m-ld.org'), { '@id': 'test' });
+        new MeldEncoding('test.m-ld.org', rdf), { '@id': 'test' });
       await ssd.initialise();
     });
 
     test('cannot share a dataset', async () => {
       const otherSsd = new SuSetDataset(dataset, [],
-        new MeldEncoding('test.m-ld.org'), { '@id': 'boom' });
+        new MeldEncoding('test.m-ld.org', rdf), { '@id': 'boom' });
       await expect(otherSsd.initialise()).rejects.toThrow();
     });
 
@@ -160,9 +162,10 @@ describe('SU-Set Dataset', () => {
 
         test('applies a snapshot', async () => {
           const snapshot = await ssd.takeSnapshot();
+          const newLocal = await snapshot.quads.pipe(toArray()).toPromise();
           await ssd.applySnapshot({
             lastTime: localTime,
-            quads: from(await snapshot.quads.pipe(toArray()).toPromise())
+            quads: from(newLocal)
           }, localTime = localTime.ticked());
           await expect(ssd.find1({ '@id': 'http://test.m-ld.org/fred' }))
             .resolves.toEqual('http://test.m-ld.org/fred');
@@ -355,7 +358,7 @@ describe('SU-Set Dataset', () => {
         apply: () => Promise.resolve()
       };
       ssd = new SuSetDataset(await memStore(), [constraint],
-        new MeldEncoding('test.m-ld.org'), { '@id': 'test' });
+        new MeldEncoding('test.m-ld.org', rdf), { '@id': 'test' });
       await ssd.initialise();
       await ssd.saveClock(() => localTime = localTime.ticked(), true);
     });
@@ -506,7 +509,7 @@ describe('SU-Set Dataset', () => {
 
   test('enforces delta size limit', async () => {
     ssd = new SuSetDataset(await memStore(), [],
-      new MeldEncoding('test.m-ld.org'), { '@id': 'test', maxDeltaSize: 1 });
+      new MeldEncoding('test.m-ld.org', rdf), { '@id': 'test', maxDeltaSize: 1 });
     await ssd.initialise();
     await ssd.saveClock(() => TreeClock.GENESIS, true);
     await expect(ssd.transact(async () => [

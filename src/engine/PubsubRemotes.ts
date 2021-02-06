@@ -39,7 +39,6 @@ export interface SubPubsub extends SubPub {
 }
 
 export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes {
-  protected readonly meldEncoding: MeldEncoding;
   private readonly localClone = new BehaviorSubject<MeldLocal | null>(null);
   private readonly replyResolvers: {
     [messageId: string]: [(res: Response | null) => void, PromiseLike<void> | null]
@@ -55,8 +54,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
   private connected = new BehaviorSubject<boolean>(false);
 
   constructor(config: MeldConfig) {
-    super(config['@id'], config.logLevel ?? 'info');
-    this.meldEncoding = new MeldEncoding(config['@domain']);
+    super(config);
     this.sendTimeout = config.networkTimeout ?? 5000;
   }
 
@@ -163,7 +161,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
   }
 
   private triplesFromBuffer = (payload: Buffer) =>
-    this.meldEncoding.triplesFromJson(MsgPack.decode(payload))
+    this.requireClone().encoding.triplesFromJson(MsgPack.decode(payload))
 
   async revupFrom(time: TreeClock): Promise<Revup | undefined> {
     const ack = new Future;
@@ -283,6 +281,13 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     }
   }
 
+  private requireClone() {
+    const clone = this.clone;
+    if (clone == null)
+      throw new Error('No local clone');
+    return clone;
+  }
+
   private get clone() {
     return this.localClone.value;
   }
@@ -309,7 +314,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     const sender = await this.nextSender(messageId);
     if (sender == null) {
       throw new MeldError('No visible clones',
-        `No-one present on ${this.meldEncoding.domain} to send message to`);
+        `No-one present on ${this.domain} to send message to`);
     } else if (sender.id in tried) {
       // If we have already tried this address, we've tried everyone; return
       // whatever the last response was.
@@ -382,7 +387,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
   }
 
   private bufferFromTriples = async (triples: Triple[]) =>
-    MsgPack.encode(await this.meldEncoding.jsonFromTriples(triples))
+    MsgPack.encode(await this.requireClone().encoding.jsonFromTriples(triples))
 
   private async replyRevup(sentParams: DirectParams, revup: Revup | undefined) {
     if (revup) {

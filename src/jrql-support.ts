@@ -1,5 +1,6 @@
 import * as jrql from 'json-rql';
 import { Iri } from 'jsonld/jsonld-spec';
+import { jrql as jrqlNs } from './ns';
 
 /**
  * This module defines the sub-types of json-rql supported by JrqlGraph.
@@ -554,4 +555,15 @@ export interface Update extends Query {
 /** @internal */
 export function isUpdate(p: Pattern): p is Update {
   return '@insert' in p || '@delete' in p;
+}
+
+/** @internal */
+export interface Slot extends Subject {
+  '@id': Iri;
+  [jrqlNs.item]: Value | Value[];
+}
+
+/** @internal */
+export function isSlot(s: Subject): s is Slot {
+  return s['@id'] != null && s[jrqlNs.item] != null;
 }

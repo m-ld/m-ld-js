@@ -1,12 +1,13 @@
 import { Iri } from 'jsonld/jsonld-spec';
 import { MeldConstraint, MeldReadState, InterimUpdate, Reference, Select, Subject } from '..';
-import { jrql, toIndexNumber } from '../engine/dataset/JrqlQuads';
+import { toIndexNumber } from '../engine/dataset/JrqlQuads';
 import { LseqDef, LseqIndexRewriter, PosItem } from '../engine/lseq';
-import { meld } from '../engine/MeldEncoding';
+import * as meld from '../ns/m-ld';
 import { lazy } from '../engine/util';
-import { isPropertyObject, isReference } from '../jrql-support';
+import { isPropertyObject, isReference, isSlot, Slot } from '../jrql-support';
 import { includesValue } from '../updates';
 import { SingleValued } from './SingleValued';
+import { jrql } from '../ns';
 
 /** @internal */
 export class DefaultList implements MeldConstraint {
@@ -24,7 +25,7 @@ export class DefaultList implements MeldConstraint {
     // An index deletion can also be asserted in a delete-where, so in
     // all cases, remove any index assertions
     update.remove('@delete', update['@delete']
-      .filter(s => jrql.isSlot(s) && s[jrql.index] != null)
+      .filter(s => isSlot(s) && s[jrql.index] != null)
       .map(s => ({ '@id': s['@id'], [jrql.index]: s[jrql.index] })));
   }
 
@@ -37,7 +38,7 @@ export class DefaultList implements MeldConstraint {
   private doListRewrites(mode: keyof MeldConstraint,
     update: InterimUpdate, state: MeldReadState) {
     // Look for list slots being inserted (only used for check rewrite)
-    const slotsInInsert = mode == 'check' ? update['@insert'].filter(jrql.isSlot) : [];
+    const slotsInInsert = mode == 'check' ? update['@insert'].filter(isSlot) : [];
     const rewriters = lazy(listId =>
       new ListRewriter(mode, listId, this.lseq, this.site));
     // Go through the inserts looking for lists with inserted slots
@@ -51,13 +52,13 @@ export class DefaultList implements MeldConstraint {
   }
 
   private findListInserts(mode: keyof MeldConstraint, subject: Subject,
-    rewriter: (listId: string) => ListRewriter, slotsInInsert: jrql.Slot[]) {
+    rewriter: (listId: string) => ListRewriter, slotsInInsert: Slot[]) {
     const listId = subject['@id'];
     if (listId != null) {
       if (mode == 'check') {
         // In 'check' mode, ignore non-default lists
         if (!includesValue(subject, '@type') ||
-          includesValue(subject, '@type', { '@id': meld.rdflseq.value })) {
+          includesValue(subject, '@type', { '@id': meld.rdflseq })) {
           for (let key in subject)
             this.checkIfListKey(listId, subject, key, slotsInInsert, rewriter);
         }
@@ -90,7 +91,7 @@ export class DefaultList implements MeldConstraint {
    * - anything else is treated as a list property (not an index)
    */
   private checkIfListKey(listId: string, subject: Subject, listKey: string,
-    slotsInInsert: jrql.Slot[], rewriter: (listId: string) => ListRewriter) {
+    slotsInInsert: Slot[], rewriter: (listId: string) => ListRewriter) {
     const indexKey = toIndexNumber(listKey) ?? meld.matchRdflseqPosId(listKey);
     // Value has a reference to a slot
     const slot = indexKey != null ? slotsInInsert.find(
@@ -231,10 +232,10 @@ class ListRewriter extends LseqIndexRewriter<SlotInList> {
     });
     if (!includesValue(sel[0] ?? {}, '?type')) {
       // No type yet, insert the default
-      update.assert({ '@insert': { '@id': this.listId, '@type': meld.rdflseq.value } });
+      update.assert({ '@insert': { '@id': this.listId, '@type': meld.rdflseq } });
       return true;
     }
-    return includesValue(sel[0], '?type', { '@id': meld.rdflseq.value });
+    return includesValue(sel[0], '?type', { '@id': meld.rdflseq });
   }
 
   /**

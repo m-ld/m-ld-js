@@ -52,18 +52,17 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
   private readonly networkTimeout: number;
   private readonly genesisClaim: boolean;
   readonly status: Observable<MeldStatus> & LiveStatus;
-
+  readonly encoding: MeldEncoding;
+  
   constructor({ dataset, remotes, constraints, config }: {
     dataset: Dataset;
     remotes: MeldRemotes;
     constraints?: MeldConstraint[];
     config: MeldConfig;
   }) {
-    super(config['@id'], config.logLevel);
-    this.dataset = new SuSetDataset(dataset,
-      constraints ?? [],
-      new MeldEncoding(config['@domain']),
-      config);
+    super(config);
+    this.encoding = new MeldEncoding(this.domain, dataset.dataFactory);
+    this.dataset = new SuSetDataset(dataset, constraints ?? [], this.encoding, config);
     this.subs.add(this.dataUpdates
       .pipe(map(update => update['@ticks']))
       .subscribe(this.latestTicks));

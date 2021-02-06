@@ -1,6 +1,7 @@
-import rdf = require('@rdfjs/data-model');
+import { DataFactory as RdfDataFactory } from 'rdf-data-factory';
 import { JrqlQuads, toIndexNumber } from '../src/engine/dataset/JrqlQuads';
 import * as N3 from 'n3';
+const rdf = new RdfDataFactory();
 const XSD_INTEGER = rdf.namedNode('http://www.w3.org/2001/XMLSchema#integer');
 
 describe('json-rql Quads translation', () => {

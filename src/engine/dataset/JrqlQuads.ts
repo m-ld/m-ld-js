@@ -10,27 +10,12 @@ import {
 } from '../../jrql-support';
 import { activeCtx, compactIri, dataUrlData, jsonToRdf, rdfToJson, clone } from '../jsonld';
 import { inPosition, TriplePos } from '../quads';
+import * as jrql from '../../ns/json-rql';
 const { isArray } = Array;
 
 const PN_CHARS_BASE = `[A-Za-z\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u02FF\u0370-\u037D\u037F-\u1FFF\u200C-\u200D\u2070-\u218F\u2C00-\u2FEF\u3001-\uD7FF\uF900-\uFDCF\uFDF0-\uFFFD]|[\uD800-\uDB7F][\uDC00-\uDFFF]`;
 const PN_CHARS_U = `(?:${PN_CHARS_BASE}|_)`;
 const VARNAME = `(?:${PN_CHARS_U}|[0-9])(?:${PN_CHARS_U}|[0-9]|\u00B7|[\u0300-\u036F\u203F-\u2040])*`;
-
-export namespace jrql {
-  export const $id = 'http://json-rql.org';
-  export const item = 'http://json-rql.org/#item'; // Slot item property
-  export const index = 'http://json-rql.org/#index'; // Entailed slot index property
-  export const hiddenVar = (name: string) => `${$id}/var#${name}`;
-
-  export interface Slot extends Subject {
-    '@id': Iri;
-    [item]: Value | Value[];
-  }
-
-  export function isSlot(s: Subject): s is Slot {
-    return s['@id'] != null && s[item] != null;
-  }
-}
 
 export interface JrqlQuadsOptions {
   /** Whether this will be used to match quads or insert them */
@@ -69,7 +54,7 @@ export class JrqlQuads {
     const jsonld = { '@graph': clone(g), '@context': context };
     new PreProcessor(opts, this).process(jsonld['@graph']);
     const quads = await jsonToRdf(this.graphName.termType !== 'DefaultGraph' ?
-      { ...jsonld, '@id': this.graphName.value } : jsonld) as Quad[];
+      { ...jsonld, '@id': this.graphName.value } : jsonld, this.rdf) as Quad[];
     return this.postProcess(quads);
   }
 

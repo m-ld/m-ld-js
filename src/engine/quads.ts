@@ -1,24 +1,9 @@
-import { Quad, Term, Literal } from 'rdf-js';
-// FIXME: Make this a data factory field of some class
-import { namedNode, defaultGraph, variable, blankNode, literal, quad as newQuad } from '@rdfjs/data-model';
+import { Quad, Term, Literal, DataFactory } from 'rdf-js';
 import { IndexMap, IndexSet } from "./indices";
 import { memoise } from './util';
 
 export type Triple = Omit<Quad, 'graph'>;
 export type TriplePos = 'subject' | 'predicate' | 'object';
-
-export namespace rdf {
-  export const $id = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#';
-  export const type = namedNode(`${$id}type`);
-  export const Statement = namedNode(`${$id}Statement`);
-  export const subject = namedNode(`${$id}subject`);
-  export const predicate = namedNode(`${$id}predicate`);
-  export const object = namedNode(`${$id}object`);
-  export const List = namedNode(`${$id}List`);
-  export const first = namedNode(`${$id}first`);
-  export const rest = namedNode(`${$id}rest`);
-  export const nil = namedNode(`${$id}nil`);
-}
 
 export class QuadMap<T> extends IndexMap<Quad, T> {
   protected getIndex(key: Quad): string {
@@ -67,29 +52,30 @@ const tripleIndexKey = memoise((triple: Triple) =>
 const quadIndexKey = memoise((quad: Quad) => 
   [quad.graph.value].concat(tripleKey(quad)).join('^'));
 
-export function cloneQuad(quad: Quad): Quad {
-  return newQuad(
-    cloneTerm(quad.subject),
-    cloneTerm(quad.predicate),
-    cloneTerm(quad.object),
-    cloneTerm(quad.graph));
+export function cloneQuad(quad: Quad, rdf: Required<DataFactory>): Quad {
+  return rdf.quad(
+    cloneTerm(quad.subject, rdf),
+    cloneTerm(quad.predicate, rdf),
+    cloneTerm(quad.object, rdf),
+    cloneTerm(quad.graph, rdf));
 }
 
-export function cloneTerm<T extends Term>(term: T): T {
+export function cloneTerm<T extends Term>(term: T, rdf: Required<DataFactory>): T {
   switch (term.termType) {
     case 'Quad':
-      return <T>cloneQuad(<Quad>term);
+      return <T>cloneQuad(<Quad>term, rdf);
     case 'BlankNode':
-      return <T>blankNode(term.value);
+      return <T>rdf.blankNode(term.value);
     case 'DefaultGraph':
-      return <T>defaultGraph();
+      return <T>rdf.defaultGraph();
     case 'Literal':
       const lit = <Literal>term;
-      return <T>literal(term.value, lit.language != null ? lit.language : cloneTerm(lit.datatype));
+      return <T>rdf.literal(term.value, lit.language != null ?
+        lit.language : cloneTerm(lit.datatype, rdf));
     case 'NamedNode':
-      return <T>namedNode(term.value);
+      return <T>rdf.namedNode(term.value);
     case 'Variable':
-      return <T>variable(term.value);
+      return <T>rdf.variable(term.value);
   }
 }
 

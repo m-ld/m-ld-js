@@ -12,7 +12,8 @@ import { canPosition, inPosition, TriplePos } from '../quads';
 import { activeCtx, expandTerm } from "../jsonld";
 import { Binding } from 'quadstore';
 import { Algebra, Factory as SparqlFactory } from 'sparqlalgebrajs';
-import { genVarName, jrql, JrqlQuads, matchSubVarName, matchVar } from './JrqlQuads';
+import * as jrql from '../../ns/json-rql';
+import { genVarName, JrqlQuads, matchSubVarName, matchVar } from './JrqlQuads';
 import { MeldError } from '../MeldError';
 
 /**

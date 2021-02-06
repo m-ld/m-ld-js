@@ -9,6 +9,7 @@ import { LiveValue } from './LiveValue';
 import { MeldError } from './MeldError';
 import { gzip as gzipCb, gunzip as gunzipCb, InputType } from 'zlib';
 import { Triple } from './quads';
+import { MeldEncoding } from './MeldEncoding';
 const gzip = (input: InputType) => new Promise<Buffer>((resolve, reject) =>
   gzipCb(input, (err, buf) => err ? reject(err) : resolve(buf)));
 const gunzip = (input: InputType) => new Promise<Buffer>((resolve, reject) =>
@@ -134,4 +135,5 @@ export interface MeldRemotes extends Meld {
 
 export interface MeldLocal extends Meld {
   readonly id: string;
+  readonly encoding: MeldEncoding;
 }

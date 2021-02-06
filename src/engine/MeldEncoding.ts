@@ -1,15 +1,12 @@
 import { MeldDelta, EncodedDelta, UUID } from '.';
-import { NamedNode, Quad } from 'rdf-js';
-// FIXME: Make this a data factory field of the MeldEncoding
-import {
-  literal, namedNode, blankNode, triple as newTriple, defaultGraph, quad as newQuad
-} from '@rdfjs/data-model';
+import { DataFactory, Quad } from 'rdf-js';
 import { compact } from 'jsonld';
 import { flatten } from './util';
 import { Context, ExpandedTermDef } from '../jrql-support';
 import { Iri } from 'jsonld/jsonld-spec';
-import { rdf, Triple, TripleMap } from './quads';
+import { Triple, TripleMap } from './quads';
 import { rdfToJson, jsonToRdf } from "./jsonld";
+import { Names, mld, rdf, ns } from '../ns';
 
 export class DomainContext implements Context {
   '@base': Iri;
@@ -27,54 +24,23 @@ export class DomainContext implements Context {
   }
 }
 
-export namespace meld {
-  export const $id = 'http://m-ld.org';
-  /** For serialisation of transaction IDs in delta messages */
-  export const tid: NamedNode = namedNode(`${$id}/#tid`); // TID property
-
-  export const rdflseq: NamedNode = namedNode(`${$id}/RdfLseq`);
-
-  const rdflseqPosIdPre = `${rdflseq.value}/?=`;
-
-  export function matchRdflseqPosId(predicate: Iri): string | undefined {
-    if (predicate.startsWith(rdflseqPosIdPre))
-      return predicate.slice(rdflseqPosIdPre.length);
-  }
-
-  export function rdflseqPosId(lseqPosId: string): Iri {
-    return rdflseqPosIdPre + lseqPosId;
-  }
-}
-
-export function reifyTriplesTids(triplesTids: TripleMap<UUID[]>): Triple[] {
-  return flatten([...triplesTids].map(([triple, tids]) => {
-    const rid = blankNode();
-    return [
-      newTriple(rid, rdf.type, rdf.Statement),
-      newTriple(rid, rdf.subject, triple.subject),
-      newTriple(rid, rdf.predicate, triple.predicate),
-      newTriple(rid, rdf.object, triple.object)
-    ].concat(tids.map(tid => newTriple(rid, meld.tid, literal(tid))));
-  }));
-}
-
 export function unreify(reifications: Triple[]): [Triple, UUID[]][] {
   return Object.values(reifications.reduce((rids, reification) => {
     const rid = reification.subject.value;
     let [triple, tids] = rids[rid] || [{}, []];
     switch (reification.predicate.value) {
-      case rdf.subject.value:
+      case rdf.subject:
         if (reification.object.termType == 'NamedNode')
           triple.subject = reification.object;
         break;
-      case rdf.predicate.value:
+      case rdf.predicate:
         if (reification.object.termType == 'NamedNode')
           triple.predicate = reification.object;
         break;
-      case rdf.object.value:
+      case rdf.object:
         triple.object = reification.object;
         break;
-      case meld.tid.value:
+      case mld.tid:
         tids.push(reification.object.value);
         break;
     }
@@ -88,9 +54,9 @@ export function unreify(reifications: Triple[]): [Triple, UUID[]][] {
  * @see m-ld/m-ld-core/src/main/java/org/m_ld/MeldResource.java
  */
 const DELTA_CONTEXT = {
-  rdf: rdf.$id,
+  rdf: rdf.$base,
   xs: 'http://www.w3.org/2001/XMLSchema#',
-  tid: meld.tid.value,
+  tid: mld.tid,
   s: { '@type': '@id', '@id': 'rdf:subject' },
   p: { '@type': '@id', '@id': 'rdf:predicate' },
   o: 'rdf:object'
@@ -98,9 +64,25 @@ const DELTA_CONTEXT = {
 
 export class MeldEncoding {
   context: DomainContext;
+  ns: Names<typeof mld.$names & typeof rdf.$names>;
 
-  constructor(readonly domain: string) {
+  constructor(
+    readonly domain: string,
+    readonly dataFactory: Required<DataFactory>) {
+    this.ns = ns({ ...mld.$names, ...rdf.$names }, dataFactory);
     this.context = new DomainContext(domain, DELTA_CONTEXT);
+  }
+
+  reifyTriplesTids(triplesTids: TripleMap<UUID[]>): Triple[] {
+    return flatten([...triplesTids].map(([triple, tids]) => {
+      const rid = this.dataFactory.blankNode();
+      return [
+        this.dataFactory.quad(rid, this.ns.type, this.ns.Statement),
+        this.dataFactory.quad(rid, this.ns.subject, triple.subject),
+        this.dataFactory.quad(rid, this.ns.predicate, triple.predicate),
+        this.dataFactory.quad(rid, this.ns.object, triple.object)
+      ].concat(tids.map(tid => this.dataFactory.quad(rid, this.ns.tid, this.dataFactory.literal(tid))));
+    }));
   }
 
   newDelta = async (delta: Omit<MeldDelta, 'encoded'>): Promise<MeldDelta> => {
@@ -122,7 +104,7 @@ export class MeldEncoding {
   }
 
   jsonFromTriples = async (triples: Triple[]): Promise<any> => {
-    const jsonld = await rdfToJson(triples.map(toDomainQuad));
+    const jsonld = await rdfToJson(triples.map(this.toDomainQuad));
     const graph: any = await compact(jsonld, this.context);
     // The jsonld processor may create a top-level @graph with @context
     delete graph['@context'];
@@ -130,10 +112,8 @@ export class MeldEncoding {
   }
 
   triplesFromJson = async (json: any): Promise<Triple[]> =>
-    await jsonToRdf({ '@graph': json, '@context': this.context }) as Triple[];
-  
-}
+    await jsonToRdf({ '@graph': json, '@context': this.context }, this.dataFactory) as Triple[];
 
-export function toDomainQuad(triple: Triple): Quad {
-  return newQuad(triple.subject, triple.predicate, triple.object, defaultGraph());
+  toDomainQuad = (triple: Triple): Quad =>
+    this.dataFactory.quad(triple.subject, triple.predicate, triple.object, this.dataFactory.defaultGraph())
 }
