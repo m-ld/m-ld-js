@@ -34,158 +34,162 @@ describe('Meld State API', () => {
       .resolves.toEqual({ '@id': 'fred', name: 'Fred' });
   });
 
-  test('deletes a subject by update', async () => {
-    await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
-    const captureUpdate = new Future<MeldUpdate>();
-    api.follow(captureUpdate.resolve);
-    await api.write<Update>({ '@delete': { '@id': 'fred' } });
-    await expect(api.get('fred')).resolves.toBeUndefined();
-    await expect(captureUpdate).resolves.toEqual({
-      '@ticks': 2,
-      '@delete': [{ '@id': 'fred', name: 'Fred' }],
-      '@insert': []
+  describe('basic writes', () => {
+    test('deletes a subject by update', async () => {
+      await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
+      const captureUpdate = new Future<MeldUpdate>();
+      api.follow(captureUpdate.resolve);
+      await api.write<Update>({ '@delete': { '@id': 'fred' } });
+      await expect(api.get('fred')).resolves.toBeUndefined();
+      await expect(captureUpdate).resolves.toEqual({
+        '@ticks': 2,
+        '@delete': [{ '@id': 'fred', name: 'Fred' }],
+        '@insert': []
+      });
+    });
+
+    test('deletes a property by update', async () => {
+      await api.write<Subject>({ '@id': 'fred', name: 'Fred', height: 5 });
+      const captureUpdate = new Future<MeldUpdate>();
+      api.follow(captureUpdate.resolve);
+      await api.write<Update>({ '@delete': { '@id': 'fred', height: 5 } });
+      await expect(api.get('fred'))
+        .resolves.toEqual({ '@id': 'fred', name: 'Fred' });
+      await expect(captureUpdate).resolves.toEqual({
+        '@ticks': 2,
+        '@delete': [{ '@id': 'fred', height: 5 }],
+        '@insert': []
+      });
+    });
+
+    test('deletes where any', async () => {
+      await api.write<Subject>({ '@id': 'fred', name: 'Fred', height: 5 });
+      await api.write<Update>({ '@delete': { '@id': 'fred', height: any() } });
+      await expect(api.get('fred'))
+        .resolves.toEqual({ '@id': 'fred', name: 'Fred' });
+    });
+
+    test('updates a property', async () => {
+      await api.write<Subject>({ '@id': 'fred', name: 'Fred', height: 5 });
+      const captureUpdate = new Future<MeldUpdate>();
+      api.follow(captureUpdate.resolve);
+      await api.write<Update>({
+        '@delete': { '@id': 'fred', height: 5 },
+        '@insert': { '@id': 'fred', height: 6 }
+      });
+      await expect(api.get('fred'))
+        .resolves.toEqual({ '@id': 'fred', name: 'Fred', height: 6 });
+      await expect(captureUpdate).resolves.toEqual({
+        '@ticks': 2,
+        '@delete': [{ '@id': 'fred', height: 5 }],
+        '@insert': [{ '@id': 'fred', height: 6 }]
+      });
+    });
+
+    test('delete where must match all', async () => {
+      await api.write<Subject>({ '@id': 'fred', name: 'Fred', height: 5 });
+      // This write has no effect because we're asking for triples with subject of
+      // both fred and bambam
+      await api.write<Update>({
+        '@delete': [{ '@id': 'fred', height: 5 }, { '@id': 'bambam' }]
+      });
+      await expect(api.get('fred'))
+        .resolves.toEqual({ '@id': 'fred', name: 'Fred', height: 5 });
+    });
+
+    test('inserts a subject by update', async () => {
+      const captureUpdate = new Future<MeldUpdate>();
+      api.follow(captureUpdate.resolve);
+      await api.write<Update>({ '@insert': { '@id': 'fred', name: 'Fred' } });
+      await expect(api.get('fred')).resolves.toBeDefined();
+      await expect(captureUpdate).resolves.toEqual({
+        '@ticks': 1,
+        '@delete': [],
+        '@insert': [{ '@id': 'fred', name: 'Fred' }]
+      });
+    });
+
+    test('deletes a subject by path', async () => {
+      await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
+      const captureUpdate = new Future<MeldUpdate>();
+      api.follow(captureUpdate.resolve);
+      await api.delete('fred');
+      await expect(api.get('fred')).resolves.toBeUndefined();
+      await expect(captureUpdate).resolves.toEqual({
+        '@ticks': 2,
+        '@delete': [{ '@id': 'fred', name: 'Fred' }],
+        '@insert': []
+      });
+    });
+
+    test('deletes a property by path', async () => {
+      await api.write<Subject>({ '@id': 'fred', name: 'Fred', wife: { '@id': 'wilma' } });
+      await api.delete('wilma');
+      await expect(api.get('fred')).resolves.toEqual({ '@id': 'fred', name: 'Fred' });
+    });
+
+    test('deletes an object by path', async () => {
+      await api.write<Subject>({ '@id': 'fred', wife: { '@id': 'wilma' } });
+      await api.delete('wilma');
+      await expect(api.get('fred')).resolves.toBeUndefined();
     });
   });
 
-  test('deletes a property by update', async () => {
-    await api.write<Subject>({ '@id': 'fred', name: 'Fred', height: 5 });
-    const captureUpdate = new Future<MeldUpdate>();
-    api.follow(captureUpdate.resolve);
-    await api.write<Update>({ '@delete': { '@id': 'fred', height: 5 } });
-    await expect(api.get('fred'))
-      .resolves.toEqual({ '@id': 'fred', name: 'Fred' });
-    await expect(captureUpdate).resolves.toEqual({
-      '@ticks': 2,
-      '@delete': [{ '@id': 'fred', height: 5 }],
-      '@insert': []
+  describe('basic reads', () => {
+    test('selects where', async () => {
+      await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
+      await api.write<Subject>({ '@id': 'wilma', name: 'Wilma' });
+      await expect(api.read<Select>({
+        '@select': '?f', '@where': { '@id': '?f', name: 'Fred' }
+      })).resolves.toMatchObject([{ '?f': { '@id': 'fred' } }]);
     });
-  });
 
-  test('deletes where any', async () => {
-    await api.write<Subject>({ '@id': 'fred', name: 'Fred', height: 5 });
-    await api.write<Update>({ '@delete': { '@id': 'fred', height: any() } });
-    await expect(api.get('fred'))
-      .resolves.toEqual({ '@id': 'fred', name: 'Fred' });
-  });
-
-  test('updates a property', async () => {
-    await api.write<Subject>({ '@id': 'fred', name: 'Fred', height: 5 });
-    const captureUpdate = new Future<MeldUpdate>();
-    api.follow(captureUpdate.resolve);
-    await api.write<Update>({
-      '@delete': { '@id': 'fred', height: 5 },
-      '@insert': { '@id': 'fred', height: 6 }
-    });
-    await expect(api.get('fred'))
-      .resolves.toEqual({ '@id': 'fred', name: 'Fred', height: 6 });
-    await expect(captureUpdate).resolves.toEqual({
-      '@ticks': 2,
-      '@delete': [{ '@id': 'fred', height: 5 }],
-      '@insert': [{ '@id': 'fred', height: 6 }]
-    });
-  });
-
-  test('delete where must match all', async () => {
-    await api.write<Subject>({ '@id': 'fred', name: 'Fred', height: 5 });
-    // This write has no effect because we're asking for triples with subject of
-    // both fred and bambam
-    await api.write<Update>({
-      '@delete': [{ '@id': 'fred', height: 5 }, { '@id': 'bambam' }]
-    });
-    await expect(api.get('fred'))
-      .resolves.toEqual({ '@id': 'fred', name: 'Fred', height: 5 });
-  });
-
-  test('inserts a subject by update', async () => {
-    const captureUpdate = new Future<MeldUpdate>();
-    api.follow(captureUpdate.resolve);
-    await api.write<Update>({ '@insert': { '@id': 'fred', name: 'Fred' } });
-    await expect(api.get('fred')).resolves.toBeDefined();
-    await expect(captureUpdate).resolves.toEqual({
-      '@ticks': 1,
-      '@delete': [],
-      '@insert': [{ '@id': 'fred', name: 'Fred' }]
-    });
-  });
-
-  test('deletes a subject by path', async () => {
-    await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
-    const captureUpdate = new Future<MeldUpdate>();
-    api.follow(captureUpdate.resolve);
-    await api.delete('fred');
-    await expect(api.get('fred')).resolves.toBeUndefined();
-    await expect(captureUpdate).resolves.toEqual({
-      '@ticks': 2,
-      '@delete': [{ '@id': 'fred', name: 'Fred' }],
-      '@insert': []
-    });
-  });
-
-  test('deletes a property by path', async () => {
-    await api.write<Subject>({ '@id': 'fred', name: 'Fred', wife: { '@id': 'wilma' } });
-    await api.delete('wilma');
-    await expect(api.get('fred')).resolves.toEqual({ '@id': 'fred', name: 'Fred' });
-  });
-
-  test('deletes an object by path', async () => {
-    await api.write<Subject>({ '@id': 'fred', wife: { '@id': 'wilma' } });
-    await api.delete('wilma');
-    await expect(api.get('fred')).resolves.toBeUndefined();
-  });
-
-  test('selects where', async () => {
-    await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
-    await api.write<Subject>({ '@id': 'wilma', name: 'Wilma' });
-    await expect(api.read<Select>({
-      '@select': '?f', '@where': { '@id': '?f', name: 'Fred' }
-    })).resolves.toMatchObject([{ '?f': { '@id': 'fred' } }]);
-  });
-
-  test('selects where union', async () => {
-    await api.write<Group>({
-      '@graph': [
-        { '@id': 'fred', name: 'Fred' },
-        { '@id': 'wilma', name: 'Wilma' }
-      ]
-    });
-    await expect(api.read<Select>({
-      '@select': '?s', '@where': {
-        '@union': [
-          { '@id': '?s', name: 'Wilma' },
-          { '@id': '?s', name: 'Fred' }
+    test('selects where union', async () => {
+      await api.write<Group>({
+        '@graph': [
+          { '@id': 'fred', name: 'Fred' },
+          { '@id': 'wilma', name: 'Wilma' }
         ]
-      }
-    })).resolves.toEqual(expect.arrayContaining([
-      expect.objectContaining({ '?s': { '@id': 'fred' } }),
-      expect.objectContaining({ '?s': { '@id': 'wilma' } })
-    ]));
-  });
+      });
+      await expect(api.read<Select>({
+        '@select': '?s', '@where': {
+          '@union': [
+            { '@id': '?s', name: 'Wilma' },
+            { '@id': '?s', name: 'Fred' }
+          ]
+        }
+      })).resolves.toEqual(expect.arrayContaining([
+        expect.objectContaining({ '?s': { '@id': 'fred' } }),
+        expect.objectContaining({ '?s': { '@id': 'wilma' } })
+      ]));
+    });
 
-  test('selects not found', async () => {
-    await api.write({ '@id': 'fred', name: 'Fred' } as Subject);
-    await expect(api.read<Select>({
-      '@select': '?w', '@where': { '@id': '?w', name: 'Wilma' }
-    })).resolves.toEqual([]);
-  });
+    test('selects not found', async () => {
+      await api.write({ '@id': 'fred', name: 'Fred' } as Subject);
+      await expect(api.read<Select>({
+        '@select': '?w', '@where': { '@id': '?w', name: 'Wilma' }
+      })).resolves.toEqual([]);
+    });
 
-  test('describes where', async () => {
-    await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
-    await api.write<Subject>({ '@id': 'wilma', name: 'Wilma' });
-    await expect(api.read<Describe>({
-      '@describe': '?f', '@where': { '@id': '?f', name: 'Fred' }
-    })).resolves.toEqual([{ '@id': 'fred', name: 'Fred' }]);
-  });
+    test('describes where', async () => {
+      await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
+      await api.write<Subject>({ '@id': 'wilma', name: 'Wilma' });
+      await expect(api.read<Describe>({
+        '@describe': '?f', '@where': { '@id': '?f', name: 'Fred' }
+      })).resolves.toEqual([{ '@id': 'fred', name: 'Fred' }]);
+    });
 
-  test('describes with boolean value', async () => {
-    await api.write<Subject>({ '@id': 'fred', married: true });
-    await expect(api.read<Describe>({ '@describe': 'fred' }))
-      .resolves.toEqual([{ '@id': 'fred', married: true }]);
-  });
+    test('describes with boolean value', async () => {
+      await api.write<Subject>({ '@id': 'fred', married: true });
+      await expect(api.read<Describe>({ '@describe': 'fred' }))
+        .resolves.toEqual([{ '@id': 'fred', married: true }]);
+    });
 
-  test('describes with double value', async () => {
-    await api.write<Subject>({ '@id': 'fred', name: 'Fred', age: 40.5 });
-    await expect(api.read<Describe>({ '@describe': 'fred' }))
-      .resolves.toMatchObject([{ '@id': 'fred', name: 'Fred', age: 40.5 }]);
+    test('describes with double value', async () => {
+      await api.write<Subject>({ '@id': 'fred', name: 'Fred', age: 40.5 });
+      await expect(api.read<Describe>({ '@describe': 'fred' }))
+        .resolves.toMatchObject([{ '@id': 'fred', name: 'Fred', age: 40.5 }]);
+    });
   });
 
   describe('anonymous subjects', () => {

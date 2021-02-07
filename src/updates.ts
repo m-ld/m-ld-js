@@ -3,10 +3,14 @@ import { DeleteInsert, Resource } from './api';
 import { addValue, getValues, hasProperty, hasValue, removeValue, ValueOptions } from './engine/jsonld';
 
 /**
- * Indexes a **m-ld** update notification by Subject.
+ * A **m-ld** update notification, indexed by Subject.
+ */
+export type SubjectUpdates = { [id: string]: DeleteInsert<Subject>; };
+
+/**
+ * Provides an alternate view of the update deletes and inserts, by Subject.
  *
- * By default, updates are presented with arrays of inserted and deleted
- * subjects:
+ * An update is presented with arrays of inserted and deleted subjects:
  * ```json
  * {
  *   "@delete": [{ "@id": "foo", "severity": 3 }],
@@ -18,8 +22,8 @@ import { addValue, getValues, hasProperty, hasValue, removeValue, ValueOptions }
  * ```
  *
  * In many cases it is preferable to apply inserted and deleted properties to
- * app data views on a subject-by-subject basis. This method transforms the
- * above into:
+ * app data views on a subject-by-subject basis. This property views the above
+ * as:
  * ```json
  * {
  *   "foo": {
@@ -32,26 +36,20 @@ import { addValue, getValues, hasProperty, hasValue, removeValue, ValueOptions }
  *   }
  * }
  * ```
- *
- * @param update a **m-ld** update notification obtained via the
- * {@link follow} method
- */
+*/
 export function asSubjectUpdates(update: DeleteInsert<Subject[]>): SubjectUpdates {
   return bySubject(update, '@insert', bySubject(update, '@delete'));
 }
-
-/**
- * A **m-ld** update notification, indexed by Subject.
- * @see {@link asSubjectUpdates}
- */
-export type SubjectUpdates = { [id: string]: DeleteInsert<Subject>; };
 
 /** @internal */
 function bySubject(update: DeleteInsert<Subject[]>,
   key: keyof DeleteInsert<Subject[]>,
   bySubject: SubjectUpdates = {}): SubjectUpdates {
-  return update[key].reduce((byId, subject) =>
-    ({ ...byId, [subject['@id'] ?? '*']: { ...byId[subject['@id'] ?? '*'], [key]: subject } }), bySubject);
+  return update[key].reduce((bySubject, subject) => {
+    const id = subject['@id'] ?? ''; // Should never be empty
+    bySubject[id] = Object.assign(bySubject[id] ?? {}, { [key]: subject });
+    return bySubject;
+  }, bySubject);
 }
 
 /** @internal */

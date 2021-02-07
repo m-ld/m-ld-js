@@ -2,7 +2,7 @@ import { InterimUpdate, DeleteInsert } from '../../api';
 import { Quad } from 'rdf-js';
 import { TreeClock } from '../clocks';
 import { Subject, Update } from '../../jrql-support';
-import { DefinitePatch, PatchQuads } from '.';
+import { PatchQuads } from '.';
 import { flatten as flatJsonLd } from 'jsonld';
 import { JrqlGraph } from './JrqlGraph';
 import { rdfToJson } from "../jsonld";
@@ -35,13 +35,13 @@ export class InterimUpdatePatch implements InterimUpdate {
   get ready(): Promise<InterimUpdatePatch> {
     return this.needsUpdate.then(async (needsUpdate) => {
       if (needsUpdate) {
-        const newPatch = this.mutable ? this.assertions :
+        const patch = this.mutable ? this.assertions :
           new PatchQuads(this.patch).append(this.assertions);
         this.needsUpdate = Promise.resolve(false);
-        return Object.assign(this, await this.asDeleteInsert(newPatch));
-      } else {
-        return this;
+        this['@delete'] = await this.toSubjects(patch.oldQuads);
+        this['@insert'] = await this.toSubjects(patch.newQuads);
       }
+      return this;
     });
   }
 
@@ -68,13 +68,6 @@ export class InterimUpdatePatch implements InterimUpdate {
   private mutate(fn: () => Promise<boolean>) {
     this.needsUpdate = this.needsUpdate.then(
       async (needsUpdate) => (await fn()) || needsUpdate);
-  }
-
-  private async asDeleteInsert(patch: DefinitePatch) {
-    return {
-      '@delete': await this.toSubjects(patch.oldQuads ?? []),
-      '@insert': await this.toSubjects(patch.newQuads ?? [])
-    };
   }
 
   /**

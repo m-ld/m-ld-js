@@ -11,8 +11,8 @@ import { shortId } from './util';
  * a {@link MeldUpdate}.
  */
 export interface DeleteInsert<T> {
-  '@delete': T;
-  '@insert': T;
+  readonly '@delete': T;
+  readonly '@insert': T;
 }
 
 /**
@@ -133,7 +133,7 @@ export interface MeldState extends MeldReadState {
 /**
  * @see m-ld [specification](http://spec.m-ld.org/interfaces/meldupdate.html)
  */
-export interface MeldUpdate {
+export interface MeldUpdate extends DeleteInsert<Subject[]> {
   /**
    * Partial subjects, containing properties that have been deleted from the
    * domain. Note that deletion of a property (even of all properties) does not
