@@ -48,8 +48,10 @@ export type SubjectUpdates = { [id: string]: DeleteInsert<Subject>; };
 
 /** @internal */
 function bySubject(update: DeleteInsert<Subject[]>,
-  key: '@insert' | '@delete', bySubject: SubjectUpdates = {}): SubjectUpdates {
-  return update[key].reduce((byId, subject) => ({ ...byId, [subject['@id'] ?? '*']: { ...byId[subject['@id'] ?? '*'], [key]: subject } }), bySubject);
+  key: keyof DeleteInsert<Subject[]>,
+  bySubject: SubjectUpdates = {}): SubjectUpdates {
+  return update[key].reduce((byId, subject) =>
+    ({ ...byId, [subject['@id'] ?? '*']: { ...byId[subject['@id'] ?? '*'], [key]: subject } }), bySubject);
 }
 
 /** @internal */

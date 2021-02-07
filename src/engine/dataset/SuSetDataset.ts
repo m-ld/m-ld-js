@@ -1,13 +1,10 @@
 import {
-  MeldUpdate, MeldConstraint, MeldReadState, Resource,
-  ReadResult, InterimUpdate, readResult, DeleteInsert
-} from '../../api';
+  MeldUpdate, MeldConstraint, MeldReadState, InterimUpdate} from '../../api';
 import { Snapshot, UUID, DeltaMessage, MeldDelta } from '..';
 import { Quad } from 'rdf-js';
 import { TreeClock } from '../clocks';
-import { Subject, Update } from '../../jrql-support';
+import { Subject } from '../../jrql-support';
 import { Dataset, DefinitePatch, PatchQuads } from '.';
-import { flatten as flatJsonLd } from 'jsonld';
 import { Iri } from 'jsonld/jsonld-spec';
 import { JrqlGraph } from './JrqlGraph';
 import { MeldEncoding, unreify } from '../MeldEncoding';
@@ -21,12 +18,13 @@ import { MeldError } from '../MeldError';
 import { LocalLock } from '../local';
 import { SUSET_CONTEXT, tripleId, txnId } from './SuSetGraph';
 import { SuSetJournalDataset, SuSetJournalEntry } from './SuSetJournal';
-import { MeldConfig, Read } from '../..';
+import { MeldConfig } from '../..';
 import { QuadMap, TripleMap, Triple } from '../quads';
-import { rdfToJson } from "../jsonld";
 import { CheckList } from '../../constraints/CheckList';
 import { DefaultList } from '../../constraints/DefaultList';
 import { qs } from '../../ns';
+import { InterimUpdatePatch } from './InterimUpdatePatch';
+import { GraphState } from './GraphState';
 
 interface HashTid extends Subject {
   '@id': Iri; // hash:<hashed triple id>
@@ -39,77 +37,6 @@ function asTriplesTids(quadTidQuads: QuadMap<Quad[]>): TripleMap<UUID[]> {
   return new TripleMap<UUID[]>([...quadTidQuads].map(([quad, tids]) => {
     return [quad, tids.map(tidQuad => tidQuad.object.value)];
   }));
-}
-
-export class GraphState implements MeldReadState {
-  constructor(
-    readonly graph: JrqlGraph) {
-  }
-
-  read<S>(request: Read): ReadResult<Resource<S>> {
-    return readResult(this.graph.read(request)
-      .pipe(map(subject => <Resource<S>>subject)));
-  }
-
-  get<S = Subject>(id: string): Promise<Resource<S> | undefined> {
-    return this.graph.describe1(id);
-  }
-}
-
-class InterimUpdatePatch implements InterimUpdate {
-  '@ticks': number;
-  '@delete': Subject[];
-  '@insert': Subject[];
-  /** Assertions made by the constraint (not including the app patch) */
-  assertions: PatchQuads;
-  /** Entailments made by the constraint */
-  entailments = new PatchQuads();
-
-  ready: Promise<InterimUpdatePatch>;
-
-  /**
-   * @param patch the starting app patch (will not be mutated unless 'mutable')
-   */
-  constructor(
-    readonly graph: SuSetDataset,
-    time: TreeClock,
-    readonly patch: PatchQuads,
-    readonly mutable?: 'mutable') {
-    // If mutable, we treat the app patch as assertions
-    this.assertions = mutable ? patch : new PatchQuads();
-    this['@ticks'] = time.ticks;
-    this.ready = this.graph.asDeleteInsert(patch)
-      .then(delIns => Object.assign(this, delIns));
-  }
-
-  private async update() {
-    const newPatch = this.mutable ? this.assertions :
-      new PatchQuads(this.patch).append(this.assertions);
-    // FIXME: Inefficient, re-creates the whole update every time
-    Object.assign(this, await this.graph.asDeleteInsert(newPatch));
-    return this;
-  }
-
-  assert(update: Update) {
-    this.ready = this.ready
-      .then(() => this.graph.write(update))
-      .then(patch => this.assertions.append(patch))
-      .then(() => this.update());
-  }
-
-  entail(update: Update) {
-    this.ready = this.ready
-      .then(() => this.graph.write(update))
-      .then(patch => this.entailments.append(patch))
-      .then(() => this);
-  }
-
-  remove(key: keyof DeleteInsert<any>, pattern: Subject | Subject[]) {
-    this.ready = this.ready
-      .then(() => this.graph.definiteQuads(pattern))
-      .then(toRemove => this.assertions.remove(
-        key == '@delete' ? 'oldQuads' : 'newQuads', toRemove).length ? this.update() : this);
-  }
 }
 
 /**
@@ -184,7 +111,9 @@ export class SuSetDataset extends JrqlGraph {
   }
 
   @SuSetDataset.checkNotClosed.async
-  async saveClock(prepare: (gwc: TreeClock) => Promise<TreeClock> | TreeClock, newClone?: boolean): Promise<TreeClock> {
+  async saveClock(
+    prepare: (gwc: TreeClock) => Promise<TreeClock> | TreeClock,
+    newClone?: boolean): Promise<TreeClock> {
     return this.dataset.transact<TreeClock>({
       id: 'suset-save-clock',
       prepare: async () => {
@@ -413,23 +342,6 @@ export class SuSetDataset extends JrqlGraph {
     return new PatchQuads(assertions).append(entailments).append(tidPatch);
   }
 
-  async asDeleteInsert(patch: DefinitePatch) {
-    return {
-      '@delete': await this.toSubjects(patch.oldQuads ?? []),
-      '@insert': await this.toSubjects(patch.newQuads ?? [])
-    };
-  }
-
-  /**
-   * @returns flattened subjects compacted with no context
-   * @see https://www.w3.org/TR/json-ld11/#flattened-document-form
-   */
-  private async toSubjects(quads: Iterable<Quad>): Promise<Subject[]> {
-    // The flatten function is guaranteed to create a graph object
-    const graph: any = await flatJsonLd(await rdfToJson(quads), {});
-    return graph['@graph'];
-  }
-
   private newTriplesTid(triples: Triple[], tid: UUID): Promise<PatchQuads> {
     return this.tidsGraph.update({
       '@insert': triples.map<HashTid>(triple => ({ '@id': tripleId(triple), tid }))
@@ -490,9 +402,9 @@ export class SuSetDataset extends JrqlGraph {
   }
 
   /**
-   * Takes a snapshot of data, including transaction IDs.
-   * This requires a consistent view, so a transaction lock is taken until all data has been emitted.
-   * To avoid holding up the world, buffer the data.
+   * Takes a snapshot of data, including transaction IDs. This requires a
+   * consistent view, so a transaction lock is taken until all data has been
+   * emitted. To avoid holding up the world, buffer the data.
    */
   @SuSetDataset.checkNotClosed.async
   async takeSnapshot(): Promise<DatasetSnapshot> {

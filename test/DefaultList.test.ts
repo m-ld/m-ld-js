@@ -2,7 +2,7 @@ import { MeldReadState, InterimUpdate, MeldUpdate } from '../src/api';
 import { memStore } from './testClones';
 import { DefaultList } from '../src/constraints/DefaultList';
 import { JrqlGraph } from '../src/engine/dataset/JrqlGraph';
-import { GraphState } from '../src/engine/dataset/SuSetDataset';
+import { GraphState } from '../src/engine/dataset/GraphState';
 import { Dataset } from '../src/engine/dataset';
 import { mock } from 'jest-mock-extended';
 import { Update } from '../src/jrql-support';
