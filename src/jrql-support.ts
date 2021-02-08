@@ -67,6 +67,14 @@ export type SubjectPropertyObject = Value | Container | SubjectPropertyObject[];
  * @see https://json-rql.org/interfaces/container.html
  */
 export type Container = List | Set;
+/**
+ * A stand-in for a Value used as a basis for filtering.
+ * @see https://json-rql.org/globals.html#expression
+ */
+// TODO: Reference should be subsumed in Atom in json-rql
+export type Expression = jrql.Atom | Reference | Constraint;
+/** @internal */
+export { operators } from 'json-rql';
 
 /**
  * Used to express an ordered set of data. A List object is reified to a Subject
@@ -188,6 +196,26 @@ export function isSubject(p: Pattern): p is Subject {
 }
 
 /**
+ * An operator-based constraint of the form `{ <operator> : [<expression>...]
+ * }`. The key is the operator, and the value is the array of arguments. If the
+ * operator is unary, the expression need not be wrapped in an array.
+ * @see https://json-rql.org/interfaces/constraint.html
+ */
+export interface Constraint {
+  /**
+   * Operators are based on SPARQL expression keywords, lowercase with '@' prefix.
+   * It's not practical to constrain the types further here, see #isConstraint
+   * @see https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#rConditionalOrExpression
+   */
+  [operator: string]: Expression | Expression[]
+};
+
+/** @internal */
+export function isConstraint(value: Expression): value is Constraint {
+  return typeof value == 'object' && Object.keys(value).every(key => key in jrql.operators);
+}
+
+/**
  * Used to express a group of patterns to match, or a group of subjects to write
  * (when used as a transaction pattern).
  *
@@ -263,7 +291,12 @@ export interface Group extends Pattern {
   /**
    * Specifies a set of alternative Subjects (or sets of Subjects) to match.
    */
-  '@union'?: (Subject | Subject[])[];
+  '@union'?: (Subject | Group)[];
+  /**
+   * Specifies a filter or an array of filters, each of the form `{ <operator> :
+   * [<expression>...] }`.
+   */
+  '@filter'?: Constraint | Constraint[];
 }
 
 /** @internal */

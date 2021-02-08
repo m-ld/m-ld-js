@@ -1,20 +1,21 @@
 import { Iri } from 'jsonld/jsonld-spec';
 import {
   Context, Read, Subject, Update, isDescribe, isGroup, isSubject, isUpdate,
-  Group, isSelect, Result, Variable, Write
+  Group, isSelect, Result, Variable, Write, Constraint, Expression, operators, isConstraint
 } from '../../jrql-support';
 import { DataFactory, NamedNode, Quad, Term } from 'rdf-js';
 import { Graph, PatchQuads } from '.';
 import { toArray, mergeMap, filter, take, groupBy, catchError } from 'rxjs/operators';
 import { EMPTY, from, Observable, throwError } from 'rxjs';
-import { array } from '../../util';
 import { canPosition, inPosition, TriplePos } from '../quads';
-import { activeCtx, expandTerm } from "../jsonld";
+import { activeCtx, expandTerm, toObjectTerm } from "../jsonld";
 import { Binding } from 'quadstore';
 import { Algebra, Factory as SparqlFactory } from 'sparqlalgebrajs';
 import * as jrql from '../../ns/json-rql';
 import { genVarName, JrqlQuads, matchSubVarName, matchVar } from './JrqlQuads';
 import { MeldError } from '../MeldError';
+import { array } from '../..';
+import { asyncBinaryFold, flatten } from '../util';
 
 /**
  * A graph wrapper that provides low-level json-rql handling for queries. The
@@ -220,12 +221,61 @@ export class JrqlGraph {
     exec: (op: Algebra.Operation, vars: Iterable<string>) => Observable<T>,
     context: Context): Observable<T> {
     const vars = new Set<string>();
-    return from(unions(where).reduce<Promise<Algebra.Operation | null>>(async (opSoFar, graph) => {
-      const left = await opSoFar;
-      const quads = await this.jrql.quads(graph, { query: true, vars }, context);
-      const right = this.sparql.createBgp(quads.map(this.toPattern));
-      return left != null ? this.sparql.createUnion(left, right) : right;
-    }, Promise.resolve(null))).pipe(mergeMap(op => op == null ? EMPTY : exec(op, vars)));
+    return from(this.operation(where, vars, context)).pipe(
+      mergeMap(op => op == null ? EMPTY : exec(op, vars)));
+  }
+
+  private async operation(where: Group | Subject,
+    vars: Set<string>, context: Context): Promise<Algebra.Operation> {
+    if (isSubject(where)) {
+      const quads = await this.jrql.quads(where, { query: true, vars }, context);
+      return this.sparql.createBgp(quads.map(this.toPattern));
+    } else {
+      const graph = array(where['@graph']),
+        filter = array(where['@filter']), // TODO
+        union = array(where['@union']);
+      const quads = graph.length ? await this.jrql.quads(
+        graph, { query: true, vars }, context) : [];
+      const bgp = this.sparql.createBgp(quads.map(this.toPattern));
+      const unionOp = await asyncBinaryFold(union,
+        pattern => this.operation(pattern, vars, context),
+        (left, right) => this.sparql.createUnion(left, right));
+      const unfiltered = unionOp && bgp.patterns.length ?
+        this.sparql.createJoin(bgp, unionOp) : unionOp ?? bgp;
+      return filter.length ? this.sparql.createFilter(
+        unfiltered, await this.constraintExpr(...filter)) : unfiltered;
+    }
+  }
+
+  private async constraintExpr(...constraints: Constraint[]): Promise<Algebra.Expression> {
+    const expression = await asyncBinaryFold(
+      // Every constraint and every entry in a constraint is ANDed
+      flatten(constraints.map(constraint => Object.entries(constraint))),
+      ([operator, expr]) => this.operatorExpr(operator, expr),
+      (left, right) => this.sparql.createOperatorExpression('and', [left, right]));
+    if (expression == null)
+      throw new Error('Missing expression');
+    return expression;
+  }
+
+  private async operatorExpr(
+    operator: string, expr: Expression | Expression[]): Promise<Algebra.Expression> {
+    if (operator in operators)
+      return this.sparql.createOperatorExpression(
+        (<any>operators)[operator].sparql,
+        await Promise.all(array(expr).map(expr => this.exprExpr(expr))));
+    else
+      throw new Error(`Unrecognised operator: ${operator}`);
+  }
+
+  private async exprExpr(expr: Expression): Promise<Algebra.Expression> {
+    if (isConstraint(expr)) {
+      return this.constraintExpr(expr);
+    } else {
+      const varName = typeof expr == 'string' && matchVar(expr);
+      return this.sparql.createTermExpression(varName ?
+        this.rdf.variable(varName) : await toObjectTerm(expr, this.rdf));
+    }
   }
 
   private project = (op: Algebra.Operation, vars: Iterable<string>): Observable<Binding> => {
@@ -296,15 +346,4 @@ function anyVarTerm(quad: Quad) {
 function asGroup(where: Subject | Subject[] | Group): Group {
   return Array.isArray(where) ? { '@graph': where } :
     isGroup(where) ? where : { '@graph': where };
-}
-
-function unions(where: Group): Subject[][] {
-  // A Group can technically have both a @graph and a @union
-  const graph = array(where['@graph']);
-  if (where['@union'] != null) {
-    // Top-level graph intersects with each union
-    return where['@union'].map(subject => array(subject).concat(graph))
-  } else {
-    return [graph];
-  }
 }

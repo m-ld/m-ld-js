@@ -192,6 +192,21 @@ describe('Meld State API', () => {
     });
   });
 
+  describe('filters', () => {
+    test('selects name equal', async () => {
+      await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
+      await api.write<Subject>({ '@id': 'wilma', name: 'Wilma' });
+      const selection = await api.read<Select>({
+        '@select': '?f',
+        '@where': {
+          '@graph': { '@id': '?f', name: '?n' },
+          '@filter': { '@eq': ['?n', 'Fred'] }
+        }
+      });
+      expect(selection).toEqual([{ '?f': { '@id': 'fred' } }]);
+    });
+  });
+
   describe('anonymous subjects', () => {
     test('describes an anonymous subject', async () => {
       await api.write<Update>({ '@insert': { name: 'Fred', height: 5 } });

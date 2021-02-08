@@ -7,6 +7,7 @@ import { compactIri as _compactIri } from 'jsonld/lib/compact';
 export { Options } from 'jsonld';
 export { ActiveContext } from 'jsonld/lib/context';
 import validDataUrl = require('valid-data-url');
+import { blank } from '../ns/json-rql';
 
 export * from 'jsonld/lib/util';
 export * from 'jsonld/lib/context';
@@ -54,4 +55,8 @@ export function dataUrlData(url: Url, ...contentTypes: string[]): string | undef
  */
 export function getValues(subject: { [key: string]: any }, property: string): Array<any> {
   return [].concat(subject[property] ?? []);
+}
+
+export async function toObjectTerm(expr: any, rdf: Required<DataFactory>) {
+  return (await jsonToRdf({ [blank]: expr }, rdf))[0].object;
 }

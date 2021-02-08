@@ -310,3 +310,14 @@ export function minIndexOfSparse<T>(arr: T[]) {
   arr.some((_, i) => (min = i) != null);
   return min;
 }
+
+export async function asyncBinaryFold<T, R>(
+  input: T[],
+  map: (t: T) => R | Promise<R>,
+  fold: (r1: R, r2: R) => R | Promise<R>): Promise<R | null> {
+  return input.reduce<Promise<R | null>>(async (r, t) => {
+    const r1 = await r;
+    const r2 = await map(t);
+    return r1 == null ? r2 : await fold(r1, r2);
+  }, Promise.resolve(null));
+}
