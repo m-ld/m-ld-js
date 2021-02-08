@@ -8,11 +8,11 @@ import { Graph, PatchQuads } from '.';
 import { toArray, mergeMap, filter, take, groupBy, catchError } from 'rxjs/operators';
 import { EMPTY, from, Observable, throwError } from 'rxjs';
 import { canPosition, inPosition, TriplePos } from '../quads';
-import { activeCtx, expandTerm, toObjectTerm } from "../jsonld";
+import { activeCtx, expandTerm } from "../jsonld";
 import { Binding } from 'quadstore';
 import { Algebra, Factory as SparqlFactory } from 'sparqlalgebrajs';
 import * as jrql from '../../ns/json-rql';
-import { genVarName, JrqlQuads, matchSubVarName, matchVar } from './JrqlQuads';
+import { genVarName, JrqlQuads, matchSubVarName, matchVar, toObjectTerms } from './JrqlQuads';
 import { MeldError } from '../MeldError';
 import { array } from '../..';
 import { asyncBinaryFold, flatten } from '../util';
@@ -232,7 +232,7 @@ export class JrqlGraph {
       return this.sparql.createBgp(quads.map(this.toPattern));
     } else {
       const graph = array(where['@graph']),
-        filter = array(where['@filter']), // TODO
+        filter = array(where['@filter']),
         union = array(where['@union']);
       const quads = graph.length ? await this.jrql.quads(
         graph, { query: true, vars }, context) : [];
@@ -243,15 +243,16 @@ export class JrqlGraph {
       const unfiltered = unionOp && bgp.patterns.length ?
         this.sparql.createJoin(bgp, unionOp) : unionOp ?? bgp;
       return filter.length ? this.sparql.createFilter(
-        unfiltered, await this.constraintExpr(...filter)) : unfiltered;
+        unfiltered, await this.constraintExpr(filter, context)) : unfiltered;
     }
   }
 
-  private async constraintExpr(...constraints: Constraint[]): Promise<Algebra.Expression> {
+  private async constraintExpr(
+    constraints: Constraint[], context: Context): Promise<Algebra.Expression> {
     const expression = await asyncBinaryFold(
       // Every constraint and every entry in a constraint is ANDed
       flatten(constraints.map(constraint => Object.entries(constraint))),
-      ([operator, expr]) => this.operatorExpr(operator, expr),
+      ([operator, expr]) => this.operatorExpr(operator, expr, context),
       (left, right) => this.sparql.createOperatorExpression('and', [left, right]));
     if (expression == null)
       throw new Error('Missing expression');
@@ -259,22 +260,25 @@ export class JrqlGraph {
   }
 
   private async operatorExpr(
-    operator: string, expr: Expression | Expression[]): Promise<Algebra.Expression> {
+    operator: string,
+    expr: Expression | Expression[],
+    context: Context): Promise<Algebra.Expression> {
     if (operator in operators)
       return this.sparql.createOperatorExpression(
         (<any>operators)[operator].sparql,
-        await Promise.all(array(expr).map(expr => this.exprExpr(expr))));
+        await Promise.all(array(expr).map(expr => this.exprExpr(expr, context))));
     else
       throw new Error(`Unrecognised operator: ${operator}`);
   }
 
-  private async exprExpr(expr: Expression): Promise<Algebra.Expression> {
+  private async exprExpr(
+    expr: Expression, context: Context): Promise<Algebra.Expression> {
     if (isConstraint(expr)) {
-      return this.constraintExpr(expr);
+      return this.constraintExpr([expr], context);
     } else {
       const varName = typeof expr == 'string' && matchVar(expr);
       return this.sparql.createTermExpression(varName ?
-        this.rdf.variable(varName) : await toObjectTerm(expr, this.rdf));
+        this.rdf.variable(varName) : (await toObjectTerms(expr, this.rdf, context))[0]);
     }
   }
 

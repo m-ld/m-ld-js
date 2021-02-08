@@ -205,6 +205,36 @@ describe('Meld State API', () => {
       });
       expect(selection).toEqual([{ '?f': { '@id': 'fred' } }]);
     });
+
+    test('selects name in', async () => {
+      await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
+      await api.write<Subject>({ '@id': 'wilma', name: 'Wilma' });
+      await api.write<Subject>({ '@id': 'barney', name: 'Barney' });
+      const selection = await api.read<Select>({
+        '@select': '?f',
+        '@where': {
+          '@graph': { '@id': '?f', name: '?n' },
+          '@filter': { '@in': ['?n', 'Fred', 'Wilma'] }
+        }
+      });
+      expect(new Set(selection)).toEqual(new Set([
+        { '?f': { '@id': 'fred' } }, { '?f': { '@id': 'wilma' } }]));
+    });
+
+    test('selects @id in', async () => {
+      await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
+      await api.write<Subject>({ '@id': 'wilma', name: 'Wilma' });
+      await api.write<Subject>({ '@id': 'barney', name: 'Barney' });
+      const selection = await api.read<Select>({
+        '@select': '?f',
+        '@where': {
+          '@graph': { '@id': '?f' },
+          '@filter': { '@in': ['?f', { '@id': 'fred' }, { '@id': 'wilma' }] }
+        }
+      });
+      expect(new Set(selection)).toEqual(new Set([
+        { '?f': { '@id': 'fred' } }, { '?f': { '@id': 'wilma' } }]));
+    });
   });
 
   describe('anonymous subjects', () => {

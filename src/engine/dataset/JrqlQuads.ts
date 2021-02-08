@@ -1,7 +1,7 @@
 import { compact } from 'jsonld';
 import { Iri, Url } from 'jsonld/jsonld-spec';
 import { Binding } from 'quadstore';
-import { DataFactory, Quad, Term } from 'rdf-js';
+import { DataFactory, Quad, Quad_Object, Term } from 'rdf-js';
 import { GraphName } from '.';
 import { any, array, includeValue, uuid } from '../..';
 import {
@@ -311,6 +311,14 @@ export function toIndexNumber(indexKey: any): number | [number, number] | undefi
 
 export function toIndexDataUrl(index: number | [number, number]): Url {
   return `data:,${array(index).map(i => i.toFixed(0)).join(',')}`;
+}
+
+export async function toObjectTerms(
+  expr: any, rdf: Required<DataFactory>, context: Context): Promise<Quad_Object[]> {
+  return (await jsonToRdf({
+    '@context': context,
+    [jrql.blank]: expr
+  }, rdf)).map(quad => quad.object);
 }
 
 const isNaturalNumber = (n: any) =>
