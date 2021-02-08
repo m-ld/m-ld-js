@@ -35,32 +35,34 @@ describe('LSEQ', () => {
       expect(lseq.parse('0x01x').toString()).toBe('0x01x');
       expect(lseq.parse('1x01y').toString()).toBe('1x01y');
     });
+  });
 
-    test('generates head', () => {
-      const head = lseq.min.between(lseq.max, 'x');
+  describe('Allocating single positions', () => {
+    test('allocates head', () => {
+      const head = lseq.min.between(lseq.max, 'x')[0];
       expect(head.ids.length).toBe(1);
       expect(head.ids[0].pos).toBeGreaterThan(0);
       expect(head.ids[0].pos).toBeLessThan(16);
       expect(head.ids[0].site).toBe('x');
     });
 
-    test('generates next', () => {
-      const tail = lseq.parse('1x').between(lseq.max, 'x');
+    test('allocates next', () => {
+      const tail = lseq.parse('1x').between(lseq.max, 'x')[0];
       expect(tail.ids.length).toBe(1);
       expect(tail.ids[0].pos).toBeGreaterThan(1);
       expect(tail.ids[0].pos).toBeLessThan(16);
       expect(tail.ids[0].site).toBe('x');
     });
 
-    test('generates between', () => {
-      const mid = lseq.parse('1x').between(lseq.parse('fx'), 'x');
+    test('allocates between', () => {
+      const mid = lseq.parse('1x').between(lseq.parse('fx'), 'x')[0];
       expect(mid.ids.length).toBe(1);
       expect(mid.ids[0].pos).toBeGreaterThan(1);
       expect(mid.ids[0].pos).toBeLessThan(15);
     });
 
     test('overflows if high', () => {
-      const posId = lseq.parse('fx').between(lseq.max, 'x');
+      const posId = lseq.parse('fx').between(lseq.max, 'x')[0];
       expect(posId.ids.length).toBe(2);
       expect(posId.ids[0].pos).toBe(15);
       expect(posId.ids[1].pos).toBeGreaterThan(0);
@@ -68,37 +70,37 @@ describe('LSEQ', () => {
     });
 
     test('overflows if low', () => {
-      const posId = lseq.min.between(lseq.parse('1x'), 'x');
+      const posId = lseq.min.between(lseq.parse('1x'), 'x')[0];
       expect(posId.ids.length).toBe(2);
       expect(posId.ids[0].pos).toBe(0);
       expect(posId.ids[1].pos).toBeGreaterThan(0);
       expect(posId.ids[1].pos).toBeLessThan(256);
     });
 
-    test('generates between min and overflowed head', () => {
-      const posId = lseq.min.between(lseq.parse('0x02x'), 'x');
+    test('allocates between min and overflowed head', () => {
+      const posId = lseq.min.between(lseq.parse('0x02x'), 'x')[0];
       expect(posId.ids.length).toBe(2);
       expect(posId.ids[0].pos).toBe(0);
       expect(posId.ids[1].pos).toBe(1);
     });
 
-    test('generates between min and double-overflowed head', () => {
-      const posId = lseq.min.between(lseq.parse('0x00x002x'), 'x');
+    test('allocates between min and double-overflowed head', () => {
+      const posId = lseq.min.between(lseq.parse('0x00x002x'), 'x')[0];
       expect(posId.ids.length).toBe(3);
       expect(posId.ids[0].pos).toBe(0);
       expect(posId.ids[1].pos).toBe(0);
       expect(posId.ids[2].pos).toBe(1);
     });
 
-    test('generates between overflowed and max', () => {
-      const posId = lseq.parse('fxfex').between(lseq.max, 'x');
+    test('allocates between overflowed and max', () => {
+      const posId = lseq.parse('fxfex').between(lseq.max, 'x')[0];
       expect(posId.ids.length).toBe(2);
       expect(posId.ids[0].pos).toBe(15);
       expect(posId.ids[1].pos).toBe(255);
     });
 
     test('overflows if too close', () => {
-      const posId = lseq.parse('1x').between(lseq.parse('2x'), 'x');
+      const posId = lseq.parse('1x').between(lseq.parse('2x'), 'x')[0];
       expect(posId.ids.length).toBe(2);
       expect(posId.ids[0].pos).toBe(1);
       expect(posId.ids[1].pos).toBeGreaterThan(0);
@@ -106,7 +108,7 @@ describe('LSEQ', () => {
     });
 
     test('overflows twice if no room', () => {
-      const posId = lseq.parse('1x').between(lseq.parse('1x01x'), 'x');
+      const posId = lseq.parse('1x').between(lseq.parse('1x01x'), 'x')[0];
       expect(posId.ids.length).toBe(3);
       expect(posId.ids[0].pos).toBe(1);
       expect(posId.ids[1].pos).toBe(0);
@@ -115,7 +117,7 @@ describe('LSEQ', () => {
     });
 
     test('overflows if no headroom', () => {
-      const posId = lseq.parse('1xffx').between(lseq.parse('2x01x'), 'x');
+      const posId = lseq.parse('1xffx').between(lseq.parse('2x01x'), 'x')[0];
       expect(posId.ids.length).toBe(3);
       expect(posId.ids[0].pos).toBe(1);
       expect(posId.ids[1].pos).toBe(255);
@@ -124,7 +126,7 @@ describe('LSEQ', () => {
     });
 
     test('prefers shorter between', () => {
-      const posId = lseq.parse('1xffx001x').between(lseq.parse('2xffx'), 'x');
+      const posId = lseq.parse('1xffx001x').between(lseq.parse('2xffx'), 'x')[0];
       // Could correctly generate 1xffx002x-1xffxfffx, prefers or 2x01x-2xfex
       expect(posId.ids.length).toBe(2);
       expect(posId.ids[0].pos).toBe(2);
@@ -137,7 +139,7 @@ describe('LSEQ', () => {
     });
 
     test('can position between same index if different site', () => {
-      const posId = lseq.parse('1x').between(lseq.parse('1y'), 'x');
+      const posId = lseq.parse('1x').between(lseq.parse('1y'), 'x')[0];
       expect(posId.ids.length).toBe(2);
       expect(posId.ids[0].pos).toBe(1);
       expect(posId.ids[1].pos).toBeGreaterThan(0);
@@ -145,12 +147,80 @@ describe('LSEQ', () => {
     });
 
     test('correctly orders different sites', () => {
-      const posId = lseq.parse('1x01x').between(lseq.parse('1y'), 'x');
+      const posId = lseq.parse('1x01x').between(lseq.parse('1y'), 'x')[0];
       expect(posId.ids.length).toBe(2);
       expect(posId.ids[0].pos).toBe(1);
       expect(posId.ids[0].site).toBe('x');
       expect(posId.ids[1].pos).toBeGreaterThan(1);
       expect(posId.ids[1].pos).toBeLessThan(256);
+    });
+  });
+
+  describe('Allocating multiple positions', () => {
+    test('allocates head', () => {
+      const heads = lseq.min.between(lseq.max, 'x', 3);
+      expect(heads.length).toBe(3);
+      let prev = 0;
+      for (let head of heads) {
+        expect(head.ids.length).toBe(1);
+        expect(head.ids[0].pos).toBeGreaterThan(prev);
+        expect(head.ids[0].pos).toBeLessThan(16);
+        expect(head.ids[0].site).toBe('x');
+        prev = head.ids[0].pos;
+      }
+    });
+
+    test('allocates next', () => {
+      const tails = lseq.parse('1x').between(lseq.max, 'x', 3);
+      expect(tails.length).toBe(3);
+      let prev = '1x';
+      for (let tail of tails) {
+        expect(tail.ids.length).toBe(1);
+        expect(tail.toString() > prev).toBe(true);
+        expect(tail.ids[0].pos).toBeLessThan(16);
+        expect(tail.ids[0].site).toBe('x');
+        prev = tail.toString();
+      }
+    });
+
+    test('allocates between', () => {
+      const mids = lseq.parse('1x').between(lseq.parse('fx'), 'x', 3);
+      expect(mids.length).toBe(3);
+      let prev = '1x';
+      for (let mid of mids) {
+        expect(mid.ids.length).toBe(1);
+        expect(mid.toString() > prev).toBe(true);
+        expect(mid.ids[0].pos).toBeLessThan(15);
+        prev = mid.toString();
+      }
+    });
+
+    test('overflows if not enough room', () => {
+      // Using exactly double the space to ensure every position allocated at
+      // level 1 has one allocation at level 2
+      const mids = lseq.parse('1x').between(lseq.parse('4x'), 'x', 4);
+      expect(mids.length).toBe(4);
+      let prev = '1x';
+      for (let mid of mids) {
+        expect(mid.ids.length).toBeLessThan(3);
+        expect(mid.toString() > prev).toBe(true);
+        expect(mid.ids[0].pos).toBeLessThan(4);
+        prev = mid.toString();
+      }
+    });
+
+    test('double overflows if necessary', () => {
+      // Enough to blow up the second level
+      const count = 1 + 16 * 15 + 1;
+      const loads = lseq.parse('1x').between(lseq.parse('3x'), 'x', count);
+      expect(loads.length).toBe(count);
+      let prev = '1x';
+      for (let posId of loads) {
+        expect(posId.ids.length).toBeLessThan(4);
+        expect(posId.toString() > prev).toBe(true);
+        expect(posId.ids[0].pos).toBeLessThan(3);
+        prev = posId.toString();
+      }
     });
   });
 
@@ -173,7 +243,7 @@ describe('LSEQ', () => {
         const ordered = this.ordered();
         const lbound = ordered[i - 1]?.posId, ubound = ordered[i]?.posId;
         const posId = (lbound ? lseq.parse(lbound) : lseq.min)
-          .between(ubound ? lseq.parse(ubound) : lseq.max, this.site).toString();
+          .between(ubound ? lseq.parse(ubound) : lseq.max, this.site)[0].toString();
         this.items[posId] = value;
         return { insert: [posId, value] };
       }
@@ -257,7 +327,7 @@ describe('LSEQ', () => {
     test('does nothing with no requests on a singleton list', () => {
       const rw = new LseqIndexRewriter(lseq, 'x');
       const notify = mock<LseqIndexNotify<string>>();
-      rw.rewriteIndexes([{posId: lseq.min.between(lseq.max, 'x').toString(), value: 'a'}],
+      rw.rewriteIndexes([{ posId: lseq.min.between(lseq.max, 'x')[0].toString(), value: 'a' }],
         notify);
       expect(notify.deleted.mock.calls.length).toBe(0);
       expect(notify.inserted.mock.calls.length).toBe(0);
@@ -283,10 +353,10 @@ describe('LSEQ', () => {
 
     test('inserts tail by index on singleton list', () => {
       const rw = new LseqIndexRewriter<string>(lseq, 'x');
-      const head = lseq.min.between(lseq.max, 'x').toString();
+      const head = lseq.min.between(lseq.max, 'x')[0].toString();
       rw.addInsert(['b'], 1);
       const notify = mock<LseqIndexNotify<string>>();
-      rw.rewriteIndexes([{posId: head, value: 'a'}], notify);
+      rw.rewriteIndexes([{ posId: head, value: 'a' }], notify);
       expect(notify.deleted.mock.calls.length).toBe(0);
       expect(notify.inserted.mock.calls.length).toBe(1);
       expect(notify.inserted.mock.calls[0][0]).toBe('b');
@@ -297,7 +367,7 @@ describe('LSEQ', () => {
 
     test('inserts beyond tail index on singleton list', () => {
       const rw = new LseqIndexRewriter<string>(lseq, 'x');
-      const head = lseq.min.between(lseq.max, 'x').toString();
+      const head = lseq.min.between(lseq.max, 'x')[0].toString();
       rw.addInsert(['b'], 2); // Beyond tail
       const notify = mock<LseqIndexNotify<string>>();
       rw.rewriteIndexes([{ posId: head, value: 'a' }], notify);
@@ -311,19 +381,19 @@ describe('LSEQ', () => {
 
     test('inserts two heads on singleton list', () => {
       const rw = new LseqIndexRewriter<string>(lseq, 'x');
-      const head = lseq.min.between(lseq.max, 'x').toString();
+      const head = lseq.min.between(lseq.max, 'x')[0].toString();
       rw.addInsert(['a', 'b'], 0);
       const notify = mock<LseqIndexNotify<string>>();
       rw.rewriteIndexes([{ posId: head, value: 'c' }], notify);
       expect(notify.deleted.mock.calls.length).toBe(0);
-      
+
       expect(notify.inserted.mock.calls.length).toBe(2);
-      
+
       expect(notify.inserted.mock.calls[0][0]).toBe('a');
       const aPos = notify.inserted.mock.calls[0][1];
       expect(aPos < head).toBe(true);
       expect(notify.inserted.mock.calls[0][2]).toBe(0);
-      
+
       expect(notify.inserted.mock.calls[1][0]).toBe('b');
       const bPos = notify.inserted.mock.calls[1][1];
       expect(bPos > aPos).toBe(true);
@@ -338,7 +408,7 @@ describe('LSEQ', () => {
 
     test('deletes head on a singleton list', () => {
       const rw = new LseqIndexRewriter<string>(lseq, 'x');
-      const head = lseq.min.between(lseq.max, 'x').toString();
+      const head = lseq.min.between(lseq.max, 'x')[0].toString();
       rw.addDelete(head);
       const notify = mock<LseqIndexNotify<string>>();
       rw.rewriteIndexes([{ posId: head, value: 'a' }], notify);
@@ -351,7 +421,7 @@ describe('LSEQ', () => {
 
     test('does not delete non-existent position', () => {
       const rw = new LseqIndexRewriter<string>(lseq, 'x');
-      const head = lseq.min.between(lseq.max, 'x').toString();
+      const head = lseq.min.between(lseq.max, 'x')[0].toString();
       rw.addDelete('garbage');
       const notify = mock<LseqIndexNotify<string>>();
       rw.rewriteIndexes([{ posId: head, value: 'a' }], notify);
@@ -362,8 +432,8 @@ describe('LSEQ', () => {
 
     test('does nothing if deleting an insert', () => {
       const rw = new LseqIndexRewriter<string>(lseq, 'x');
-      const head = lseq.min.between(lseq.max, 'x').toString();
-      const tail = lseq.parse(head).between(lseq.max, 'x').toString();
+      const head = lseq.min.between(lseq.max, 'x')[0].toString();
+      const tail = lseq.parse(head).between(lseq.max, 'x')[0].toString();
       rw.addInsert('b', tail);
       rw.addDelete(tail);
       const notify = mock<LseqIndexNotify<string>>();
@@ -375,15 +445,15 @@ describe('LSEQ', () => {
 
     test('throws if inserting a delete', () => {
       const rw = new LseqIndexRewriter<string>(lseq, 'x');
-      const head = lseq.min.between(lseq.max, 'x').toString();
-      const tail = lseq.parse(head).between(lseq.max, 'x').toString();
+      const head = lseq.min.between(lseq.max, 'x')[0].toString();
+      const tail = lseq.parse(head).between(lseq.max, 'x')[0].toString();
       rw.addDelete(tail);
       expect(() => rw.addInsert('b', tail)).toThrow();
     });
 
     test('replaces head by index on a singleton list', () => {
       const rw = new LseqIndexRewriter<string>(lseq, 'x');
-      const head = lseq.min.between(lseq.max, 'x').toString();
+      const head = lseq.min.between(lseq.max, 'x')[0].toString();
       rw.addDelete(head);
       rw.addInsert(['b'], 0);
       const notify = mock<LseqIndexNotify<string>>();
@@ -397,14 +467,14 @@ describe('LSEQ', () => {
       const bPos = notify.inserted.mock.calls[0][1];
       expect(bPos > lseq.min.toString()).toBe(true);
       expect(notify.inserted.mock.calls[0][2]).toBe(0);
-      
+
       expect(notify.reindexed.mock.calls.length).toBe(0);
     });
 
     test('does not renumber tail after replacing head', () => {
       const rw = new LseqIndexRewriter<string>(lseq, 'x');
-      const head = lseq.min.between(lseq.max, 'x').toString(),
-        tail = lseq.parse(head).between(lseq.max, 'x').toString();
+      const head = lseq.min.between(lseq.max, 'x')[0].toString(),
+        tail = lseq.parse(head).between(lseq.max, 'x')[0].toString();
       rw.addDelete(head);
       rw.addInsert(['b'], 0);
       const notify = mock<LseqIndexNotify<string>>();
@@ -419,7 +489,7 @@ describe('LSEQ', () => {
 
     test('inserts head by position ID on empty list', () => {
       const rw = new LseqIndexRewriter<string>(lseq, 'x');
-      const head = lseq.min.between(lseq.max, 'x').toString();
+      const head = lseq.min.between(lseq.max, 'x')[0].toString();
       rw.addInsert('a', head);
       const notify = mock<LseqIndexNotify<string>>();
       rw.rewriteIndexes([], notify);
@@ -433,13 +503,13 @@ describe('LSEQ', () => {
 
     test('inserts head by position ID on singleton list', () => {
       const rw = new LseqIndexRewriter<string>(lseq, 'x');
-      const head = lseq.min.between(lseq.max, 'x').toString();
-      const newHead = lseq.min.between(lseq.parse(head), 'x').toString();
+      const head = lseq.min.between(lseq.max, 'x')[0].toString();
+      const newHead = lseq.min.between(lseq.parse(head), 'x')[0].toString();
       rw.addInsert('a', newHead);
       const notify = mock<LseqIndexNotify<string>>();
       rw.rewriteIndexes([{ posId: head, value: 'b' }], notify);
       expect(notify.deleted.mock.calls.length).toBe(0);
-      
+
       expect(notify.inserted.mock.calls.length).toBe(1);
       expect(notify.inserted.mock.calls[0][0]).toBe('a');
       expect(notify.inserted.mock.calls[0][1]).toBe(newHead);
@@ -453,8 +523,8 @@ describe('LSEQ', () => {
 
     test('inserts tail by position ID on singleton list', () => {
       const rw = new LseqIndexRewriter<string>(lseq, 'x');
-      const head = lseq.min.between(lseq.max, 'x').toString();
-      const tail = lseq.parse(head).between(lseq.max, 'x').toString();
+      const head = lseq.min.between(lseq.max, 'x')[0].toString();
+      const tail = lseq.parse(head).between(lseq.max, 'x')[0].toString();
       rw.addInsert('b', tail);
       const notify = mock<LseqIndexNotify<string>>();
       rw.rewriteIndexes([{ posId: head, value: 'a' }], notify);
@@ -468,9 +538,9 @@ describe('LSEQ', () => {
 
     test('inserts middle by position ID', () => {
       const rw = new LseqIndexRewriter<string>(lseq, 'x');
-      const head = lseq.min.between(lseq.max, 'x').toString();
-      const tail = lseq.parse(head).between(lseq.max, 'x').toString();
-      const mid = lseq.parse(head).between(lseq.parse(tail), 'x').toString();
+      const head = lseq.min.between(lseq.max, 'x')[0].toString();
+      const tail = lseq.parse(head).between(lseq.max, 'x')[0].toString();
+      const mid = lseq.parse(head).between(lseq.parse(tail), 'x')[0].toString();
       rw.addInsert('b', mid);
       const notify = mock<LseqIndexNotify<string>>();
       rw.rewriteIndexes([{ posId: head, value: 'a' }, { posId: tail, value: 'c' }], notify);
