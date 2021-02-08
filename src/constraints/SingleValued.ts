@@ -2,8 +2,8 @@ import {
   MeldConstraint, MeldUpdate, MeldReadState, asSubjectUpdates, updateSubject, InterimUpdate
 } from '..';
 import { Iri } from 'jsonld/jsonld-spec';
-import { map, filter, take, mergeMap, defaultIfEmpty, concatMap } from 'rxjs/operators';
-import { Subject, Select, Value, isValueObject } from '../jrql-support';
+import { map, filter, take, concatMap } from 'rxjs/operators';
+import { Subject, Select, Value, isValueObject, Reference } from '../jrql-support';
 import { Observable, EMPTY, concat, defer, from } from 'rxjs';
 
 /**
@@ -41,8 +41,8 @@ export class SingleValued implements MeldConstraint {
   }
 
   async check(state: MeldReadState, update: MeldUpdate): Promise<unknown> {
-    // Fail early and report the first failure
-    const failed = await this.affected(state, update, 'failEarly').pipe(
+    // Report the first failure
+    const failed = await this.affected(state, update).pipe(
       filter(subject => isMultiValued(subject[this.property])),
       take(1)).toPromise();
     return failed != null ? Promise.reject(this.failure(failed)) : Promise.resolve();
@@ -64,34 +64,32 @@ export class SingleValued implements MeldConstraint {
       })).toPromise();
   }
 
-  private affected(state: MeldReadState, update: MeldUpdate, failEarly?: 'failEarly'):
-    Observable<Subject> {
-    const hasProperty = (subject: Subject): boolean => subject[this.property] != null;
-    const propertyInserts = update['@insert'].filter(hasProperty);
-    // 'Fail early' means we pipe the raw inserts through the filter first,
-    // in case they trivially contain an array for the property
+  private affected(state: MeldReadState, update: MeldUpdate): Observable<Subject> {
+    const propertyInserts = update['@insert'].filter(this.hasProperty);
+    // Fail earliest if there are no inserts for the property
     return !propertyInserts.length ? EMPTY :
-      concat(failEarly ? from(propertyInserts) : EMPTY, defer(() => {
+      // Fail early by piping the raw inserts through the filter first,
+      // in case they trivially contain an array for the property
+      concat(from(propertyInserts), defer(() => {
         // Reformulate the update per-(subject with the target property)
         const subjectUpdates = asSubjectUpdates({
-          '@delete': update['@delete'].filter(hasProperty),
+          '@delete': update['@delete'].filter(this.hasProperty),
           '@insert': propertyInserts
         });
-        return from(Object.keys(subjectUpdates)).pipe(
-          mergeMap(sid => state.read<Select>({
-            // TODO: Only need to select where o is not equal to the insert
-            '@select': '?o', '@where': { '@id': sid, [this.property]: '?o' }
-          }).pipe(
-            defaultIfEmpty({ '@id': '_:b0', '?o': [] }),
-            map(selectResult => {
-              // Weirdness to construct a subject from the select result
-              // TODO: Support `@construct`
-              const subject = { '@id': sid, [this.property]: selectResult['?o'] };
-              updateSubject(subject, subjectUpdates[sid]);
-              // Side-effect to prevent duplicate processing
-              delete subjectUpdates[sid];
-              return subject;
-            }))));
+        const sids = Object.keys(subjectUpdates);
+        return state.read<Select>({
+          '@select': ['?s', '?o'],
+          '@where': {
+            '@graph': { '@id': '?s', [this.property]: '?o' },
+            '@filter': { '@in': ['?s', ...sids.map(sid => ({ '@id': sid }))] }
+          }
+        }).pipe(map(selectResult => {
+          const sid = (<Reference>selectResult['?s'])['@id'];
+          // Weirdness to construct a subject from the select result
+          // TODO: Support `@construct`
+          const subject = { '@id': sid, [this.property]: selectResult['?o'] };
+          return updateSubject(subject, subjectUpdates[sid]);
+        }));
       }));
   }
 
@@ -99,4 +97,6 @@ export class SingleValued implements MeldConstraint {
     return `Multiple values for ${subject['@id']}: ${this.property}
     ${subject[this.property]}`;
   }
+
+  private hasProperty = (subject: Subject): boolean => subject[this.property] != null;
 }
