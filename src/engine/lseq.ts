@@ -312,39 +312,8 @@ export class LseqIndexRewriter<T> {
       this.lseq.parse(existing[oldIndex - 1].posId) : this.lseq.min;
     let prevPosId = '';
 
-    const posIdInsertQueue = this.posIdInsertsAsQueue();
-    const dequeuePosIdInserts = (upper: LseqPosId) => {
-      while (posIdInsertQueue.length > 0 && posIdInsertQueue[0].posId < upper.toString()) {
-        const insert = posIdInsertQueue.shift() as PosItem<T>;
-        notify.inserted(insert.value, insert.posId, newIndex++);
-        posId = this.lseq.parse(insert.posId); // Side-effect
-      }
-    };
-
-    let indexInsertQueue: { start: number, values: T[] } | null = null;
-    const enqueueIndexInserts = () => {
-      const indexInserts = this.indexInserts[oldIndex];
-      if (indexInserts != null) {
-        const queue = (indexInsertQueue ??= { start: newIndex, values: [] }).values;
-        // indexInserts may be sparse, so using forEach
-        indexInserts.forEach(value => {
-          queue.push(value);
-          newIndex++; // Side-effect
-        });
-      }
-    };
-    const dequeueIndexInserts = (upper: LseqPosId) => {
-      if (indexInsertQueue != null) {
-        const positions = posId.between(upper, this.site, indexInsertQueue.values.length);
-        for (let i = 0; i < positions.length; i++) {
-          posId = positions[i]; // Side-effect
-          notify.inserted(indexInsertQueue.values[i],
-            posId.toString(), indexInsertQueue.start + i);
-        }
-        indexInsertQueue = null;
-      }
-    };
-
+    const posIdInsertQueue = new PosIdInsertsQueue<T>(this.posIdInserts);
+    const indexInsertBatch = new IndexInsertBatch<T>(this.site);
     while (
       oldIndex < this.indexInserts.length ||
       posId.toString() !== prevPosId ||
@@ -355,17 +324,20 @@ export class LseqIndexRewriter<T> {
       const exists: PosItem<T> | undefined = existing[oldIndex];
       // posId is already the lower bound on the next position created
       const upper = exists != null ? this.lseq.parse(exists.posId) : this.lseq.max;
-      // Insert items before this position if requested
-      dequeuePosIdInserts(upper);
+      // Prepare insert items before this position if they exist
+      for (let inserted of posIdInsertQueue.dequeue(upper)) {
+        posId = this.lseq.parse(inserted.posId);
+        notify.inserted(inserted.value, inserted.posId, newIndex++);
+      }
       // Prepare insertion of items at this (old) index if requested
-      enqueueIndexInserts();
+      newIndex += indexInsertBatch.addAll(this.indexInserts[oldIndex], newIndex);
       if (exists != null) {
         if (this.deletes.has(exists.posId)) {
           notify.deleted(exists.value, exists.posId, oldIndex);
           // Do not increment the position or new index
         } else {
-          // Bank any index-based insertions prior to next old item
-          dequeueIndexInserts(upper);
+          // Flush any index-based insertions prior to next old item
+          posId = indexInsertBatch.flush(posId, upper, notify.inserted);
           // If the index of the old value has change, notify
           if (newIndex !== oldIndex)
             notify.reindexed(exists.value, exists.posId, newIndex);
@@ -376,21 +348,63 @@ export class LseqIndexRewriter<T> {
       }
       oldIndex++;
     }
-    dequeueIndexInserts(this.lseq.max);
+    // Flush any remaining index-based insertions
+    indexInsertBatch.flush(posId, this.lseq.max, notify.inserted);
   }
 
-  private posIdInsertsAsQueue(): PosItem<T>[] {
-    return [...this.posIdInserts.entries()]
-      .map(([posId, value]) => ({ posId, value }))
-      .sort((e1, e2) => e1.posId.localeCompare(e2.posId));
-  }
-
-  private * iterateInserts() {
+  private *iterateInserts() {
     for (let index in this.indexInserts) // Copes with sparsity
       for (let value of this.indexInserts[index])
         if (value != null)
           yield { index: Number(index), value };
     for (let [posId, value] of this.posIdInserts.entries())
       yield { posId, value };
+  }
+}
+
+class PosIdInsertsQueue<T> {
+  queue: PosItem<T>[];
+
+  constructor(posIdInserts: Map<string, T>) {
+    this.queue = [...posIdInserts.entries()]
+      .map(([posId, value]) => ({ posId, value }))
+      .sort((e1, e2) => e1.posId.localeCompare(e2.posId));
+  }
+
+  *dequeue(upper: LseqPosId) {
+    while (this.queue.length > 0 && this.queue[0].posId < upper.toString())
+      yield (this.queue.shift() as PosItem<T>);
+  }
+}
+
+class IndexInsertBatch<T> {
+  batch: { start: number, values: T[] } | null = null;
+
+  constructor(readonly site: string) { }
+
+  /** @returns count inserted */
+  addAll(indexInserts: T[] | undefined, start: number) {
+    if (indexInserts != null) {
+      this.batch ??= { start, values: [] };
+      const size = this.batch.values.length;
+      const values = this.batch.values;
+      // indexInserts may be sparse, so using forEach
+      indexInserts.forEach(value => values.push(value));
+      return this.batch.values.length - size;
+    }
+    return 0;
+  }
+
+  /** @returns last inserted position ID */
+  flush(posId: LseqPosId, upper: LseqPosId, cb: LseqIndexNotify<T>['inserted']) {
+    if (this.batch) {
+      const positions = posId.between(upper, this.site, this.batch.values.length);
+      for (let i = 0; i < positions.length; i++) {
+        posId = positions[i];
+        cb(this.batch.values[i], posId.toString(), this.batch.start + i);
+      }
+    }
+    this.batch = null;
+    return posId;
   }
 }
