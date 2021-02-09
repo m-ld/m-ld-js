@@ -149,8 +149,10 @@ class ListRewriter extends LseqIndexRewriter<SlotInList> {
    */
   private preProcess(existing: PosItem<SlotInList>[], update: InterimUpdate) {
     const bySlot: { [slotId: string]: { old?: SlotInList; final?: string | number; }; } = {};
-    for (let { value: slot, posId } of existing)
+    for (let index in existing) { // 'in' allows for sparsity
+      const { value: slot, posId } = existing[index];
       bySlot[slot.id] = { old: slot, final: this.deletes.has(posId) ? undefined : posId };
+    }
     for (let { value: slot, posId, index } of this.inserts) {
       const prev = bySlot[slot.id]?.final;
       if (prev == null) {
@@ -240,29 +242,28 @@ class ListRewriter extends LseqIndexRewriter<SlotInList> {
 
   /**
    * Loads relevant position identifiers. Relevance is defined as:
-   * - Index >= `this.minInsertIndex`
-   * - PosId >= `this.minDeletePosId`
-   * - SlotId in `this.insertSlots`, and any following
+   * - Index >= `this.domain.index.min`
+   * - PosId >= `this.domain.posId.min`
+   * - Slot in inserted slots _and all after_ (may get deleted)
    */
-  // TODO: This just loads the whole list and sorts in memory at the moment
+  // TODO: This loads the whole list
   private async loadRelevantSlots(state: MeldReadState) {
-    // Don't use Describe because that would generate an @list
-    return (await state
-      .read<Select>({
-        '@select': ['?listKey', '?slot', '?index'],
-        '@where': {
-          '@id': this.listId, '?listKey': { '@id': '?slot', [jrql.index]: '?index' }
-        }
-      }))
-      .map(sel => {
-        const listKey = (<Reference>sel['?listKey'])['@id'];
-        const posId = meld.matchRdflseqPosId(listKey);
-        if (posId != null) {
-          const id = (<Reference>sel['?slot'])['@id'], index = (<number>sel['?index']);
-          return <PosItem<SlotInList>>{ posId, value: { listKey, id, index } };
-        }
-      }, [])
-      .filter<PosItem<SlotInList>>((e): e is PosItem<SlotInList> => e != null)
-      .sort((e1, e2) => e1.posId.localeCompare(e2.posId));
+    const affected: PosItem<SlotInList>[] = [];
+    // Don't use Describe because that would generate a @list
+    (await state.read<Select>({
+      '@select': ['?listKey', '?slot', '?index'],
+      '@where': {
+        '@id': this.listId, '?listKey': { '@id': '?slot', [jrql.index]: '?index' }
+      }
+    })).forEach(sel => {
+      const listKey = (<Reference>sel['?listKey'])['@id'];
+      const posId = meld.matchRdflseqPosId(listKey);
+      if (posId != null) {
+        const id = (<Reference>sel['?slot'])['@id'], index = (<number>sel['?index']);
+        affected[index] = <PosItem<SlotInList>>{ posId, value: { listKey, id, index } };
+      }
+    });
+    // affected may have an empty head region but should be contiguous thereafter
+    return affected;
   }
 }

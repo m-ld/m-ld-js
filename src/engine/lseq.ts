@@ -310,15 +310,14 @@ export class LseqIndexRewriter<T> {
     let oldIndex = minIndexOfSparse(existing) ?? 0, newIndex = oldIndex;
     let posId = (oldIndex - 1) in existing ?
       this.lseq.parse(existing[oldIndex - 1].posId) : this.lseq.min;
-    let prevPosId = '';
-
     const posIdInsertQueue = new PosIdInsertsQueue<T>(this.posIdInserts);
-    const indexInsertBatch = new IndexInsertBatch<T>(this.site);
-    while (
+    const indexInsertBatch = new IndexInsertBatch<T>(this.site, notify.inserted);
+    for (let prevPosId = '';
       oldIndex < this.indexInserts.length ||
       posId.toString() !== prevPosId ||
       // Don't keep iterating if all inserts are processed and index done
-      (oldIndex < existing.length && oldIndex !== newIndex)
+      (oldIndex < existing.length && oldIndex !== newIndex);
+      oldIndex++
     ) {
       prevPosId = posId.toString();
       const exists: PosItem<T> | undefined = existing[oldIndex];
@@ -337,7 +336,7 @@ export class LseqIndexRewriter<T> {
           // Do not increment the position or new index
         } else {
           // Flush any index-based insertions prior to next old item
-          posId = indexInsertBatch.flush(posId, upper, notify.inserted);
+          posId = indexInsertBatch.flush(posId, upper);
           // If the index of the old value has change, notify
           if (newIndex !== oldIndex)
             notify.reindexed(exists.value, exists.posId, newIndex);
@@ -346,10 +345,9 @@ export class LseqIndexRewriter<T> {
           newIndex++;
         }
       }
-      oldIndex++;
     }
     // Flush any remaining index-based insertions
-    indexInsertBatch.flush(posId, this.lseq.max, notify.inserted);
+    indexInsertBatch.flush(posId, this.lseq.max);
   }
 
   private *iterateInserts() {
@@ -380,7 +378,10 @@ class PosIdInsertsQueue<T> {
 class IndexInsertBatch<T> {
   batch: { start: number, values: T[] } | null = null;
 
-  constructor(readonly site: string) { }
+  constructor(
+    readonly site: string,
+    readonly inserted: LseqIndexNotify<T>['inserted']) {
+  }
 
   /** @returns count inserted */
   addAll(indexInserts: T[] | undefined, start: number) {
@@ -396,12 +397,12 @@ class IndexInsertBatch<T> {
   }
 
   /** @returns last inserted position ID */
-  flush(posId: LseqPosId, upper: LseqPosId, cb: LseqIndexNotify<T>['inserted']) {
+  flush(posId: LseqPosId, upper: LseqPosId) {
     if (this.batch) {
       const positions = posId.between(upper, this.site, this.batch.values.length);
       for (let i = 0; i < positions.length; i++) {
         posId = positions[i];
-        cb(this.batch.values[i], posId.toString(), this.batch.start + i);
+        this.inserted(this.batch.values[i], posId.toString(), this.batch.start + i);
       }
     }
     this.batch = null;

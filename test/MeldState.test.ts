@@ -235,6 +235,51 @@ describe('Meld State API', () => {
       expect(new Set(selection)).toEqual(new Set([
         { '?f': { '@id': 'fred' } }, { '?f': { '@id': 'wilma' } }]));
     });
+
+    test('selects name or other name', async () => {
+      await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
+      await api.write<Subject>({ '@id': 'wilma', name: 'Wilma' });
+      await api.write<Subject>({ '@id': 'barney', name: 'Barney' });
+      const selection = await api.read<Select>({
+        '@select': '?f',
+        '@where': {
+          '@graph': { '@id': '?f', name: '?n' },
+          '@filter': { '@or': [{ '@eq': ['?n', 'Fred'] }, { '@eq': ['?n', 'Wilma'] }] }
+        }
+      });
+      expect(new Set(selection)).toEqual(new Set([
+        { '?f': { '@id': 'fred' } }, { '?f': { '@id': 'wilma' } }]));
+    });
+
+    test('selects string gte', async () => {
+      await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
+      await api.write<Subject>({ '@id': 'wilma', name: 'Wilma' });
+      await api.write<Subject>({ '@id': 'barney', name: 'Barney' });
+      const selection = await api.read<Select>({
+        '@select': '?f',
+        '@where': {
+          '@graph': { '@id': '?f', name: '?n' },
+          '@filter': { '@gte': ['?n', 'Fred'] }
+        }
+      });
+      expect(new Set(selection)).toEqual(new Set([
+        { '?f': { '@id': 'fred' } }, { '?f': { '@id': 'wilma' } }]));
+    });
+
+    test('selects number gte', async () => {
+      await api.write<Subject>({ '@id': 'fred', height: 6 });
+      await api.write<Subject>({ '@id': 'wilma', height: 5 });
+      await api.write<Subject>({ '@id': 'barney', height: 4 });
+      const selection = await api.read<Select>({
+        '@select': '?f',
+        '@where': {
+          '@graph': { '@id': '?f', height: '?h' },
+          '@filter': { '@gte': ['?h', 5] }
+        }
+      });
+      expect(new Set(selection)).toEqual(new Set([
+        { '?f': { '@id': 'fred' } }, { '?f': { '@id': 'wilma' } }]));
+    });
   });
 
   describe('anonymous subjects', () => {
