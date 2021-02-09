@@ -1,7 +1,8 @@
 import { Iri } from 'jsonld/jsonld-spec';
 import {
   Context, Read, Subject, Update, isDescribe, isGroup, isSubject, isUpdate,
-  Group, isSelect, Result, Variable, Write, Constraint, Expression, operators, isConstraint
+  Group, isSelect, Result, Variable, Write, Constraint, Expression, operators,
+  isConstraint, VariableExpression
 } from '../../jrql-support';
 import { DataFactory, NamedNode, Quad, Term } from 'rdf-js';
 import { Graph, PatchQuads } from '.';
@@ -232,19 +233,45 @@ export class JrqlGraph {
       return this.sparql.createBgp(quads.map(this.toPattern));
     } else {
       const graph = array(where['@graph']),
+        union = array(where['@union']),
         filter = array(where['@filter']),
-        union = array(where['@union']);
+        values = array(where['@values']);
       const quads = graph.length ? await this.jrql.quads(
         graph, { query: true, vars }, context) : [];
       const bgp = this.sparql.createBgp(quads.map(this.toPattern));
       const unionOp = await asyncBinaryFold(union,
         pattern => this.operation(pattern, vars, context),
         (left, right) => this.sparql.createUnion(left, right));
-      const unfiltered = unionOp && bgp.patterns.length ?
+      const unioned = unionOp && bgp.patterns.length ?
         this.sparql.createJoin(bgp, unionOp) : unionOp ?? bgp;
-      return filter.length ? this.sparql.createFilter(
-        unfiltered, await this.constraintExpr(filter, context)) : unfiltered;
+      const filtered = filter.length ? this.sparql.createFilter(
+        unioned, await this.constraintExpr(filter, context)) : unioned;
+      const valued = values.length ? this.sparql.createJoin(
+        await this.valuesExpr(values, context), filtered) : filtered;
+      return valued;
     }
+  }
+
+  private async valuesExpr(
+    values: VariableExpression[], context: Context): Promise<Algebra.Operation> {
+    const variableNames = new Set<string>();
+    const variablesTerms = await Promise.all(values.map<Promise<{ [variable: string]: Term }>>(
+      variableExpr => Object.entries(variableExpr).reduce<Promise<{ [variable: string]: Term; }>>(
+        async (variableTerms, [variable, expr]) => {
+          const varName = matchVar(variable);
+          if (!varName)
+            throw new Error('Variable not specified in a values expression');
+          variableNames.add(varName);
+          if (isConstraint(expr))
+            throw new Error('Cannot use constraint in a values expression');
+          return {
+            ...await variableTerms,
+            [variable]: (await toObjectTerms(expr, this.rdf, context))[0]
+          };
+        }, Promise.resolve({}))));
+
+    return this.sparql.createValues(
+      [...variableNames].map(this.rdf.variable), variablesTerms);
   }
 
   private async constraintExpr(

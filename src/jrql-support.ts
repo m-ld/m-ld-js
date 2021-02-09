@@ -297,6 +297,11 @@ export interface Group extends Pattern {
    * [<expression>...] }`.
    */
   '@filter'?: Constraint | Constraint[];
+  /**
+   * Specifies a Variable Expression or array of Variable Expressions that
+   * define [inline allowable value combinations]
+   */
+  '@values'?: VariableExpression | VariableExpression[];
 }
 
 /** @internal */
@@ -310,11 +315,21 @@ export function isWriteGroup(p: Pattern): p is Group {
 }
 
 /**
+ * A variable expression an object whose keys are variables, and whose values
+ * are expressions whose result will be assigned to the variable, e.g.
+ * ```json
+ * { "?averageSize" : { '@avg' : "?size" } }
+ * ```
+ */
+export interface VariableExpression {
+  [key: string]: Expression;
+};
+
+/**
  * A sub-type of Pattern which matches data using a `@where` clause.
  * @see https://json-rql.org/interfaces/query.html
  */
 export interface Query extends Pattern {
-  // No support for @values
   /**
    * The data pattern to match, as a set of subjects or a group. Variables are
    * used as placeholders to capture matching properties and values in the

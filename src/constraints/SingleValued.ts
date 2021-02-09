@@ -81,7 +81,7 @@ export class SingleValued implements MeldConstraint {
           '@select': ['?s', '?o'],
           '@where': {
             '@graph': { '@id': '?s', [this.property]: '?o' },
-            '@filter': { '@in': ['?s', ...sids.map(sid => ({ '@id': sid }))] }
+            '@values': sids.map(sid => ({ '?s': { '@id': sid } }))
           }
         }).pipe(map(selectResult => {
           const sid = (<Reference>selectResult['?s'])['@id'];

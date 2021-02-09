@@ -236,6 +236,21 @@ describe('Meld State API', () => {
         { '?f': { '@id': 'fred' } }, { '?f': { '@id': 'wilma' } }]));
     });
 
+    test('selects @id from values', async () => {
+      await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
+      await api.write<Subject>({ '@id': 'wilma', name: 'Wilma' });
+      await api.write<Subject>({ '@id': 'barney', name: 'Barney' });
+      const selection = await api.read<Select>({
+        '@select': '?n',
+        '@where': {
+          '@graph': { '@id': '?f', name: '?n' },
+          '@values': [{ '?f': { '@id': 'fred' } }, { '?f': { '@id': 'wilma' } }]
+        }
+      });
+      expect(new Set(selection)).toEqual(new Set([
+        { '?n': 'Fred' }, { '?n': 'Wilma' }]));
+    });
+
     test('selects name or other name', async () => {
       await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
       await api.write<Subject>({ '@id': 'wilma', name: 'Wilma' });
