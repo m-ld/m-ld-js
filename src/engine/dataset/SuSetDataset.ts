@@ -180,10 +180,9 @@ export class SuSetDataset extends JrqlGraph {
           return { return: null };
 
         txc.sw.next('check-constraints');
-        const update = await new InterimUpdatePatch(this, time, patch, 'mutable').ready;
-        await this.constraint.check(this.state, update);
-        // Wait for all pending modifications
-        await update.ready;
+        const interim = new InterimUpdatePatch(this, time, patch, 'mutable');
+        await this.constraint.check(this.state, interim);
+        const { update, entailments } = await interim.finalise();
 
         txc.sw.next('find-tids');
         const deletedTriplesTids = await this.findTriplesTids(patch.oldQuads);
@@ -199,7 +198,7 @@ export class SuSetDataset extends JrqlGraph {
         const journaling = tail.builder(journal, { delta, localTime: time });
 
         return {
-          patch: this.transactionPatch(patch, update.entailments, tidPatch),
+          patch: this.transactionPatch(patch, entailments, tidPatch),
           kvps: journaling.commit,
           return: this.deltaMessage(tail, time, delta),
           after: () => this.emitUpdate(update)
@@ -208,15 +207,9 @@ export class SuSetDataset extends JrqlGraph {
     });
   }
 
-  private emitUpdate(update: InterimUpdate) {
-    if (update['@delete'].length || update['@insert'].length) {
-      // De-clutter the update for sanity
-      this.updateSource.next({
-        '@delete': update['@delete'],
-        '@insert': update['@insert'],
-        '@ticks': update['@ticks']
-      });
-    }
+  private emitUpdate(update: MeldUpdate) {
+    if (update['@delete'].length || update['@insert'].length)
+      this.updateSource.next(update);
   }
 
   private deltaMessage(tail: SuSetJournalEntry, time: TreeClock, delta: MeldDelta) {
@@ -256,9 +249,10 @@ export class SuSetDataset extends JrqlGraph {
 
         txc.sw.next('apply-cx'); // "cx" = constraint
         const tid = txnId(msg.time);
-        const update = await new InterimUpdatePatch(this, cxnTime, patch).ready;
-        await this.constraint.apply(this.state, update);
-        const cxn = await this.constraintTxn((await update.ready).assertions, patch, tid, cxnTime);
+        const interim = new InterimUpdatePatch(this, cxnTime, patch);
+        await this.constraint.apply(this.state, interim);
+        const { update, assertions, entailments } = await interim.finalise();
+        const cxn = await this.constraintTxn(assertions, patch, tid, cxnTime);
         // After applying the constraint, patch new quads might have changed
         tidPatch.append(await this.newTriplesTid(patch.newQuads, tid));
 
@@ -274,12 +268,12 @@ export class SuSetDataset extends JrqlGraph {
         if (cxn != null) {
           // update['@ticks'] = cxnTime.ticks;
           tidPatch.append(cxn.tidPatch);
-          patch.append(update.assertions);
+          patch.append(assertions);
           // Also create a journal entry for the constraint "transaction"
           journaling.next({ delta: cxn.delta, localTime: cxnTime });
         }
         return {
-          patch: this.transactionPatch(patch, update.entailments, tidPatch),
+          patch: this.transactionPatch(patch, entailments, tidPatch),
           kvps: journaling.commit,
           // FIXME: If this delta message exceeds max size, what to do?
           return: cxn?.delta != null ? this.deltaMessage(tail, cxnTime, cxn.delta) : null,

@@ -1,4 +1,4 @@
-import { InterimUpdate, DeleteInsert } from '../../api';
+import { InterimUpdate, DeleteInsert, MeldUpdate } from '../../api';
 import { Quad } from 'rdf-js';
 import { TreeClock } from '../clocks';
 import { Subject, Update } from '../../jrql-support';
@@ -8,40 +8,51 @@ import { JrqlGraph } from './JrqlGraph';
 import { rdfToJson } from "../jsonld";
 
 export class InterimUpdatePatch implements InterimUpdate {
-  '@ticks': number;
-  '@delete': Subject[] = [];
-  '@insert': Subject[] = [];
   /** Assertions made by the constraint (not including the app patch if not mutable) */
-  assertions: PatchQuads;
+  private assertions: PatchQuads;
   /** Entailments made by the constraint */
-  entailments = new PatchQuads();
+  private entailments = new PatchQuads();
   /** Whether to recreate the insert & delete fields from the assertions */
-  needsUpdate: Promise<boolean>;
+  private needsUpdate: PromiseLike<boolean>;
+  /** Cached update */
+  private _update: MeldUpdate | undefined;
 
   /**
    * @param patch the starting app patch (will not be mutated unless 'mutable')
    */
   constructor(
-    readonly graph: JrqlGraph,
-    time: TreeClock,
-    readonly patch: PatchQuads,
-    readonly mutable?: 'mutable') {
+    private readonly graph: JrqlGraph,
+    private readonly time: TreeClock,
+    private readonly patch: PatchQuads,
+    private readonly mutable?: 'mutable') {
     // If mutable, we treat the app patch as assertions
     this.assertions = mutable ? patch : new PatchQuads();
-    this['@ticks'] = time.ticks;
     this.needsUpdate = Promise.resolve(true);
   }
 
-  get ready(): Promise<InterimUpdatePatch> {
-    return this.needsUpdate.then(async (needsUpdate) => {
-      if (needsUpdate) {
+  async finalise() {
+    const state = {
+      update: await this.update,
+      assertions: this.assertions,
+      entailments: this.entailments
+    };
+    this.needsUpdate = { then: () => { throw 'Interim update has been finalised'; } };
+    return state;
+  }
+
+  get update(): Promise<MeldUpdate> {
+    return Promise.resolve(this.needsUpdate).then(async needsUpdate => {
+      if (needsUpdate || this._update == null) {
         const patch = this.mutable ? this.assertions :
           new PatchQuads(this.patch).append(this.assertions);
         this.needsUpdate = Promise.resolve(false);
-        this['@delete'] = await this.toSubjects(patch.oldQuads);
-        this['@insert'] = await this.toSubjects(patch.newQuads);
+        this._update = {
+          '@ticks': this.time.ticks,
+          '@delete': await this.toSubjects(patch.oldQuads),
+          '@insert': await this.toSubjects(patch.newQuads)
+        };
       }
-      return this;
+      return this._update;
     });
   }
 

@@ -388,12 +388,12 @@ describe('SU-Set Dataset', () => {
     });
 
     test('provides a mutable update to the constraint', async () => {
-      constraint.check = async (_, update) => {
-        update.assert({ '@insert': wilma });
-        await update.ready;
+      constraint.check = async (_, interim) => {
+        interim.assert({ '@insert': wilma });
+        let update = await interim.update;
         expect(update['@insert']).toMatchObject(expect.arrayContaining([wilma]));
-        update.assert({ '@insert': barney });
-        await update.ready;
+        interim.assert({ '@insert': barney });
+        update = await interim.update;
         expect(update['@insert']).toMatchObject(expect.arrayContaining([wilma, barney]));
       };
       await expect(ssd.transact(async () => [

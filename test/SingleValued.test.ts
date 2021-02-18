@@ -1,4 +1,4 @@
-import { MeldReadState, InterimUpdate } from '../src/api';
+import { MeldReadState, InterimUpdate, MeldUpdate } from '../src/api';
 import { memStore } from './testClones';
 import { SingleValued } from '../src/constraints/SingleValued';
 import { JrqlGraph } from '../src/engine/dataset/JrqlGraph';
@@ -19,38 +19,38 @@ describe('Single-valued constraint', () => {
 
   test('Passes an empty update', async () => {
     const constraint = new SingleValued('http://test.m-ld.org/#name');
-    await expect(constraint.check(state, {
+    await expect(constraint.check(state, mockInterim({
       '@ticks': 0,
       '@delete': [],
       '@insert': []
-    })).resolves.toBeUndefined();
+    }))).resolves.toBeUndefined();
   });
 
   test('Passes a missing property update', async () => {
     const constraint = new SingleValued('http://test.m-ld.org/#name');
-    await expect(constraint.check(state, {
+    await expect(constraint.check(state, mockInterim({
       '@ticks': 0,
       '@delete': [],
       '@insert': [{ '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#height': 5 }]
-    })).resolves.toBeUndefined();
+    }))).resolves.toBeUndefined();
   });
 
   test('Passes a single-valued property update', async () => {
     const constraint = new SingleValued('http://test.m-ld.org/#name');
-    await expect(constraint.check(state, {
+    await expect(constraint.check(state, mockInterim({
       '@ticks': 0,
       '@delete': [],
       '@insert': [{ '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Fred' }]
-    })).resolves.toBeUndefined();
+    }))).resolves.toBeUndefined();
   });
 
   test('Fails a multi-valued property update', async () => {
     const constraint = new SingleValued('http://test.m-ld.org/#name');
-    await expect(constraint.check(state, {
+    await expect(constraint.check(state, mockInterim({
       '@ticks': 0,
       '@delete': [],
       '@insert': [{ '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': ['Fred', 'Flintstone'] }]
-    })).rejects.toBeDefined();
+    }))).rejects.toBeDefined();
   });
 
   test('Fails a single-valued additive property update', async () => {
@@ -62,16 +62,16 @@ describe('Single-valued constraint', () => {
       })
     });
     const constraint = new SingleValued('http://test.m-ld.org/#name');
-    await expect(constraint.check(state, {
+    await expect(constraint.check(state, mockInterim({
       '@ticks': 0,
       '@delete': [],
       '@insert': [{ '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Flintstone' }]
-    })).rejects.toBeDefined();
+    }))).rejects.toBeDefined();
   });
 
   test('does not apply to a single-valued property update', async () => {
     const constraint = new SingleValued('http://test.m-ld.org/#name');
-    const update = mock<InterimUpdate>({
+    const update = mockInterim({
       '@ticks': 0,
       '@delete': [],
       // @ts-ignore - Type instantiation is excessively deep and possibly infinite. ts(2589)
@@ -84,7 +84,7 @@ describe('Single-valued constraint', () => {
 
   test('applies to a multi-valued property update', async () => {
     const constraint = new SingleValued('http://test.m-ld.org/#name');
-    const update = mock<InterimUpdate>({
+    const update = mockInterim({
       '@ticks': 0,
       '@delete': [],
       '@insert': [{ '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': ['Fred', 'Flintstone'] }]
@@ -104,7 +104,7 @@ describe('Single-valued constraint', () => {
       })
     });
     const constraint = new SingleValued('http://test.m-ld.org/#name');
-    const update = mock<InterimUpdate>({
+    const update = mockInterim({
       '@ticks': 0,
       '@delete': [],
       '@insert': [{ '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Flintstone' }]
@@ -128,7 +128,7 @@ describe('Single-valued constraint', () => {
       })
     });
     const constraint = new SingleValued('http://test.m-ld.org/#name');
-    const update = mock<InterimUpdate>({
+    const update = mockInterim({
       '@ticks': 0,
       '@delete': [],
       '@insert': [{ '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Flintstone' }]
@@ -142,3 +142,8 @@ describe('Single-valued constraint', () => {
       .resolves.toMatchObject({ 'http://test.m-ld.org/#name': 'Wilma' });
   });
 });
+
+function mockInterim(update: MeldUpdate) {
+  // Passing an implementation into the mock adds unwanted properties
+  return Object.assign(mock<InterimUpdate>(), { update: Promise.resolve(update) });
+}

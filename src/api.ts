@@ -320,7 +320,7 @@ export interface MeldConstraint {
 /**
  * An update to which further updates can be asserted or entailed.
  */
-export interface InterimUpdate extends MeldUpdate {
+export interface InterimUpdate {
   /**
    * An assertion is an update that maintains the data integrity of the domain
    * by changing data that the app created, or that was the result of a prior
@@ -366,10 +366,11 @@ export interface InterimUpdate extends MeldUpdate {
    */
   remove(key: keyof DeleteInsert<any>, pattern: Subject | Subject[]): void;
   /**
-   * A promise that resolves when all pending modifications made by the methods
-   * above have affected this updates `@insert` and `@delete` properties.
+   * A promise that resolves to the current update. If any modifications made by
+   * the methods above have affected the `@insert` and `@delete` of the update,
+   * they will have been applied.
    */
-  ready: Promise<unknown>;
+  readonly update: Promise<MeldUpdate>;
 }
 
 /**

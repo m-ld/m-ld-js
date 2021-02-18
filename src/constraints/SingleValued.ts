@@ -1,10 +1,11 @@
 import {
-  MeldConstraint, MeldUpdate, MeldReadState, asSubjectUpdates, updateSubject, InterimUpdate
+  MeldConstraint, MeldUpdate, MeldReadState, asSubjectUpdates, updateSubject, InterimUpdate, array
 } from '..';
 import { Iri } from 'jsonld/jsonld-spec';
 import { map, filter, take, concatMap } from 'rxjs/operators';
 import { Subject, Select, Value, isValueObject, Reference } from '../jrql-support';
 import { Observable, EMPTY, concat, defer, from } from 'rxjs';
+import { DeleteInsert } from '../api';
 
 /**
  * Configuration for a `SingleValued` constraint. The configured property should
@@ -40,21 +41,21 @@ export class SingleValued implements MeldConstraint {
       comparable(value) > comparable(maxValue) ? value : maxValue);
   }
 
-  async check(state: MeldReadState, update: MeldUpdate): Promise<unknown> {
+  async check(state: MeldReadState, interim: InterimUpdate): Promise<unknown> {
     // Report the first failure
-    const failed = await this.affected(state, update).pipe(
+    const failed = await this.affected(state, await interim.update).pipe(
       filter(subject => isMultiValued(subject[this.property])),
       take(1)).toPromise();
     return failed != null ? Promise.reject(this.failure(failed)) : Promise.resolve();
   }
 
-  apply(state: MeldReadState, update: InterimUpdate): Promise<unknown> {
-    return this.affected(state, update).pipe(
+  async apply(state: MeldReadState, interim: InterimUpdate): Promise<unknown> {
+    return this.affected(state, await interim.update).pipe(
       concatMap(async subject => {
         const values = subject[this.property];
         if (isMultiValued(values)) {
           const resolvedValue = await this.resolve(values);
-          update.assert({
+          interim.assert({
             '@delete': {
               '@id': subject['@id'],
               [this.property]: values.filter(v => v !== resolvedValue)
@@ -64,7 +65,7 @@ export class SingleValued implements MeldConstraint {
       })).toPromise();
   }
 
-  private affected(state: MeldReadState, update: MeldUpdate): Observable<Subject> {
+  private affected(state: MeldReadState, update: DeleteInsert<Subject[]>): Observable<Subject> {
     const propertyInserts = update['@insert'].filter(this.hasProperty);
     // Fail earliest if there are no inserts for the property
     return !propertyInserts.length ? EMPTY :

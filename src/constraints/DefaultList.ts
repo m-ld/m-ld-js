@@ -19,12 +19,13 @@ export class DefaultList implements MeldConstraint {
     readonly site: string) {
   }
 
-  async check(state: MeldReadState, update: InterimUpdate) {
-    await this.itemSingleValued.check(state, update);
-    await this.doListRewrites('check', update, state);
+  async check(state: MeldReadState, interim: InterimUpdate) {
+    await this.itemSingleValued.check(state, interim);
+    const update = await interim.update;
+    await this.doListRewrites('check', interim, state);
     // An index deletion can also be asserted in a delete-where, so in
     // all cases, remove any index assertions
-    update.remove('@delete', update['@delete']
+    interim.remove('@delete', update['@delete']
       .filter(s => isSlot(s) && s[jrql.index] != null)
       .map(s => ({ '@id': s['@id'], [jrql.index]: s[jrql.index] })));
   }
@@ -35,9 +36,11 @@ export class DefaultList implements MeldConstraint {
     return this.doListRewrites('apply', update, state);
   }
 
-  private doListRewrites(mode: keyof MeldConstraint,
-    update: InterimUpdate, state: MeldReadState) {
+  private async doListRewrites(mode: keyof MeldConstraint,
+    interim: InterimUpdate, state: MeldReadState) {
+    const update = await interim.update;
     // Look for list slots being inserted (only used for check rewrite)
+    // TODO: replace with by-Subject indexing
     const slotsInInsert = mode == 'check' ? update['@insert'].filter(isSlot) : [];
     const rewriters = lazy(listId =>
       new ListRewriter(mode, listId, this.lseq, this.site));
@@ -48,7 +51,7 @@ export class DefaultList implements MeldConstraint {
     for (let subject of update['@delete'])
       this.findListDeletes(subject, rewriters);
     return Promise.all([...rewriters].map(
-      rewriter => rewriter.doRewrite(state, update)));
+      rewriter => rewriter.doRewrite(state, interim)));
   }
 
   private findListInserts(mode: keyof MeldConstraint, subject: Subject,
@@ -177,38 +180,38 @@ class ListRewriter extends LseqIndexRewriter<SlotInList> {
     return bySlot;
   }
 
-  async doRewrite(state: MeldReadState, update: InterimUpdate) {
-    if (await this.isDefaultList(state, update)) {
+  async doRewrite(state: MeldReadState, interim: InterimUpdate) {
+    if (await this.isDefaultList(state, interim)) {
       const existing = await this.loadRelevantSlots(state);
       // Cache existing slots and their final positions, by slot ID
-      const bySlot = this.preProcess(existing, update);
+      const bySlot = this.preProcess(existing, interim);
       // Re-write the indexes based on all deletions and insertions
       this.rewriteIndexes(existing, {
         deleted: slot => {
           // If the slot is moving, we'll do the re-index in the insert
           if (bySlot[slot.id].final == null) {
             // Entail removal of the old slot index
-            update.entail({ '@delete': { '@id': slot.id, [jrql.index]: slot.index } });
+            interim.entail({ '@delete': { '@id': slot.id, [jrql.index]: slot.index } });
             // Cascade the deletion of the slot in this position
             if (this.mode == 'check')
-              update.assert({ '@delete': { '@id': slot.id } });
+              interim.assert({ '@delete': { '@id': slot.id } });
           }
         },
         inserted: (slot, posId, index) => {
           const listKey = meld.rdflseqPosId(posId);
           if (this.mode == 'check') {
             // Remove the original inserted slot index from the update.
-            update.remove('@insert', {
+            interim.remove('@insert', {
               '@id': this.listId, [slot.listKey]: { '@id': slot.id }
             });
             // Add the new slot with updated details at the new position ID.
-            update.assert({ // Asserting the new slot position
+            interim.assert({ // Asserting the new slot position
               '@insert': { '@id': this.listId, [listKey]: { '@id': slot.id } }
             });
           }
           const { old } = bySlot[slot.id];
           if (old?.index !== index) {
-            update.entail({ // Entailing the slot index
+            interim.entail({ // Entailing the slot index
               '@insert': { '@id': slot.id, [jrql.index]: index },
               // Entail deletion of the old index if this slot has moved
               '@delete': old != null ? { '@id': slot.id, [jrql.index]: old.index } : []
@@ -216,7 +219,7 @@ class ListRewriter extends LseqIndexRewriter<SlotInList> {
           }
         },
         reindexed: (slot, _posId, index) => {
-          update.entail({
+          interim.entail({
             '@delete': { '@id': slot.id, [jrql.index]: slot.index },
             '@insert': { '@id': slot.id, [jrql.index]: index }
           });

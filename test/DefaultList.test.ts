@@ -22,7 +22,7 @@ describe('Default list constraint', () => {
 
   test('Passes an empty update', async () => {
     const constraint = new DefaultList('test');
-    const update = mockUpdate({
+    const update = mockInterim({
       '@ticks': 0,
       '@delete': [],
       '@insert': []
@@ -33,7 +33,7 @@ describe('Default list constraint', () => {
 
   test('Rewrites a list insert', async () => {
     const constraint = new DefaultList('test');
-    const update = mockUpdate({
+    const update = mockInterim({
       '@ticks': 0,
       '@delete': [],
       // @ts-ignore 'Type instantiation is excessively deep and possibly infinite.ts(2589)'
@@ -101,7 +101,7 @@ describe('Default list constraint', () => {
       })
     });
     const constraint = new DefaultList('test');
-    const update = mockUpdate({
+    const update = mockInterim({
       '@ticks': 0,
       '@delete': [],
       '@insert': [{
@@ -142,7 +142,7 @@ describe('Default list constraint', () => {
       })
     });
     const constraint = new DefaultList('test');
-    const update = mockUpdate({
+    const update = mockInterim({
       '@ticks': 0,
       '@delete': [],
       '@insert': [{
@@ -188,7 +188,7 @@ describe('Default list constraint', () => {
       })
     });
     const constraint = new DefaultList('test');
-    const update = mockUpdate({
+    const update = mockInterim({
       '@ticks': 0,
       '@delete': [],
       '@insert': [{
@@ -233,9 +233,9 @@ describe('Default list constraint', () => {
   });
 });
 
-function mockUpdate(update: MeldUpdate) {
+function mockInterim(update: MeldUpdate) {
   // Passing an implementation into the mock adds unwanted properties
-  return Object.assign(mock<InterimUpdate>(), update);
+  return Object.assign(mock<InterimUpdate>(), { update: Promise.resolve(update) });
 }
 
 function findIndexKey([u]: [Update]): string | undefined {

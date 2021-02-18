@@ -36,7 +36,7 @@ export type SubjectUpdates = { [id: string]: DeleteInsert<Subject>; };
  *   }
  * }
  * ```
-*/
+ */
 export function asSubjectUpdates(update: DeleteInsert<Subject[]>): SubjectUpdates {
   return bySubject(update, '@insert', bySubject(update, '@delete'));
 }
@@ -71,8 +71,8 @@ const valueOptions = (subject: Subject, key: string): ValueOptions => ({
  */
 export function updateSubject<T>(subject: Resource<T>, update: DeleteInsert<Subject>): Resource<T> {
   // Allow for undefined/null ids
-  const inserts = update['@insert'] && subject['@id'] == update['@insert']['@id'] ? update['@insert'] : {};
-  const deletes = update['@delete'] && subject['@id'] == update['@delete']['@id'] ? update['@delete'] : {};
+  const inserts = subject['@id'] === update['@insert']?.['@id'] ? update['@insert'] : {};
+  const deletes = subject['@id'] === update['@delete']?.['@id'] ? update['@delete'] : {};
   new Set(Object.keys(subject).concat(Object.keys(inserts))).forEach(key => {
     switch (key) {
       case '@id': break;
