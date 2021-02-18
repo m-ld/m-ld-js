@@ -306,12 +306,12 @@ export interface Group extends Pattern {
 
 /** @internal */
 export function isGroup(p: Pattern): p is Group {
-  return '@graph' in p || '@union' in p;
+  return '@graph' in p || '@union' in p || '@filter' in p || '@values' in p;
 }
 
 /** @internal */
 export function isWriteGroup(p: Pattern): p is Group {
-  return '@graph' in p && !('@union' in p);
+  return '@graph' in p && !('@union' in p || '@filter' in p || '@values' in p);
 }
 
 /**
@@ -612,6 +612,6 @@ export interface Slot extends Subject {
 }
 
 /** @internal */
-export function isSlot(s: Subject): s is Slot {
-  return s['@id'] != null && s[jrqlNs.item] != null;
+export function isSlot(s: SubjectPropertyObject): s is Slot {
+  return typeof s == 'object' && '@id' in s && jrqlNs.item in s;
 }

@@ -1,4 +1,3 @@
-import { compact } from 'jsonld';
 import { Iri, Url } from 'jsonld/jsonld-spec';
 import { Binding } from 'quadstore';
 import { DataFactory, Quad, Quad_Object, Term } from 'rdf-js';
@@ -8,9 +7,10 @@ import {
   Context, Subject, Result, Value, isValueObject, isReference,
   isSet, isList, List, SubjectPropertyObject
 } from '../../jrql-support';
-import { activeCtx, compactIri, dataUrlData, jsonToRdf, rdfToJson, clone } from '../jsonld';
+import { activeCtx, compactIri, dataUrlData, jsonToRdf, clone } from '../jsonld';
 import { inPosition, TriplePos } from '../quads';
 import * as jrql from '../../ns/json-rql';
+import { SubjectGraph } from '../SubjectGraph';
 const { isArray } = Array;
 
 const PN_CHARS_BASE = `[A-Za-z\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u02FF\u0370-\u037D\u037F-\u1FFF\u200C-\u200D\u2070-\u218F\u2C00-\u2FEF\u3001-\uD7FF\uF900-\uFDCF\uFDF0-\uFFFD]|[\uD800-\uDB7F][\uDC00-\uDFFF]`;
@@ -85,7 +85,8 @@ export class JrqlQuads {
    */
   async toSubject(
     propertyQuads: Quad[], listItemQuads: Quad[], context: Context): Promise<Subject> {
-    const subject = (await compact(await rdfToJson(propertyQuads), context || {})) as Subject;
+    const subjects = await SubjectGraph.fromRDF(propertyQuads).withContext(context);
+    const subject = { ...subjects[0] };
     if (listItemQuads.length) {
       const ctx = await activeCtx(context);
       // Sort the list items lexically by index

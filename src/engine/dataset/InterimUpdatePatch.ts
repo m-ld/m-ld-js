@@ -5,7 +5,7 @@ import { Subject, Update } from '../../jrql-support';
 import { PatchQuads } from '.';
 import { flatten as flatJsonLd } from 'jsonld';
 import { JrqlGraph } from './JrqlGraph';
-import { rdfToJson } from "../jsonld";
+import { SubjectGraph } from '../SubjectGraph';
 
 export class InterimUpdatePatch implements InterimUpdate {
   /** Assertions made by the constraint (not including the app patch if not mutable) */
@@ -41,15 +41,15 @@ export class InterimUpdatePatch implements InterimUpdate {
   }
 
   get update(): Promise<MeldUpdate> {
-    return Promise.resolve(this.needsUpdate).then(async needsUpdate => {
+    return Promise.resolve(this.needsUpdate).then(needsUpdate => {
       if (needsUpdate || this._update == null) {
         const patch = this.mutable ? this.assertions :
           new PatchQuads(this.patch).append(this.assertions);
         this.needsUpdate = Promise.resolve(false);
         this._update = {
           '@ticks': this.time.ticks,
-          '@delete': await this.toSubjects(patch.oldQuads),
-          '@insert': await this.toSubjects(patch.newQuads)
+          '@delete': SubjectGraph.fromRDF(patch.oldQuads),
+          '@insert': SubjectGraph.fromRDF(patch.newQuads)
         };
       }
       return this._update;
@@ -79,15 +79,5 @@ export class InterimUpdatePatch implements InterimUpdate {
   private mutate(fn: () => Promise<boolean>) {
     this.needsUpdate = this.needsUpdate.then(
       async (needsUpdate) => (await fn()) || needsUpdate);
-  }
-
-  /**
-   * @returns flattened subjects compacted with no context
-   * @see https://www.w3.org/TR/json-ld11/#flattened-document-form
-   */
-  private async toSubjects(quads: Iterable<Quad>): Promise<Subject[]> {
-    // The flatten function is guaranteed to create a graph object
-    const graph: any = await flatJsonLd(await rdfToJson(quads), {});
-    return graph['@graph'];
   }
 }

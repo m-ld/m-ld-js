@@ -11,11 +11,6 @@ import validDataUrl = require('valid-data-url');
 export * from 'jsonld/lib/util';
 export * from 'jsonld/lib/context';
 
-export function rdfToJson(quads: Iterable<Quad>): Promise<any> {
-  // Using native types to avoid unexpected value objects
-  return fromRDF(quads, { useNativeTypes: true });
-}
-
 export async function jsonToRdf(json: any, rdf: Required<DataFactory>): Promise<Quad[]> {
   const quads = await toRDF(json) as Quad[];
   // jsonld produces quad members without equals

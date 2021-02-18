@@ -127,15 +127,8 @@ export class ApiStateMachine extends ApiState implements MeldStateMachine {
   private async applyUpdateContext(update: MeldUpdate): Promise<MeldUpdate> {
     return {
       '@ticks': update['@ticks'],
-      '@delete': await this.regroup(update['@delete']),
-      '@insert': await this.regroup(update['@insert'])
+      '@delete': await update['@delete'].withContext(this.context),
+      '@insert': await update['@insert'].withContext(this.context)
     }
-  }
-
-  private async regroup(subjects: Subject[]): Promise<Subject[]> {
-    // TODO: Cast required due to
-    // https://github.com/DefinitelyTyped/DefinitelyTyped/issues/50909
-    const graph: any = await flatten(<JsonLdDocument>subjects, this.context);
-    return graph['@graph'];
   }
 }

@@ -22,3 +22,8 @@ export class TickableScheduler implements SchedulerLike {
 }
 
 export const genIdRegex = /^\.well-known\/genid\/.+/;
+
+/** Round-trips the given value through JSON for matcher convenience */
+export function jsonify(obj: any) {
+  return JSON.parse(JSON.stringify(obj));
+}

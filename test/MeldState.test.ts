@@ -6,6 +6,7 @@ import { Group, Subject, Select, Describe, Update, Reference } from '../src/jrql
 import { DomainContext } from '../src/engine/MeldEncoding';
 import { Future } from '../src/engine/util';
 import { genIdRegex } from './testUtil';
+import { SubjectGraph } from '../src/engine/SubjectGraph';
 
 describe('Meld State API', () => {
   let api: ApiStateMachine;
@@ -27,8 +28,8 @@ describe('Meld State API', () => {
     await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
     await expect(captureUpdate).resolves.toEqual({
       '@ticks': 1,
-      '@insert': [{ '@id': 'fred', name: 'Fred' }],
-      '@delete': []
+      '@insert': new SubjectGraph([{ '@id': 'fred', name: 'Fred' }]),
+      '@delete': new SubjectGraph([])
     });
     await expect(api.get('fred'))
       .resolves.toEqual({ '@id': 'fred', name: 'Fred' });

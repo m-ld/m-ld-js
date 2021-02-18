@@ -17,5 +17,5 @@ export function ns<N extends string>(
 export * as jrql from './json-rql';
 export * as mld from './m-ld';
 export * as rdf from './rdf';
-export const xs = { $base: 'http://www.w3.org/2001/XMLSchema#' };
+export * as xs from './xs';
 export * as qs from './quadstore';

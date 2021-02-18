@@ -5,8 +5,9 @@ import { flatten } from './util';
 import { Context, ExpandedTermDef } from '../jrql-support';
 import { Iri } from 'jsonld/jsonld-spec';
 import { Triple, TripleMap } from './quads';
-import { rdfToJson, jsonToRdf } from "./jsonld";
+import { jsonToRdf } from "./jsonld";
 import { Names, mld, rdf, ns } from '../ns';
+import { SubjectGraph } from './SubjectGraph';
 
 export class DomainContext implements Context {
   '@base': Iri;
@@ -104,11 +105,9 @@ export class MeldEncoding {
   }
 
   jsonFromTriples = async (triples: Triple[]): Promise<any> => {
-    const jsonld = await rdfToJson(triples.map(this.toDomainQuad));
-    const graph: any = await compact(jsonld, this.context);
-    // The jsonld processor may create a top-level @graph with @context
-    delete graph['@context'];
-    return '@graph' in graph ? graph['@graph'] : graph;
+    const json = await SubjectGraph.fromRDF(triples).withContext(this.context);
+    // Recreates JSON-LD compaction behaviour
+    return json.length == 0 ? {} : json.length == 1 ? json[0] : json;
   }
 
   triplesFromJson = async (json: any): Promise<Triple[]> =>

@@ -1,10 +1,11 @@
 import * as spec from '@m-ld/m-ld-spec';
 import {
-  Subject, Update, Reference, Variable, Read, Write
+  Subject, Update, Reference, Variable, Read, Write, Context
 } from './jrql-support';
 import { Observable, Subscription } from 'rxjs';
 import { toArray } from 'rxjs/operators';
 import { shortId } from './util';
+import { Iri } from 'jsonld/jsonld-spec';
 
 /**
  * A convenience type for a struct with a `@insert` and `@delete` property, like
@@ -131,21 +132,42 @@ export interface MeldState extends MeldReadState {
 }
 
 /**
+ * Convenience for collections of identified Subjects, such as found in a
+ * {@link MeldUpdate}. Extends `Array` and serialisable to JSON-LD as such.
+ */
+export interface Subjects extends Array<Readonly<Subject & Reference>> {
+  /**
+   * Subjects in the collection indexed by `@id`. In addition, if a Subject in
+   * the graph references another Subject in the same graph, the reference is
+   * realised as a Javascript reference, so it is possible to traverse the graph
+   * from some known root object.
+   */
+  graph: ReadonlyMap<Iri, Readonly<Subject & Reference>>;
+  /**
+   * Transforms the collection of Subjects using the given JSON-LD context.
+   * @param context a JSON-LD context, which may affect all identifiers in the
+   * Subjects, at key, property or value positions.
+   * @see https://w3c.github.io/json-ld-syntax/#the-context
+   */
+  withContext(context: Context): Promise<Subjects>;
+}
+
+/**
  * @see m-ld [specification](http://spec.m-ld.org/interfaces/meldupdate.html)
  */
-export interface MeldUpdate extends DeleteInsert<Subject[]> {
+export interface MeldUpdate extends DeleteInsert<Subjects> {
   /**
    * Partial subjects, containing properties that have been deleted from the
    * domain. Note that deletion of a property (even of all properties) does not
    * necessarily indicate that the subject's identity is not longer represented
    * in the domain.
    */
-  readonly '@delete': Subject[];
+  readonly '@delete': Subjects;
   /**
    * Partial subjects, containing properties that have been inserted into the
    * domain.
    */
-  readonly '@insert': Subject[];
+  readonly '@insert': Subjects;
   /**
    * Current local clock ticks at the time of the update.
    * @see MeldStatus.ticks

@@ -10,6 +10,7 @@ import { from } from 'rxjs';
 import { Describe, MeldConstraint } from '../src';
 import { MeldEncoding } from '../src/engine/MeldEncoding';
 import { DataFactory as RdfDataFactory } from 'rdf-data-factory';
+import { jsonify } from './testUtil';
 const rdf = new RdfDataFactory();
 
 const fred = {
@@ -27,7 +28,8 @@ describe('SU-Set Dataset', () => {
   let ssd: SuSetDataset;
 
   function captureUpdate() {
-    return ssd.updates.pipe(first()).toPromise();
+    // Convert the subject graphs to JSON for matching convenience
+    return ssd.updates.pipe(first()).toPromise().then(jsonify);
   }
 
   describe('with basic config', () => {
@@ -122,7 +124,6 @@ describe('SU-Set Dataset', () => {
 
         await expect(ssd.find1({ '@id': 'http://test.m-ld.org/fred' }))
           .resolves.toEqual('http://test.m-ld.org/fred');
-
       });
 
       test('applies a no-op delta', async () => {

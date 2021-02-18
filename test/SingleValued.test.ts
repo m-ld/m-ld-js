@@ -5,6 +5,7 @@ import { JrqlGraph } from '../src/engine/dataset/JrqlGraph';
 import { GraphState } from '../src/engine/dataset/GraphState';
 import { Dataset } from '../src/engine/dataset';
 import { mock } from 'jest-mock-extended';
+import { SubjectGraph } from '../src/engine/SubjectGraph';
 
 describe('Single-valued constraint', () => {
   let data: Dataset;
@@ -21,8 +22,8 @@ describe('Single-valued constraint', () => {
     const constraint = new SingleValued('http://test.m-ld.org/#name');
     await expect(constraint.check(state, mockInterim({
       '@ticks': 0,
-      '@delete': [],
-      '@insert': []
+      '@delete': new SubjectGraph([]),
+      '@insert': new SubjectGraph([])
     }))).resolves.toBeUndefined();
   });
 
@@ -30,8 +31,10 @@ describe('Single-valued constraint', () => {
     const constraint = new SingleValued('http://test.m-ld.org/#name');
     await expect(constraint.check(state, mockInterim({
       '@ticks': 0,
-      '@delete': [],
-      '@insert': [{ '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#height': 5 }]
+      '@delete': new SubjectGraph([]),
+      '@insert': new SubjectGraph([{
+        '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#height': 5
+      }])
     }))).resolves.toBeUndefined();
   });
 
@@ -39,8 +42,10 @@ describe('Single-valued constraint', () => {
     const constraint = new SingleValued('http://test.m-ld.org/#name');
     await expect(constraint.check(state, mockInterim({
       '@ticks': 0,
-      '@delete': [],
-      '@insert': [{ '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Fred' }]
+      '@delete': new SubjectGraph([]),
+      '@insert': new SubjectGraph([{
+        '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Fred'
+      }])
     }))).resolves.toBeUndefined();
   });
 
@@ -48,8 +53,10 @@ describe('Single-valued constraint', () => {
     const constraint = new SingleValued('http://test.m-ld.org/#name');
     await expect(constraint.check(state, mockInterim({
       '@ticks': 0,
-      '@delete': [],
-      '@insert': [{ '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': ['Fred', 'Flintstone'] }]
+      '@delete': new SubjectGraph([]),
+      '@insert': new SubjectGraph([{
+        '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': ['Fred', 'Flintstone']
+      }])
     }))).rejects.toBeDefined();
   });
 
@@ -64,8 +71,10 @@ describe('Single-valued constraint', () => {
     const constraint = new SingleValued('http://test.m-ld.org/#name');
     await expect(constraint.check(state, mockInterim({
       '@ticks': 0,
-      '@delete': [],
-      '@insert': [{ '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Flintstone' }]
+      '@delete': new SubjectGraph([]),
+      '@insert': new SubjectGraph([{
+        '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Flintstone'
+      }])
     }))).rejects.toBeDefined();
   });
 
@@ -73,9 +82,10 @@ describe('Single-valued constraint', () => {
     const constraint = new SingleValued('http://test.m-ld.org/#name');
     const update = mockInterim({
       '@ticks': 0,
-      '@delete': [],
-      // @ts-ignore - Type instantiation is excessively deep and possibly infinite. ts(2589)
-      '@insert': [{ '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Fred' }]
+      '@delete': new SubjectGraph([]),
+      '@insert': new SubjectGraph([{
+        '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Fred'
+      }])
     });
     // @ts-ignore - Type instantiation is excessively deep and possibly infinite. ts(2589)
     await constraint.apply(state, update);
@@ -86,8 +96,10 @@ describe('Single-valued constraint', () => {
     const constraint = new SingleValued('http://test.m-ld.org/#name');
     const update = mockInterim({
       '@ticks': 0,
-      '@delete': [],
-      '@insert': [{ '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': ['Fred', 'Flintstone'] }]
+      '@delete': new SubjectGraph([]),
+      '@insert': new SubjectGraph([{
+        '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': ['Fred', 'Flintstone']
+      }])
     });
     await constraint.apply(state, update);
     expect(update.assert).toBeCalledWith({
@@ -106,8 +118,10 @@ describe('Single-valued constraint', () => {
     const constraint = new SingleValued('http://test.m-ld.org/#name');
     const update = mockInterim({
       '@ticks': 0,
-      '@delete': [],
-      '@insert': [{ '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Flintstone' }]
+      '@delete': new SubjectGraph([]),
+      '@insert': new SubjectGraph([{
+        '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Flintstone'
+      }])
     });
     await constraint.apply(state, update);
     expect(update.assert).toBeCalledWith({
@@ -130,8 +144,10 @@ describe('Single-valued constraint', () => {
     const constraint = new SingleValued('http://test.m-ld.org/#name');
     const update = mockInterim({
       '@ticks': 0,
-      '@delete': [],
-      '@insert': [{ '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Flintstone' }]
+      '@delete': new SubjectGraph([]),
+      '@insert': new SubjectGraph([{
+        '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Flintstone'
+      }])
     });
     await constraint.apply(state, update);
     // FIXME: not applied to the dataset!

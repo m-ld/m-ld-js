@@ -6,6 +6,7 @@ import { GraphState } from '../src/engine/dataset/GraphState';
 import { Dataset } from '../src/engine/dataset';
 import { mock } from 'jest-mock-extended';
 import { Update } from '../src/jrql-support';
+import { SubjectGraph } from '../src/engine/SubjectGraph';
 
 // Note that DefaultList is quite heavily tested by MeldState.test.ts but not
 // for apply mode
@@ -24,8 +25,8 @@ describe('Default list constraint', () => {
     const constraint = new DefaultList('test');
     const update = mockInterim({
       '@ticks': 0,
-      '@delete': [],
-      '@insert': []
+      '@delete': new SubjectGraph([]),
+      '@insert': new SubjectGraph([])
     });
     // @ts-ignore 'Type instantiation is excessively deep and possibly infinite.ts(2589)'
     await expect(constraint.check(state, update)).resolves.toBeUndefined();
@@ -35,9 +36,8 @@ describe('Default list constraint', () => {
     const constraint = new DefaultList('test');
     const update = mockInterim({
       '@ticks': 0,
-      '@delete': [],
-      // @ts-ignore 'Type instantiation is excessively deep and possibly infinite.ts(2589)'
-      '@insert': [{
+      '@delete': new SubjectGraph([]),
+      '@insert': new SubjectGraph([{
         '@id': 'http://test.m-ld.org/shopping',
         'data:,0': {
           '@id': 'http://test.m-ld.org/.well-known/genid/slot0'
@@ -46,7 +46,7 @@ describe('Default list constraint', () => {
       {
         '@id': 'http://test.m-ld.org/.well-known/genid/slot0',
         'http://json-rql.org/#item': 'Bread'
-      }]
+      }])
     });
     await expect(constraint.check(state, update)).resolves.toBeUndefined();
     expect(update.remove).toBeCalledWith('@insert', {
@@ -103,13 +103,13 @@ describe('Default list constraint', () => {
     const constraint = new DefaultList('test');
     const update = mockInterim({
       '@ticks': 0,
-      '@delete': [],
-      '@insert': [{
+      '@delete': new SubjectGraph([]),
+      '@insert': new SubjectGraph([{
         '@id': 'http://test.m-ld.org/shopping',
         'http://m-ld.org/RdfLseq/?=bother___________': {
           '@id': 'http://test.m-ld.org/.well-known/genid/slot0'
         }
-      }]
+      }])
     });
     await expect(constraint.apply(state, update)).resolves.toBeDefined();
     expect(update.remove).not.toHaveBeenCalled();
@@ -144,13 +144,13 @@ describe('Default list constraint', () => {
     const constraint = new DefaultList('test');
     const update = mockInterim({
       '@ticks': 0,
-      '@delete': [],
-      '@insert': [{
+      '@delete': new SubjectGraph([]),
+      '@insert': new SubjectGraph([{
         '@id': 'http://test.m-ld.org/shopping',
         'http://m-ld.org/RdfLseq/?=aother___________': {
           '@id': 'http://test.m-ld.org/.well-known/genid/slot0'
         }
-      }]
+      }])
     });
     await expect(constraint.apply(state, update)).resolves.toBeDefined();
     expect(update.remove).not.toHaveBeenCalled();
@@ -190,14 +190,14 @@ describe('Default list constraint', () => {
     const constraint = new DefaultList('test');
     const update = mockInterim({
       '@ticks': 0,
-      '@delete': [],
-      '@insert': [{
+      '@delete': new SubjectGraph([]),
+      '@insert': new SubjectGraph([{
         '@id': 'http://test.m-ld.org/shopping',
         // Slot one 'Milk' is moving to the head
         'http://m-ld.org/RdfLseq/?=aother___________': {
           '@id': 'http://test.m-ld.org/.well-known/genid/slot1'
         }
-      }]
+      }])
     });
     await expect(constraint.apply(state, update)).resolves.toBeDefined();
     expect(update.remove).not.toHaveBeenCalled();
