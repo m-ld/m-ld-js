@@ -78,6 +78,6 @@ export class InterimUpdatePatch implements InterimUpdate {
 
   private mutate(fn: () => Promise<boolean>) {
     this.needsUpdate = this.needsUpdate.then(
-      async (needsUpdate) => (await fn()) || needsUpdate);
+      async needsUpdate => (await fn()) || needsUpdate);
   }
 }

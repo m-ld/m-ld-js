@@ -1,11 +1,9 @@
 import { DataFactory, Quad } from 'rdf-js';
-import { fromRDF, toRDF, Options, processContext } from 'jsonld';
 import { cloneQuad } from './quads';
+import { toRDF, Options, processContext } from 'jsonld';
 import { Context, Iri, Url } from 'jsonld/jsonld-spec';
 import { getInitialContext, expandIri, ActiveContext } from 'jsonld/lib/context';
 import { compactIri as _compactIri } from 'jsonld/lib/compact';
-export { Options } from 'jsonld';
-export { ActiveContext } from 'jsonld/lib/context';
 import validDataUrl = require('valid-data-url');
 
 export * from 'jsonld/lib/util';
@@ -26,7 +24,7 @@ export function compactIri(iri: Iri, ctx: ActiveContext, options?: Options.Compa
 }
 
 export async function activeCtx(ctx: Context, options?: Options.DocLoader): Promise<ActiveContext> {
-  return await processContext(getInitialContext({}), ctx, options ?? {});
+  return processContext(getInitialContext({}), ctx, options ?? {});
 }
 
 export function dataUrlData(url: Url, ...contentTypes: string[]): string | undefined {
