@@ -15,8 +15,9 @@ export async function jsonToRdf(json: any, rdf: Required<DataFactory>): Promise<
   return quads.map(quad => cloneQuad(quad, rdf));
 }
 
-export function expandTerm(value: string, ctx: ActiveContext, options?: Options.Expand): Iri {
-  return expandIri(ctx, value, { base: true }, options ?? {});
+export function expandTerm(value: string, ctx: ActiveContext,
+  options?: Options.Expand & { vocab?: boolean }): Iri {
+  return expandIri(ctx, value, { base: true, vocab: options?.vocab }, options ?? {});
 }
 
 export function compactIri(iri: Iri, ctx: ActiveContext, options?: Options.CompactIri): string {
@@ -47,4 +48,8 @@ export function dataUrlData(url: Url, ...contentTypes: string[]): string | undef
  */
 export function getValues(subject: { [key: string]: any }, property: string): Array<any> {
   return [].concat(subject[property] ?? []);
+}
+
+export function canonicalDouble(value: number) {
+  return value.toExponential(15).replace(/(\d)0*e\+?/, '$1E');
 }

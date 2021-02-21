@@ -52,9 +52,13 @@ export type ExpandedTermDef = jrql.ExpandedTermDef;
  */
 export type Variable = jrql.Variable;
 /**
+ * @see https://json-rql.org/#atom
+ */
+export type Atom = jrql.Atom;
+/**
  * @see https://json-rql.org/#value
  */
-export type Value = jrql.Atom | Subject | Reference;
+export type Value = Atom | Subject | Reference;
 /**
  * The allowable types for a Subject property value, named awkwardly to avoid
  * overloading `Object`. Represents the "object" of a property, in the sense of

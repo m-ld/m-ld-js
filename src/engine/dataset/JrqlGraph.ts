@@ -13,9 +13,9 @@ import { activeCtx, expandTerm } from "../jsonld";
 import { Binding } from 'quadstore';
 import { Algebra, Factory as SparqlFactory } from 'sparqlalgebrajs';
 import * as jrql from '../../ns/json-rql';
-import { genVarName, JrqlQuads, matchSubVarName, matchVar, toObjectTerms } from './JrqlQuads';
+import { JrqlQuads, matchSubVarName, matchVar, toObjectTerms } from './JrqlQuads';
 import { MeldError } from '../MeldError';
-import { array } from '../..';
+import { any, array } from '../..';
 import { asyncBinaryFold, flatten } from '../util';
 
 /**
@@ -358,7 +358,7 @@ export class JrqlGraph {
   }
 
   private any() {
-    return this.rdf.variable(genVarName());
+    return this.rdf.variable(any().slice(1));
   }
 }
 

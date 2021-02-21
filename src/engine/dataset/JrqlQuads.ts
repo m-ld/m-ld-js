@@ -1,16 +1,18 @@
 import { Iri, Url } from 'jsonld/jsonld-spec';
 import { Binding } from 'quadstore';
-import { DataFactory, Quad, Quad_Object, Term } from 'rdf-js';
+import { DataFactory, NamedNode, Quad, Quad_Object, Quad_Subject, Term } from 'rdf-js';
 import { GraphName } from '.';
-import { any, array, includeValue, uuid } from '../..';
+import { any, array, uuid } from '../..';
 import {
   Context, Subject, Result, Value, isValueObject, isReference,
-  isSet, isList, List, SubjectPropertyObject
-} from '../../jrql-support';
-import { activeCtx, compactIri, dataUrlData, jsonToRdf, clone } from '../jsonld';
-import { inPosition, TriplePos } from '../quads';
-import * as jrql from '../../ns/json-rql';
+  isSet, SubjectPropertyObject, isPropertyObject, Atom} from '../../jrql-support';
+import { activeCtx, compactIri, dataUrlData, jsonToRdf, expandTerm, canonicalDouble } from '../jsonld';
+import { inPosition } from '../quads';
+import { jrql, rdf, xs } from '../../ns';
 import { SubjectGraph } from '../SubjectGraph';
+import { ActiveContext, getContextValue } from 'jsonld/lib/context';
+import { isString, isBoolean, isDouble, isNumber } from 'jsonld/lib/types';
+import { lazy } from '../util';
 const { isArray } = Array;
 
 const PN_CHARS_BASE = `[A-Za-z\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u02FF\u0370-\u037D\u037F-\u1FFF\u200C-\u200D\u2070-\u218F\u2C00-\u2FEF\u3001-\uD7FF\uF900-\uFDCF\uFDF0-\uFFFD]|[\uD800-\uDB7F][\uDC00-\uDFFF]`;
@@ -26,19 +28,19 @@ export interface JrqlQuadsOptions {
 
 export class JrqlQuads {
   constructor(
-    private readonly rdf: Required<DataFactory>,
-    private readonly graphName: GraphName,
-    private readonly base?: Iri) {
+    readonly rdf: Required<DataFactory>,
+    readonly graphName: GraphName,
+    readonly base?: Iri) {
   }
 
   async solutionSubject(results: Result[] | Result, binding: Binding, context: Context) {
     const solutionId = this.rdf.blankNode();
+    const pseudoPropertyQuads = Object.entries(binding).map(([variable, term]) => this.rdf.quad(
+      solutionId,
+      this.rdf.namedNode(hiddenVar(variable.slice(1))),
+      inPosition('object', term)));
     // Construct quads that represent the solution's variable values
-    const subject = await this.toSubject(Object.entries(binding).map(([variable, term]) =>
-      this.rdf.quad(
-        solutionId,
-        this.rdf.namedNode(hiddenVar(variable.slice(1))),
-        inPosition('object', term))), [/* TODO: list-items */], context);
+    const subject = await this.toSubject(pseudoPropertyQuads, [/* TODO: list-items */], context);
     // Unhide the variables and strip out anything that's not selected
     return Object.assign({}, ...Object.entries(subject).map(([key, value]) => {
       if (key !== '@id') { // Strip out blank node identifier
@@ -50,32 +52,7 @@ export class JrqlQuads {
   }
 
   async quads(g: Subject | Subject[], opts: JrqlQuadsOptions, context: Context): Promise<Quad[]> {
-    // The pre-processor acts on the input graph in-place
-    const jsonld = { '@graph': clone(g), '@context': context };
-    new PreProcessor(opts, this).process(jsonld['@graph']);
-    const quads = await jsonToRdf(this.graphName.termType !== 'DefaultGraph' ?
-      { ...jsonld, '@id': this.graphName.value } : jsonld, this.rdf) as Quad[];
-    return this.postProcess(quads);
-  }
-
-  private postProcess(quads: Quad[]): Quad[] {
-    // TODO: Detect RDF lists e.g. from '@container': '@list' in context, and
-    // convert them to m-ld lists
-    return quads.map(quad => this.rdf.quad(
-      this.unhideVar('subject', quad.subject),
-      this.unhideVar('predicate', quad.predicate),
-      this.unhideVar('object', quad.object),
-      quad.graph));
-  }
-
-  private unhideVar<P extends TriplePos>(_pos: P, term: Quad[P]): Quad[P] {
-    switch (term.termType) {
-      case 'NamedNode':
-        const varName = matchHiddenVar(term.value);
-        if (varName)
-          return this.rdf.variable(varName);
-    }
-    return term;
+    return [...new QuadProcessor(opts, await activeCtx(context), this).process(null, null, g)];
   }
 
   /**
@@ -105,9 +82,8 @@ export class JrqlQuads {
    * `undefined` but the function will throw a `TypeError` if it is.
    * @see https://www.w3.org/TR/rdf11-concepts/#h3_section-skolemization
    */
-  skolem(): Iri {
-    return new URL(`/.well-known/genid/${uuid()}`, this.base).href;
-  }
+  skolem = (): NamedNode =>
+    this.rdf.namedNode(new URL(`/.well-known/genid/${uuid()}`, this.base).href)
 
   genSubValue(parentValue: Term, subVarName: SubVarName) {
     switch (subVarName) {
@@ -116,99 +92,108 @@ export class JrqlQuads {
         return this.rdf.namedNode(toIndexDataUrl(Number(parentValue.value)));
       case 'slotId':
         // Index exists, so a slot can be made
-        return this.rdf.namedNode(this.skolem());
+        return this.skolem();
     }
   }
 }
 
-class PreProcessor {
-  query: boolean;
-  vars?: Set<string>;
+class QuadProcessor {
+  readonly query: boolean;
+  readonly vars?: Set<string>;
+  readonly rdf: Required<DataFactory>;
+  readonly graphName: GraphName;
+  readonly skolem: () => NamedNode;
 
   constructor(
     { query, vars }: JrqlQuadsOptions,
-    readonly jrql: JrqlQuads) {
+    readonly ctx: ActiveContext,
+    { rdf: dataFactory, skolem, graphName }: JrqlQuads) {
     this.query = query;
     this.vars = vars;
+    this.rdf = dataFactory;
+    this.skolem = skolem;
+    this.graphName = graphName;
   }
 
-  process(object: SubjectPropertyObject, top: boolean = true) {
-    array(object).forEach(value => {
+  *process(
+    outer: Quad_Subject | null,
+    property: string | null,
+    object: SubjectPropertyObject): Iterable<Quad> {
+    // TODO: property is @list in context
+    for (let value of array(object)) {
       if (isArray(value)) {
-        this.process(value, top);
+        // Nested array is flattened
+        yield* this.process(outer, property, value);
+      } else if (isSet(value)) {
+        // @set is elided
+        yield* this.process(outer, property, value['@set']);
       } else if (typeof value === 'object' && !isValueObject(value)) {
-        // JSON-LD value object (with @value) cannot contain a variable or a
-        // list, so ignore it. If this is a Reference, we treat it as a Subject.
+        // TODO: @json type, nested @context object
+        // If this is a Reference, we treat it as a Subject
         const subject: Subject = value as Subject;
-        if (isList(subject))
-          this.expandListSlots(subject);
+        const sid = subject['@id'] ? this.expandNode(subject['@id']) :
+          // Anonymous query subjects => blank node subject (match any) or skolem
+          this.query ? this.genVar() : this.skolem();
+        
+        if (outer != null && property != null)
+          // Yield the outer quad referencing this subject
+          yield this.rdf.quad(outer, this.predicate(property), sid, this.graphName);
+        else if (this.query && isReference(subject))
+          // References at top level => implicit wildcard p-o
+          yield this.rdf.quad(sid, this.genVar(), this.genVar(), this.graphName);
+
         // Process predicates and objects
-        this.processEntries(subject);
-        // References at top level => implicit wildcard p-o
-        if (top && this.query && isReference(subject))
-          (<any>subject)[genHiddenVar(this.vars)] = { '@id': genHiddenVar(this.vars) };
-        // Anonymous query subjects => blank node subject (match any) or skolem
-        if (!subject['@id'])
-          subject['@id'] = this.query ? hiddenVar(genVarName(), this.vars) : this.jrql.skolem();
+        for (let [property, value] of Object.entries(subject))
+          if (isPropertyObject(property, value))
+            if (property === '@list')
+              yield* this.expandListSlots(sid, value);
+            else
+              yield* this.process(sid, property, value);
+
+      } else if (outer != null && property != null) {
+        // This is an atom, so yield one quad
+        yield this.rdf.quad(outer, this.predicate(property),
+          this.atomObject(property, value), this.graphName);
+        // TODO: What if the property expands to a keyword in the context?
+      } else {
+        throw new Error('Cannot process top-level value');
       }
-    });
+    }
   }
 
-  private processEntries(subject: Subject) {
-    Object.entries(subject).forEach(([key, value]: [string, SubjectPropertyObject]) => {
-      if (key !== '@context' && value != null) {
-        const varKey = hideVar(key, this.vars);
-        if (isSet(value)) {
-          this.process(value['@set'], false);
-        } else if (typeof value === 'object') {
-          this.process(value, false);
-        } else if (typeof value === 'string') {
-          const varVal = hideVar(value, this.vars);
-          if (varVal !== value)
-            value = !key.startsWith('@') ? { '@id': varVal } : varVal;
-        }
-        subject[varKey] = value;
-        if (varKey !== key)
-          delete subject[key];
-      }
-    });
-  }
-
-  private expandListSlots(list: List) {
+  private *expandListSlots(lid: Quad_Subject, list: SubjectPropertyObject): Iterable<Quad> {
     // Normalise explicit list objects: expand fully to slots
-    if (typeof list['@list'] === 'object') {
+    if (typeof list === 'object') {
       // This handles arrays as well as hashes
       // Normalise indexes to data URLs (throw if not convertible)
-      Object.entries(list['@list']).forEach(([indexKey, item]) => {
+      for (let [indexKey, item] of Object.entries(list)) {
         // Provided index is either a variable (string) or an index number
         const index = matchVar(indexKey) ?? toIndexNumber(indexKey);
         if (index == null)
           throw new Error(`List index ${indexKey} is not a variable or number data`);
         // Check for inserting multiple sub-items at one index
         if (typeof index != 'string' && !this.query &&
-          !isArray(index) && isArray(item) && !isArray(list['@list'])) {
-          item.forEach((subItem, subIndex) =>
-            this.addSlot(list, [index, subIndex], subItem));
+          !isArray(index) && isArray(item) && !isArray(list)) {
+          for (let subIndex = 0; subIndex < item.length; subIndex++)
+            yield* this.addSlot(lid, [index, subIndex], item[subIndex]);
         } else {
-          this.addSlot(list, index, item);
+          yield* this.addSlot(lid, index, item);
         }
-      });
-    } else if (list['@list'] != null) {
+      }
+    } else {
       // Singleton list item at position zero
-      this.addSlot(list, 0, list['@list']);
+      yield* this.addSlot(lid, 0, list);
     }
-    // Degrade the list to a plain subject for further processing
-    delete (<Subject>list)['@list'];
   }
 
-  private addSlot(list: List,
+  private *addSlot(lid: Quad_Subject,
     index: string | number | [number, number],
-    item: SubjectPropertyObject) {
+    item: SubjectPropertyObject): Iterable<Quad> {
     const slot = this.asSlot(item);
     let indexKey: string;
     if (typeof index === 'string') {
       // Index is a variable
-      index ||= genVarName(); // We need the var name now to generate sub-var names
+      index ||= this.genVarName(); // We need the var name now to generate sub-var names
       indexKey = subVar(index, 'listKey');
       // Generate the slot id variable if not available
       if (!('@id' in slot))
@@ -227,20 +212,92 @@ class PreProcessor {
       slot[jrql.index] = typeof index == 'string' ? `?${index}` :
         // Sub-index should never exist for a query
         isArray(index) ? index[0] : index;
-
-    includeValue(list, indexKey, slot);
+    // This will yield the index key as a property, as well as the slot
+    yield* this.process(lid, indexKey, slot);
   }
 
+  /** @returns a mutable proto-slot object */
   private asSlot(item: SubjectPropertyObject): Subject {
     if (typeof item == 'object' && '@item' in item) {
       // The item is already a slot (with an @item key)
-      item[jrql.item] = item['@item'];
-      delete item['@item'];
-      return item;
+      const slot: Subject = { ...item, [jrql.item]: item['@item'] };
+      delete slot['@item'];
+      return slot;
     } else {
       // A nested list is a nested list (not flattened or a set)
       return { [jrql.item]: isArray(item) ? { '@list': item } : item };
     }
+  }
+
+  private matchVar(term: string) {
+    const varName = matchVar(term);
+    if (varName != null) {
+      if (!varName)
+        // Allow anonymous variables as '?'
+        return this.genVar();
+      this.vars?.add(varName);
+      return this.rdf.variable(varName);
+    }
+  }
+
+  private predicate = lazy(property =>
+    property === '@type' ? this.rdf.namedNode(rdf.type) : this.expandNode(property, true));
+
+  private expandNode(term: string, vocab = false) {
+    return this.matchVar(term) ?? this.rdf.namedNode(expandTerm(term, this.ctx, { vocab }));
+  }
+
+  private genVarName() {
+    const varName = any().slice(1);
+    this.vars?.add(varName);
+    return varName;
+  }
+
+  private genVar() {
+    return this.rdf.variable(this.genVarName());
+  }
+
+  private atomObject(property: string, value: Atom): Quad_Object {
+    if (isString(value)) {
+      const variable = this.matchVar(value);
+      if (variable != null)
+        return variable;
+    }
+    let type: string | null = null, language: string | null = null;
+    if (isValueObject(value)) {
+      if (value['@type'])
+        type = expandTerm(value['@type'], this.ctx);
+      language = value['@language'] ?? null;
+      value = value['@value'];
+    }
+    if (type == null)
+      type = getContextValue(this.ctx, property, '@type');
+
+    if (isString(value)) {
+      if (property === '@type' || type === '@id' || type === '@vocab')
+        return this.expandNode(value, type === '@vocab');
+      language = getContextValue(this.ctx, property, '@language');
+      if (language != null)
+        return this.rdf.literal(value, language);
+      if (type === xs.double)
+        value = canonicalDouble(parseFloat(value));
+    } else if (isBoolean(value)) {
+      value = value.toString();
+      type ??= xs.boolean;
+    } else if (isNumber(value)) {
+      if (isDouble(value)) {
+        value = canonicalDouble(value);
+        type ??= xs.double;
+      } else {
+        value = value.toFixed(0);
+        type ??= xs.integer;
+      }
+    }
+
+    if (type && type !== '@none')
+      return this.rdf.literal(value, this.rdf.namedNode(type));
+    else
+      return this.rdf.literal(value);
   }
 }
 
@@ -256,12 +313,6 @@ export function matchSubVarName(fullVarName: string): [string, SubVarName] | [] 
   return match != null ? [match[1], match[2] as SubVarName] : [];
 }
 
-function hideVar(token: string, vars?: Set<string>): string {
-  const name = matchVar(token);
-  // Allow anonymous variables as '?'
-  return name === '' ? genHiddenVar(vars) : name ? hiddenVar(name, vars) : token;
-}
-
 const MATCH_VAR = new RegExp(`^\\?(${VARNAME})$`);
 export function matchVar(token: string): string | undefined {
   return token === '?' ? '' : MATCH_VAR.exec(token)?.[1];
@@ -270,14 +321,6 @@ export function matchVar(token: string): string | undefined {
 export const MATCH_HIDDEN_VAR = new RegExp(`^${hiddenVar('(' + VARNAME + ')')}$`);
 function matchHiddenVar(value: string): string | undefined {
   return MATCH_HIDDEN_VAR.exec(value)?.[1];
-}
-
-function genHiddenVar(vars?: Set<string>) {
-  return hiddenVar(genVarName(), vars);
-}
-
-export function genVarName() {
-  return any().slice(1);
 }
 
 function hiddenVar(name: string, vars?: Set<string>) {
