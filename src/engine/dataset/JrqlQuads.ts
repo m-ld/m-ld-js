@@ -1,12 +1,15 @@
-import { Iri, Url } from 'jsonld/jsonld-spec';
+import { Url } from 'jsonld/jsonld-spec';
 import { Binding } from 'quadstore';
-import { DataFactory, NamedNode, Quad, Quad_Object, Quad_Subject, Term } from 'rdf-js';
-import { GraphName } from '.';
-import { any, array, uuid } from '../..';
+import { Quad, Quad_Object, Quad_Subject, Term } from 'rdf-js';
+import { Graph } from '.';
+import { any, array } from '../..';
 import {
   Context, Subject, Result, Value, isValueObject, isReference,
-  isSet, SubjectPropertyObject, isPropertyObject, Atom} from '../../jrql-support';
-import { activeCtx, compactIri, dataUrlData, jsonToRdf, expandTerm, canonicalDouble } from '../jsonld';
+  isSet, SubjectPropertyObject, isPropertyObject, Atom
+} from '../../jrql-support';
+import {
+  activeCtx, compactIri, dataUrlData, jsonToRdf, expandTerm, canonicalDouble
+} from '../jsonld';
 import { inPosition } from '../quads';
 import { jrql, rdf, xs } from '../../ns';
 import { SubjectGraph } from '../SubjectGraph';
@@ -28,16 +31,14 @@ export interface JrqlQuadsOptions {
 
 export class JrqlQuads {
   constructor(
-    readonly rdf: Required<DataFactory>,
-    readonly graphName: GraphName,
-    readonly base?: Iri) {
+    readonly graph: Graph) {
   }
 
   async solutionSubject(results: Result[] | Result, binding: Binding, context: Context) {
-    const solutionId = this.rdf.blankNode();
-    const pseudoPropertyQuads = Object.entries(binding).map(([variable, term]) => this.rdf.quad(
+    const solutionId = this.graph.blankNode();
+    const pseudoPropertyQuads = Object.entries(binding).map(([variable, term]) => this.graph.quad(
       solutionId,
-      this.rdf.namedNode(hiddenVar(variable.slice(1))),
+      this.graph.namedNode(jrql.hiddenVar(variable.slice(1))),
       inPosition('object', term)));
     // Construct quads that represent the solution's variable values
     const subject = await this.toSubject(pseudoPropertyQuads, [/* TODO: list-items */], context);
@@ -52,7 +53,7 @@ export class JrqlQuads {
   }
 
   async quads(g: Subject | Subject[], opts: JrqlQuadsOptions, context: Context): Promise<Quad[]> {
-    return [...new QuadProcessor(opts, await activeCtx(context), this).process(null, null, g)];
+    return [...new QuadProcessor(opts, await activeCtx(context), this.graph).process(null, null, g)];
   }
 
   /**
@@ -77,42 +78,36 @@ export class JrqlQuads {
     return subject;
   }
 
-  /**
-   * Generates a new skolemization IRI for a blank node. The base is allowed to be
-   * `undefined` but the function will throw a `TypeError` if it is.
-   * @see https://www.w3.org/TR/rdf11-concepts/#h3_section-skolemization
-   */
-  skolem = (): NamedNode =>
-    this.rdf.namedNode(new URL(`/.well-known/genid/${uuid()}`, this.base).href)
-
   genSubValue(parentValue: Term, subVarName: SubVarName) {
     switch (subVarName) {
       case 'listKey':
         // Generating a data URL for the index key
-        return this.rdf.namedNode(toIndexDataUrl(Number(parentValue.value)));
+        return this.graph.namedNode(toIndexDataUrl(Number(parentValue.value)));
       case 'slotId':
         // Index exists, so a slot can be made
-        return this.skolem();
+        return this.graph.skolem();
     }
+  }
+
+  async toObjectTerms(
+    expr: any, context: Context): Promise<Quad_Object[]> {
+    return (await jsonToRdf({
+      '@context': context,
+      [jrql.blank]: expr
+    }, this.graph)).map(quad => quad.object);
   }
 }
 
 class QuadProcessor {
   readonly query: boolean;
   readonly vars?: Set<string>;
-  readonly rdf: Required<DataFactory>;
-  readonly graphName: GraphName;
-  readonly skolem: () => NamedNode;
 
   constructor(
     { query, vars }: JrqlQuadsOptions,
     readonly ctx: ActiveContext,
-    { rdf: dataFactory, skolem, graphName }: JrqlQuads) {
+    readonly graph: Graph) {
     this.query = query;
     this.vars = vars;
-    this.rdf = dataFactory;
-    this.skolem = skolem;
-    this.graphName = graphName;
   }
 
   *process(
@@ -133,14 +128,14 @@ class QuadProcessor {
         const subject: Subject = value as Subject;
         const sid = subject['@id'] ? this.expandNode(subject['@id']) :
           // Anonymous query subjects => blank node subject (match any) or skolem
-          this.query ? this.genVar() : this.skolem();
-        
+          this.query ? this.genVar() : this.graph.skolem();
+
         if (outer != null && property != null)
           // Yield the outer quad referencing this subject
-          yield this.rdf.quad(outer, this.predicate(property), sid, this.graphName);
+          yield this.graph.quad(outer, this.predicate(property), sid);
         else if (this.query && isReference(subject))
           // References at top level => implicit wildcard p-o
-          yield this.rdf.quad(sid, this.genVar(), this.genVar(), this.graphName);
+          yield this.graph.quad(sid, this.genVar(), this.genVar());
 
         // Process predicates and objects
         for (let [property, value] of Object.entries(subject))
@@ -152,8 +147,8 @@ class QuadProcessor {
 
       } else if (outer != null && property != null) {
         // This is an atom, so yield one quad
-        yield this.rdf.quad(outer, this.predicate(property),
-          this.atomObject(property, value), this.graphName);
+        yield this.graph.quad(outer, this.predicate(property),
+          this.atomObject(property, value));
         // TODO: What if the property expands to a keyword in the context?
       } else {
         throw new Error('Cannot process top-level value');
@@ -236,15 +231,15 @@ class QuadProcessor {
         // Allow anonymous variables as '?'
         return this.genVar();
       this.vars?.add(varName);
-      return this.rdf.variable(varName);
+      return this.graph.variable(varName);
     }
   }
 
   private predicate = lazy(property =>
-    property === '@type' ? this.rdf.namedNode(rdf.type) : this.expandNode(property, true));
+    property === '@type' ? this.graph.namedNode(rdf.type) : this.expandNode(property, true));
 
   private expandNode(term: string, vocab = false) {
-    return this.matchVar(term) ?? this.rdf.namedNode(expandTerm(term, this.ctx, { vocab }));
+    return this.matchVar(term) ?? this.graph.namedNode(expandTerm(term, this.ctx, { vocab }));
   }
 
   private genVarName() {
@@ -254,7 +249,7 @@ class QuadProcessor {
   }
 
   private genVar() {
-    return this.rdf.variable(this.genVarName());
+    return this.graph.variable(this.genVarName());
   }
 
   private atomObject(property: string, value: Atom): Quad_Object {
@@ -278,7 +273,7 @@ class QuadProcessor {
         return this.expandNode(value, type === '@vocab');
       language = getContextValue(this.ctx, property, '@language');
       if (language != null)
-        return this.rdf.literal(value, language);
+        return this.graph.literal(value, language);
       if (type === xs.double)
         value = canonicalDouble(parseFloat(value));
     } else if (isBoolean(value)) {
@@ -295,9 +290,9 @@ class QuadProcessor {
     }
 
     if (type && type !== '@none')
-      return this.rdf.literal(value, this.rdf.namedNode(type));
+      return this.graph.literal(value, this.graph.namedNode(type));
     else
-      return this.rdf.literal(value);
+      return this.graph.literal(value);
   }
 }
 
@@ -318,14 +313,9 @@ export function matchVar(token: string): string | undefined {
   return token === '?' ? '' : MATCH_VAR.exec(token)?.[1];
 }
 
-export const MATCH_HIDDEN_VAR = new RegExp(`^${hiddenVar('(' + VARNAME + ')')}$`);
+export const MATCH_HIDDEN_VAR = new RegExp(`^${jrql.hiddenVar('(' + VARNAME + ')')}$`);
 function matchHiddenVar(value: string): string | undefined {
   return MATCH_HIDDEN_VAR.exec(value)?.[1];
-}
-
-function hiddenVar(name: string, vars?: Set<string>) {
-  vars && vars.add(name);
-  return jrql.hiddenVar(name);
 }
 
 function isSelected(results: Result[] | Result, key: string) {
@@ -355,14 +345,6 @@ export function toIndexNumber(indexKey: any): number | [number, number] | undefi
 
 export function toIndexDataUrl(index: number | [number, number]): Url {
   return `data:,${array(index).map(i => i.toFixed(0)).join(',')}`;
-}
-
-export async function toObjectTerms(
-  expr: any, rdf: Required<DataFactory>, context: Context): Promise<Quad_Object[]> {
-  return (await jsonToRdf({
-    '@context': context,
-    [jrql.blank]: expr
-  }, rdf)).map(quad => quad.object);
 }
 
 const isNaturalNumber = (n: any) =>

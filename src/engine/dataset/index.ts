@@ -1,7 +1,6 @@
 import {
   Quad, DefaultGraph, NamedNode, Quad_Subject,
-  Quad_Predicate, Quad_Object, DataFactory
-} from 'rdf-js';
+  Quad_Predicate, Quad_Object, DataFactory} from 'rdf-js';
 import { Quadstore } from 'quadstore';
 import { AbstractChainedBatch, AbstractLevelDOWN } from 'abstract-leveldown';
 import { Observable } from 'rxjs';
@@ -11,7 +10,7 @@ import { LockManager } from '../locks';
 import { QuadSet } from '../quads';
 import { Filter } from '../indices';
 import { BatchOpts, Binding, DefaultGraphMode, ResultType } from 'quadstore/dist/lib/types';
-import { Context } from 'jsonld/jsonld-spec';
+import { Context, Iri } from 'jsonld/jsonld-spec';
 import { activeCtx, compactIri, expandTerm, ActiveContext } from '../jsonld';
 import { Algebra } from 'sparqlalgebrajs';
 import { newEngine } from 'quadstore-comunica';
@@ -127,15 +126,21 @@ const notClosed = check((d: Dataset) => !d.closed, () => new Error('Dataset clos
 /**
  * Read-only utility interface for reading Quads from a Dataset.
  */
-export interface Graph {
+export interface Graph extends Required<DataFactory> {
   readonly name: GraphName;
-  readonly dataFactory: Required<DataFactory>;
 
   match(subject?: Quad_Subject, predicate?: Quad_Predicate, object?: Quad_Object): Observable<Quad>;
 
   query(query: Algebra.Construct): Observable<Quad>;
   query(query: Algebra.Describe): Observable<Quad>;
   query(query: Algebra.Project): Observable<Binding>;
+
+  /**
+   * Generates a new skolemization IRI. The dataset base is allowed to be
+   * `undefined` but the function will throw a `TypeError` if it is.
+   * @see https://www.w3.org/TR/rdf11-concepts/#h3_section-skolemization
+   */
+  skolem(): NamedNode;
 }
 
 /**
@@ -152,15 +157,17 @@ export const STORAGE_CONTEXT: Context = {
 
 export class QuadStoreDataset implements Dataset {
   readonly location: string;
-  private /* readonly */ store: Quadstore;
+  /* readonly */ store: Quadstore;
   private readonly activeCtx?: Promise<ActiveContext>;
   private readonly lock = new LockManager;
   private isClosed: boolean = false;
+  base: Iri | undefined;
 
   constructor(private readonly backend: AbstractLevelDOWN, context?: Context) {
     // Internal of level-js and leveldown
     this.location = (<any>backend).location ?? uuid();
     this.activeCtx = activeCtx({ ...STORAGE_CONTEXT, ...context });
+    this.base = context?.['@base'] ?? undefined;
   }
 
   async initialise(): Promise<QuadStoreDataset> {
@@ -189,7 +196,7 @@ export class QuadStoreDataset implements Dataset {
   };
 
   graph(name?: GraphName): Graph {
-    return new QuadStoreGraph(this.store, name || this.dataFactory.defaultGraph());
+    return new QuadStoreGraph(this, name || this.dataFactory.defaultGraph());
   }
 
   @notClosed.async
@@ -277,20 +284,16 @@ export class QuadStoreDataset implements Dataset {
 
 class QuadStoreGraph implements Graph {
   constructor(
-    readonly store: Quadstore,
+    readonly dataset: QuadStoreDataset,
     readonly name: GraphName) {
   }
-
-  get dataFactory() {
-    return <Required<DataFactory>>this.store.dataFactory;
-  };
 
   query(query: Algebra.Construct): Observable<Quad>;
   query(query: Algebra.Describe): Observable<Quad>;
   query(query: Algebra.Project): Observable<Binding>;
   query(query: Algebra.Project | Algebra.Describe | Algebra.Construct): Observable<Binding | Quad> {
     return observeStream(async () => {
-      const stream = await this.store.sparqlStream(query);
+      const stream = await this.dataset.store.sparqlStream(query);
       if (stream.type === ResultType.BINDINGS || stream.type === ResultType.QUADS)
         return stream.iterator;
       else
@@ -299,6 +302,18 @@ class QuadStoreGraph implements Graph {
   }
 
   match(subject?: Quad_Subject, predicate?: Quad_Predicate, object?: Quad_Object): Observable<Quad> {
-    return observeStream(async () => this.store.match(subject, predicate, object, this.name));
+    return observeStream(async () => this.dataset.store.match(subject, predicate, object, this.name));
   }
+
+  skolem = () => this.dataset.dataFactory.namedNode(
+    new URL(`/.well-known/genid/${uuid()}`, this.dataset.base).href)
+
+  namedNode = this.dataset.dataFactory.namedNode;
+  blankNode = this.dataset.dataFactory.blankNode;
+  literal = this.dataset.dataFactory.literal;
+  variable = this.dataset.dataFactory.variable;
+  defaultGraph = this.dataset.dataFactory.defaultGraph;
+
+  quad = (subject: Quad_Subject, predicate: Quad_Predicate, object: Quad_Object) =>
+    this.dataset.dataFactory.quad(subject, predicate, object, this.name);
 }

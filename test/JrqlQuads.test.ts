@@ -1,14 +1,18 @@
 import { DataFactory as RdfDataFactory } from 'rdf-data-factory';
 import { JrqlQuads, toIndexNumber } from '../src/engine/dataset/JrqlQuads';
 import * as N3 from 'n3';
-const rdf = new RdfDataFactory();
-const XSD_INTEGER = rdf.namedNode('http://www.w3.org/2001/XMLSchema#integer');
+import { Graph } from '../src/engine/dataset';
+import { mock } from 'jest-mock-extended';
+import { uuid } from '../src';
 
 describe('json-rql Quads translation', () => {
+  const rdf = new RdfDataFactory();
+  Object.assign(rdf, { skolem: () => rdf.namedNode(`http://test.m-ld.org/${uuid()}`) });
+
   let jrql: JrqlQuads;
   const context = { '@base': 'http://test.m-ld.org/', '@vocab': '#' };
 
-  beforeEach(() => jrql = new JrqlQuads(rdf, rdf.defaultGraph(), context['@base']));
+  beforeEach(() => jrql = new JrqlQuads(mock<Graph>(rdf)));
 
   test('quadifies @id-only top-level subject with variable p-o', async () => {
     const quads = await jrql.quads({ '@id': 'fred' }, { query: true }, context);

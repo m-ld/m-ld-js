@@ -13,7 +13,7 @@ import { activeCtx, expandTerm } from "../jsonld";
 import { Binding } from 'quadstore';
 import { Algebra, Factory as SparqlFactory } from 'sparqlalgebrajs';
 import * as jrql from '../../ns/json-rql';
-import { JrqlQuads, matchSubVarName, matchVar, toObjectTerms } from './JrqlQuads';
+import { JrqlQuads, matchSubVarName, matchVar } from './JrqlQuads';
 import { MeldError } from '../MeldError';
 import { any, array } from '../..';
 import { asyncBinaryFold, flatten } from '../util';
@@ -35,15 +35,9 @@ export class JrqlGraph {
    */
   constructor(
     readonly graph: Graph,
-    readonly defaultContext: Context = {},
-    readonly base?: Iri) {
-    this.sparql = new SparqlFactory(graph.dataFactory);
-    this.jrql = new JrqlQuads(this.rdf, this.graph.name, base);
-  }
-
-  /** Convenience for RDF algebra construction */
-  get rdf(): Required<DataFactory> {
-    return this.graph.dataFactory;
+    readonly defaultContext: Context = {}) {
+    this.sparql = new SparqlFactory(graph);
+    this.jrql = new JrqlQuads(graph);
   }
 
   read(query: Read,
@@ -85,7 +79,7 @@ export class JrqlGraph {
       const vars = {
         subject: this.any(), property: this.any(),
         value: this.any(), item: this.any(),
-        described: this.rdf.variable(describedVarName)
+        described: this.graph.variable(describedVarName)
       };
       return this.solutions(asGroup(where ?? {}), op =>
         this.graph.query(this.sparql.createProject(
@@ -125,7 +119,7 @@ export class JrqlGraph {
     // Partition the bindings into plain properties and list items
     return this.jrql.toSubject(...bindings.reduce<[Quad[], Quad[]]>((quads, binding) => {
       const [propertyQuads, listItemQuads] = quads, item = this.bound(binding, terms.item);
-      (item == null ? propertyQuads : listItemQuads).push(this.rdf.quad(
+      (item == null ? propertyQuads : listItemQuads).push(this.graph.quad(
         inPosition('subject', this.bound(binding, terms.subject)),
         inPosition('predicate', this.bound(binding, terms.property)),
         inPosition('object', this.bound(binding, item == null ? terms.value : item)),
@@ -144,7 +138,7 @@ export class JrqlGraph {
       this.sparql.createBgp([this.sparql.createPattern(
         subject, property, value, this.graph.name)]),
       this.sparql.createBgp([this.sparql.createPattern(
-        value, this.rdf.namedNode(jrql.item), item, this.graph.name)]));
+        value, this.graph.namedNode(jrql.item), item, this.graph.name)]));
   }
 
   async find1<T>(jrqlPattern: Partial<T> & Subject,
@@ -266,12 +260,12 @@ export class JrqlGraph {
             throw new Error('Cannot use constraint in a values expression');
           return {
             ...await variableTerms,
-            [variable]: (await toObjectTerms(expr, this.rdf, context))[0]
+            [variable]: (await this.jrql.toObjectTerms(expr, context))[0]
           };
         }, Promise.resolve({}))));
 
     return this.sparql.createValues(
-      [...variableNames].map(this.rdf.variable), variablesTerms);
+      [...variableNames].map(this.graph.variable), variablesTerms);
   }
 
   private async constraintExpr(
@@ -305,21 +299,20 @@ export class JrqlGraph {
     } else {
       const varName = typeof expr == 'string' && matchVar(expr);
       return this.sparql.createTermExpression(varName ?
-        this.rdf.variable(varName) : (await toObjectTerms(expr, this.rdf, context))[0]);
+        this.graph.variable(varName) : (await this.jrql.toObjectTerms(expr, context))[0]);
     }
   }
 
   private project = (op: Algebra.Operation, vars: Iterable<string>): Observable<Binding> => {
     return this.graph.query(this.sparql.createProject(op,
-      [...vars].map(varName => this.rdf.variable(varName))));
+      [...vars].map(varName => this.graph.variable(varName))));
   }
 
   private fillTemplate(quads: Quad[], binding: Binding): Quad[] {
-    return quads.map(quad => this.rdf.quad(
+    return quads.map(quad => this.graph.quad(
       this.fillTemplatePos('subject', quad.subject, binding),
       this.fillTemplatePos('predicate', quad.predicate, binding),
-      this.fillTemplatePos('object', quad.object, binding),
-      quad.graph));
+      this.fillTemplatePos('object', quad.object, binding)));
   }
 
   private fillTemplatePos<P extends TriplePos>(pos: P, term: Quad[P], binding: Binding): Quad[P] {
@@ -333,7 +326,7 @@ export class JrqlGraph {
   }
 
   private async resolve(iri: Iri, context?: Context): Promise<NamedNode> {
-    return this.rdf.namedNode(context ? expandTerm(iri, await activeCtx(context)) : iri);
+    return this.graph.namedNode(context ? expandTerm(iri, await activeCtx(context)) : iri);
   }
 
   private bound(binding: Binding, term: Term): Term | undefined {
@@ -358,7 +351,7 @@ export class JrqlGraph {
   }
 
   private any() {
-    return this.rdf.variable(any().slice(1));
+    return this.graph.variable(any().slice(1));
   }
 }
 

@@ -61,7 +61,7 @@ export class SuSetDataset extends JrqlGraph {
     constraints: MeldConstraint[],
     private readonly encoding: MeldEncoding,
     config: Pick<MeldConfig, '@id' | 'maxDeltaSize' | 'logLevel'>) {
-    super(dataset.graph(), {}, encoding.context['@base']);
+    super(dataset.graph());
     this.journalData = new SuSetJournalDataset(dataset);
     this.tidsGraph = new JrqlGraph(
       dataset.graph(encoding.dataFactory.namedNode(qs.tids)), SUSET_CONTEXT);
