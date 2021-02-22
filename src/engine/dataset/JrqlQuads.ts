@@ -15,7 +15,7 @@ import { jrql, rdf, xs } from '../../ns';
 import { SubjectGraph } from '../SubjectGraph';
 import { ActiveContext, getContextValue } from 'jsonld/lib/context';
 import { isString, isBoolean, isDouble, isNumber } from 'jsonld/lib/types';
-import { lazy } from '../util';
+import { lazy, mapObject } from '../util';
 const { isArray } = Array;
 
 const PN_CHARS_BASE = `[A-Za-z\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u02FF\u0370-\u037D\u037F-\u1FFF\u200C-\u200D\u2070-\u218F\u2C00-\u2FEF\u3001-\uD7FF\uF900-\uFDCF\uFDF0-\uFFFD]|[\uD800-\uDB7F][\uDC00-\uDFFF]`;
@@ -43,13 +43,13 @@ export class JrqlQuads {
     // Construct quads that represent the solution's variable values
     const subject = await this.toSubject(pseudoPropertyQuads, [/* TODO: list-items */], context);
     // Unhide the variables and strip out anything that's not selected
-    return Object.assign({}, ...Object.entries(subject).map(([key, value]) => {
+    return mapObject(subject, (key, value) => {
       if (key !== '@id') { // Strip out blank node identifier
-        const varName = matchHiddenVar(key), newKey = varName ? '?' + varName : key;
+        const varName = matchHiddenVar(key), newKey = (varName ? '?' + varName : key);
         if (isSelected(results, newKey))
           return { [newKey]: value };
       }
-    }));
+    });
   }
 
   async quads(g: Subject | Subject[], opts: JrqlQuadsOptions, context: Context): Promise<Quad[]> {

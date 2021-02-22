@@ -321,3 +321,8 @@ export async function asyncBinaryFold<T, R>(
     return r1 == null ? r2 : await fold(r1, r2);
   }, Promise.resolve(null));
 }
+
+export function mapObject(
+  o: {}, fn: (k: string, v: any) => { [key: string]: any } | undefined): { [key: string]: any } {
+  return Object.assign({}, ...Object.entries(o).map(([k, v]) => fn(k, v)));
+}
