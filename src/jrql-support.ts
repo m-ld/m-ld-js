@@ -1,6 +1,5 @@
 import * as jrql from 'json-rql';
 import { Iri } from 'jsonld/jsonld-spec';
-import { jrql as jrqlNs } from './ns';
 
 /**
  * This module defines the sub-types of json-rql supported by JrqlGraph.
@@ -182,6 +181,15 @@ export interface Subject extends Pattern {
    */
   [key: string]: SubjectPropertyObject | Context | undefined;
 }
+
+/**
+ * 'Properties' of a Subject, including from {@link List} and {@link Slot}.
+ * Strictly, these are possible paths to a {@link SubjectPropertyObject}
+ * aggregated by the Subject. An `@list` contains numeric indexes. The second
+ * optional index is used for multiple items being inserted at the first index.
+ */
+export type SubjectProperty =
+  Iri | '@item' | '@index' | '@type' | ['@list', number, number?];
 
 /**
  * Determines whether the given property object from a well-formed Subject is a
@@ -612,10 +620,11 @@ export function isUpdate(p: Pattern): p is Update {
 /** @internal */
 export interface Slot extends Subject {
   '@id': Iri;
-  [jrqlNs.item]: Value | Value[];
+  '@item': Value | Value[];
+  '@index'?: number;
 }
 
 /** @internal */
 export function isSlot(s: SubjectPropertyObject): s is Slot {
-  return typeof s == 'object' && '@id' in s && jrqlNs.item in s;
+  return typeof s == 'object' && '@id' in s && '@item' in s;
 }

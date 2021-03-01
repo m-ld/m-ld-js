@@ -1,6 +1,6 @@
 import * as spec from '@m-ld/m-ld-spec';
 import {
-  Subject, Update, Reference, Variable, Read, Write, Context
+  Subject, Update, Reference, Variable, Read, Write, Context, SubjectProperty
 } from './jrql-support';
 import { Observable, Subscription } from 'rxjs';
 import { toArray } from 'rxjs/operators';
@@ -132,17 +132,23 @@ export interface MeldState extends MeldReadState {
 }
 
 /**
+ * A fully-identified Subject from the backend.
+ */
+export type GraphSubject = Readonly<Subject & Reference>;
+
+/**
  * Convenience for collections of identified Subjects, such as found in a
  * {@link MeldUpdate}. Extends `Array` and serialisable to JSON-LD as such.
  */
-export interface Subjects extends Array<Readonly<Subject & Reference>> {
+export interface Subjects extends Array<GraphSubject> {
   /**
    * Subjects in the collection indexed by `@id`. In addition, if a Subject in
    * the graph references another Subject in the same graph, the reference is
    * realised as a Javascript reference, so it is possible to traverse the graph
-   * from some known root object.
+   * from some known root object. This means that the graph cannot necessarily
+   * by serialised to JSON as it may not be acyclic.
    */
-  graph: ReadonlyMap<Iri, Readonly<Subject & Reference>>;
+  graph: ReadonlyMap<Iri, GraphSubject>;
   /**
    * Transforms the collection of Subjects using the given JSON-LD context.
    * @param context a JSON-LD context, which may affect all identifiers in the
@@ -387,6 +393,18 @@ export interface InterimUpdate {
    * @see {@link ready}
    */
   remove(key: keyof DeleteInsert<any>, pattern: Subject | Subject[]): void;
+  /**
+   * Substitutes the given alias for the given property subject, property, or
+   * subject and property, in updates provided to the application. This allows a
+   * constraint to hide a data implementation detail.
+   *
+   * @param subjectId the subject to which the alias applies
+   * @param property if `@id`, the subject IRI is aliased. Otherwise, the
+   * property is aliased.
+   * @param alias the alias for the given subject and/or property. It is an
+   * error if the property is `@id` and a `SubjectProperty` alias is provided.
+   */
+  alias(subjectId: Iri | null, property: '@id' | Iri, alias: Iri | SubjectProperty): void;
   /**
    * A promise that resolves to the current update. If any modifications made by
    * the methods above have affected the `@insert` and `@delete` of the update,

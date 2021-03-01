@@ -326,3 +326,30 @@ export function mapObject(
   o: {}, fn: (k: string, v: any) => { [key: string]: any } | undefined): { [key: string]: any } {
   return Object.assign({}, ...Object.entries(o).map(([k, v]) => fn(k, v)));
 }
+
+export function* deepValues(o: any,
+  filter: (o: any, path: string[]) => boolean = o => typeof o != 'object',
+  path: string[] = []): IterableIterator<[string[], any]> {
+  if (filter(o, path))
+    yield [path, o];
+  else if (typeof o == 'object')
+    for (let key in o)
+      yield *deepValues(o[key], filter, path.concat(key));
+}
+
+export function setAtPath(o: any, path: string[], value: any,
+  createAt: (path: string[]) => any = path => { throw `nothing at ${path}`; }, start = 0) {
+  if (path.length > start)
+    if (path.length - start === 1)
+      o[path[start]] = value; // no-op for primitives, throws for null/undefined
+    else
+      setAtPath(o[path[start]] ??= createAt(path.slice(0, start + 1)),
+        path, value, createAt, start + 1);
+  return value;
+}
+
+export function trimTail<T>(arr: T[]): T[] {
+  while (arr[arr.length - 1] == null)
+    arr.length--;
+  return arr;
+}

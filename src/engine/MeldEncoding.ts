@@ -1,6 +1,5 @@
 import { MeldDelta, EncodedDelta, UUID } from '.';
 import { DataFactory, Quad } from 'rdf-js';
-import { compact } from 'jsonld';
 import { flatten } from './util';
 import { Context, ExpandedTermDef } from '../jrql-support';
 import { Iri } from 'jsonld/jsonld-spec';

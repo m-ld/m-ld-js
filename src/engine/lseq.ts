@@ -213,7 +213,7 @@ function assert(condition: any, err: keyof typeof ERRORS, detail?: string) {
 
 export interface LseqIndexNotify<T> {
   deleted(value: T, posId: string, index: number): void,
-  inserted(value: T, posId: string, index: number): void,
+  inserted(value: T, posId: string, index: number, oldIndex: [number, number]): void,
   reindexed(value: T, posId: string, index: number): void
 }
 
@@ -277,6 +277,10 @@ export class LseqIndexRewriter<T> {
     }
   }
 
+  removeInsert(posId: string) {
+    this.posIdInserts.delete(posId);
+  }
+
   /**
    * Indicates the domain of indexes and position IDs that this rewriter will
    * affect in a call to {@link rewriteIndexes}, so long as no further calls to
@@ -307,38 +311,40 @@ export class LseqIndexRewriter<T> {
    * - value >= domain.posId.min
    */
   rewriteIndexes(existing: PosItem<T>[], notify: LseqIndexNotify<T>) {
-    let oldIndex = minIndexOfSparse(existing) ?? 0, newIndex = oldIndex;
-    let posId = (oldIndex - 1) in existing ?
-      this.lseq.parse(existing[oldIndex - 1].posId) : this.lseq.min;
+    let index = minIndexOfSparse(existing) ?? 0, newIndex = index;
+    let posId = (index - 1) in existing ?
+      this.lseq.parse(existing[index - 1].posId) : this.lseq.min;
     const posIdInsertQueue = new PosIdInsertsQueue<T>(this.posIdInserts);
     const indexInsertBatch = new IndexInsertBatch<T>(this.site, notify.inserted);
     for (let prevPosId = '';
-      oldIndex < this.indexInserts.length ||
+      index < this.indexInserts.length ||
       posId.toString() !== prevPosId ||
       // Don't keep iterating if all inserts are processed and index done
-      (oldIndex < existing.length && oldIndex !== newIndex);
-      oldIndex++
+      (index < existing.length && index !== newIndex);
+      index++
     ) {
       prevPosId = posId.toString();
-      const exists: PosItem<T> | undefined = existing[oldIndex];
+      const exists: PosItem<T> | undefined = existing[index];
       // posId is already the lower bound on the next position created
       const upper = exists != null ? this.lseq.parse(exists.posId) : this.lseq.max;
       // Prepare insert items before this position if they exist
+      let subIndex = 0;
       for (let inserted of posIdInsertQueue.dequeue(upper)) {
         posId = this.lseq.parse(inserted.posId);
-        notify.inserted(inserted.value, inserted.posId, newIndex++);
+        notify.inserted(inserted.value, inserted.posId, newIndex++, [index, subIndex++]);
       }
       // Prepare insertion of items at this (old) index if requested
-      newIndex += indexInsertBatch.addAll(this.indexInserts[oldIndex], newIndex);
+      newIndex += indexInsertBatch.addAll(this.indexInserts[index], newIndex,
+        Math.min(index, existing.length)); // Report beyond-end as at-end
       if (exists != null) {
         if (this.deletes.has(exists.posId)) {
-          notify.deleted(exists.value, exists.posId, oldIndex);
+          notify.deleted(exists.value, exists.posId, index);
           // Do not increment the position or new index
         } else {
           // Flush any index-based insertions prior to next old item
           posId = indexInsertBatch.flush(posId, upper);
           // If the index of the old value has change, notify
-          if (newIndex !== oldIndex)
+          if (newIndex !== index)
             notify.reindexed(exists.value, exists.posId, newIndex);
           // Next loop iteration must jump over the old value
           posId = this.lseq.parse(exists.posId);
@@ -376,7 +382,7 @@ class PosIdInsertsQueue<T> {
 }
 
 class IndexInsertBatch<T> {
-  batch: { start: number, values: T[] } | null = null;
+  batch: { start: number, values: T[], oldIndex: number } | null = null;
 
   constructor(
     readonly site: string,
@@ -384,9 +390,9 @@ class IndexInsertBatch<T> {
   }
 
   /** @returns count inserted */
-  addAll(indexInserts: T[] | undefined, start: number) {
+  addAll(indexInserts: T[] | undefined, start: number, oldIndex: number) {
     if (indexInserts != null) {
-      this.batch ??= { start, values: [] };
+      this.batch ??= { start, values: [], oldIndex };
       const size = this.batch.values.length;
       const values = this.batch.values;
       // indexInserts may be sparse, so using forEach
@@ -402,7 +408,8 @@ class IndexInsertBatch<T> {
       const positions = posId.between(upper, this.site, this.batch.values.length);
       for (let i = 0; i < positions.length; i++) {
         posId = positions[i];
-        this.inserted(this.batch.values[i], posId.toString(), this.batch.start + i);
+        this.inserted(this.batch.values[i], posId.toString(),
+          this.batch.start + i, [this.batch.oldIndex, i]);
       }
     }
     this.batch = null;

@@ -10,6 +10,7 @@ import { SubjectGraph } from '../src/engine/SubjectGraph';
 
 describe('Meld State API', () => {
   let api: ApiStateMachine;
+  let captureUpdate: Future<MeldUpdate>;
 
   beforeEach(async () => {
     const context = new DomainContext('test.m-ld.org');
@@ -20,10 +21,10 @@ describe('Meld State API', () => {
     });
     await clone.initialise();
     api = new ApiStateMachine(context, clone);
+    captureUpdate = new Future;
   });
 
   test('retrieves a JSON-LD subject', async () => {
-    const captureUpdate = new Future<MeldUpdate>();
     api.follow(captureUpdate.resolve);
     await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
     await expect(captureUpdate).resolves.toEqual({
@@ -38,7 +39,6 @@ describe('Meld State API', () => {
   describe('basic writes', () => {
     test('deletes a subject by update', async () => {
       await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
-      const captureUpdate = new Future<MeldUpdate>();
       api.follow(captureUpdate.resolve);
       await api.write<Update>({ '@delete': { '@id': 'fred' } });
       await expect(api.get('fred')).resolves.toBeUndefined();
@@ -51,7 +51,6 @@ describe('Meld State API', () => {
 
     test('deletes a property by update', async () => {
       await api.write<Subject>({ '@id': 'fred', name: 'Fred', height: 5 });
-      const captureUpdate = new Future<MeldUpdate>();
       api.follow(captureUpdate.resolve);
       await api.write<Update>({ '@delete': { '@id': 'fred', height: 5 } });
       await expect(api.get('fred'))
@@ -72,7 +71,6 @@ describe('Meld State API', () => {
 
     test('updates a property', async () => {
       await api.write<Subject>({ '@id': 'fred', name: 'Fred', height: 5 });
-      const captureUpdate = new Future<MeldUpdate>();
       api.follow(captureUpdate.resolve);
       await api.write<Update>({
         '@delete': { '@id': 'fred', height: 5 },
@@ -99,7 +97,6 @@ describe('Meld State API', () => {
     });
 
     test('inserts a subject by update', async () => {
-      const captureUpdate = new Future<MeldUpdate>();
       api.follow(captureUpdate.resolve);
       await api.write<Update>({ '@insert': { '@id': 'fred', name: 'Fred' } });
       await expect(api.get('fred')).resolves.toBeDefined();
@@ -112,7 +109,6 @@ describe('Meld State API', () => {
 
     test('deletes a subject by path', async () => {
       await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
-      const captureUpdate = new Future<MeldUpdate>();
       api.follow(captureUpdate.resolve);
       await api.delete('fred');
       await expect(api.get('fred')).resolves.toBeUndefined();
@@ -397,8 +393,22 @@ describe('Meld State API', () => {
 
   describe('lists', () => {
     test('inserts a list as a property', async () => {
+      api.follow(captureUpdate.resolve);
       await api.write<Subject>({
         '@id': 'fred', shopping: { '@list': ['Bread', 'Milk'] }
+      });
+      expect([...(await captureUpdate)['@insert'].graph.values()]).toContainEqual({
+        '@id': 'fred',
+        shopping: {
+          '@id': expect.stringMatching(genIdRegex),
+          '@type': 'http://m-ld.org/RdfLseq',
+          '@list': {
+            0: [
+              { '@id': expect.stringMatching(genIdRegex), '@item': 'Bread', '@index': 0 },
+              { '@id': expect.stringMatching(genIdRegex), '@item': 'Milk', '@index': 1 }
+            ]
+          }
+        }
       });
       const fred = (await api.read<Describe>({ '@describe': 'fred' }))[0];
       expect(fred).toMatchObject({
@@ -452,8 +462,15 @@ describe('Meld State API', () => {
       await api.write<Subject>({
         '@id': 'shopping', '@list': ['Bread']
       });
+      api.follow(captureUpdate.resolve);
       await api.write<Subject>({
         '@id': 'shopping', '@list': { 2: 'Milk' }
+      });
+      expect([...(await captureUpdate)['@insert'].graph.values()]).toContainEqual({
+        '@id': 'shopping',
+        '@list': {
+          1: [{ '@id': expect.stringMatching(genIdRegex), '@item': 'Milk', '@index': 1 }]
+        }
       });
       await expect(api.read<Describe>({ '@describe': 'shopping' })).resolves.toMatchObject([{
         '@id': 'shopping',
@@ -466,8 +483,15 @@ describe('Meld State API', () => {
       await api.write<Subject>({
         '@id': 'shopping', '@list': { 0: 'Milk' }
       });
+      api.follow(captureUpdate.resolve);
       await api.write<Subject>({
         '@id': 'shopping', '@list': { 0: 'Bread' }
+      });
+      expect([...(await captureUpdate)['@insert'].graph.values()]).toContainEqual({
+        '@id': 'shopping',
+        '@list': {
+          0: [{ '@id': expect.stringMatching(genIdRegex), '@item': 'Bread', '@index': 0 }]
+        }
       });
       await expect(api.read<Describe>({ '@describe': 'shopping' })).resolves.toMatchObject([{
         '@id': 'shopping',
@@ -488,8 +512,18 @@ describe('Meld State API', () => {
       await api.write<Subject>({
         '@id': 'shopping', '@list': { 0: 'Milk' }
       });
+      api.follow(captureUpdate.resolve);
       await api.write<Subject>({
         '@id': 'shopping', '@list': { 0: ['Bread', 'Candles'] }
+      });
+      expect([...(await captureUpdate)['@insert'].graph.values()]).toContainEqual({
+        '@id': 'shopping',
+        '@list': {
+          0: [
+            { '@id': expect.stringMatching(genIdRegex), '@item': 'Bread', '@index': 0 },
+            { '@id': expect.stringMatching(genIdRegex), '@item': 'Candles', '@index': 1 }
+          ]
+        }
       });
       await expect(api.read<Describe>({ '@describe': 'shopping' })).resolves.toMatchObject([{
         '@id': 'shopping',
@@ -565,7 +599,15 @@ describe('Meld State API', () => {
         '@where': { '@id': 'shopping', '@list': { '?': { '@id': '?slot', '@item': '?' } } }
       }))[0]['?slot'])['@id'];
 
+      api.follow(captureUpdate.resolve);
       await api.write<Update>({ '@delete': { '@id': 'shopping', '@list': { 0: '?' } } });
+
+      expect([...(await captureUpdate)['@delete'].graph.values()]).toContainEqual({
+        '@id': 'shopping',
+        '@list': {
+          0: { '@id': expect.stringMatching(genIdRegex), '@item': 'Milk', '@index': 0 }
+        }
+      });
       await expect(api.read<Describe>({ '@describe': 'shopping' }))
         .resolves.toEqual([{
           '@id': 'shopping',
@@ -577,12 +619,26 @@ describe('Meld State API', () => {
 
     test('move a slot by index', async () => {
       await api.write<Subject>({ '@id': 'shopping', '@list': ['Milk', 'Bread', 'Spam'] });
+      api.follow(captureUpdate.resolve);
       await api.write<Update>({
         '@delete': {
           '@id': 'shopping', '@list': { 1: { '@id': '?slot', '@item': '?item' } }
         },
         '@insert': {
           '@id': 'shopping', '@list': { 0: { '@id': '?slot', '@item': '?item' } }
+        }
+      });
+      expect([...(await captureUpdate)['@delete'].graph.values()]).toContainEqual({
+        '@id': 'shopping',
+        '@list': {
+          // @item is not included in delete for a move
+          1: { '@id': expect.stringMatching(genIdRegex), '@index': 1 }
+        }
+      });
+      expect([...(await captureUpdate)['@insert'].graph.values()]).toContainEqual({
+        '@id': 'shopping',
+        '@list': {
+          0: [{ '@id': expect.stringMatching(genIdRegex), '@item': 'Bread', '@index': 0 }]
         }
       });
       await expect(api.read<Describe>({ '@describe': 'shopping' }))
@@ -595,12 +651,26 @@ describe('Meld State API', () => {
 
     test('move a slot by value', async () => {
       await api.write<Subject>({ '@id': 'shopping', '@list': ['Milk', 'Bread', 'Spam'] });
+      api.follow(captureUpdate.resolve);
       await api.write<Update>({
         '@delete': {
           '@id': 'shopping', '@list': { '?i': { '@id': '?slot', '@item': 'Spam' } }
         },
         '@insert': {
           '@id': 'shopping', '@list': { 0: { '@id': '?slot', '@item': 'Spam' } }
+        }
+      });
+      expect([...(await captureUpdate)['@delete'].graph.values()]).toContainEqual({
+        '@id': 'shopping',
+        '@list': {
+          // @item is not included in delete for a move
+          2: { '@id': expect.stringMatching(genIdRegex), '@index': 2 }
+        }
+      });
+      expect([...(await captureUpdate)['@insert'].graph.values()]).toContainEqual({
+        '@id': 'shopping',
+        '@list': {
+          0: [{ '@id': expect.stringMatching(genIdRegex), '@item': 'Spam', '@index': 0 }]
         }
       });
       await expect(api.read<Describe>({ '@describe': 'shopping' }))
@@ -622,9 +692,16 @@ describe('Meld State API', () => {
 
     test('change an item', async () => {
       await api.write<Subject>({ '@id': 'shopping', '@list': ['Milk', 'Bread'] });
+      api.follow(captureUpdate.resolve);
       await api.write<Update>({
         '@delete': { '@id': 'shopping', '@list': { '?1': 'Bread' } },
         '@insert': { '@id': 'shopping', '@list': { '?1': 'Spam' } }
+      });
+      expect([...(await captureUpdate)['@delete'].graph.values()]).toContainEqual({
+        '@id': expect.stringMatching(genIdRegex), '@item': 'Bread'
+      });
+      expect([...(await captureUpdate)['@insert'].graph.values()]).toContainEqual({
+        '@id': expect.stringMatching(genIdRegex), '@item': 'Spam'
       });
       await expect(api.read<Describe>({ '@describe': 'shopping' }))
         .resolves.toEqual([{
@@ -635,8 +712,31 @@ describe('Meld State API', () => {
     });
 
     test('nested lists are created', async () => {
+      api.follow(captureUpdate.resolve);
       await api.write<Subject>({
         '@id': 'shopping', '@list': ['Milk', ['Bread', 'Spam']]
+      });
+      expect([...(await captureUpdate)['@insert'].graph.values()]).toContainEqual({
+        '@id': 'shopping',
+        '@type': 'http://m-ld.org/RdfLseq',
+        '@list': {
+          0: [{
+            '@id': expect.stringMatching(genIdRegex), '@item': 'Milk', '@index': 0
+          }, {
+            '@id': expect.stringMatching(genIdRegex),
+            '@item': {
+              '@id': expect.stringMatching(genIdRegex),
+              '@type': 'http://m-ld.org/RdfLseq',
+              '@list': {
+                0: [
+                  { '@id': expect.stringMatching(genIdRegex), '@item': 'Bread', '@index': 0 },
+                  { '@id': expect.stringMatching(genIdRegex), '@item': 'Spam', '@index': 1 }
+                ]
+              }
+            },
+            '@index': 1
+          }]
+        }
       });
       await expect(api.read<Describe>({ '@describe': 'shopping' }))
         .resolves.toMatchObject([{

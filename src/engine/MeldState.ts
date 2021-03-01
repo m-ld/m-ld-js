@@ -1,7 +1,6 @@
 import { Context, Subject, Describe, Pattern, Update, Read, Write } from '../jrql-support';
 import { Observable, Subscription } from 'rxjs';
 import { map, take } from 'rxjs/operators';
-import { flatten, JsonLdDocument } from 'jsonld';
 import {
   MeldUpdate, MeldState, Resource, any, MeldStateMachine,
   ReadResult, StateProc, UpdateProc, readResult

@@ -4,7 +4,7 @@ import {
   Group, isSelect, Result, Variable, Write, Constraint, Expression, operators,
   isConstraint, VariableExpression
 } from '../../jrql-support';
-import { DataFactory, NamedNode, Quad, Term } from 'rdf-js';
+import { NamedNode, Quad, Term } from 'rdf-js';
 import { Graph, PatchQuads } from '.';
 import { toArray, mergeMap, filter, take, groupBy, catchError } from 'rxjs/operators';
 import { EMPTY, from, Observable, throwError } from 'rxjs';
@@ -12,8 +12,8 @@ import { canPosition, inPosition, TriplePos } from '../quads';
 import { activeCtx, expandTerm } from "../jsonld";
 import { Binding } from 'quadstore';
 import { Algebra, Factory as SparqlFactory } from 'sparqlalgebrajs';
-import * as jrql from '../../ns/json-rql';
-import { JrqlQuads, matchSubVarName, matchVar } from './JrqlQuads';
+import { jrql } from '../../ns';
+import { JrqlQuads } from './JrqlQuads';
 import { MeldError } from '../MeldError';
 import { any, array } from '../..';
 import { asyncBinaryFold, flatten } from '../util';
@@ -74,7 +74,7 @@ export class JrqlGraph {
   describe(describe: Iri | Variable,
     where?: Subject | Subject[] | Group,
     context: Context = this.defaultContext): Observable<Subject> {
-    const describedVarName = matchVar(describe);
+    const describedVarName = jrql.matchVar(describe);
     if (describedVarName) {
       const vars = {
         subject: this.any(), property: this.any(),
@@ -117,7 +117,7 @@ export class JrqlGraph {
 
   private toSubject(bindings: Binding[], terms: SubjectTerms, context: Context): Promise<Subject> {
     // Partition the bindings into plain properties and list items
-    return this.jrql.toSubject(...bindings.reduce<[Quad[], Quad[]]>((quads, binding) => {
+    return this.jrql.toApiSubject(...bindings.reduce<[Quad[], Quad[]]>((quads, binding) => {
       const [propertyQuads, listItemQuads] = quads, item = this.bound(binding, terms.item);
       (item == null ? propertyQuads : listItemQuads).push(this.graph.quad(
         inPosition('subject', this.bound(binding, terms.subject)),
@@ -148,7 +148,7 @@ export class JrqlGraph {
   }
 
   findQuads(jrqlPattern: Subject, context: Context = this.defaultContext): Observable<Quad> {
-    return from(this.jrql.quads(jrqlPattern, { query: true }, context)).pipe(
+    return from(this.jrql.quads(jrqlPattern, { mode: 'match' }, context)).pipe(
       mergeMap(quads => this.matchQuads(quads)));
   }
 
@@ -158,9 +158,9 @@ export class JrqlGraph {
 
     const vars = new Set<string>();
     const deleteQuads = query['@delete'] != null ?
-      await this.jrql.quads(query['@delete'], { query: true, vars }, context) : undefined;
+      await this.jrql.quads(query['@delete'], { mode: 'match', vars }, context) : undefined;
     const insertQuads = query['@insert'] != null ?
-      await this.jrql.quads(query['@insert'], { query: false }, context) : undefined;
+      await this.jrql.quads(query['@insert'], { mode: 'load' }, context) : undefined;
 
     let solutions: Observable<Binding> | null = null;
     if (query['@where'] != null) {
@@ -194,7 +194,7 @@ export class JrqlGraph {
   async definiteQuads(pattern: Subject | Subject[],
     context: Context = this.defaultContext) {
     const vars = new Set<string>();
-    const quads = await this.jrql.quads(pattern, { query: false, vars }, context);
+    const quads = await this.jrql.quads(pattern, { mode: 'graph', vars }, context);
     if (vars.size > 0)
       throw new Error('Pattern has variable content');
     return quads;
@@ -223,7 +223,7 @@ export class JrqlGraph {
   private async operation(where: Group | Subject,
     vars: Set<string>, context: Context): Promise<Algebra.Operation> {
     if (isSubject(where)) {
-      const quads = await this.jrql.quads(where, { query: true, vars }, context);
+      const quads = await this.jrql.quads(where, { mode: 'match', vars }, context);
       return this.sparql.createBgp(quads.map(this.toPattern));
     } else {
       const graph = array(where['@graph']),
@@ -231,7 +231,7 @@ export class JrqlGraph {
         filter = array(where['@filter']),
         values = array(where['@values']);
       const quads = graph.length ? await this.jrql.quads(
-        graph, { query: true, vars }, context) : [];
+        graph, { mode: 'match', vars }, context) : [];
       const bgp = this.sparql.createBgp(quads.map(this.toPattern));
       const unionOp = await asyncBinaryFold(union,
         pattern => this.operation(pattern, vars, context),
@@ -252,7 +252,7 @@ export class JrqlGraph {
     const variablesTerms = await Promise.all(values.map<Promise<{ [variable: string]: Term }>>(
       variableExpr => Object.entries(variableExpr).reduce<Promise<{ [variable: string]: Term; }>>(
         async (variableTerms, [variable, expr]) => {
-          const varName = matchVar(variable);
+          const varName = jrql.matchVar(variable);
           if (!varName)
             throw new Error('Variable not specified in a values expression');
           variableNames.add(varName);
@@ -297,7 +297,7 @@ export class JrqlGraph {
     if (isConstraint(expr)) {
       return this.constraintExpr([expr], context);
     } else {
-      const varName = typeof expr == 'string' && matchVar(expr);
+      const varName = typeof expr == 'string' && jrql.matchVar(expr);
       return this.sparql.createTermExpression(varName ?
         this.graph.variable(varName) : (await this.jrql.toObjectTerms(expr, context))[0]);
     }
@@ -337,7 +337,7 @@ export class JrqlGraph {
           return value;
 
         // If this variable is a sub-variable, see if the parent variable is bound
-        const [varName, subVarName] = matchSubVarName(term.value);
+        const [varName, subVarName] = jrql.matchSubVarName(term.value);
         const genValue = subVarName != null ?
           this.jrql.genSubValue(binding[`?${varName}`], subVarName) : null;
         if (genValue != null)

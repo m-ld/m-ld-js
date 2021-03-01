@@ -1,11 +1,10 @@
 import { InterimUpdate, DeleteInsert, MeldUpdate } from '../../api';
-import { Quad } from 'rdf-js';
 import { TreeClock } from '../clocks';
-import { Subject, Update } from '../../jrql-support';
+import { Subject, SubjectProperty, Update } from '../../jrql-support';
 import { PatchQuads } from '.';
-import { flatten as flatJsonLd } from 'jsonld';
 import { JrqlGraph } from './JrqlGraph';
-import { SubjectGraph } from '../SubjectGraph';
+import { GraphAliases, SubjectGraph } from '../SubjectGraph';
+import { Iri } from 'jsonld/jsonld-spec';
 
 export class InterimUpdatePatch implements InterimUpdate {
   /** Assertions made by the constraint (not including the app patch if not mutable) */
@@ -14,12 +13,12 @@ export class InterimUpdatePatch implements InterimUpdate {
   private entailments = new PatchQuads();
   /** Whether to recreate the insert & delete fields from the assertions */
   private needsUpdate: PromiseLike<boolean>;
-  /** Cached update */
+  /** Cached interim update, lazily recreated after changes */
   private _update: MeldUpdate | undefined;
+  /** Aliases for use in updates */
+  private subjectAliases = new Map<Iri | null, { [property in '@id' | string]: SubjectProperty }>();
 
-  /**
-   * @param patch the starting app patch (will not be mutated unless 'mutable')
-   */
+  /** @param patch the starting app patch (will not be mutated unless 'mutable') */
   constructor(
     private readonly graph: JrqlGraph,
     private readonly time: TreeClock,
@@ -30,27 +29,23 @@ export class InterimUpdatePatch implements InterimUpdate {
     this.needsUpdate = Promise.resolve(true);
   }
 
+  /** @returns the final update to be presented to the app */
   async finalise() {
-    const state = {
-      update: await this.update,
-      assertions: this.assertions,
-      entailments: this.entailments
-    };
+    await this.needsUpdate; // Ensure up-to-date with any changes
     this.needsUpdate = { then: () => { throw 'Interim update has been finalised'; } };
-    return state;
+    // The final update to the app includes all assertions and entailments
+    const update = this.graph.jrql.toApiUpdate(this.createUpdate(
+      new PatchQuads(this.allAssertions).append(this.entailments)));
+    const { assertions, entailments } = this;
+    return { update, assertions, entailments };
   }
 
+  /** @returns an interim update to be presented to constraints */
   get update(): Promise<MeldUpdate> {
     return Promise.resolve(this.needsUpdate).then(needsUpdate => {
       if (needsUpdate || this._update == null) {
-        const patch = this.mutable ? this.assertions :
-          new PatchQuads(this.patch).append(this.assertions);
         this.needsUpdate = Promise.resolve(false);
-        this._update = {
-          '@ticks': this.time.ticks,
-          '@delete': SubjectGraph.fromRDF(patch.oldQuads),
-          '@insert': SubjectGraph.fromRDF(patch.newQuads)
-        };
+        this._update = this.createUpdate(this.allAssertions);
       }
       return this._update;
     });
@@ -76,8 +71,31 @@ export class InterimUpdatePatch implements InterimUpdate {
       return removed.length !== 0;
     });
 
+  alias(subjectId: Iri | null, property: '@id' | Iri, alias: Iri | SubjectProperty): void {
+    this.subjectAliases.set(subjectId, {
+      ...this.subjectAliases.get(subjectId), [property]: alias
+    });
+  }
+
+  private aliases: GraphAliases = (subject, property) => {
+    return this.subjectAliases.get(subject)?.[property];
+  }
+
+  private createUpdate(patch: PatchQuads): MeldUpdate {
+    return {
+      '@ticks': this.time.ticks,
+      '@delete': SubjectGraph.fromRDF(patch.oldQuads, this.aliases),
+      '@insert': SubjectGraph.fromRDF(patch.newQuads, this.aliases)
+    };
+  }
+
   private mutate(fn: () => Promise<boolean>) {
     this.needsUpdate = this.needsUpdate.then(
       async needsUpdate => (await fn()) || needsUpdate);
+  }
+
+  private get allAssertions() {
+    return this.mutable ? this.assertions :
+      new PatchQuads(this.patch).append(this.assertions);
   }
 }

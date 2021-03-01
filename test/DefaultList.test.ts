@@ -39,20 +39,20 @@ describe('Default list constraint', () => {
       '@delete': new SubjectGraph([]),
       '@insert': new SubjectGraph([{
         '@id': 'http://test.m-ld.org/shopping',
-        'data:,0': {
-          '@id': 'http://test.m-ld.org/.well-known/genid/slot0'
+        '@list': {
+          0: { '@id': 'http://test.m-ld.org/.well-known/genid/slot0' }
         }
       },
       {
         '@id': 'http://test.m-ld.org/.well-known/genid/slot0',
-        'http://json-rql.org/#item': 'Bread'
+        '@item': 'Bread'
       }])
     });
     await expect(constraint.check(state, update)).resolves.toBeUndefined();
     expect(update.remove).toBeCalledWith('@insert', {
       '@id': 'http://test.m-ld.org/shopping',
-      'data:,0': {
-        '@id': 'http://test.m-ld.org/.well-known/genid/slot0'
+      '@list': {
+        0: { '@id': 'http://test.m-ld.org/.well-known/genid/slot0' }
       }
     });
     let indexKey: string | undefined;
@@ -78,7 +78,7 @@ describe('Default list constraint', () => {
     expect(update.entail).toBeCalledWith(expect.objectContaining({
       '@insert': {
         '@id': 'http://test.m-ld.org/.well-known/genid/slot0',
-        'http://json-rql.org/#index': 0
+        '@index': 0
       }
     }));
   });
@@ -93,8 +93,8 @@ describe('Default list constraint', () => {
             '@type': 'http://m-ld.org/RdfLseq',
             'http://m-ld.org/RdfLseq/?=atest____________': {
               '@id': 'http://test.m-ld.org/.well-known/genid/slot0',
-              'http://json-rql.org/#item': 'Bread',
-              'http://json-rql.org/#index': 0
+              '@item': 'Bread',
+              '@index': 0
             }
           }
         })
@@ -134,8 +134,8 @@ describe('Default list constraint', () => {
             '@type': 'http://m-ld.org/RdfLseq',
             'http://m-ld.org/RdfLseq/?=btest____________': {
               '@id': 'http://test.m-ld.org/.well-known/genid/slot0',
-              'http://json-rql.org/#item': 'Bread',
-              'http://json-rql.org/#index': 0
+              '@item': 'Bread',
+              '@index': 0
             }
           }
         })
@@ -175,13 +175,13 @@ describe('Default list constraint', () => {
             '@type': 'http://m-ld.org/RdfLseq',
             'http://m-ld.org/RdfLseq/?=btest____________': {
               '@id': 'http://test.m-ld.org/.well-known/genid/slot0',
-              'http://json-rql.org/#item': 'Bread',
-              'http://json-rql.org/#index': 0
+              '@item': 'Bread',
+              '@index': 0
             },
             'http://m-ld.org/RdfLseq/?=dtest____________': {
               '@id': 'http://test.m-ld.org/.well-known/genid/slot1',
-              'http://json-rql.org/#item': 'Milk',
-              'http://json-rql.org/#index': 1
+              '@item': 'Milk',
+              '@index': 1
             }
           }
         })
@@ -212,21 +212,21 @@ describe('Default list constraint', () => {
     expect(update.entail).toBeCalledWith({
       '@insert': {
         '@id': 'http://test.m-ld.org/.well-known/genid/slot1',
-        'http://json-rql.org/#index': 0
+        '@index': 0
       },
       '@delete': {
         '@id': 'http://test.m-ld.org/.well-known/genid/slot1',
-        'http://json-rql.org/#index': 1
+        '@index': 1
       }
     });
     expect(update.entail).toBeCalledWith({
       '@insert': {
         '@id': 'http://test.m-ld.org/.well-known/genid/slot0',
-        'http://json-rql.org/#index': 1
+        '@index': 1
       },
       '@delete': {
         '@id': 'http://test.m-ld.org/.well-known/genid/slot0',
-        'http://json-rql.org/#index': 0
+        '@index': 0
       }
     });
     //console.log(JSON.stringify(update.entail.mock.calls, null, ' '))
