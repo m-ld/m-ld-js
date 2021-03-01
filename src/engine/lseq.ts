@@ -157,7 +157,8 @@ class LseqPosId {
       for (let i = 0; i < posIds.length && posIds.length < count; i += div + 1)
         posIds.splice(i + 1, 0, ...posIds[i].between(posIds[i + 1] ?? next, site, div));
     }
-    return posIds;
+    // Drop any excess due to div > 1
+    return posIds.slice(0, count);
   }
 
   private cloneWith(level: number, pos: number, site: string): LseqPosId {

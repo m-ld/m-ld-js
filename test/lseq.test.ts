@@ -209,6 +209,12 @@ describe('LSEQ', () => {
       }
     });
 
+    test('allocates exactly count', () => {
+      // Ask for enough to cause an overflow and an uneven second-level allocation
+      const mids = lseq.min.between(lseq.max, 'x', 32);
+      expect(mids.length).toBe(32);
+    });
+
     test('double overflows if necessary', () => {
       // Enough to blow up the second level
       const count = 1 + 16 * 15 + 1;
