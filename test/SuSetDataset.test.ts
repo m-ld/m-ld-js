@@ -217,7 +217,8 @@ describe('SU-Set Dataset', () => {
           ]) ?? fail();
           expect(msg.time.equals(localTime)).toBe(true);
 
-          await expect(ssd.describe1('http://test.m-ld.org/barney')).resolves.toEqual(barney);
+          await expect(ssd.describe1('http://test.m-ld.org/barney').toPromise())
+            .resolves.toEqual(barney);
         });
 
         test('answers local op since first', async () => {

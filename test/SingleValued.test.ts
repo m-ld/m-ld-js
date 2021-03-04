@@ -152,9 +152,9 @@ describe('Single-valued constraint', () => {
     await constraint.apply(state, update);
     // FIXME: not applied to the dataset!
 
-    await expect(graph.describe1('http://test.m-ld.org/fred'))
+    await expect(graph.describe1('http://test.m-ld.org/fred').toPromise())
       .resolves.toMatchObject({ 'http://test.m-ld.org/#name': 'Fred' });
-    await expect(graph.describe1('http://test.m-ld.org/wilma'))
+    await expect(graph.describe1('http://test.m-ld.org/wilma').toPromise())
       .resolves.toMatchObject({ 'http://test.m-ld.org/#name': 'Wilma' });
   });
 });

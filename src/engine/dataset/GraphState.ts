@@ -16,12 +16,12 @@ export class GraphState implements MeldReadState {
     readonly graph: JrqlGraph) {
   }
 
-  read<S>(request: Read): ReadResult<Resource<S>> {
+  read<S>(request: Read) {
     return readResult(this.graph.read(request)
       .pipe(map(subject => <Resource<S>>subject)));
   }
 
-  get<S = Subject>(id: string): Promise<Resource<S> | undefined> {
-    return this.graph.describe1(id);
+  get<S = Subject>(id: string) {
+    return <Promise<Resource<S> | undefined>>this.graph.describe1(id).toPromise();
   }
 }

@@ -159,20 +159,27 @@ export function observeStream<T>(startStream: () => Promise<EventEmitter>): Obse
     const subscription = new Subscription;
     startStream().then(stream => {
       if (!subscription.closed) {
+        const dataHandler = (datum: T) => {
+          if (!subscription.closed)
+            subs.next(datum);
+        };
+        const errorHandler = (err: any) => subs.error(err);
+        const endHandler = () => subs.complete();
+        stream
+          .on('data', dataHandler)
+          .on('error', errorHandler)
+          .on('end', endHandler);
         subscription.add(() => {
+          stream
+            .off('data', dataHandler)
+            .off('error', errorHandler)
+            .off('end', endHandler);
           const maybeAsyncIterator = <any>stream;
           if (maybeAsyncIterator != null &&
             typeof maybeAsyncIterator.close == 'function' &&
             !maybeAsyncIterator.ended)
             (<any>stream).close();
         });
-        stream
-          .on('data', datum => {
-            if (!subscription.closed)
-              subs.next(datum);
-          })
-          .on('error', err => subs.error(err))
-          .on('end', () => subs.complete());
       }
     }).catch(err => subs.error(err));
     return subscription;

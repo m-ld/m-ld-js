@@ -100,19 +100,19 @@ export class JrqlGraph {
             mergeMap(subjectBindings => subjectBindings.pipe(toArray())),
             mergeMap(subjectBindings => this.toSubject(subjectBindings, vars, context)));
     } else {
-      return from(this.describe1(describe, context)).pipe(
-        filter<Subject>(subject => subject != null));
+      return this.describe1(describe, context);
     }
   }
 
-  async describe1<T extends object>(describe: Iri,
-    context: Context = this.defaultContext): Promise<T | undefined> {
-    const subject = await this.resolve(describe, context);
-    const vars = { subject, property: this.any(), value: this.any(), item: this.any() };
-    const bindings = await this.graph.query(this.sparql.createProject(
-      this.gatherSubjectData(vars), [vars.property, vars.value, vars.item]))
-      .pipe(toArray()).toPromise();
-    return bindings.length ? <T>await this.toSubject(bindings, vars, context) : undefined;
+  describe1(describe: Iri,
+    context: Context = this.defaultContext): Observable<Subject> {
+    return from(this.resolve(describe, context)).pipe(mergeMap(subject => {
+      const vars = { subject, property: this.any(), value: this.any(), item: this.any() };
+      return this.graph.query(this.sparql.createProject(
+        this.gatherSubjectData(vars), [vars.property, vars.value, vars.item]))
+        .pipe(toArray(), mergeMap(bindings =>
+          bindings.length ? this.toSubject(bindings, vars, context) : EMPTY));
+    }))
   }
 
   private toSubject(bindings: Binding[], terms: SubjectTerms, context: Context): Promise<Subject> {
