@@ -1,11 +1,13 @@
 import { Iri, Url } from 'jsonld/jsonld-spec';
-import { Context, Reference, Subject, isReference, SubjectPropertyObject, SubjectProperty, isPropertyObject } from '../jrql-support';
+import {
+  Context, Reference, Subject, isReference, SubjectPropertyObject, SubjectProperty
+} from '../jrql-support';
 import { addValue, dataUrlData } from './jsonld';
 import { Triple } from './quads';
 import { xs, jrql, rdf } from '../ns';
 import { compact } from 'jsonld';
 import { GraphSubject, Subjects } from '../api';
-import { mapObject, deepValues, setAtPath, trimTail } from './util';
+import { mapObject, deepValues, setAtPath, trimTail, isNaturalNumber } from './util';
 import { array } from '../util';
 const { isArray } = Array;
 
@@ -190,10 +192,7 @@ function jrqlProperty(predicate: Iri): SubjectProperty {
     case jrql.item: return '@item';
   }
   const index = toIndexNumber(predicate);
-  if (isArray(index))
-    return ['@list', ...index];
-  else
-    return predicate;
+  return index != null ? ['@list', ...index] : predicate;
 }
 
 export type ListIndex = [number, number?];
@@ -228,6 +227,3 @@ export function toIndexNumber(
 export function toIndexDataUrl(index: ListIndex): Url {
   return `data:application/mld-li,${trimTail(index).map(i => i?.toFixed(0)).join(',')}`;
 }
-
-const isNaturalNumber = (n: any) =>
-  typeof n == 'number' && Number.isSafeInteger(n) && n >= 0;

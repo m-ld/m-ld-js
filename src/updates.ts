@@ -1,6 +1,10 @@
-import { isPropertyObject, isSet, Subject, Value } from './jrql-support';
-import { DeleteInsert, Resource } from './api';
-import { addValue, getValues, hasProperty, hasValue, removeValue, ValueOptions } from './engine/jsonld';
+import { isList, isPropertyObject, isSet, isUpdate, List, Slot, Subject, Value } from './jrql-support';
+import { DeleteInsert, isDeleteInsert, MeldUpdate, Resource, Subjects } from './api';
+import { addValue, compareValues, getValues, hasProperty, hasValue } from './engine/jsonld';
+import { deepValues, isNaturalNumber, setAtPath } from './engine/util';
+import { array } from './util';
+import { SubjectGraph } from './engine/SubjectGraph';
+import { isReference } from 'json-rql';
 
 /**
  * A **m-ld** update notification, indexed by Subject.
@@ -36,6 +40,9 @@ export type SubjectUpdates = { [id: string]: DeleteInsert<Subject>; };
  *   }
  * }
  * ```
+ *
+ * Javascript references to other Subjects in a Subject's properties will always
+ * be collapsed to json-rql Reference objects (e.g. `{ '@id': '<iri>' }`).
  */
 export function asSubjectUpdates(update: DeleteInsert<Subject[]>): SubjectUpdates {
   return bySubject(update, '@insert', bySubject(update, '@delete'));
@@ -45,46 +52,216 @@ export function asSubjectUpdates(update: DeleteInsert<Subject[]>): SubjectUpdate
 function bySubject(update: DeleteInsert<Subject[]>,
   key: keyof DeleteInsert<Subject[]>,
   bySubject: SubjectUpdates = {}): SubjectUpdates {
-  return update[key].reduce((bySubject, subject) => {
-    const id = subject['@id'] ?? ''; // Should never be empty
-    bySubject[id] = Object.assign(bySubject[id] ?? {}, { [key]: subject });
-    return bySubject;
-  }, bySubject);
+  for (let subject of update[key])
+    Object.assign(
+      // @id should never be empty
+      bySubject[subject['@id'] ?? '*'] ??= { '@delete': {}, '@insert': {} },
+      { [key]: unReifyRefs({ ...subject }) });
+  return bySubject;
 }
 
 /** @internal */
-const valueOptions = (subject: Subject, key: string): ValueOptions => ({
-  // m-ld semantics are strict on Set properties
-  allowDuplicate: false,
-  // Try to preserve the array-ness of keys, as far as possible
-  propertyIsArray: Array.isArray(subject[key])
-});
+function unReifyRefs(subject: Subject) {
+  for (let [path, value] of deepValues(subject,
+    (value, path) => path.length > 0 && typeof value == 'object' && '@id' in value))
+    setAtPath(subject, path, { '@id': value['@id'] });
+  return subject;
+}
 
 /**
- * Applies a subject update to the given subject, expressed as a
- * {@link Resource}. This method will correctly apply the deleted and inserted
- * properties from the update, accounting for **m-ld**
+ * Applies an update to the given subject, expressed as a {@link Resource}. This
+ * method will correctly apply the deleted and inserted properties from the
+ * update, accounting for **m-ld**
  * [data&nbsp;semantics](http://spec.m-ld.org/#data-semantics).
+ *
+ * Referenced Subjects will also be updated if they have been affected by the
+ * given update, deeply. If a reference property has changed to a different
+ * object (whether or not that object is present in the update), it will be
+ * updated to a json-rql Reference (e.g. `{ '@id': '<iri>' }`).
+ *
+ * Changes are applied to non-`@list` properties using only L-value assignment,
+ * so the given Subject can be safely implemented with property setters, such as
+ * using `set` in a class, or by using `defineProperty`, or using a Proxy; for
+ * example to trigger side-effect behaviour. Removed properties are set to an
+ * empty array (`[]`) to signal emptiness, and then deleted.
+ *
+ * Changes to `@list` items are enacted in reverse index order, by calling
+ * `splice`. If the `@list` value is a hash, it will have a `length` property
+ * added. To intercept these calls, re-implement `splice` on the `@list`
+ * property value.
+ *
+ * CAUTION: If this function is called independently on subjects which reference
+ * each other via Javascript references, or share referenced subjects, then the
+ * referenced subjects may be updated more than once, with unexpected results.
+ * To avoid this, use a {@link SubjectUpdater} to process the whole update.
+ *
  * @param subject the resource to apply the update to
- * @param update the update, obtained from an {@link asSubjectUpdates} transformation
+ * @param update the update, as a {@link MeldUpdate} or obtained from
+ * {@link asSubjectUpdates}
  * @typeParam T the app-specific subject type of interest
+ * @see http://spec.m-ld.org/#data-semantics
  */
-export function updateSubject<T>(subject: Resource<T>, update: DeleteInsert<Subject>): Resource<T> {
-  // Allow for undefined/null ids
-  const inserts = subject['@id'] === update['@insert']?.['@id'] ? update['@insert'] : {};
-  const deletes = subject['@id'] === update['@delete']?.['@id'] ? update['@delete'] : {};
-  new Set(Object.keys(subject).concat(Object.keys(inserts))).forEach(key => {
-    switch (key) {
-      case '@id': break;
-      default:
-        const opts = valueOptions(subject, key);
-        for (let del of getValues(deletes, key))
-          removeValue(subject, key, del, opts);
-        for (let ins of getValues(inserts, key))
-          addValue(subject, key, ins, opts);
+export function updateSubject<T>(
+  subject: Resource<T>,
+  update: DeleteInsert<Subject> | DeleteInsert<Subjects> | SubjectUpdates): Resource<T> {
+  return new SubjectUpdater(update).update(subject);
+}
+
+/**
+ * Applies an update to more than one subject. Subjects (by Javascript
+ * reference) will not be updated more than once, even if multiply-referenced.
+ * @see {@link updateSubject}
+ */
+export class SubjectUpdater {
+  readonly delOrInsForSubject:
+    (subject: Resource<unknown>, key: keyof DeleteInsert<any>) => Subject;
+  readonly done = new Set<object>();
+
+  constructor(update: DeleteInsert<Subject> | DeleteInsert<Subjects> | SubjectUpdates) {
+    if (isDeleteInsert(update))
+      if (isGraphUpdate(update))
+        this.delOrInsForSubject = (subject, key) =>
+          update[key].graph.get(subject['@id']) ?? {}
+      else
+        this.delOrInsForSubject = (subject, key) =>
+          update[key]?.['@id'] === subject['@id'] ? update[key] : {};
+    else
+      this.delOrInsForSubject = (subject, key) =>
+        subject['@id'] in update ? update[subject['@id']][key] : {};
+  }
+
+  /**
+   * @see {@link updateSubject}
+   */
+  update<T>(subject: Resource<T>): Resource<T> {
+    if (!this.done.has(subject)) {
+      this.done.add(subject);
+      const deletes = this.delOrInsForSubject(subject, '@delete');
+      const inserts = this.delOrInsForSubject(subject, '@insert');
+      for (let property of new Set(Object.keys(subject).concat(Object.keys(inserts ?? {})))) {
+        switch (property) {
+          case '@id': break;
+          case '@list':
+            this.updateList(subject, deletes, inserts);
+            break;
+          default:
+            const subjectProperty = new SubjectPropertyUpdater(subject, property, this);
+            subjectProperty.delete(...getValues(deletes ?? {}, property));
+            subjectProperty.insert(...getValues(inserts ?? {}, property));
+        }
+      }
     }
-  });
-  return subject;
+    return subject;
+  }
+
+  updateValues(values: any[]) {
+    for (let value of values)
+      if (typeof value == 'object' && '@id' in value && !isReference(value))
+        this.update(value);
+  }
+
+  private updateList(subject: Resource<unknown>, deletes: Subject, inserts: Subject) {
+    if (isList(subject)) {
+      if (isList(deletes) || isList(inserts))
+        this.updateListIndexes(subject['@list'],
+          isList(deletes) ? deletes['@list'] : {},
+          isList(inserts) ? inserts['@list'] : {});
+      this.updateValues(array(subject['@list']));
+    }
+  }
+
+  private updateListIndexes(list: List['@list'], deletes: List['@list'], inserts: List['@list']) {
+    const splice = typeof list.splice == 'function' ? list.splice : (() => {
+      // Array splice operation must have a length field to behave
+      list.length = Math.max(...Object.keys(list).map(Number).filter(isNaturalNumber));
+      return [].splice;
+    })();
+    const splices: { deleteCount: number, items?: any[] }[] = []; // Sparse
+    for (let i in deletes)
+      splices[i] = { deleteCount: 1 };
+    for (let i in inserts)
+      (splices[i] ??= { deleteCount: 0 }).items =
+        // List updates are always expressed with identified slots, but the list
+        // is assumed to contain direct items, not slots
+        array(inserts[i]).map((slot: Slot) => slot['@item']);
+    let deleteCount = 0, items: any[] = [];
+    for (let i of Object.keys(splices).reverse().map(Number)) {
+      deleteCount += splices[i].deleteCount;
+      items.unshift(...splices[i].items ?? []);
+      if (!(i - 1 in splices)) {
+        splice.call(list, i, deleteCount, ...items);
+        deleteCount = 0, items = [];
+      }
+    }
+  }
+}
+
+/** @internal */
+function isGraphUpdate(update: DeleteInsert<Subject> | DeleteInsert<Subjects>):
+  update is DeleteInsert<Subjects> {
+  return Array.isArray(update['@insert']) && Array.isArray(update['@delete']);
+}
+
+/** @internal */
+class SubjectPropertyUpdater {
+  private wasArray: boolean;
+
+  constructor(
+    readonly subject: Subject,
+    readonly property: string,
+    readonly subjectUpdater?: SubjectUpdater) {
+    this.wasArray = Array.isArray(this.subject[this.property]);
+  }
+
+  get values() {
+    return getValues(this.subject, this.property);
+  }
+
+  set values(values: any[]) {
+    // Apply deep updates to the final values
+    this.subjectUpdater?.updateValues(values);
+    // Per contract of updateSubject, this always L-value assigns (no pushing)
+    this.subject[this.property] = values.length === 0 ? [] : // See next
+      // Properties which were not an array before get collapsed
+      values.length === 1 && !this.wasArray ? values[0] : values;
+    if (!this.wasArray && values.length === 0)
+      delete this.subject[this.property];
+  }
+
+  delete(...values: any[]) {
+    this.values = SubjectPropertyUpdater.minus(this.values, values);
+  }
+
+  insert(...values: any[]) {
+    const object = this.subject[this.property];
+    if (isPropertyObject(this.property, object) && isSet(object))
+      object['@set'] = SubjectPropertyUpdater.union(array(object['@set']), values);
+    else
+      this.values = SubjectPropertyUpdater.union(this.values, values);
+  }
+
+  exists(value?: any) {
+    if (value != null) {
+      const object = this.subject[this.property];
+      if (!isPropertyObject(this.property, object))
+        return false;
+      else if (isSet(object))
+        return hasValue(object, '@set', value);
+      else
+        return hasValue(this.subject, this.property, value);
+    } else {
+      return hasProperty(this.subject, this.property)
+    }
+  }
+
+  private static union(values: any[], unionValues: any[]): any[] {
+    return values.concat(SubjectPropertyUpdater.minus(unionValues, values));
+  }
+
+  private static minus(values: any[], minusValues: any[]): any[] {
+    return values.filter(value => !minusValues.some(
+      minusValue => compareValues(value, minusValue)));
+  }
 }
 
 /**
@@ -94,12 +271,8 @@ export function updateSubject<T>(subject: Resource<T>, update: DeleteInsert<Subj
  * @param property the property that relates the value to the subject.
  * @param value the value to add.
  */
-export function includeValue(subject: Subject, property: string, value: Value) {
-  const object = subject[property];
-  if (isPropertyObject(property, object) && isSet(object))
-    addValue(object, '@set', value, valueOptions(subject, property));
-  else
-    addValue(subject, property, value, valueOptions(subject, property));
+export function includeValues(subject: Subject, property: string, ...values: Value[]) {
+  new SubjectPropertyUpdater(subject, property).insert(...values);
 }
 
 /**
@@ -111,15 +284,5 @@ export function includeValue(subject: Subject, property: string, value: Value) {
  * checks for any value at all.
  */
 export function includesValue(subject: Subject, property: string, value?: Value): boolean {
-  if (value != null) {
-    const object = subject[property];
-    if (!isPropertyObject(property, object))
-      return false;
-    else if (isSet(object))
-      return hasValue(object, '@set', value);
-    else
-      return hasValue(subject, property, value);
-  } else {
-    return hasProperty(subject, property)
-  }
+  return new SubjectPropertyUpdater(subject, property).exists(value);
 }

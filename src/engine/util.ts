@@ -360,3 +360,6 @@ export function trimTail<T>(arr: T[]): T[] {
     arr.length--;
   return arr;
 }
+
+export const isNaturalNumber = (n: any) =>
+  typeof n == 'number' && Number.isSafeInteger(n) && n >= 0;

@@ -16,6 +16,11 @@ export interface DeleteInsert<T> {
   readonly '@insert': T;
 }
 
+/** @internal */
+export function isDeleteInsert(o: any): o is DeleteInsert<unknown> {
+  return '@insert' in o && '@delete' in o;
+}
+
 /**
  * A utility to generate a variable with a unique Id. Convenient to use when
  * generating query patterns in code.

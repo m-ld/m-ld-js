@@ -84,5 +84,22 @@ declare module 'jsonld/lib/util' {
    *          [propertyIsArray] true if the property is always an array, false
    *            if not (default: false).
    */
-  function removeValue(subject: object, property: string, value: any, options?: Pick<ValueOptions, 'propertyIsArray'>): void;
+  function removeValue(subject: object, property: string, value: any,
+    options?: Pick<ValueOptions, 'propertyIsArray'>): void;
+
+  /**
+  * Compares two JSON-LD values for equality. Two JSON-LD values will be
+  * considered equal if:
+  *
+  * 1. They are both primitives of the same type and value.
+  * 2. They are both @values with the same @value, @type, @language,
+  *   and @index, OR
+  * 3. They both have @ids they are the same.
+  *
+  * @param v1 the first value.
+  * @param v2 the second value.
+  *
+  * @return true if v1 and v2 are considered equal, false if not.
+  */
+  function compareValues(v1: any, v2: any): boolean;
 }
