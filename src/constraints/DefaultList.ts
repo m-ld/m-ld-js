@@ -10,7 +10,7 @@ import {
 } from '../jrql-support';
 import { includesValue } from '../updates';
 import { SingleValued } from './SingleValued';
-import { addPropertyObject, listItems } from '../engine/SubjectGraph';
+import { addPropertyObject, listItems } from '../engine/jrql-util';
 
 /** @internal */
 export class DefaultList implements MeldConstraint {
@@ -88,7 +88,7 @@ export class DefaultList implements MeldConstraint {
 
   private addItems(subject: List & Reference, rewriter: (listId: string) => ListRewriter) {
     for (let [listIndex, item] of listItems(subject['@list'])) {
-      if (isSlot(item)) {
+      if (isSlot(item) && typeof listIndex != 'string') {
         const slotInList: SlotInList = {
           property: ['@list', ...listIndex], id: item['@id']
         };

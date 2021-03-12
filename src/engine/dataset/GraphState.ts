@@ -1,11 +1,7 @@
-import {
-  MeldReadState, Resource,
-  ReadResult, readResult
-} from '../../api';
-import { Subject } from '../../jrql-support';
+import { MeldReadState, Resource, readResult } from '../../api';
+import { Subject, Read } from '../../jrql-support';
 import { JrqlGraph } from './JrqlGraph';
 import { map } from 'rxjs/operators';
-import { Read } from '../..';
 
 /**
  * Utility class to directly coerce a JrqlGraph to be a MeldReadState, with no

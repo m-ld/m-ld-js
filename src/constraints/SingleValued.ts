@@ -1,6 +1,4 @@
-import {
-  MeldConstraint, MeldUpdate, MeldReadState, asSubjectUpdates, updateSubject, InterimUpdate, array
-} from '..';
+import { MeldConstraint, MeldReadState, asSubjectUpdates, updateSubject, InterimUpdate } from '..';
 import { Iri } from 'jsonld/jsonld-spec';
 import { map, filter, take, concatMap } from 'rxjs/operators';
 import { Subject, Select, Value, isValueObject, Reference } from '../jrql-support';

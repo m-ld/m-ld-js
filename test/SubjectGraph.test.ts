@@ -1,4 +1,4 @@
-import { toIndexNumber } from '../src/engine/SubjectGraph';
+import { toIndexNumber } from '../src/engine/jrql-util';
 
 test('converts key to index number', () => {
   expect(toIndexNumber(undefined)).toBeUndefined();

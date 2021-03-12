@@ -2,7 +2,7 @@ import { any, MeldUpdate } from '../src/api';
 import { ApiStateMachine } from '../src/engine/MeldState';
 import { memStore, mockRemotes, testConfig } from './testClones';
 import { DatasetEngine } from '../src/engine/dataset/DatasetEngine';
-import { Group, Subject, Select, Describe, Update, Reference } from '../src/jrql-support';
+import { Group, Subject, Select, Describe, Update, Reference, Construct } from '../src/jrql-support';
 import { DomainContext } from '../src/engine/MeldEncoding';
 import { Future } from '../src/engine/util';
 import { genIdRegex } from './testUtil';
@@ -186,6 +186,60 @@ describe('Meld State API', () => {
       await api.write<Subject>({ '@id': 'fred', name: 'Fred', age: 40.5 });
       await expect(api.read<Describe>({ '@describe': 'fred' }))
         .resolves.toMatchObject([{ '@id': 'fred', name: 'Fred', age: 40.5 }]);
+    });
+
+    test('constructs basic match', async () => {
+      await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
+      await api.write<Subject>({ '@id': 'wilma', name: 'Wilma' });
+      await expect(api.read<Construct>({
+        '@construct': { '@id': 'fred', name: '?' }
+      })).resolves.toMatchObject([{
+        '@id': 'fred', name: 'Fred'
+      }]);
+    });
+
+    test('constructs two matches', async () => {
+      await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
+      await api.write<Subject>({ '@id': 'wilma', name: 'Wilma' });
+      await expect(api.read<Construct>({
+        '@construct': { name: '?' }
+      })).resolves.toMatchObject(expect.arrayContaining([
+        { '@id': 'fred', name: 'Fred' },
+        { '@id': 'wilma', name: 'Wilma' }
+      ]));
+    });
+
+    test('constructs with two matched properties', async () => {
+      await api.write<Subject>({ '@id': 'fred', name: 'Fred', height: 6 });
+      await api.write<Subject>({ '@id': 'wilma', name: 'Wilma' });
+      await expect(api.read<Construct>({
+        '@construct': { '@id': 'fred', '?': '?' }
+      })).resolves.toMatchObject([{
+        '@id': 'fred', name: 'Fred', height: 6
+      }]);
+    });
+
+    test('constructs with nested subject', async () => {
+      await api.write<Subject>({ '@id': 'fred', name: 'Fred', wife: { '@id': 'wilma' } });
+      await api.write<Subject>({ '@id': 'wilma', name: 'Wilma' });
+      await expect(api.read<Construct>({
+        '@construct': { '@id': 'fred', wife: { name: '?' } }
+      })).resolves.toMatchObject([{
+        '@id': 'fred', wife: { '@id': 'wilma', name: 'Wilma' }
+      }]);
+    });
+
+    test('constructs with overlapping bindings', async () => {
+      await api.write<Subject>({
+        '@id': 'fred', name: 'Fred', wife: { '@id': 'wilma', name: 'Wilma' }
+      });
+      await expect(api.read<Construct>({
+        '@construct': { '@id': 'fred', '?': '?', wife: { name: '?' } }
+      })).resolves.toMatchObject([{
+        '@id': 'fred', name: 'Fred',
+        // Comes from both '?' and wife property matches
+        wife: { '@id': 'wilma', name: 'Wilma' }
+      }]);
     });
   });
 

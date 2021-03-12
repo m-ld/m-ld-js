@@ -344,8 +344,9 @@ export function* deepValues(o: any,
       yield *deepValues(o[key], filter, path.concat(key));
 }
 
-export function setAtPath(o: any, path: string[], value: any,
-  createAt: (path: string[]) => any = path => { throw `nothing at ${path}`; }, start = 0) {
+export function setAtPath<T>(o: any, path: string[], value: T,
+  createAt: (path: string[]) => any = path => { throw `nothing at ${path}`; },
+  start = 0): T {
   if (path.length > start)
     if (path.length - start === 1)
       o[path[start]] = value; // no-op for primitives, throws for null/undefined

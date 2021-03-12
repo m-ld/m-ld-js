@@ -1,10 +1,9 @@
 import { DataFactory, Quad } from 'rdf-js';
 import { cloneQuad } from './quads';
 import { toRDF, Options, processContext } from 'jsonld';
-import { Context, Iri, Url } from 'jsonld/jsonld-spec';
+import { Context, Iri } from 'jsonld/jsonld-spec';
 import { getInitialContext, expandIri, ActiveContext } from 'jsonld/lib/context';
 import { compactIri as _compactIri } from 'jsonld/lib/compact';
-import validDataUrl = require('valid-data-url');
 
 export * from 'jsonld/lib/util';
 export * from 'jsonld/lib/context';
@@ -20,22 +19,12 @@ export function expandTerm(value: string, ctx: ActiveContext,
   return expandIri(ctx, value, { base: true, vocab: options?.vocab }, options ?? {});
 }
 
-export function compactIri(iri: Iri, ctx: ActiveContext, options?: Options.CompactIri): string {
-  return _compactIri({ activeCtx: ctx, iri, ...options });
+export function compactIri(iri: Iri, ctx?: ActiveContext, options?: Options.CompactIri): string {
+  return ctx != null ? _compactIri({ activeCtx: ctx, iri, ...options }) : iri;
 }
 
 export async function activeCtx(ctx: Context, options?: Options.DocLoader): Promise<ActiveContext> {
   return processContext(getInitialContext({}), ctx, options ?? {});
-}
-
-export function dataUrlData(url: Url, ...contentTypes: string[]): string | undefined {
-  const match = url.trim().match(validDataUrl.regex);
-  const data = match?.[match.length - 1];
-  if (data != null) {
-    const contentType = match?.[1]?.split(';')[0]?.toLowerCase() || 'text/plain';
-    if (contentTypes.includes(contentType))
-      return data;
-  }
 }
 
 /**

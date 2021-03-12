@@ -154,7 +154,7 @@ export class SubjectUpdater {
     return subject;
   }
 
-  updateValues(values: any[]) {
+  updateValues(values: Iterable<any>) {
     for (let value of values)
       if (typeof value == 'object' && '@id' in value && !isReference(value))
         this.update(value);

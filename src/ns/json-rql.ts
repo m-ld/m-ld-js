@@ -24,7 +24,7 @@ export function matchSubVarName(fullVarName: string): [string, SubVarName] | [] 
 }
 
 const MATCH_VAR = new RegExp(`^\\?(${VARNAME})$`);
-export function matchVar(token: string): Variable | undefined {
+export function matchVar(token: string): string | undefined {
   return token === '?' ? '' : MATCH_VAR.exec(token)?.[1];
 }
 
@@ -35,6 +35,6 @@ export function hiddenVar(name: string): Iri {
 };
 
 const MATCH_HIDDEN_VAR = new RegExp(`^${hiddenVar('(' + VARNAME + ')')}$`);
-export function matchHiddenVar(value: string): Variable | undefined {
+export function matchHiddenVar(value: string): string | undefined {
   return MATCH_HIDDEN_VAR.exec(value)?.[1];
 }

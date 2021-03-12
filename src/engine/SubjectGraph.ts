@@ -1,14 +1,17 @@
-import { Iri, Url } from 'jsonld/jsonld-spec';
+import { Iri } from 'jsonld/jsonld-spec';
 import {
   Context, Reference, Subject, isReference, SubjectPropertyObject, SubjectProperty
 } from '../jrql-support';
-import { addValue, dataUrlData } from './jsonld';
 import { Triple } from './quads';
 import { xs, jrql, rdf } from '../ns';
 import { compact } from 'jsonld';
 import { GraphSubject, Subjects } from '../api';
-import { mapObject, deepValues, setAtPath, trimTail, isNaturalNumber } from './util';
+import { mapObject, deepValues, setAtPath } from './util';
 import { array } from '../util';
+import { addPropertyObject, listItems, toIndexDataUrl, toIndexNumber } from './jrql-util';
+import { Term } from 'rdf-js';
+import { ActiveContext } from 'jsonld/lib/context';
+import { compactIri } from './jsonld';
 const { isArray } = Array;
 
 export type GraphAliases =
@@ -49,7 +52,7 @@ export class SubjectGraph extends Array<GraphSubject> implements Subjects {
     };
   }
 
-  async withContext(context: Context): Promise<SubjectGraph> {
+  async withContext(context: Context | undefined): Promise<SubjectGraph> {
     if (typeof context == 'object' && Object.keys(context).length !== 0) {
       // Hide problematic json-rql keywords prior to JSON-LD compaction
       const hidden = this.map(subject => mapObject(subject, jsonldProperties));
@@ -64,7 +67,7 @@ export class SubjectGraph extends Array<GraphSubject> implements Subjects {
   }
 
   /** numeric parameter is needed for Array constructor compliance */
-  constructor(json: GraphSubject[] | 0) {
+  constructor(json: Iterable<GraphSubject> | 0) {
     if (typeof json == 'number')
       super(json);
     else
@@ -115,11 +118,12 @@ export class SubjectGraph extends Array<GraphSubject> implements Subjects {
   }
 }
 
-function jrqlValue(property: SubjectProperty, object: Triple['object']) {
-  if (object.termType === 'NamedNode')
+export function jrqlValue(property: SubjectProperty, object: Term, ctx?: ActiveContext) {
+  if (object.termType === 'NamedNode') {
+    const iri = compactIri(object.value, ctx);
     // @type is implicitly a reference in JSON-LD
-    return property === '@type' ? object.value : { '@id': object.value };
-  else if (object.termType === 'Literal')
+    return property === '@type' ? iri : { '@id': iri };
+  } else if (object.termType === 'Literal') {
     if (object.language)
       return { '@value': object.value, '@language': object.language };
     else if (object.datatype == null || object.datatype.value === xs.string)
@@ -132,8 +136,9 @@ function jrqlValue(property: SubjectProperty, object: Triple['object']) {
       return parseFloat(object.value);
     else
       return { '@value': object.value, '@type': object.datatype.value };
-  else
+  } else {
     throw new Error(`Cannot include ${object.termType} in a Subject`);
+  }
 }
 
 /** Hides json-rql keywords and constructs that are unknown in JSON-LD */
@@ -153,77 +158,15 @@ function jsonldProperties(property: keyof Subject, value: SubjectPropertyObject)
   }
 }
 
-export function* listItems(list: SubjectPropertyObject) {
-  // list may be an array or an indexed object
-  for (let [indexKey, item] of Object.entries(list))
-    yield* subItems(list, toIndexNumber(indexKey, 'strict'), item);
-}
-
-export function* subItems(list: SubjectPropertyObject, index: ListIndex,
-  item: SubjectPropertyObject): IterableIterator<[ListIndex, SubjectPropertyObject]> {
-  const [topIndex, subIndex] = index;
-  if (subIndex == null && isArray(item) && !isArray(list))
-    // Object.entries skips empty array positions
-    for (let [subIndex, subItem] of Object.entries(item))
-      yield [[topIndex, Number(subIndex)], subItem];
-  else
-    yield [index, item];
-}
-
-export function addPropertyObject(subject: Subject,
-  property: SubjectProperty, object: SubjectPropertyObject): Subject {
-  if (typeof property == 'string') {
-    addValue(subject, property, object);
-  } else {
-    setAtPath(subject,
-      // Trim out an empty/undefined tail
-      trimTail(property).map(String), object,
-      // subject['@list'] is an object, sub-index is an array if present
-      path => path.length == 1 ? {} : []);
-  }
-  return subject;
-}
-
 /** Converts RDF predicate to json-rql keyword, Iri, or list indexes */
-function jrqlProperty(predicate: Iri): SubjectProperty {
+export function jrqlProperty(predicate: Iri, ctx?: ActiveContext): SubjectProperty {
   switch (predicate) {
     case rdf.type: return '@type';
     case jrql.index: return '@index';
     case jrql.item: return '@item';
   }
   const index = toIndexNumber(predicate);
-  return index != null ? ['@list', ...index] : predicate;
+  return index != null ? ['@list', ...index] :
+    compactIri(predicate, ctx, { relativeTo: { vocab: true } });
 }
 
-export type ListIndex = [number, number?];
-
-export function toIndexNumber(
-  indexKey: any, strict: 'strict'): ListIndex;
-export function toIndexNumber(
-  indexKey: any, strict?: 'strict'): ListIndex | undefined;
-export function toIndexNumber(
-  indexKey: any, strict?: 'strict'): ListIndex | undefined {
-  if (indexKey != null && indexKey !== '') {
-    if (isNaturalNumber(indexKey)) // ℕ
-      return [indexKey];
-    switch (typeof indexKey) {
-      case 'string':
-        return toIndexNumber(indexKey.startsWith('data') ?
-          dataUrlData(indexKey, 'application/mld-li') : // 'data:,ℕ' or 'data:,ℕ,ℕ'
-          indexKey.includes(',') ?
-            indexKey.split(',').map(Number) : // 'ℕ,ℕ'
-            Number(indexKey), strict); // 'ℕ'
-      case 'object': // [ℕ,ℕ]
-        if (isArray(indexKey) &&
-          indexKey.length == 2 &&
-          indexKey.every(isNaturalNumber))
-          return indexKey as [number, number];
-    }
-  }
-  if (strict)
-    throw new Error(`List index ${indexKey} is not natural`);
-}
-
-export function toIndexDataUrl(index: ListIndex): Url {
-  return `data:application/mld-li,${trimTail(index).map(i => i?.toFixed(0)).join(',')}`;
-}

@@ -34,8 +34,8 @@ export class InterimUpdatePatch implements InterimUpdate {
     await this.needsUpdate; // Ensure up-to-date with any changes
     this.needsUpdate = { then: () => { throw 'Interim update has been finalised'; } };
     // The final update to the app includes all assertions and entailments
-    const update = this.graph.jrql.toApiUpdate(this.createUpdate(
-      new PatchQuads(this.allAssertions).append(this.entailments)));
+    const update = this.createUpdate(
+      new PatchQuads(this.allAssertions).append(this.entailments));
     const { assertions, entailments } = this;
     return { update, assertions, entailments };
   }
@@ -65,7 +65,7 @@ export class InterimUpdatePatch implements InterimUpdate {
 
   remove = (key: keyof DeleteInsert<any>, pattern: Subject | Subject[]) =>
     this.mutate(async () => {
-      const toRemove = await this.graph.definiteQuads(pattern);
+      const toRemove = await this.graph.graphQuads(pattern);
       const removed = this.assertions.remove(
         key == '@delete' ? 'oldQuads' : 'newQuads', toRemove);
       return removed.length !== 0;

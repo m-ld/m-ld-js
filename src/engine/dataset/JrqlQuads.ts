@@ -1,32 +1,23 @@
 import { Binding } from 'quadstore';
 import { Quad, Quad_Object, Quad_Subject, Term } from 'rdf-js';
 import { Graph } from '.';
-import { any, array } from '../..';
+import { any, array, anyName } from '../..';
 import {
   Context, Subject, Result, Value, isValueObject, isReference,
   isSet, SubjectPropertyObject, isPropertyObject, Atom, Variable
 } from '../../jrql-support';
-import {
-  activeCtx, compactIri, jsonToRdf, expandTerm, canonicalDouble
-} from '../jsonld';
+import { activeCtx, compactIri, jsonToRdf, expandTerm, canonicalDouble } from '../jsonld';
 import { inPosition } from '../quads';
 import { jrql, rdf, xs } from '../../ns';
-import {
-  ListIndex, subItems, SubjectGraph, toIndexDataUrl, toIndexNumber
-} from '../SubjectGraph';
+import { SubjectGraph } from '../SubjectGraph';
+import { JrqlMode, ListIndex, listItems, toIndexDataUrl } from '../jrql-util';
 import { ActiveContext, getContextValue } from 'jsonld/lib/context';
 import { isString, isBoolean, isDouble, isNumber } from 'jsonld/lib/types';
 import { lazy, mapObject } from '../util';
-import { MeldUpdate } from '../../api';
 const { isArray } = Array;
 
 export interface JrqlQuadsOptions {
-  /**
-   * - `match`: querying, e.g. infer variable for missing IRI
-   * - `load`: loading new information, e.g. infer skolems, infer slots
-   * - `graph`: strict mode, do not infer anything, all list contents are slots
-   */
-  mode: 'match' | 'load' | 'graph';
+  mode: JrqlMode;
   /** The variable names found (sans '?') */
   vars?: Set<string>;
 }
@@ -36,9 +27,9 @@ export class JrqlQuads {
     readonly graph: Graph) {
   }
 
-  async solutionSubject(results: Result[] | Result, binding: Binding, context: Context) {
+  async solutionSubject(results: Result[] | Result, solution: Binding, context: Context) {
     const solutionId = this.graph.blankNode();
-    const pseudoPropertyQuads = Object.entries(binding).map(([variable, term]) => this.graph.quad(
+    const pseudoPropertyQuads = Object.entries(solution).map(([variable, term]) => this.graph.quad(
       solutionId,
       this.graph.namedNode(jrql.hiddenVar(variable.slice(1))),
       inPosition('object', term)));
@@ -80,12 +71,6 @@ export class JrqlQuads {
     return subject;
   }
 
-  toApiUpdate(interim: MeldUpdate): MeldUpdate {
-    // Re-arrange list updates to API form
-
-    return interim;
-  }
-
   genSubValue(parentValue: Term, subVarName: jrql.SubVarName) {
     switch (subVarName) {
       case 'listKey':
@@ -107,10 +92,9 @@ export class JrqlQuads {
   }
 }
 
-/** 'Implements' options for type checking */
-class QuadProcessor implements JrqlQuadsOptions {
+class QuadProcessor {
   readonly mode: JrqlQuadsOptions['mode'];
-  readonly vars?: Set<string>;
+  readonly vars: JrqlQuadsOptions['vars'];
 
   constructor(
     { mode, vars }: JrqlQuadsOptions,
@@ -178,27 +162,12 @@ class QuadProcessor implements JrqlQuadsOptions {
 
   private *expandListSlots(lid: Quad_Subject, list: SubjectPropertyObject): Iterable<Quad> {
     // Normalise explicit list objects: expand fully to slots
-    if (typeof list === 'object') {
-      // This handles arrays as well as hashes
-      // Normalise indexes to data URLs (throw if not convertible)
-      for (let [indexKey, item] of Object.entries(list)) {
-        // Provided index is either a variable (string) or an index number
-        const index = jrql.matchVar(indexKey) ?? toIndexNumber(indexKey, 'strict');
-        if (typeof index == 'string' || this.mode === 'match')
-          yield* this.addSlot(lid, index, item);
-        else
-          // Check for inserting multiple sub-items at one index
-          for (let [subIndex, subItem] of subItems(list, index, item))
-            yield* this.addSlot(lid, subIndex, subItem);
-      }
-    } else {
-      // Singleton list item at position zero
-      yield* this.addSlot(lid, [0], list);
-    }
+    for (let [index, item] of listItems(list, this.mode))
+      yield* this.addSlot(lid, index, item);
   }
 
   private *addSlot(lid: Quad_Subject,
-    index: Variable | ListIndex,
+    index: string | ListIndex,
     item: SubjectPropertyObject): Iterable<Quad> {
     const slot = this.asSlot(item);
     let indexKey: string;
@@ -265,7 +234,7 @@ class QuadProcessor implements JrqlQuadsOptions {
   }
 
   private genVarName() {
-    const varName = any().slice(1);
+    const varName = anyName();
     this.vars?.add(varName);
     return varName;
   }

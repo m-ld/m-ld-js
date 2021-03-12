@@ -332,7 +332,7 @@ describe('Update utilities', () => {
       expect(splice).toBeCalledWith(1, 2, 'soled')
     });
 
-    test('updates list subject', () => {
+    test('updates nested list subject', () => {
       const box: Resource<Box> = {
         '@id': 'foo', size: 10, history: {
           '@id': 'foo-history',

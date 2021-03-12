@@ -3,7 +3,7 @@ import { Observable, Subscription } from 'rxjs';
 import { map, take } from 'rxjs/operators';
 import {
   MeldUpdate, MeldState, Resource, any, MeldStateMachine,
-  ReadResult, StateProc, UpdateProc, readResult
+  ReadResult, StateProc, UpdateProc, readResult, GraphSubject
 } from '../api';
 import { CloneEngine, EngineState, EngineUpdateProc, StateEngine } from './StateEngine';
 
@@ -13,11 +13,11 @@ abstract class ApiState implements MeldState {
     private readonly state: EngineState) {
   }
 
-  read<R extends Read = Read, S = Subject>(request: R): ReadResult<Resource<S>> {
+  read<R extends Read = Read>(request: R): ReadResult {
     const result = this.state.read(this.applyRequestContext(request));
     return readResult(result.pipe(map((subject: Subject) =>
       // Strip the domain context from each subject
-      <Resource<S>>this.stripSubjectContext(subject))));
+      <GraphSubject>this.stripSubjectContext(subject))));
   }
 
   async write<W = Write>(request: W): Promise<MeldState> {
@@ -34,7 +34,7 @@ abstract class ApiState implements MeldState {
   }
 
   get<S = Subject>(id: string): Promise<Resource<S> | undefined> {
-    return this.read<Describe, S>({ '@describe': id }).pipe(take(1)).toPromise();
+    return this.read<Describe>({ '@describe': id }).pipe(take<Resource<S>>(1)).toPromise();
   }
 
   protected abstract construct(state: EngineState): MeldState;
@@ -96,7 +96,7 @@ export class ApiStateMachine extends ApiState implements MeldStateMachine {
   }
 
   read(procedure: StateProc, handler?: UpdateProc): Subscription;
-  read<R extends Read = Read, S = Subject>(request: R): ReadResult<Resource<S>>;
+  read<R extends Read = Read, S = Subject>(request: R): ReadResult;
   read(request: Read | StateProc, handler?: UpdateProc) {
     if (typeof request == 'function') {
       return this.engine.read(

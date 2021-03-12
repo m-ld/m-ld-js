@@ -2,11 +2,11 @@ import { Iri } from 'jsonld/jsonld-spec';
 import {
   Context, Read, Subject, Update, isDescribe, isGroup, isSubject, isUpdate,
   Group, isSelect, Result, Variable, Write, Constraint, Expression, operators,
-  isConstraint, VariableExpression
+  isConstraint, VariableExpression, isConstruct
 } from '../../jrql-support';
 import { NamedNode, Quad, Term } from 'rdf-js';
 import { Graph, PatchQuads } from '.';
-import { toArray, mergeMap, filter, take, groupBy, catchError } from 'rxjs/operators';
+import { toArray, mergeMap, take, groupBy, catchError, reduce } from 'rxjs/operators';
 import { EMPTY, from, Observable, throwError } from 'rxjs';
 import { canPosition, inPosition, TriplePos } from '../quads';
 import { activeCtx, expandTerm } from "../jsonld";
@@ -17,6 +17,7 @@ import { JrqlQuads } from './JrqlQuads';
 import { MeldError } from '../MeldError';
 import { any, array } from '../..';
 import { asyncBinaryFold, flatten } from '../util';
+import { ConstructTemplate } from './ConstructTemplate';
 
 /**
  * A graph wrapper that provides low-level json-rql handling for queries. The
@@ -30,8 +31,6 @@ export class JrqlGraph {
   /**
    * @param graph a quads graph to operate on
    * @param defaultContext default context for interpreting JSON patterns
-   * @param base Iri for minting new Iris. Not necessarily the same as
-   * `defaultContext.@base`
    */
   constructor(
     readonly graph: Graph,
@@ -46,9 +45,10 @@ export class JrqlGraph {
       return this.describe(query['@describe'], query['@where'], context);
     } else if (isSelect(query) && query['@where'] != null) {
       return this.select(query['@select'], query['@where'], context);
-    } else {
-      return throwError(new MeldError('Unsupported pattern', 'Read type not supported.'));
+    } else if (isConstruct(query)) {
+      return this.construct(query['@construct'], query['@where'], context);
     }
+    return throwError(new MeldError('Unsupported pattern', 'Read type not supported.'));
   }
 
   async write(query: Write,
@@ -67,7 +67,7 @@ export class JrqlGraph {
   select(select: Result,
     where: Subject | Subject[] | Group,
     context: Context = this.defaultContext): Observable<Subject> {
-    return this.solutions(asGroup(where), this.project, context).pipe(
+    return this.solutions(where, this.project, context).pipe(
       mergeMap(solution => this.jrql.solutionSubject(select, solution, context)));
   }
 
@@ -81,7 +81,7 @@ export class JrqlGraph {
         value: this.any(), item: this.any(),
         described: this.graph.variable(describedVarName)
       };
-      return this.solutions(asGroup(where ?? {}), op =>
+      return this.solutions(where ?? {}, op =>
         this.graph.query(this.sparql.createProject(
           this.sparql.createJoin(
             // Sub-select DISTINCT to fetch subject ids
@@ -112,7 +112,20 @@ export class JrqlGraph {
         this.gatherSubjectData(vars), [vars.property, vars.value, vars.item]))
         .pipe(toArray(), mergeMap(bindings =>
           bindings.length ? this.toSubject(bindings, vars, context) : EMPTY));
-    }))
+    }));
+  }
+
+  construct(construct: Subject | Subject[],
+    where?: Subject | Subject[] | Group,
+    context: Context = this.defaultContext): Observable<Subject> {
+    return from(activeCtx(context)).pipe(mergeMap(ctx => {
+      const template = new ConstructTemplate(construct, ctx);
+      // If no where, use the construct as the pattern
+      // TODO: Add ordering to allow streaming results
+      return this.solutions(where ?? template.asPattern, this.project, context).pipe(
+        reduce((template, solution) => template.addSolution(solution), template),
+        mergeMap(template => template.results));
+    }));
   }
 
   private toSubject(bindings: Binding[], terms: SubjectTerms, context: Context): Promise<Subject> {
@@ -165,7 +178,7 @@ export class JrqlGraph {
     let solutions: Observable<Binding> | null = null;
     if (query['@where'] != null) {
       // If there is a @where clause, use variable substitutions per solution
-      solutions = this.solutions(asGroup(query['@where']), this.project, context);
+      solutions = this.solutions(query['@where'], this.project, context);
     } else if (deleteQuads != null && vars.size > 0) {
       // A @delete clause with no @where may be used to bind variables
       solutions = this.project(
@@ -191,7 +204,7 @@ export class JrqlGraph {
     return patch;
   }
 
-  async definiteQuads(pattern: Subject | Subject[],
+  async graphQuads(pattern: Subject | Subject[],
     context: Context = this.defaultContext) {
     const vars = new Set<string>();
     const quads = await this.jrql.quads(pattern, { mode: 'graph', vars }, context);
@@ -212,11 +225,11 @@ export class JrqlGraph {
       this.sparql.createBgp(patterns), patterns));
   }
 
-  private solutions<T>(where: Group,
+  private solutions<T>(where: Subject | Subject[] | Group,
     exec: (op: Algebra.Operation, vars: Iterable<string>) => Observable<T>,
     context: Context): Observable<T> {
     const vars = new Set<string>();
-    return from(this.operation(where, vars, context)).pipe(
+    return from(this.operation(asGroup(where), vars, context)).pipe(
       mergeMap(op => op == null ? EMPTY : exec(op, vars)));
   }
 

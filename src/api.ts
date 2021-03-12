@@ -6,6 +6,7 @@ import { Observable, Subscription } from 'rxjs';
 import { toArray } from 'rxjs/operators';
 import { shortId } from './util';
 import { Iri } from 'jsonld/jsonld-spec';
+import { SubjectGraph } from './engine/SubjectGraph';
 
 /**
  * A convenience type for a struct with a `@insert` and `@delete` property, like
@@ -26,10 +27,14 @@ export function isDeleteInsert(o: any): o is DeleteInsert<unknown> {
  * generating query patterns in code.
  */
 export function any(): Variable {
-  return `?${shortId((nextAny++).toString(16))}`;
+  return `?${anyName()}`;
 }
 /** @internal */
 let nextAny = 0x1111;
+/** @internal */
+export function anyName(): string {
+  return shortId((nextAny++).toString(16));
+}
 
 // Unchanged from m-ld-spec
 /** @see m-ld [specification](http://spec.m-ld.org/interfaces/livestatus.html) */
@@ -50,13 +55,13 @@ export type MeldStatus = spec.MeldStatus;
  *
  * @see {@link MeldStateMachine.read}
  */
-export type ReadResult<T> = Observable<T> & PromiseLike<T[]>;
+export type ReadResult = Observable<GraphSubject> & PromiseLike<Subjects>;
 
 /** @internal */
-export function readResult<T>(result: Observable<T>): ReadResult<T> {
-  const then: PromiseLike<T[]>['then'] =
-    (onfulfilled, onrejected) => result.pipe(toArray()).toPromise()
-      .then(onfulfilled, onrejected);
+export function readResult(result: Observable<GraphSubject>): ReadResult {
+  const then: PromiseLike<Subjects>['then'] =
+    (onfulfilled, onrejected) => result.pipe(toArray<GraphSubject>()).toPromise()
+      .then(onfulfilled == null ? null : graph => onfulfilled(new SubjectGraph(graph)), onrejected);
   return Object.assign(result, { then });
 }
 
@@ -84,7 +89,7 @@ export interface MeldReadState {
    * @returns read subjects
    * @see {@link MeldStateMachine.read}
    */
-  read<R extends Read = Read, S = Subject>(request: R): ReadResult<Resource<S>>;
+  read<R extends Read = Read>(request: R): ReadResult;
   /**
    * Shorthand method for retrieving a single Subject by its `@id`, if it exists.
    * 
@@ -259,7 +264,7 @@ export interface MeldStateMachine extends MeldState {
    * @param request the declarative read description
    * @returns read subjects
    */
-  read<R extends Read = Read, S = Subject>(request: R): ReadResult<Resource<S>>;
+  read<R extends Read = Read>(request: R): ReadResult;
 
   /**
    * Performs some write procedure on the current state.

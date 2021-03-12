@@ -10,6 +10,7 @@ import { Iri } from 'jsonld/jsonld-spec';
  * A m-ld transaction is a **json-rql** pattern, which represents a data read or
  * a data write. Supported pattern types are:
  * - {@link Describe}
+ * - {@link Construct}
  * - {@link Select}
  * - {@link Group} or {@link Subject} (the shorthand way to insert data)
  * - {@link Update} (the longhand way to insert or delete data)
@@ -185,11 +186,12 @@ export interface Subject extends Pattern {
 /**
  * 'Properties' of a Subject, including from {@link List} and {@link Slot}.
  * Strictly, these are possible paths to a {@link SubjectPropertyObject}
- * aggregated by the Subject. An `@list` contains numeric indexes. The second
- * optional index is used for multiple items being inserted at the first index.
+ * aggregated by the Subject. An `@list` contains numeric indexes (which may be
+ * numeric strings or variables). The second optional index is used for multiple
+ * items being inserted at the first index, using an array.
  */
 export type SubjectProperty =
-  Iri | '@item' | '@index' | '@type' | ['@list', number, number?];
+  Iri | Variable | '@item' | '@index' | '@type' | ['@list', number | string, number?];
 
 /**
  * Determines whether the given property object from a well-formed Subject is a
@@ -205,6 +207,11 @@ export function isPropertyObject(property: string, object: Subject['any']):
 /** @internal */
 export function isSubject(p: Pattern): p is Subject {
   return !isGroup(p) && !isQuery(p);
+}
+
+/** @internal */
+export function isSubjectObject(o: SubjectPropertyObject): o is Subject {
+  return typeof o == 'object' && !isReference(o) && !isValueObject(o);
 }
 
 /**
@@ -400,7 +407,7 @@ export interface Read extends Query {
  * Determines if the given pattern will read data from the domain.
  */
 export function isRead(p: Pattern): p is Read {
-  return isDescribe(p) || isSelect(p);
+  return isDescribe(p) || isSelect(p) || isConstruct(p);
 }
 
 /**
@@ -489,6 +496,23 @@ export interface Describe extends Read {
 /** @internal */
 export function isDescribe(p: Pattern): p is Describe {
   return '@describe' in p;
+}
+
+/**
+ * TODO docs
+ * @see https://json-rql.org/interfaces/construct.html
+ */
+export interface Construct extends Read {
+  /**
+   * Specifies a Subject for the requested data, using variables to place-hold
+   * variables matched by the `@where` clause.
+   */
+  '@construct': Subject | Subject[];
+}
+
+/** @internal */
+export function isConstruct(p: Pattern): p is Construct {
+  return '@construct' in p;
 }
 
 /**
