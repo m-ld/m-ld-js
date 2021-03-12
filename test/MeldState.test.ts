@@ -198,11 +198,54 @@ describe('Meld State API', () => {
       }]);
     });
 
+    test('constructs where', async () => {
+      await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
+      await api.write<Subject>({ '@id': 'wilma', name: 'Wilma' });
+      await expect(api.read<Construct>({
+        '@construct': { name: '?name' },
+        '@where': { '@id': 'fred', name: '?name' }
+      })).resolves.toMatchObject([{
+        name: 'Fred'
+      }]);
+    });
+
+    test('constructs where two matches', async () => {
+      await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
+      await api.write<Subject>({ '@id': 'wilma', name: 'Wilma' });
+      await expect(api.read<Construct>({
+        '@construct': { name: '?name' },
+        '@where': { name: '?name' }
+      })).resolves.toMatchObject([{
+        name: expect.arrayContaining(['Fred', 'Wilma'])
+      }]);
+    });
+
+    test('constructs new ID from existing', async () => {
+      await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
+      await api.write<Subject>({ '@id': 'wilma', name: 'Wilma' });
+      await expect(api.read<Construct>({
+        '@construct': { '@id': 'fake', name: '?name' },
+        '@where': { '@id': 'fred', name: '?name' }
+      })).resolves.toMatchObject([{
+        '@id': 'fake', name: 'Fred'
+      }]);
+    });
+
     test('constructs two matches', async () => {
       await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
       await api.write<Subject>({ '@id': 'wilma', name: 'Wilma' });
       await expect(api.read<Construct>({
         '@construct': { name: '?' }
+      })).resolves.toMatchObject([{
+        name: expect.arrayContaining(['Fred', 'Wilma'])
+      }]);
+    });
+
+    test('constructs two identified matches', async () => {
+      await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
+      await api.write<Subject>({ '@id': 'wilma', name: 'Wilma' });
+      await expect(api.read<Construct>({
+        '@construct': { '@id': '?', name: '?' }
       })).resolves.toMatchObject(expect.arrayContaining([
         { '@id': 'fred', name: 'Fred' },
         { '@id': 'wilma', name: 'Wilma' }
@@ -225,20 +268,37 @@ describe('Meld State API', () => {
       await expect(api.read<Construct>({
         '@construct': { '@id': 'fred', wife: { name: '?' } }
       })).resolves.toMatchObject([{
-        '@id': 'fred', wife: { '@id': 'wilma', name: 'Wilma' }
+        '@id': 'fred', wife: { name: 'Wilma' }
       }]);
     });
 
     test('constructs with overlapping bindings', async () => {
-      await api.write<Subject>({
-        '@id': 'fred', name: 'Fred', wife: { '@id': 'wilma', name: 'Wilma' }
-      });
+      await api.write<Subject>({ '@id': 'fred', name: 'Fred', wife: { '@id': 'wilma' } });
+      await api.write<Subject>({ '@id': 'wilma', name: 'Wilma' });
       await expect(api.read<Construct>({
-        '@construct': { '@id': 'fred', '?': '?', wife: { name: '?' } }
+        '@construct': { '@id': 'fred', '?': '?', wife: { '@id': '?', name: '?' } }
       })).resolves.toMatchObject([{
         '@id': 'fred', name: 'Fred',
         // Comes from both '?' and wife property matches
         wife: { '@id': 'wilma', name: 'Wilma' }
+      }]);
+    });
+
+    test('constructs list', async () => {
+      await api.write<Subject>({ '@id': 'shopping', '@list': ['Bread', 'Milk'] });
+      await expect(api.read<Construct>({
+        '@construct': { '@id': 'shopping', '@list': { '?': '?' } }
+      })).resolves.toMatchObject([{
+        '@id': 'shopping', '@list': { '0': 'Bread', '1': 'Milk' }
+      }]);
+    });
+
+    test('constructs item from list', async () => {
+      await api.write<Subject>({ '@id': 'shopping', '@list': ['Bread', 'Milk'] });
+      await expect(api.read<Construct>({
+        '@construct': { '@id': 'shopping', '@list': { 1: '?' } }
+      })).resolves.toMatchObject([{
+        '@id': 'shopping', '@list': { '1': 'Milk' }
       }]);
     });
   });

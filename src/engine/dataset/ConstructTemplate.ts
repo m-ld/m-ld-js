@@ -39,12 +39,12 @@ export class ConstructTemplate {
 function withNamedVar<T>(
   varNameIfString: T,
   whenIsVar: (variable: Variable, name: string) => void,
-  otherwise: (target: Exclude<T, string>) => void) {
+  otherwise?: (target: Exclude<T, string>) => void) {
   if (typeof varNameIfString == 'string') {
     const varName = varNameIfString || anyName();
     whenIsVar(`?${varName}`, varName);
   } else {
-    otherwise(<Exclude<T, string>>varNameIfString);
+    otherwise?.(<Exclude<T, string>>varNameIfString);
   }
 }
 
@@ -55,8 +55,8 @@ function withNamedVar<T>(
  * - Stores variable paths for population
  */
 class SubjectTemplate {
-  results = new Map<Iri, GraphSubject>();
-  private literalId?: Iri;
+  results = new Map<Iri | undefined, Subject>();
+  private templateId?: Iri;
   private variableId?: Variable;
   private variableProps: [SubjectProperty, Variable][] = [];
   private variableValues: [SubjectProperty, Variable][] = [];
@@ -65,9 +65,10 @@ class SubjectTemplate {
 
   constructor(construct: Subject, readonly ctx: ActiveContext) {
     // Discover or create the subject identity variable
-    withNamedVar(matchVar(construct['@id'] ?? '?'),
-      variable => this.variableId = variable,
-      () => this.literalId = construct['@id']);
+    this.templateId = construct['@id'];
+    if (this.templateId != null)
+      withNamedVar(matchVar(this.templateId),
+        variable => this.variableId = variable);
     // Discover List variables
     if (isList(construct))
       for (let [index, item] of listItems(construct['@list'], 'match'))
@@ -85,14 +86,14 @@ class SubjectTemplate {
   }
 
   get pattern(): Subject {
-    const pattern = { '@id': this.variableId ?? this.literalId };
+    const pattern = { '@id': this.variableId ?? this.templateId };
     for (let [property, value] of this.literalValues)
       addPropertyObject(pattern, property, value);
     for (let [property, variable] of this.variableValues)
       addPropertyObject(pattern, property, variable);
     for (let [property, template] of this.nestedSubjects)
       addPropertyObject(pattern, property, template.pattern);
-    return pattern
+    return pattern;
   }
 
   private addProperty(property: SubjectProperty,
@@ -124,32 +125,37 @@ class SubjectTemplate {
   }
 
   addSolution(solution: Binding): Subject | undefined {
-    const sid = this.variableId != null ?
-      compactIri(solution[this.variableId]?.value, this.ctx) : this.literalId;
-    // If no subject ID available, no result
-    if (sid != null) {
-      // Do we already have a result for the bound Subject ID?
-      const isNewResult = !this.results.has(sid);
-      const result = this.results.get(sid) ?? this.createResult(sid);
-      // Populate bound content: 1. Properties
-      // Keep track of substitute property paths for values
-      const populator = this.propertyPopulator(result, solution);
-      // 2. Literal values (only include un-substituted if new)
-      for (let [property, literal] of this.literalValues)
-        populator(property, isNewResult).populateWith(() => literal);
-      // 3. Bound values into (substitute) properties
-      for (let [property, variable] of this.variableValues)
-        if (variable in solution)
-          populator(property).populateWith(
-            resultProp => jrqlValue(resultProp, solution[variable], this.ctx));
-      // 4. Nested subjects into (substitute) properties
-      for (let [property, template] of this.nestedSubjects) {
-        const nested = template.addSolution(solution);
-        if (nested != null)
-          populator(property).populateWith(() => nested);
-      }
-      return result;
+    /**
+     * Options for Subject ID:
+     * - Literal template ID: all solutions go in one result with ID
+     * - Variable template ID:
+     *   - Variable in solution: solution is matched to a result with ID
+     *   - Variable not in solution: all solutions go in one result with template ID
+     * - No template ID: all solutions go in one result with no ID
+     */
+    const sid = this.variableId != null && this.variableId in solution ?
+      compactIri(solution[this.variableId].value, this.ctx) : undefined;
+    // Do we already have a result for the bound Subject ID?
+    const isNewResult = !this.results.has(sid);
+    const result = this.results.get(sid) ?? this.createResult(sid);
+    // Populate bound content: 1. Properties
+    // Keep track of substitute property paths for values
+    const populator = this.propertyPopulator(result, solution);
+    // 2. Literal values (only include un-substituted if new)
+    for (let [property, literal] of this.literalValues)
+      populator(property, isNewResult).populateWith(() => literal);
+    // 3. Bound values into (substitute) properties
+    for (let [property, variable] of this.variableValues)
+      if (variable in solution)
+        populator(property).populateWith(
+          resultProp => jrqlValue(resultProp, solution[variable], this.ctx));
+    // 4. Nested subjects into (substitute) properties
+    for (let [property, template] of this.nestedSubjects) {
+      const nested = template.addSolution(solution);
+      if (nested != null)
+        populator(property).populateWith(() => nested);
     }
+    return result;
   }
 
   private propertyPopulator(result: Subject, solution: Binding) {
@@ -172,8 +178,12 @@ class SubjectTemplate {
     };;
   }
 
-  private createResult(sid: string): Subject {
-    const result: Subject & Reference = { '@id': sid };
+  private createResult(sid: string | undefined): Subject {
+    const result: Subject = {};
+    if (sid != null)
+      result['@id'] = sid;
+    else if (this.templateId != null)
+      result['@id'] = this.templateId;
     this.results.set(sid, result);
     return result;
   }
