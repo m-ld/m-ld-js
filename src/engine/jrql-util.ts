@@ -1,7 +1,6 @@
 import { Url } from 'jsonld/jsonld-spec';
 import { SubjectPropertyObject, Subject, SubjectProperty, Value } from '../jrql-support';
 import { jrql } from '../ns';
-import { addValue } from './jsonld';
 import { setAtPath, trimTail, isNaturalNumber } from './util';
 import validDataUrl = require('valid-data-url');
 import { includeValues } from '..';

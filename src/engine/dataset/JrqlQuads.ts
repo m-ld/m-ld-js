@@ -4,7 +4,7 @@ import { Graph } from '.';
 import { any, array, anyName } from '../..';
 import {
   Context, Subject, Result, Value, isValueObject, isReference,
-  isSet, SubjectPropertyObject, isPropertyObject, Atom, Variable
+  isSet, SubjectPropertyObject, isPropertyObject, Atom
 } from '../../jrql-support';
 import { activeCtx, compactIri, jsonToRdf, expandTerm, canonicalDouble } from '../jsonld';
 import { inPosition } from '../quads';

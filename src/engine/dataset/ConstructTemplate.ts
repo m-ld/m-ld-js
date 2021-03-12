@@ -2,9 +2,9 @@ import { Iri } from 'jsonld/jsonld-spec';
 import { Binding } from 'quadstore';
 import { from, Observable } from 'rxjs';
 import { mergeMap } from 'rxjs/operators';
-import { anyName, GraphSubject } from '../../api';
+import { anyName } from '../../api';
 import {
-  isList, isPropertyObject, isSet, isSubjectObject, Reference, Subject,
+  isList, isPropertyObject, isSet, isSubjectObject, Subject,
   SubjectProperty, SubjectPropertyObject, Value, Variable
 } from '../../jrql-support';
 import { matchVar } from '../../ns/json-rql';
@@ -167,23 +167,23 @@ class SubjectTemplate {
         resultProps.set(patternProp, jrqlProperty(solution[variable].value, this.ctx));
     return (patternProp: SubjectProperty, includeAll = true) => {
       const substitute = resultProps.get(patternProp);
-      return {
-        populateWith(object: (resultProp: SubjectProperty) => Value) {
-          if (substitute != null)
-            addPropertyObject(result, substitute, object(substitute));
-          else if (includeAll)
-            addPropertyObject(result, patternProp, object(patternProp));
-        }
-      };
-    };;
+      let populateWith: (getObject: (resultProp: SubjectProperty) => Value) => void;
+      if (substitute != null)
+        populateWith = getObject =>
+          addPropertyObject(result, substitute, getObject(substitute));
+      else if (includeAll)
+        populateWith = getObject =>
+          addPropertyObject(result, patternProp, getObject(patternProp));
+      else
+        populateWith = () => {};
+      return { populateWith };
+    };
   }
 
   private createResult(sid: string | undefined): Subject {
-    const result: Subject = {};
-    if (sid != null)
-      result['@id'] = sid;
-    else if (this.templateId != null)
-      result['@id'] = this.templateId;
+    const result: Subject = {}, rid = sid ?? this.templateId;
+    if (rid != null)
+      result['@id'] = rid;
     this.results.set(sid, result);
     return result;
   }

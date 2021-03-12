@@ -1,9 +1,8 @@
-import { isList, isPropertyObject, isSet, isUpdate, List, Slot, Subject, Value } from './jrql-support';
-import { DeleteInsert, isDeleteInsert, MeldUpdate, Resource, Subjects } from './api';
-import { addValue, compareValues, getValues, hasProperty, hasValue } from './engine/jsonld';
+import { isList, isPropertyObject, isSet, List, Slot, Subject, Value } from './jrql-support';
+import { DeleteInsert, isDeleteInsert, Resource, Subjects } from './api';
+import { compareValues, getValues, hasProperty, hasValue } from './engine/jsonld';
 import { deepValues, isNaturalNumber, setAtPath } from './engine/util';
 import { array } from './util';
-import { SubjectGraph } from './engine/SubjectGraph';
 import { isReference } from 'json-rql';
 
 /**
