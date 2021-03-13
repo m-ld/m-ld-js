@@ -5,7 +5,7 @@ import { DatasetEngine } from '../src/engine/dataset/DatasetEngine';
 import { Group, Subject, Select, Describe, Update, Reference, Construct } from '../src/jrql-support';
 import { DomainContext } from '../src/engine/MeldEncoding';
 import { Future } from '../src/engine/util';
-import { genIdRegex } from './testUtil';
+import { blankRegex, genIdRegex } from './testUtil';
 import { SubjectGraph } from '../src/engine/SubjectGraph';
 
 describe('Meld State API', () => {
@@ -205,6 +205,7 @@ describe('Meld State API', () => {
         '@construct': { name: '?name' },
         '@where': { '@id': 'fred', name: '?name' }
       })).resolves.toMatchObject([{
+        '@id': expect.stringMatching(blankRegex),
         name: 'Fred'
       }]);
     });
@@ -216,6 +217,7 @@ describe('Meld State API', () => {
         '@construct': { name: '?name' },
         '@where': { name: '?name' }
       })).resolves.toMatchObject([{
+        '@id': expect.stringMatching(blankRegex),
         name: expect.arrayContaining(['Fred', 'Wilma'])
       }]);
     });
@@ -237,6 +239,7 @@ describe('Meld State API', () => {
       await expect(api.read<Construct>({
         '@construct': { name: '?' }
       })).resolves.toMatchObject([{
+        '@id': expect.stringMatching(blankRegex),
         name: expect.arrayContaining(['Fred', 'Wilma'])
       }]);
     });
@@ -314,7 +317,10 @@ describe('Meld State API', () => {
           '@filter': { '@eq': ['?n', 'Fred'] }
         }
       });
-      expect(selection).toEqual([{ '?f': { '@id': 'fred' } }]);
+      expect(selection).toEqual([{
+        '@id': expect.stringMatching(blankRegex),
+        '?f': { '@id': 'fred' }
+      }]);
     });
 
     test('selects name in', async () => {
@@ -328,8 +334,11 @@ describe('Meld State API', () => {
           '@filter': { '@in': ['?n', 'Fred', 'Wilma'] }
         }
       });
-      expect(new Set(selection)).toEqual(new Set([
-        { '?f': { '@id': 'fred' } }, { '?f': { '@id': 'wilma' } }]));
+      expect(selection.length).toBe(2);
+      expect(selection).toEqual(expect.arrayContaining([
+        { '@id': expect.stringMatching(blankRegex), '?f': { '@id': 'fred' } },
+        { '@id': expect.stringMatching(blankRegex), '?f': { '@id': 'wilma' } }
+      ]));
     });
 
     test('selects @id in', async () => {
@@ -343,8 +352,11 @@ describe('Meld State API', () => {
           '@filter': { '@in': ['?f', { '@id': 'fred' }, { '@id': 'wilma' }] }
         }
       });
-      expect(new Set(selection)).toEqual(new Set([
-        { '?f': { '@id': 'fred' } }, { '?f': { '@id': 'wilma' } }]));
+      expect(selection.length).toBe(2);
+      expect(selection).toEqual(expect.arrayContaining([
+        { '@id': expect.stringMatching(blankRegex), '?f': { '@id': 'fred' } },
+        { '@id': expect.stringMatching(blankRegex), '?f': { '@id': 'wilma' } }
+      ]));
     });
 
     test('selects @id from values', async () => {
@@ -358,8 +370,11 @@ describe('Meld State API', () => {
           '@values': [{ '?f': { '@id': 'fred' } }, { '?f': { '@id': 'wilma' } }]
         }
       });
-      expect(new Set(selection)).toEqual(new Set([
-        { '?n': 'Fred' }, { '?n': 'Wilma' }]));
+      expect(selection.length).toBe(2);
+      expect(selection).toEqual(expect.arrayContaining([
+        { '@id': expect.stringMatching(blankRegex), '?n': 'Fred' },
+        { '@id': expect.stringMatching(blankRegex), '?n': 'Wilma' }
+      ]));
     });
 
     test('selects name or other name', async () => {
@@ -373,8 +388,11 @@ describe('Meld State API', () => {
           '@filter': { '@or': [{ '@eq': ['?n', 'Fred'] }, { '@eq': ['?n', 'Wilma'] }] }
         }
       });
-      expect(new Set(selection)).toEqual(new Set([
-        { '?f': { '@id': 'fred' } }, { '?f': { '@id': 'wilma' } }]));
+      expect(selection.length).toBe(2);
+      expect(selection).toEqual(expect.arrayContaining([
+        { '@id': expect.stringMatching(blankRegex), '?f': { '@id': 'fred' } },
+        { '@id': expect.stringMatching(blankRegex), '?f': { '@id': 'wilma' } }
+      ]));
     });
 
     test('selects string gte', async () => {
@@ -388,8 +406,11 @@ describe('Meld State API', () => {
           '@filter': { '@gte': ['?n', 'Fred'] }
         }
       });
-      expect(new Set(selection)).toEqual(new Set([
-        { '?f': { '@id': 'fred' } }, { '?f': { '@id': 'wilma' } }]));
+      expect(selection.length).toBe(2);
+      expect(selection).toEqual(expect.arrayContaining([
+        { '@id': expect.stringMatching(blankRegex), '?f': { '@id': 'fred' } },
+        { '@id': expect.stringMatching(blankRegex), '?f': { '@id': 'wilma' } }
+      ]));
     });
 
     test('selects number gte', async () => {
@@ -403,8 +424,11 @@ describe('Meld State API', () => {
           '@filter': { '@gte': ['?h', 5] }
         }
       });
-      expect(new Set(selection)).toEqual(new Set([
-        { '?f': { '@id': 'fred' } }, { '?f': { '@id': 'wilma' } }]));
+      expect(selection.length).toBe(2);
+      expect(selection).toEqual(expect.arrayContaining([
+        { '@id': expect.stringMatching(blankRegex), '?f': { '@id': 'fred' } },
+        { '@id': expect.stringMatching(blankRegex), '?f': { '@id': 'wilma' } }
+      ]));
     });
   });
 

@@ -13,8 +13,7 @@ export class GraphState implements MeldReadState {
   }
 
   read<S>(request: Read) {
-    return readResult(this.graph.read(request)
-      .pipe(map(subject => <Resource<S>>subject)));
+    return readResult(this.graph.read(request));
   }
 
   get<S = Subject>(id: string) {

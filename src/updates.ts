@@ -1,5 +1,5 @@
 import { isList, isPropertyObject, isSet, List, Slot, Subject, Value } from './jrql-support';
-import { DeleteInsert, isDeleteInsert, Resource, Subjects } from './api';
+import { DeleteInsert, isDeleteInsert, Resource, GraphSubjects } from './api';
 import { compareValues, getValues, hasProperty, hasValue } from './engine/jsonld';
 import { deepValues, isNaturalNumber, setAtPath } from './engine/util';
 import { array } from './util';
@@ -102,7 +102,7 @@ function unReifyRefs(subject: Subject) {
  */
 export function updateSubject<T>(
   subject: Resource<T>,
-  update: DeleteInsert<Subject> | DeleteInsert<Subjects> | SubjectUpdates): Resource<T> {
+  update: DeleteInsert<Subject> | DeleteInsert<GraphSubjects> | SubjectUpdates): Resource<T> {
   return new SubjectUpdater(update).update(subject);
 }
 
@@ -116,7 +116,7 @@ export class SubjectUpdater {
     (subject: Resource<unknown>, key: keyof DeleteInsert<any>) => Subject;
   readonly done = new Set<object>();
 
-  constructor(update: DeleteInsert<Subject> | DeleteInsert<Subjects> | SubjectUpdates) {
+  constructor(update: DeleteInsert<Subject> | DeleteInsert<GraphSubjects> | SubjectUpdates) {
     if (isDeleteInsert(update))
       if (isGraphUpdate(update))
         this.delOrInsForSubject = (subject, key) =>
@@ -196,8 +196,8 @@ export class SubjectUpdater {
 }
 
 /** @internal */
-function isGraphUpdate(update: DeleteInsert<Subject> | DeleteInsert<Subjects>):
-  update is DeleteInsert<Subjects> {
+function isGraphUpdate(update: DeleteInsert<Subject> | DeleteInsert<GraphSubjects>):
+  update is DeleteInsert<GraphSubjects> {
   return Array.isArray(update['@insert']) && Array.isArray(update['@delete']);
 }
 

@@ -15,7 +15,7 @@ import { Algebra, Factory as SparqlFactory } from 'sparqlalgebrajs';
 import { jrql } from '../../ns';
 import { JrqlQuads } from './JrqlQuads';
 import { MeldError } from '../MeldError';
-import { any, array } from '../..';
+import { any, array, GraphSubject } from '../..';
 import { asyncBinaryFold, flatten } from '../util';
 import { ConstructTemplate } from './ConstructTemplate';
 
@@ -40,40 +40,40 @@ export class JrqlGraph {
   }
 
   read(query: Read,
-    context: Context = query['@context'] || this.defaultContext): Observable<Subject> {
-    if (isDescribe(query) && !Array.isArray(query['@describe'])) {
+    context: Context = query['@context'] || this.defaultContext): Observable<GraphSubject> {
+    if (isDescribe(query) && !Array.isArray(query['@describe']))
       return this.describe(query['@describe'], query['@where'], context);
-    } else if (isSelect(query) && query['@where'] != null) {
+    else if (isSelect(query) && query['@where'] != null)
       return this.select(query['@select'], query['@where'], context);
-    } else if (isConstruct(query)) {
+    else if (isConstruct(query))
       return this.construct(query['@construct'], query['@where'], context);
-    }
-    return throwError(new MeldError('Unsupported pattern', 'Read type not supported.'));
+    else
+      return throwError(new MeldError('Unsupported pattern', 'Read type not supported.'));
   }
 
   async write(query: Write,
     context: Context = query['@context'] || this.defaultContext): Promise<PatchQuads> {
     // @unions not supported unless in a where clause
-    if (isGroup(query) && query['@graph'] != null && query['@union'] == null) {
+    if (isGroup(query) && query['@graph'] != null && query['@union'] == null)
       return this.write({ '@insert': query['@graph'] } as Update, context);
-    } else if (isSubject(query)) {
+    else if (isSubject(query))
       return this.write({ '@insert': query } as Update, context);
-    } else if (isUpdate(query)) {
+    else if (isUpdate(query))
       return this.update(query, context);
-    }
-    throw new MeldError('Unsupported pattern', 'Write type not supported.');
+    else
+      throw new MeldError('Unsupported pattern', 'Write type not supported.');
   }
 
   select(select: Result,
     where: Subject | Subject[] | Group,
-    context: Context = this.defaultContext): Observable<Subject> {
+    context: Context = this.defaultContext): Observable<GraphSubject> {
     return this.solutions(where, this.project, context).pipe(
       mergeMap(solution => this.jrql.solutionSubject(select, solution, context)));
   }
 
   describe(describe: Iri | Variable,
     where?: Subject | Subject[] | Group,
-    context: Context = this.defaultContext): Observable<Subject> {
+    context: Context = this.defaultContext): Observable<GraphSubject> {
     const describedVarName = jrql.matchVar(describe);
     if (describedVarName) {
       const vars = {
@@ -105,7 +105,7 @@ export class JrqlGraph {
   }
 
   describe1(describe: Iri,
-    context: Context = this.defaultContext): Observable<Subject> {
+    context: Context = this.defaultContext): Observable<GraphSubject> {
     return from(this.resolve(describe, context)).pipe(mergeMap(subject => {
       const vars = { subject, property: this.any(), value: this.any(), item: this.any() };
       return this.graph.query(this.sparql.createProject(
@@ -117,7 +117,7 @@ export class JrqlGraph {
 
   construct(construct: Subject | Subject[],
     where?: Subject | Subject[] | Group,
-    context: Context = this.defaultContext): Observable<Subject> {
+    context: Context = this.defaultContext): Observable<GraphSubject> {
     return from(activeCtx(context)).pipe(mergeMap(ctx => {
       const template = new ConstructTemplate(construct, ctx);
       // If no where, use the construct as the pattern
@@ -128,7 +128,7 @@ export class JrqlGraph {
     }));
   }
 
-  private toSubject(bindings: Binding[], terms: SubjectTerms, context: Context): Promise<Subject> {
+  private toSubject(bindings: Binding[], terms: SubjectTerms, context: Context): Promise<GraphSubject> {
     // Partition the bindings into plain properties and list items
     return this.jrql.toApiSubject(...bindings.reduce<[Quad[], Quad[]]>((quads, binding) => {
       const [propertyQuads, listItemQuads] = quads, item = this.bound(binding, terms.item);

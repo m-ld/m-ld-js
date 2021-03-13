@@ -26,15 +26,15 @@ export function isDeleteInsert(o: any): o is DeleteInsert<unknown> {
  * A utility to generate a variable with a unique Id. Convenient to use when
  * generating query patterns in code.
  */
-export function any(): Variable {
-  return `?${anyName()}`;
-}
+export const any = (): Variable => `?${anyName()}`
+/**
+ * A utility to generate a unique blank node.
+ */
+export const blank = () => '_:' + anyName();
 /** @internal */
 let nextAny = 0x1111;
 /** @internal */
-export function anyName(): string {
-  return shortId((nextAny++).toString(16));
-}
+export const anyName = (): string => shortId((nextAny++).toString(16))
 
 // Unchanged from m-ld-spec
 /** @see m-ld [specification](http://spec.m-ld.org/interfaces/livestatus.html) */
@@ -45,7 +45,7 @@ export type MeldStatus = spec.MeldStatus;
 /**
  * Convenience return type for reading data from a clone. Use as a
  * [Promise](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise)
- * with `.then` or `await` to obtain the results as an array of
+ * with `.then` or `await` to obtain the results as an array of identified
  * {@link Subject}s. Use as an
  * [Observable](https://rxjs.dev/api/index/class/Observable) with `.subscribe`
  * (or other RxJS methods) to be notified of individual Subjects as they arrive.
@@ -55,11 +55,11 @@ export type MeldStatus = spec.MeldStatus;
  *
  * @see {@link MeldStateMachine.read}
  */
-export type ReadResult = Observable<GraphSubject> & PromiseLike<Subjects>;
+export type ReadResult = Observable<GraphSubject> & PromiseLike<GraphSubjects>;
 
 /** @internal */
 export function readResult(result: Observable<GraphSubject>): ReadResult {
-  const then: PromiseLike<Subjects>['then'] =
+  const then: PromiseLike<GraphSubjects>['then'] =
     (onfulfilled, onrejected) => result.pipe(toArray<GraphSubject>()).toPromise()
       .then(onfulfilled == null ? null : graph => onfulfilled(new SubjectGraph(graph)), onrejected);
   return Object.assign(result, { then });
@@ -150,7 +150,7 @@ export type GraphSubject = Readonly<Subject & Reference>;
  * Convenience for collections of identified Subjects, such as found in a
  * {@link MeldUpdate}. Extends `Array` and serialisable to JSON-LD as such.
  */
-export interface Subjects extends Array<GraphSubject> {
+export interface GraphSubjects extends Array<GraphSubject> {
   /**
    * Subjects in the collection indexed by `@id`. In addition, if a Subject in
    * the graph references another Subject in the same graph, the reference is
@@ -165,25 +165,25 @@ export interface Subjects extends Array<GraphSubject> {
    * Subjects, at key, property or value positions.
    * @see https://w3c.github.io/json-ld-syntax/#the-context
    */
-  withContext(context: Context): Promise<Subjects>;
+  withContext(context: Context): Promise<GraphSubjects>;
 }
 
 /**
  * @see m-ld [specification](http://spec.m-ld.org/interfaces/meldupdate.html)
  */
-export interface MeldUpdate extends DeleteInsert<Subjects> {
+export interface MeldUpdate extends DeleteInsert<GraphSubjects> {
   /**
    * Partial subjects, containing properties that have been deleted from the
    * domain. Note that deletion of a property (even of all properties) does not
    * necessarily indicate that the subject's identity is not longer represented
    * in the domain.
    */
-  readonly '@delete': Subjects;
+  readonly '@delete': GraphSubjects;
   /**
    * Partial subjects, containing properties that have been inserted into the
    * domain.
    */
-  readonly '@insert': Subjects;
+  readonly '@insert': GraphSubjects;
   /**
    * Current local clock ticks at the time of the update.
    * @see MeldStatus.ticks

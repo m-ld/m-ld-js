@@ -19,7 +19,7 @@ import { delayUntil, Future, tapComplete, fromArrayPromise, poisson } from '../u
 import { LockManager } from "../locks";
 import { levels } from 'loglevel';
 import { AbstractMeld, comesAlive } from '../AbstractMeld';
-import { MeldConfig } from '../..';
+import { GraphSubject, MeldConfig } from '../..';
 import { RemoteUpdates } from './RemoteUpdates';
 import { CloneEngine } from '../StateEngine';
 import { MeldError, MeldErrorStatus } from '../MeldError';
@@ -448,8 +448,8 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
   }
 
   @AbstractMeld.checkNotClosed.rx
-  read(request: Read): Observable<Subject> {
-    return new Observable<Subject>(subs => {
+  read(request: Read): Observable<GraphSubject> {
+    return new Observable<GraphSubject>(subs => {
       this.lock.share('live', () => new Promise<void>(resolve => {
         this.logRequest('read', request);
         // Only leave the live-lock when the results have been fully streamed

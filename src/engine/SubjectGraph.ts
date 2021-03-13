@@ -5,7 +5,7 @@ import {
 import { Triple } from './quads';
 import { xs, jrql, rdf } from '../ns';
 import { compact } from 'jsonld';
-import { GraphSubject, Subjects } from '../api';
+import { GraphSubject, GraphSubjects } from '../api';
 import { mapObject, deepValues, setAtPath } from './util';
 import { array } from '../util';
 import { addPropertyObject, listItems, toIndexDataUrl, toIndexNumber } from './jrql-util';
@@ -17,7 +17,7 @@ const { isArray } = Array;
 export type GraphAliases =
   (subject: Iri | null, property: '@id' | string) => Iri | SubjectProperty | undefined;
 
-export class SubjectGraph extends Array<GraphSubject> implements Subjects {
+export class SubjectGraph extends Array<GraphSubject> implements GraphSubjects {
   /** Lazy instantiation of graph */
   _graph?: ReadonlyMap<Iri, GraphSubject>;
 
@@ -121,7 +121,7 @@ export class SubjectGraph extends Array<GraphSubject> implements Subjects {
 export function jrqlValue(property: SubjectProperty, object: Term, ctx?: ActiveContext) {
   if (object.termType === 'NamedNode') {
     const iri = compactIri(object.value, ctx);
-    // @type is implicitly a reference in JSON-LD
+    // @type is implicitly a reference
     return property === '@type' ? iri : { '@id': iri };
   } else if (object.termType === 'Literal') {
     if (object.language)

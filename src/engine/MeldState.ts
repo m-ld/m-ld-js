@@ -14,10 +14,7 @@ abstract class ApiState implements MeldState {
   }
 
   read<R extends Read = Read>(request: R): ReadResult {
-    const result = this.state.read(this.applyRequestContext(request));
-    return readResult(result.pipe(map((subject: Subject) =>
-      // Strip the domain context from each subject
-      <GraphSubject>this.stripSubjectContext(subject))));
+    return readResult(this.state.read(this.applyRequestContext(request)));
   }
 
   async write<W = Write>(request: W): Promise<MeldState> {
@@ -46,13 +43,6 @@ abstract class ApiState implements MeldState {
       '@context': { ...this.context, ...request['@context'] || {} }
     };
   }
-
-  private stripSubjectContext(jsonld: Subject): Subject {
-    const { '@context': context, ...rtn } = jsonld;
-    if (context)
-      Object.keys(this.context).forEach((k: keyof Context) => delete context[k]);
-    return context && Object.keys(context).length ? { ...rtn, '@context': context } : rtn;
-  }
 }
 
 class ImmutableState extends ApiState {
@@ -70,7 +60,7 @@ export class ApiStateMachine extends ApiState implements MeldStateMachine {
   constructor(context: Context, engine: CloneEngine) {
     const stateEngine = new StateEngine(engine);
     super(context, {
-      read: (request: Read): Observable<Subject> => {
+      read: (request: Read): Observable<GraphSubject> => {
         return new Observable(subs => {
           const subscription = new Subscription;
           // This does not wait for results before returning control

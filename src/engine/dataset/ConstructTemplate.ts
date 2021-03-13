@@ -2,6 +2,7 @@ import { Iri } from 'jsonld/jsonld-spec';
 import { Binding } from 'quadstore';
 import { from, Observable } from 'rxjs';
 import { mergeMap } from 'rxjs/operators';
+import { blank, GraphSubject } from '../..';
 import { anyName } from '../../api';
 import {
   isList, isPropertyObject, isSet, isSubjectObject, Subject,
@@ -30,21 +31,9 @@ export class ConstructTemplate {
     return this;
   }
 
-  get results(): Observable<Subject> {
+  get results(): Observable<GraphSubject> {
     return from(this.templates).pipe(
       mergeMap(template => template.results.values()));
-  }
-}
-
-function withNamedVar<T>(
-  varNameIfString: T,
-  whenIsVar: (variable: Variable, name: string) => void,
-  otherwise?: (target: Exclude<T, string>) => void) {
-  if (typeof varNameIfString == 'string') {
-    const varName = varNameIfString || anyName();
-    whenIsVar(`?${varName}`, varName);
-  } else {
-    otherwise?.(<Exclude<T, string>>varNameIfString);
   }
 }
 
@@ -55,7 +44,7 @@ function withNamedVar<T>(
  * - Stores variable paths for population
  */
 class SubjectTemplate {
-  results = new Map<Iri | undefined, Subject>();
+  results = new Map<Iri | undefined, GraphSubject>();
   private templateId?: Iri;
   private variableId?: Variable;
   private variableProps: [SubjectProperty, Variable][] = [];
@@ -72,7 +61,7 @@ class SubjectTemplate {
     // Discover List variables
     if (isList(construct))
       for (let [index, item] of listItems(construct['@list'], 'match'))
-        withNamedVar(index,
+        withNamedVar(index, // Index may be a var name
           (variable, name) => this.addProperty(['@list', variable], name, item),
           index => this.addProperty(['@list', ...index], null, item))
     // Discover other property variables
@@ -85,6 +74,7 @@ class SubjectTemplate {
     }
   }
 
+  /** Only used if the query does not have a `@where` component. */
   get pattern(): Subject {
     const pattern = { '@id': this.variableId ?? this.templateId };
     for (let [property, value] of this.literalValues)
@@ -130,8 +120,9 @@ class SubjectTemplate {
      * - Literal template ID: all solutions go in one result with ID
      * - Variable template ID:
      *   - Variable in solution: solution is matched to a result with ID
-     *   - Variable not in solution: all solutions go in one result with template ID
-     * - No template ID: all solutions go in one result with no ID
+     *   - Variable not in solution: all solutions go in one result with
+     *     template or blank ID
+     * - No template ID: all solutions go in one result with blank ID
      */
     const sid = this.variableId != null && this.variableId in solution ?
       compactIri(solution[this.variableId].value, this.ctx) : undefined;
@@ -180,11 +171,29 @@ class SubjectTemplate {
     };
   }
 
-  private createResult(sid: string | undefined): Subject {
-    const result: Subject = {}, rid = sid ?? this.templateId;
-    if (rid != null)
-      result['@id'] = rid;
+  private createResult(sid: string | undefined): GraphSubject {
+    const result: GraphSubject = { '@id': sid ?? this.templateId ?? blank() };
     this.results.set(sid, result);
     return result;
+  }
+}
+
+/**
+ * Odd utility which takes an identifier that, if it is strictly a string, is a
+ * variable name, and runs one of the given lambdas.
+ * @param identifier a variable name if it is a string, otherwise anything
+ * @param whenIsVar runs if the first parameter was a variable. If the variable
+ * was the empty string, a variable name is generated.
+ * @param otherwise runs if the first parameter was not a variable.
+ */
+function withNamedVar<T>(
+  identifier: T,
+  whenIsVar: (variable: Variable, name: string) => void,
+  otherwise?: (target: Exclude<T, string>) => void) {
+  if (typeof identifier == 'string') {
+    const varName = identifier || anyName();
+    whenIsVar(`?${varName}`, varName);
+  } else {
+    otherwise?.(<Exclude<T, string>>identifier);
   }
 }

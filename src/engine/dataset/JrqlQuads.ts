@@ -1,7 +1,7 @@
 import { Binding } from 'quadstore';
 import { Quad, Quad_Object, Quad_Subject, Term } from 'rdf-js';
 import { Graph } from '.';
-import { any, array, anyName } from '../..';
+import { any, array, anyName, GraphSubject, blank } from '../..';
 import {
   Context, Subject, Result, Value, isValueObject, isReference,
   isSet, SubjectPropertyObject, isPropertyObject, Atom
@@ -27,8 +27,9 @@ export class JrqlQuads {
     readonly graph: Graph) {
   }
 
-  async solutionSubject(results: Result[] | Result, solution: Binding, context: Context) {
-    const solutionId = this.graph.blankNode();
+  async solutionSubject(
+    results: Result[] | Result, solution: Binding, context: Context): Promise<GraphSubject> {
+    const solutionId = this.graph.blankNode(blank());
     const pseudoPropertyQuads = Object.entries(solution).map(([variable, term]) => this.graph.quad(
       solutionId,
       this.graph.namedNode(jrql.hiddenVar(variable.slice(1))),
@@ -36,11 +37,13 @@ export class JrqlQuads {
     // Construct quads that represent the solution's variable values
     const subject = await this.toApiSubject(pseudoPropertyQuads, [/* TODO: list-items */], context);
     // Unhide the variables and strip out anything that's not selected
-    return mapObject(subject, (key, value) => {
-      if (key !== '@id') { // Strip out blank node identifier
-        const varName = jrql.matchHiddenVar(key), newKey = (varName ? '?' + varName : key);
-        if (isSelected(results, newKey))
-          return { [newKey]: value };
+    return <GraphSubject>mapObject(subject, (key, value) => {
+      switch (key) {
+        case '@id': return { [key]: value };
+        default:
+          const varName = jrql.matchHiddenVar(key), newKey = (varName ? '?' + varName : key);
+          if (isSelected(results, newKey))
+            return { [newKey]: value };
       }
     });
   }
@@ -55,7 +58,7 @@ export class JrqlQuads {
    * @returns a single subject compacted against the given context
    */
   async toApiSubject(
-    propertyQuads: Quad[], listItemQuads: Quad[], context: Context): Promise<Subject> {
+    propertyQuads: Quad[], listItemQuads: Quad[], context: Context): Promise<GraphSubject> {
     const subjects = await SubjectGraph.fromRDF(propertyQuads).withContext(context);
     const subject = { ...subjects[0] };
     if (listItemQuads.length) {
