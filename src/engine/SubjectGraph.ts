@@ -6,16 +6,20 @@ import { Triple } from './quads';
 import { xs, jrql, rdf } from '../ns';
 import { compact } from 'jsonld';
 import { GraphSubject, GraphSubjects } from '../api';
-import { mapObject, deepValues, setAtPath } from './util';
+import { mapObject, deepValues, setAtPath, isArray } from './util';
 import { array } from '../util';
 import { addPropertyObject, listItems, toIndexDataUrl, toIndexNumber } from './jrql-util';
-import { Term } from 'rdf-js';
-import { ActiveContext } from 'jsonld/lib/context';
+import { Quad_Predicate, Quad_Subject, Term } from 'rdf-js';
+import { ActiveContext, getContextValue } from 'jsonld/lib/context';
 import { compactIri } from './jsonld';
-const { isArray } = Array;
 
 export type GraphAliases =
   (subject: Iri | null, property: '@id' | string) => Iri | SubjectProperty | undefined;
+
+interface RdfOptions {
+  aliases?: GraphAliases,
+  ctx?: ActiveContext
+}
 
 export class SubjectGraph extends Array<GraphSubject> implements GraphSubjects {
   /** Lazy instantiation of graph */
@@ -30,26 +34,37 @@ export class SubjectGraph extends Array<GraphSubject> implements GraphSubjects {
    * - JSON literals become strings
    * @see https://github.com/m-ld/m-ld-js/issues/3
    */
-  static fromRDF(triples: Triple[], aliases?: GraphAliases): SubjectGraph {
+  static fromRDF(triples: Triple[], opts: RdfOptions = {}): SubjectGraph {
     return new SubjectGraph(Object.values(
       triples.reduce<{ [id: string]: GraphSubject }>((byId, triple) => {
-        const { subjectId, property } = SubjectGraph.identify(
-          triple.subject.value, triple.predicate.value, aliases);
+        const subjectId = SubjectGraph.identifySubject(triple.subject, opts);
+        const property = SubjectGraph.identifyProperty(subjectId, triple.predicate, opts);
         addPropertyObject(byId[subjectId] ??= { '@id': subjectId },
-          property, jrqlValue(property, triple.object));
+          property, jrqlValue(property, triple.object, opts.ctx));
         return byId;
       }, {})));
   }
 
-  private static identify(subjectIri: Iri, predicate: Iri, aliases?: GraphAliases) {
-    const subjectId = aliases?.(subjectIri, '@id') ?? subjectIri;
-    if (isArray(subjectId))
-      throw new SyntaxError('Subject @id alias must be an IRI');
-    const property = aliases?.(subjectIri, predicate) ??
-      aliases?.(null, predicate) ?? predicate;
-    return {
-      subjectId, property: isArray(property) ? property : jrqlProperty(property)
-    };
+  private static identifySubject(
+    subject: Quad_Subject, { aliases, ctx }: RdfOptions): Iri {
+    if (subject.termType === 'BlankNode') {
+      return subject.value;
+    } else if (subject.termType === 'NamedNode') {
+      const maybeIri = aliases?.(subject.value, '@id') ?? subject.value;
+      if (!isArray(maybeIri))
+        return compactIri(maybeIri, ctx);
+    }
+    throw new SyntaxError('Subject @id alias must be an IRI or blank');
+  }
+
+  private static identifyProperty(subjectId: Iri,
+    predicate: Quad_Predicate, { aliases, ctx }: RdfOptions): SubjectProperty {
+    if (predicate.termType !== 'Variable') {
+      const property = aliases?.(subjectId, predicate.value) ??
+        aliases?.(null, predicate.value) ?? predicate.value;
+      return isArray(property) ? property : jrqlProperty(property, ctx);
+    }
+    throw new SyntaxError('Subject property must be an IRI');
   }
 
   async withContext(context: Context | undefined): Promise<SubjectGraph> {
@@ -118,24 +133,39 @@ export class SubjectGraph extends Array<GraphSubject> implements GraphSubjects {
   }
 }
 
+function getContextType(
+  property: SubjectProperty, ctx: ActiveContext | undefined): string | null {
+  return typeof property == 'string' && ctx != null ?
+    getContextValue(ctx, property, '@type') : null;
+}
+
 export function jrqlValue(property: SubjectProperty, object: Term, ctx?: ActiveContext) {
-  if (object.termType === 'NamedNode') {
-    const iri = compactIri(object.value, ctx);
-    // @type is implicitly a reference
-    return property === '@type' ? iri : { '@id': iri };
+  if (object.termType.endsWith('Node')) {
+    if (property === '@type') {
+      // @type is implicitly a reference from vocabulary
+      return compactIri(object.value, ctx, { vocab: true });
+    } else {
+      const type = getContextType(property, ctx);
+      const iri = compactIri(object.value, ctx, { vocab: type === '@vocab' });
+      return type === '@id' ? iri : { '@id': iri };
+    }
   } else if (object.termType === 'Literal') {
     if (object.language)
       return { '@value': object.value, '@language': object.language };
-    else if (object.datatype == null || object.datatype.value === xs.string)
-      return object.value;
-    else if (object.datatype.value === xs.boolean)
-      return object.value === 'true';
-    else if (object.datatype.value === xs.integer)
-      return parseInt(object.value, 10);
-    else if (object.datatype.value === xs.double)
-      return parseFloat(object.value);
-    else
-      return { '@value': object.value, '@type': object.datatype.value };
+    else {
+      const type = object.datatype == null ?
+        getContextType(property, ctx) : object.datatype.value;
+      if (type == null || type === xs.string)
+        return object.value;
+      else if (type === xs.boolean)
+        return object.value === 'true';
+      else if (type === xs.integer)
+        return parseInt(object.value, 10);
+      else if (type === xs.double)
+        return parseFloat(object.value);
+      else
+        return { '@value': object.value, '@type': compactIri(type, ctx, { vocab: true }) };
+    }
   } else {
     throw new Error(`Cannot include ${object.termType} in a Subject`);
   }

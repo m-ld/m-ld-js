@@ -1,4 +1,4 @@
-import { Quad, Term, Literal, DataFactory } from 'rdf-js';
+import { Quad, Term, DataFactory, NamedNode } from 'rdf-js';
 import { IndexMap, IndexSet } from "./indices";
 import { memoise } from './util';
 
@@ -52,33 +52,6 @@ const tripleIndexKey = memoise((triple: Triple) =>
 const quadIndexKey = memoise((quad: Quad) => 
   [quad.graph.value].concat(tripleKey(quad)).join('^'));
 
-export function cloneQuad(quad: Quad, rdf: Required<DataFactory>): Quad {
-  return rdf.quad(
-    cloneTerm(quad.subject, rdf),
-    cloneTerm(quad.predicate, rdf),
-    cloneTerm(quad.object, rdf),
-    cloneTerm(quad.graph, rdf));
-}
-
-export function cloneTerm<T extends Term>(term: T, rdf: Required<DataFactory>): T {
-  switch (term.termType) {
-    case 'Quad':
-      return <T>cloneQuad(<Quad>term, rdf);
-    case 'BlankNode':
-      return <T>rdf.blankNode(term.value);
-    case 'DefaultGraph':
-      return <T>rdf.defaultGraph();
-    case 'Literal':
-      const lit = <Literal>term;
-      return <T>rdf.literal(term.value, lit.language != null ?
-        lit.language : cloneTerm(lit.datatype, rdf));
-    case 'NamedNode':
-      return <T>rdf.namedNode(term.value);
-    case 'Variable':
-      return <T>rdf.variable(term.value);
-  }
-}
-
 export function canPosition<P extends TriplePos>(pos: P, value?: Term): value is Quad[P] {
   if (!value)
     return false;
@@ -96,4 +69,13 @@ export function inPosition<P extends TriplePos>(pos: P, value?: Term): Quad[P] {
     return value;
   else
     throw new Error(`${value} cannot be used in ${pos} position`);
+}
+
+export interface RdfFactory extends Required<DataFactory> {
+  /**
+   * Generates a new skolemization IRI. The dataset base is allowed to be
+   * `undefined` but the function will throw a `TypeError` if it is.
+   * @see https://www.w3.org/TR/rdf11-concepts/#h3_section-skolemization
+   */
+  skolem?(): NamedNode;
 }

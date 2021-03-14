@@ -1,7 +1,7 @@
 import { isList, isPropertyObject, isSet, List, Slot, Subject, Value } from './jrql-support';
 import { DeleteInsert, isDeleteInsert, Resource, GraphSubjects } from './api';
 import { compareValues, getValues, hasProperty, hasValue } from './engine/jsonld';
-import { deepValues, isNaturalNumber, setAtPath } from './engine/util';
+import { deepValues, isArray, isNaturalNumber, setAtPath } from './engine/util';
 import { array } from './util';
 import { isReference } from 'json-rql';
 
@@ -198,7 +198,7 @@ export class SubjectUpdater {
 /** @internal */
 function isGraphUpdate(update: DeleteInsert<Subject> | DeleteInsert<GraphSubjects>):
   update is DeleteInsert<GraphSubjects> {
-  return Array.isArray(update['@insert']) && Array.isArray(update['@delete']);
+  return isArray(update['@insert']) && isArray(update['@delete']);
 }
 
 /** @internal */
@@ -209,7 +209,7 @@ class SubjectPropertyUpdater {
     readonly subject: Subject,
     readonly property: string,
     readonly subjectUpdater?: SubjectUpdater) {
-    this.wasArray = Array.isArray(this.subject[this.property]);
+    this.wasArray = isArray(this.subject[this.property]);
   }
 
   get values() {

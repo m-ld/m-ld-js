@@ -1,12 +1,14 @@
 import { MeldDelta, EncodedDelta, UUID } from '.';
-import { DataFactory, Quad } from 'rdf-js';
-import { flatten } from './util';
+import { Quad } from 'rdf-js';
+import { flatten, lazy } from './util';
 import { Context, ExpandedTermDef } from '../jrql-support';
 import { Iri } from 'jsonld/jsonld-spec';
-import { Triple, TripleMap } from './quads';
-import { jsonToRdf } from "./jsonld";
-import { Names, mld, rdf, ns } from '../ns';
+import { RdfFactory, Triple, TripleMap } from './quads';
+import { activeCtx } from "./jsonld";
+import { mld, rdf } from '../ns';
 import { SubjectGraph } from './SubjectGraph';
+import { ActiveContext } from 'jsonld/lib/context';
+import { SubjectQuads } from './SubjectQuads';
 
 export class DomainContext implements Context {
   '@base': Iri;
@@ -63,31 +65,34 @@ const DELTA_CONTEXT = {
 };
 
 export class MeldEncoding {
-  context: DomainContext;
-  ns: Names<typeof mld.$names & typeof rdf.$names>;
+  ctx: ActiveContext;
+  ready: Promise<unknown>;
 
   constructor(
     readonly domain: string,
-    readonly dataFactory: Required<DataFactory>) {
-    this.ns = ns({ ...mld.$names, ...rdf.$names }, dataFactory);
-    this.context = new DomainContext(domain, DELTA_CONTEXT);
+    readonly makeRdf: RdfFactory) {
+    this.ready = activeCtx(new DomainContext(domain, DELTA_CONTEXT))
+      .then(ctx => this.ctx = ctx);
   }
+
+  private name = lazy(name => this.makeRdf.namedNode(name));
 
   reifyTriplesTids(triplesTids: TripleMap<UUID[]>): Triple[] {
     return flatten([...triplesTids].map(([triple, tids]) => {
-      const rid = this.dataFactory.blankNode();
+      const rid = this.makeRdf.blankNode();
       return [
-        this.dataFactory.quad(rid, this.ns.type, this.ns.Statement),
-        this.dataFactory.quad(rid, this.ns.subject, triple.subject),
-        this.dataFactory.quad(rid, this.ns.predicate, triple.predicate),
-        this.dataFactory.quad(rid, this.ns.object, triple.object)
-      ].concat(tids.map(tid => this.dataFactory.quad(rid, this.ns.tid, this.dataFactory.literal(tid))));
+        this.makeRdf.quad(rid, this.name(rdf.type), this.name(rdf.Statement)),
+        this.makeRdf.quad(rid, this.name(rdf.subject), triple.subject),
+        this.makeRdf.quad(rid, this.name(rdf.predicate), triple.predicate),
+        this.makeRdf.quad(rid, this.name(rdf.object), triple.object)
+      ].concat(tids.map(tid =>
+        this.makeRdf.quad(rid, this.name(mld.tid), this.makeRdf.literal(tid))));
     }));
   }
 
   newDelta = async (delta: Omit<MeldDelta, 'encoded'>): Promise<MeldDelta> => {
     const [del, ins] = await Promise.all([delta.delete, delta.insert]
-      .map(triples => this.jsonFromTriples(triples).then(EncodedDelta.encode)));
+      .map(triples => EncodedDelta.encode(this.jsonFromTriples(triples))));
     return { ...delta, encoded: [1, del, ins] };
   }
 
@@ -96,22 +101,25 @@ export class MeldEncoding {
     if (ver !== 1)
       throw new Error(`Encoded delta version ${ver} not supported`);
     const jsons = await Promise.all([del, ins].map(EncodedDelta.decode));
-    const [delTriples, insTriples] = await Promise.all(jsons.map(this.triplesFromJson));
+    const [delTriples, insTriples] = jsons.map(this.triplesFromJson);
     return ({
       insert: insTriples, delete: delTriples, encoded: delta,
       toString: () => `${JSON.stringify(jsons)}`
     });
   }
 
-  jsonFromTriples = async (triples: Triple[]): Promise<any> => {
-    const json = await SubjectGraph.fromRDF(triples).withContext(this.context);
+  jsonFromTriples = (triples: Triple[]): any => {
+    const json = SubjectGraph.fromRDF(triples, this);
     // Recreates JSON-LD compaction behaviour
     return json.length == 0 ? {} : json.length == 1 ? json[0] : json;
   }
 
-  triplesFromJson = async (json: any): Promise<Triple[]> =>
-    await jsonToRdf({ '@graph': json, '@context': this.context }, this.dataFactory) as Triple[];
+  triplesFromJson = (json: any): Triple[] =>
+    [...new SubjectQuads('graph', this.ctx, this.makeRdf).quads(json)];
 
-  toDomainQuad = (triple: Triple): Quad =>
-    this.dataFactory.quad(triple.subject, triple.predicate, triple.object, this.dataFactory.defaultGraph())
+  toDomainQuad = (triple: Triple): Quad => this.makeRdf.quad(
+    triple.subject,
+    triple.predicate,
+    triple.object,
+    this.makeRdf.defaultGraph());
 }

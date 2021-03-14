@@ -1,26 +1,25 @@
 import { Url } from 'jsonld/jsonld-spec';
 import { SubjectPropertyObject, Subject, SubjectProperty, Value } from '../jrql-support';
 import { jrql } from '../ns';
-import { setAtPath, trimTail, isNaturalNumber } from './util';
+import { setAtPath, trimTail, isNaturalNumber, isArray } from './util';
 import validDataUrl = require('valid-data-url');
 import { includeValues } from '..';
-const { isArray } = Array;
 
 /**
  * - `match`: querying
- *   - variables to match
+ *   - variables to match allowed
  *   - infer variable for missing IRI
  *   - lists can be arrays or hashes
  *   - list items are raw or slots
  * - `load`: loading new information
- *   - variables from a match
- *   - infer skolems
- *   - infer slots
+ *   - variables (to be populated from a match) allowed
+ *   - infer skolems for missing Subject IDs
  *   - lists can be arrays or hashes
  *   - list items are raw or slots
  * - `graph`: strict mode, e.g. updates:
- *   - no variables
+ *   - no variables allowed
  *   - do not infer anything
+ *   - missing Subject IDs are blank
  *   - lists are hashes
  *   - all list contents are slots
  */

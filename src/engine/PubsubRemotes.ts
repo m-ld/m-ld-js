@@ -386,8 +386,8 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     ]);
   }
 
-  private bufferFromTriples = async (triples: Triple[]) =>
-    MsgPack.encode(await this.requireClone().encoding.jsonFromTriples(triples))
+  private bufferFromTriples = (triples: Triple[]) =>
+    MsgPack.encode(this.requireClone().encoding.jsonFromTriples(triples));
 
   private async replyRevup(sentParams: DirectParams, revup: Revup | undefined) {
     if (revup) {

@@ -67,7 +67,6 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
       .pipe(map(update => update['@ticks']))
       .subscribe(this.latestTicks));
     this.remotes = remotes;
-    this.remotes.setLocal(this);
     this.remoteUpdates = new RemoteUpdates(remotes);
     this.networkTimeout = config.networkTimeout ?? 5000;
     this.genesisClaim = config.genesis;
@@ -89,6 +88,8 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
   @AbstractMeld.checkNotClosed.async
   async initialise(): Promise<void> {
     await this.dataset.initialise();
+    await this.encoding.ready;
+    this.remotes.setLocal(this);
     // Establish a clock for this clone
     let time = await this.dataset.loadClock();
     if (!time) {

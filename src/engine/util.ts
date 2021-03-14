@@ -8,6 +8,8 @@ import * as performance from 'marky';
 import { encode as rawEncode, decode as rawDecode } from '@ably/msgpack-js';
 import { EventEmitter } from 'events';
 
+export const isArray = Array.isArray;
+
 export namespace MsgPack {
   export const encode = (value: any) => Buffer.from(rawEncode(value).buffer);
   export const decode = (buffer: ArrayBuffer) => rawDecode(Buffer.from(buffer));

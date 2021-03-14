@@ -5,8 +5,6 @@ export const tid = `${$base}#tid`; // TID property
 
 export const rdflseq = `${$base}RdfLseq`;
 
-export const $names = { tid, rdflseq };
-
 const rdflseqPosIdPre = `${rdflseq}/?=`;
 
 export function matchRdflseqPosId(predicate: string): string | undefined {

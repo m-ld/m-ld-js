@@ -16,7 +16,7 @@ import { jrql } from '../../ns';
 import { JrqlQuads } from './JrqlQuads';
 import { MeldError } from '../MeldError';
 import { any, array, GraphSubject } from '../..';
-import { asyncBinaryFold, flatten } from '../util';
+import { asyncBinaryFold, flatten, isArray } from '../util';
 import { ConstructTemplate } from './ConstructTemplate';
 
 /**
@@ -41,7 +41,7 @@ export class JrqlGraph {
 
   read(query: Read,
     context: Context = query['@context'] || this.defaultContext): Observable<GraphSubject> {
-    if (isDescribe(query) && !Array.isArray(query['@describe']))
+    if (isDescribe(query) && !isArray(query['@describe']))
       return this.describe(query['@describe'], query['@where'], context);
     else if (isSelect(query) && query['@where'] != null)
       return this.select(query['@select'], query['@where'], context);
@@ -273,7 +273,7 @@ export class JrqlGraph {
             throw new Error('Cannot use constraint in a values expression');
           return {
             ...await variableTerms,
-            [variable]: (await this.jrql.toObjectTerms(expr, context))[0]
+            [variable]: await this.jrql.toObjectTerm(expr, context)
           };
         }, Promise.resolve({}))));
 
@@ -312,7 +312,7 @@ export class JrqlGraph {
     } else {
       const varName = typeof expr == 'string' && jrql.matchVar(expr);
       return this.sparql.createTermExpression(varName ?
-        this.graph.variable(varName) : (await this.jrql.toObjectTerms(expr, context))[0]);
+        this.graph.variable(varName) : await this.jrql.toObjectTerm(expr, context));
     }
   }
 
@@ -381,6 +381,6 @@ function anyVarTerm(quad: Quad) {
 }
 
 function asGroup(where: Subject | Subject[] | Group): Group {
-  return Array.isArray(where) ? { '@graph': where } :
+  return isArray(where) ? { '@graph': where } :
     isGroup(where) ? where : { '@graph': where };
 }

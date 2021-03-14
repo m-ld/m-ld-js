@@ -84,8 +84,8 @@ export class InterimUpdatePatch implements InterimUpdate {
   private createUpdate(patch: PatchQuads): MeldUpdate {
     return {
       '@ticks': this.time.ticks,
-      '@delete': SubjectGraph.fromRDF(patch.oldQuads, this.aliases),
-      '@insert': SubjectGraph.fromRDF(patch.newQuads, this.aliases)
+      '@delete': SubjectGraph.fromRDF(patch.oldQuads, { aliases: this.aliases }),
+      '@insert': SubjectGraph.fromRDF(patch.newQuads, { aliases: this.aliases })
     };
   }
 

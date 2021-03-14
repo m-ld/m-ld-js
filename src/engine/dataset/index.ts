@@ -7,7 +7,7 @@ import { Observable } from 'rxjs';
 import { generate as uuid } from 'short-uuid';
 import { check, observeStream, Stopwatch } from '../util';
 import { LockManager } from '../locks';
-import { QuadSet } from '../quads';
+import { QuadSet, RdfFactory } from '../quads';
 import { Filter } from '../indices';
 import { BatchOpts, Binding, DefaultGraphMode, ResultType } from 'quadstore/dist/lib/types';
 import { Context, Iri } from 'jsonld/jsonld-spec';
@@ -126,7 +126,7 @@ const notClosed = check((d: Dataset) => !d.closed, () => new Error('Dataset clos
 /**
  * Read-only utility interface for reading Quads from a Dataset.
  */
-export interface Graph extends Required<DataFactory> {
+export interface Graph extends RdfFactory {
   readonly name: GraphName;
 
   match(subject?: Quad_Subject, predicate?: Quad_Predicate, object?: Quad_Object): Observable<Quad>;
@@ -134,13 +134,6 @@ export interface Graph extends Required<DataFactory> {
   query(query: Algebra.Construct): Observable<Quad>;
   query(query: Algebra.Describe): Observable<Quad>;
   query(query: Algebra.Project): Observable<Binding>;
-
-  /**
-   * Generates a new skolemization IRI. The dataset base is allowed to be
-   * `undefined` but the function will throw a `TypeError` if it is.
-   * @see https://www.w3.org/TR/rdf11-concepts/#h3_section-skolemization
-   */
-  skolem(): NamedNode;
 }
 
 /**

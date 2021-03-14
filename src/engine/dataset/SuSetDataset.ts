@@ -34,8 +34,8 @@ interface HashTid extends Subject {
 type DatasetSnapshot = Omit<Snapshot, 'updates'>;
 
 function asTriplesTids(quadTidQuads: QuadMap<Quad[]>): TripleMap<UUID[]> {
-  return new TripleMap<UUID[]>([...quadTidQuads].map(([quad, tids]) => {
-    return [quad, tids.map(tidQuad => tidQuad.object.value)];
+  return new TripleMap<UUID[]>([...quadTidQuads].map(([quad, tidQuads]) => {
+    return [quad, tidQuads.map(tidQuad => tidQuad.object.value)];
   }));
 }
 
@@ -64,7 +64,7 @@ export class SuSetDataset extends JrqlGraph {
     super(dataset.graph());
     this.journalData = new SuSetJournalDataset(dataset);
     this.tidsGraph = new JrqlGraph(
-      dataset.graph(encoding.dataFactory.namedNode(qs.tids)), SUSET_CONTEXT);
+      dataset.graph(this.graph.namedNode(qs.tids)), SUSET_CONTEXT);
     // Update notifications are strictly ordered but don't hold up transactions
     this.datasetLock = new LocalLock(config['@id'], dataset.location);
     this.maxDeltaSize = config.maxDeltaSize ?? Infinity;
@@ -75,6 +75,7 @@ export class SuSetDataset extends JrqlGraph {
 
   @SuSetDataset.checkNotClosed.async
   async initialise() {
+    await this.encoding.ready;
     // Check for exclusive access to the dataset location
     try {
       await this.datasetLock.acquire();
