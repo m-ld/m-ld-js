@@ -1,7 +1,7 @@
 import { LiveStatus, MeldStatus, MeldConstraint } from '../../api';
 import { Snapshot, DeltaMessage, MeldRemotes, MeldLocal, Revup, Recovery } from '..';
 import { liveRollup } from "../LiveValue";
-import { Subject, Read, Write, Pattern } from '../../jrql-support';
+import { Read, Write, Pattern, Context } from '../../jrql-support';
 import {
   Observable, merge, from, EMPTY,
   concat, BehaviorSubject, Subscription, interval, of, Subscriber, OperatorFunction, partition
@@ -23,7 +23,6 @@ import { GraphSubject, MeldConfig } from '../..';
 import { RemoteUpdates } from './RemoteUpdates';
 import { CloneEngine } from '../StateEngine';
 import { MeldError, MeldErrorStatus } from '../MeldError';
-import { MeldEncoding } from '../MeldEncoding';
 
 enum ConnectStyle {
   SOFT, HARD
@@ -52,17 +51,16 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
   private readonly networkTimeout: number;
   private readonly genesisClaim: boolean;
   readonly status: Observable<MeldStatus> & LiveStatus;
-  readonly encoding: MeldEncoding;
   
-  constructor({ dataset, remotes, constraints, config }: {
+  constructor({ dataset, remotes, constraints, config, context }: {
     dataset: Dataset;
     remotes: MeldRemotes;
     constraints?: MeldConstraint[];
     config: MeldConfig;
+    context?: Context;
   }) {
     super(config);
-    this.encoding = new MeldEncoding(this.domain, dataset.dataFactory);
-    this.dataset = new SuSetDataset(dataset, constraints ?? [], this.encoding, config);
+    this.dataset = new SuSetDataset(dataset, context ?? {}, constraints ?? [], config);
     this.subs.add(this.dataUpdates
       .pipe(map(update => update['@ticks']))
       .subscribe(this.latestTicks));
@@ -72,6 +70,10 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
     this.genesisClaim = config.genesis;
     this.status = this.createStatus();
     this.subs.add(this.status.subscribe(status => this.log.debug(status)));
+  }
+
+  get encoding() {
+    return this.dataset.encoding;
   }
 
   /**
@@ -88,7 +90,6 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
   @AbstractMeld.checkNotClosed.async
   async initialise(): Promise<void> {
     await this.dataset.initialise();
-    await this.encoding.ready;
     this.remotes.setLocal(this);
     // Establish a clock for this clone
     let time = await this.dataset.loadClock();

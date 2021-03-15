@@ -106,15 +106,15 @@ export async function clone(
   constraints ??= await Promise.all((config.constraints ?? [])
     .map(item => constraintFromConfig(item, context)));
 
-  const engine = new DatasetEngine({ dataset, remotes, config, constraints });
+  const engine = new DatasetEngine({ dataset, remotes, config, constraints, context });
   await engine.initialise();
-  return new DatasetClone(context, engine);
+  return new DatasetClone(engine);
 }
 
 /** @internal */
 class DatasetClone extends ApiStateMachine implements MeldClone {
-  constructor(context: Context, private readonly dataset: DatasetEngine) {
-    super(context, dataset);
+  constructor(private readonly dataset: DatasetEngine) {
+    super(dataset);
   }
 
   get status(): Observable<MeldStatus> & LiveStatus {

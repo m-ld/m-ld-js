@@ -19,9 +19,12 @@ export function flatten<T>(bumpy: T[][]): T[] {
   return ([] as T[]).concat(...bumpy);
 }
 
+export function fromPromise<T, P>(promise: Promise<P>, map: (p: P) => Observable<T>): Observable<T> {
+  return from(promise).pipe(mergeMap(map));
+}
+
 export function fromArrayPromise<T>(promise: Promise<T[]>): Observable<T> {
-  // Rx weirdness exemplified in 26 characters
-  return from(promise).pipe(mergeMap(from));
+  return fromPromise(promise, from);
 }
 
 export function toJson(thing: any): any {
@@ -320,15 +323,14 @@ export function minIndexOfSparse<T>(arr: T[]) {
   return min;
 }
 
-export async function asyncBinaryFold<T, R>(
+export function binaryFold<T, R>(
   input: T[],
-  map: (t: T) => R | Promise<R>,
-  fold: (r1: R, r2: R) => R | Promise<R>): Promise<R | null> {
-  return input.reduce<Promise<R | null>>(async (r, t) => {
-    const r1 = await r;
-    const r2 = await map(t);
-    return r1 == null ? r2 : await fold(r1, r2);
-  }, Promise.resolve(null));
+  map: (t: T) => R,
+  fold: (r1: R, r2: R) => R): R | null {
+  return input.reduce<R | null>((r1, t) => {
+    const r2 = map(t);
+    return r1 == null ? r2 : fold(r1, r2);
+  }, null);
 }
 
 export function mapObject(

@@ -87,7 +87,7 @@ describe('Default list constraint', () => {
     // Create a well-formed list with one slot containing 'Bread'
     await data.transact({
       prepare: async () => ({
-        patch: await graph.update({
+        patch: await graph.write({
           '@insert': {
             '@id': 'http://test.m-ld.org/shopping',
             '@type': 'http://m-ld.org/RdfLseq',
@@ -128,7 +128,7 @@ describe('Default list constraint', () => {
     // Create a well-formed list with one slot containing 'Bread'
     await data.transact({
       prepare: async () => ({
-        patch: await graph.update({
+        patch: await graph.write({
           '@insert': {
             '@id': 'http://test.m-ld.org/shopping',
             '@type': 'http://m-ld.org/RdfLseq',
@@ -169,7 +169,7 @@ describe('Default list constraint', () => {
     // Create a well-formed list with two slots 'Bread', 'Milk'
     await data.transact({
       prepare: async () => ({
-        patch: await graph.update({
+        patch: await graph.write({
           '@insert': {
             '@id': 'http://test.m-ld.org/shopping',
             '@type': 'http://m-ld.org/RdfLseq',

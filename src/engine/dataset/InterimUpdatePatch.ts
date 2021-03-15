@@ -5,6 +5,8 @@ import { PatchQuads } from '.';
 import { JrqlGraph } from './JrqlGraph';
 import { GraphAliases, SubjectGraph } from '../SubjectGraph';
 import { Iri } from 'jsonld/jsonld-spec';
+import { ActiveContext } from 'jsonld/lib/context';
+import { Quad } from 'rdf-js';
 
 export class InterimUpdatePatch implements InterimUpdate {
   /** Assertions made by the constraint (not including the app patch if not mutable) */
@@ -30,12 +32,12 @@ export class InterimUpdatePatch implements InterimUpdate {
   }
 
   /** @returns the final update to be presented to the app */
-  async finalise() {
+  async finalise(ctx: ActiveContext) {
     await this.needsUpdate; // Ensure up-to-date with any changes
     this.needsUpdate = { then: () => { throw 'Interim update has been finalised'; } };
     // The final update to the app includes all assertions and entailments
     const update = this.createUpdate(
-      new PatchQuads(this.allAssertions).append(this.entailments));
+      new PatchQuads(this.allAssertions).append(this.entailments), ctx);
     const { assertions, entailments } = this;
     return { update, assertions, entailments };
   }
@@ -64,8 +66,8 @@ export class InterimUpdatePatch implements InterimUpdate {
   });
 
   remove = (key: keyof DeleteInsert<any>, pattern: Subject | Subject[]) =>
-    this.mutate(async () => {
-      const toRemove = await this.graph.graphQuads(pattern);
+    this.mutate(() => {
+      const toRemove = this.graph.graphQuads(pattern);
       const removed = this.assertions.remove(
         key == '@delete' ? 'oldQuads' : 'newQuads', toRemove);
       return removed.length !== 0;
@@ -81,15 +83,19 @@ export class InterimUpdatePatch implements InterimUpdate {
     return this.subjectAliases.get(subject)?.[property];
   }
 
-  private createUpdate(patch: PatchQuads): MeldUpdate {
+  private createUpdate(patch: PatchQuads, ctx?: ActiveContext): MeldUpdate {
     return {
       '@ticks': this.time.ticks,
-      '@delete': SubjectGraph.fromRDF(patch.oldQuads, { aliases: this.aliases }),
-      '@insert': SubjectGraph.fromRDF(patch.newQuads, { aliases: this.aliases })
+      '@delete': this.quadSubjects(patch.oldQuads, ctx),
+      '@insert': this.quadSubjects(patch.newQuads, ctx)
     };
   }
 
-  private mutate(fn: () => Promise<boolean>) {
+  private quadSubjects(quads: Quad[], ctx?: ActiveContext) {
+    return SubjectGraph.fromRDF(quads, { aliases: this.aliases, ctx });
+  }
+
+  private mutate(fn: () => Promise<boolean> | boolean) {
     this.needsUpdate = this.needsUpdate.then(
       async needsUpdate => (await fn()) || needsUpdate);
   }

@@ -1,22 +1,22 @@
 import { Iri } from 'jsonld/jsonld-spec';
 import {
-  Context, Read, Subject, Update, isDescribe, isGroup, isSubject, isUpdate,
+  Read, Subject, Update, isDescribe, isGroup, isSubject, isUpdate,
   Group, isSelect, Result, Variable, Write, Constraint, Expression, operators,
   isConstraint, VariableExpression, isConstruct
 } from '../../jrql-support';
 import { NamedNode, Quad, Term } from 'rdf-js';
 import { Graph, PatchQuads } from '.';
-import { toArray, mergeMap, take, groupBy, catchError, reduce } from 'rxjs/operators';
-import { EMPTY, from, Observable, throwError } from 'rxjs';
+import { toArray, mergeMap, groupBy, catchError, reduce, map } from 'rxjs/operators';
+import { EMPTY, Observable, of, throwError } from 'rxjs';
 import { canPosition, inPosition, TriplePos } from '../quads';
-import { activeCtx, expandTerm } from "../jsonld";
+import { ActiveContext, expandTerm, initialCtx, nextCtx } from "../jsonld";
 import { Binding } from 'quadstore';
 import { Algebra, Factory as SparqlFactory } from 'sparqlalgebrajs';
 import { jrql } from '../../ns';
 import { JrqlQuads } from './JrqlQuads';
 import { MeldError } from '../MeldError';
 import { any, array, GraphSubject } from '../..';
-import { asyncBinaryFold, flatten, isArray } from '../util';
+import { binaryFold, flatten, fromPromise, isArray } from '../util';
 import { ConstructTemplate } from './ConstructTemplate';
 
 /**
@@ -34,46 +34,47 @@ export class JrqlGraph {
    */
   constructor(
     readonly graph: Graph,
-    readonly defaultContext: Context = {}) {
+    readonly defaultCtx = initialCtx()) {
     this.sparql = new SparqlFactory(graph);
     this.jrql = new JrqlQuads(graph);
   }
 
-  read(query: Read,
-    context: Context = query['@context'] || this.defaultContext): Observable<GraphSubject> {
-    if (isDescribe(query) && !isArray(query['@describe']))
-      return this.describe(query['@describe'], query['@where'], context);
-    else if (isSelect(query) && query['@where'] != null)
-      return this.select(query['@select'], query['@where'], context);
-    else if (isConstruct(query))
-      return this.construct(query['@construct'], query['@where'], context);
-    else
-      return throwError(new MeldError('Unsupported pattern', 'Read type not supported.'));
+  read(query: Read, ctx = this.defaultCtx): Observable<GraphSubject> {
+    return fromPromise(nextCtx(ctx, query['@context']), ctx => {
+      if (isDescribe(query) && !isArray(query['@describe']))
+        return this.describe(query['@describe'], query['@where'], ctx);
+      else if (isSelect(query) && query['@where'] != null)
+        return this.select(query['@select'], query['@where'], ctx);
+      else if (isConstruct(query))
+        return this.construct(query['@construct'], query['@where'], ctx);
+      else
+        return throwError(new MeldError('Unsupported pattern', 'Read type not supported.'));
+    });
   }
 
-  async write(query: Write,
-    context: Context = query['@context'] || this.defaultContext): Promise<PatchQuads> {
+  async write(query: Write, ctx = this.defaultCtx): Promise<PatchQuads> {
+    ctx = await nextCtx(ctx, query['@context']);
     // @unions not supported unless in a where clause
     if (isGroup(query) && query['@graph'] != null && query['@union'] == null)
-      return this.write({ '@insert': query['@graph'] } as Update, context);
+      return this.write({ '@insert': query['@graph'] } as Update, ctx);
     else if (isSubject(query))
-      return this.write({ '@insert': query } as Update, context);
+      return this.write({ '@insert': query } as Update, ctx);
     else if (isUpdate(query))
-      return this.update(query, context);
+      return this.update(query, ctx);
     else
       throw new MeldError('Unsupported pattern', 'Write type not supported.');
   }
 
   select(select: Result,
     where: Subject | Subject[] | Group,
-    context: Context = this.defaultContext): Observable<GraphSubject> {
-    return this.solutions(where, this.project, context).pipe(
-      mergeMap(solution => this.jrql.solutionSubject(select, solution, context)));
+    ctx = this.defaultCtx): Observable<GraphSubject> {
+    return this.solutions(where, this.project, ctx).pipe(
+      map(solution => this.jrql.solutionSubject(select, solution, ctx)));
   }
 
   describe(describe: Iri | Variable,
     where?: Subject | Subject[] | Group,
-    context: Context = this.defaultContext): Observable<GraphSubject> {
+    ctx = this.defaultCtx): Observable<GraphSubject> {
     const describedVarName = jrql.matchVar(describe);
     if (describedVarName) {
       const vars = {
@@ -91,44 +92,42 @@ export class JrqlGraph {
                   this.sparql.createTermExpression(vars.described)),
                 [vars.subject])),
             this.gatherSubjectData(vars)),
-          [vars.subject, vars.property, vars.value, vars.item])), context).pipe(
+          [vars.subject, vars.property, vars.value, vars.item])), ctx).pipe(
             // TODO: Comunica bug? Cannot read property 'close' of undefined, if stream empty
             catchError(err => err instanceof TypeError ? EMPTY : throwError(err)),
             // TODO: Ordering annoyance: sometimes subjects interleave, so
             // cannot use toArrays(quad => quad.subject.value),
             groupBy(binding => this.bound(binding, vars.subject)),
             mergeMap(subjectBindings => subjectBindings.pipe(toArray())),
-            mergeMap(subjectBindings => this.toSubject(subjectBindings, vars, context)));
+            map(subjectBindings => this.toSubject(subjectBindings, vars, ctx)));
     } else {
-      return this.describe1(describe, context);
+      return this.describe1(describe, ctx);
     }
   }
 
-  describe1(describe: Iri,
-    context: Context = this.defaultContext): Observable<GraphSubject> {
-    return from(this.resolve(describe, context)).pipe(mergeMap(subject => {
-      const vars = { subject, property: this.any(), value: this.any(), item: this.any() };
-      return this.graph.query(this.sparql.createProject(
-        this.gatherSubjectData(vars), [vars.property, vars.value, vars.item]))
-        .pipe(toArray(), mergeMap(bindings =>
-          bindings.length ? this.toSubject(bindings, vars, context) : EMPTY));
-    }));
+  describe1(describe: Iri, ctx = this.defaultCtx): Observable<GraphSubject> {
+    const vars = {
+      subject: this.resolve(describe, ctx),
+      property: this.any(), value: this.any(), item: this.any()
+    };
+    return this.graph.query(this.sparql.createProject(
+      this.gatherSubjectData(vars), [vars.property, vars.value, vars.item]))
+      .pipe(toArray(), mergeMap(bindings =>
+        bindings.length ? of(this.toSubject(bindings, vars, ctx)) : EMPTY));
   }
 
   construct(construct: Subject | Subject[],
     where?: Subject | Subject[] | Group,
-    context: Context = this.defaultContext): Observable<GraphSubject> {
-    return from(activeCtx(context)).pipe(mergeMap(ctx => {
-      const template = new ConstructTemplate(construct, ctx);
-      // If no where, use the construct as the pattern
-      // TODO: Add ordering to allow streaming results
-      return this.solutions(where ?? template.asPattern, this.project, context).pipe(
-        reduce((template, solution) => template.addSolution(solution), template),
-        mergeMap(template => template.results));
-    }));
+    ctx = this.defaultCtx): Observable<GraphSubject> {
+    const template = new ConstructTemplate(construct, ctx);
+    // If no where, use the construct as the pattern
+    // TODO: Add ordering to allow streaming results
+    return this.solutions(where ?? template.asPattern, this.project, ctx).pipe(
+      reduce((template, solution) => template.addSolution(solution), template),
+      mergeMap(template => template.results));
   }
 
-  private toSubject(bindings: Binding[], terms: SubjectTerms, context: Context): Promise<GraphSubject> {
+  private toSubject(bindings: Binding[], terms: SubjectTerms, ctx: ActiveContext): GraphSubject {
     // Partition the bindings into plain properties and list items
     return this.jrql.toApiSubject(...bindings.reduce<[Quad[], Quad[]]>((quads, binding) => {
       const [propertyQuads, listItemQuads] = quads, item = this.bound(binding, terms.item);
@@ -138,7 +137,7 @@ export class JrqlGraph {
         inPosition('object', this.bound(binding, item == null ? terms.value : item)),
         this.graph.name))
       return quads;
-    }, [[], []]), context);
+    }, [[], []]), ctx);
   }
 
   private gatherSubjectData({ subject, property, value, item }: SubjectTerms): Algebra.Operation {
@@ -154,31 +153,23 @@ export class JrqlGraph {
         value, this.graph.namedNode(jrql.item), item, this.graph.name)]));
   }
 
-  async find1<T>(jrqlPattern: Partial<T> & Subject,
-    context: Context = jrqlPattern['@context'] ?? this.defaultContext): Promise<Iri | ''> {
-    const quad = await this.findQuads(jrqlPattern, context).pipe(take(1)).toPromise();
-    return quad?.subject.value ?? '';
+  findQuads(jrqlPattern: Subject, ctx = this.defaultCtx): Observable<Quad> {
+    return this.matchQuads(this.jrql.quads(jrqlPattern, { mode: 'match' }, ctx));
   }
 
-  findQuads(jrqlPattern: Subject, context: Context = this.defaultContext): Observable<Quad> {
-    return from(this.jrql.quads(jrqlPattern, { mode: 'match' }, context)).pipe(
-      mergeMap(quads => this.matchQuads(quads)));
-  }
-
-  async update(query: Update,
-    context: Context = query['@context'] || this.defaultContext): Promise<PatchQuads> {
+  private async update(query: Update, ctx: ActiveContext): Promise<PatchQuads> {
     let patch = new PatchQuads();
 
     const vars = new Set<string>();
     const deleteQuads = query['@delete'] != null ?
-      await this.jrql.quads(query['@delete'], { mode: 'match', vars }, context) : undefined;
+      this.jrql.quads(query['@delete'], { mode: 'match', vars }, ctx) : undefined;
     const insertQuads = query['@insert'] != null ?
-      await this.jrql.quads(query['@insert'], { mode: 'load' }, context) : undefined;
+      this.jrql.quads(query['@insert'], { mode: 'load' }, ctx) : undefined;
 
     let solutions: Observable<Binding> | null = null;
     if (query['@where'] != null) {
       // If there is a @where clause, use variable substitutions per solution
-      solutions = this.solutions(query['@where'], this.project, context);
+      solutions = this.solutions(query['@where'], this.project, ctx);
     } else if (deleteQuads != null && vars.size > 0) {
       // A @delete clause with no @where may be used to bind variables
       solutions = this.project(
@@ -204,10 +195,9 @@ export class JrqlGraph {
     return patch;
   }
 
-  async graphQuads(pattern: Subject | Subject[],
-    context: Context = this.defaultContext) {
+  graphQuads(pattern: Subject | Subject[], ctx = this.defaultCtx) {
     const vars = new Set<string>();
-    const quads = await this.jrql.quads(pattern, { mode: 'graph', vars }, context);
+    const quads = this.jrql.quads(pattern, { mode: 'graph', vars }, ctx);
     if (vars.size > 0)
       throw new Error('Pattern has variable content');
     return quads;
@@ -227,44 +217,44 @@ export class JrqlGraph {
 
   private solutions<T>(where: Subject | Subject[] | Group,
     exec: (op: Algebra.Operation, vars: Iterable<string>) => Observable<T>,
-    context: Context): Observable<T> {
+    ctx: ActiveContext): Observable<T> {
     const vars = new Set<string>();
-    return from(this.operation(asGroup(where), vars, context)).pipe(
-      mergeMap(op => op == null ? EMPTY : exec(op, vars)));
+    const op = this.operation(asGroup(where), vars, ctx);
+    return op == null ? EMPTY : exec(op, vars);
   }
 
-  private async operation(where: Group | Subject,
-    vars: Set<string>, context: Context): Promise<Algebra.Operation> {
+  private operation(where: Group | Subject,
+    vars: Set<string>, ctx: ActiveContext): Algebra.Operation {
     if (isSubject(where)) {
-      const quads = await this.jrql.quads(where, { mode: 'match', vars }, context);
+      const quads = this.jrql.quads(where, { mode: 'match', vars }, ctx);
       return this.sparql.createBgp(quads.map(this.toPattern));
     } else {
       const graph = array(where['@graph']),
         union = array(where['@union']),
         filter = array(where['@filter']),
         values = array(where['@values']);
-      const quads = graph.length ? await this.jrql.quads(
-        graph, { mode: 'match', vars }, context) : [];
+      const quads = graph.length ? this.jrql.quads(
+        graph, { mode: 'match', vars }, ctx) : [];
       const bgp = this.sparql.createBgp(quads.map(this.toPattern));
-      const unionOp = await asyncBinaryFold(union,
-        pattern => this.operation(pattern, vars, context),
+      const unionOp = binaryFold(union,
+        pattern => this.operation(pattern, vars, ctx),
         (left, right) => this.sparql.createUnion(left, right));
       const unioned = unionOp && bgp.patterns.length ?
         this.sparql.createJoin(bgp, unionOp) : unionOp ?? bgp;
       const filtered = filter.length ? this.sparql.createFilter(
-        unioned, await this.constraintExpr(filter, context)) : unioned;
+        unioned, this.constraintExpr(filter, ctx)) : unioned;
       const valued = values.length ? this.sparql.createJoin(
-        await this.valuesExpr(values, context), filtered) : filtered;
+        this.valuesExpr(values, ctx), filtered) : filtered;
       return valued;
     }
   }
 
-  private async valuesExpr(
-    values: VariableExpression[], context: Context): Promise<Algebra.Operation> {
+  private valuesExpr(
+    values: VariableExpression[], ctx: ActiveContext): Algebra.Operation {
     const variableNames = new Set<string>();
-    const variablesTerms = await Promise.all(values.map<Promise<{ [variable: string]: Term }>>(
-      variableExpr => Object.entries(variableExpr).reduce<Promise<{ [variable: string]: Term; }>>(
-        async (variableTerms, [variable, expr]) => {
+    const variablesTerms = values.map<{ [variable: string]: Term }>(
+      variableExpr => Object.entries(variableExpr).reduce<{ [variable: string]: Term }>(
+        (variableTerms, [variable, expr]) => {
           const varName = jrql.matchVar(variable);
           if (!varName)
             throw new Error('Variable not specified in a values expression');
@@ -272,47 +262,46 @@ export class JrqlGraph {
           if (isConstraint(expr))
             throw new Error('Cannot use constraint in a values expression');
           return {
-            ...await variableTerms,
-            [variable]: await this.jrql.toObjectTerm(expr, context)
+            ...variableTerms,
+            [variable]: this.jrql.toObjectTerm(expr, ctx)
           };
-        }, Promise.resolve({}))));
+        }, {}));
 
     return this.sparql.createValues(
       [...variableNames].map(this.graph.variable), variablesTerms);
   }
 
-  private async constraintExpr(
-    constraints: Constraint[], context: Context): Promise<Algebra.Expression> {
-    const expression = await asyncBinaryFold(
+  private constraintExpr(
+    constraints: Constraint[], ctx: ActiveContext): Algebra.Expression {
+    const expression = binaryFold(
       // Every constraint and every entry in a constraint is ANDed
       flatten(constraints.map(constraint => Object.entries(constraint))),
-      ([operator, expr]) => this.operatorExpr(operator, expr, context),
+      ([operator, expr]) => this.operatorExpr(operator, expr, ctx),
       (left, right) => this.sparql.createOperatorExpression('and', [left, right]));
     if (expression == null)
       throw new Error('Missing expression');
     return expression;
   }
 
-  private async operatorExpr(
+  private operatorExpr(
     operator: string,
     expr: Expression | Expression[],
-    context: Context): Promise<Algebra.Expression> {
+    ctx: ActiveContext): Algebra.Expression {
     if (operator in operators)
       return this.sparql.createOperatorExpression(
         (<any>operators)[operator].sparql,
-        await Promise.all(array(expr).map(expr => this.exprExpr(expr, context))));
+        array(expr).map(expr => this.exprExpr(expr, ctx)));
     else
       throw new Error(`Unrecognised operator: ${operator}`);
   }
 
-  private async exprExpr(
-    expr: Expression, context: Context): Promise<Algebra.Expression> {
+  private exprExpr(expr: Expression, ctx: ActiveContext): Algebra.Expression {
     if (isConstraint(expr)) {
-      return this.constraintExpr([expr], context);
+      return this.constraintExpr([expr], ctx);
     } else {
       const varName = typeof expr == 'string' && jrql.matchVar(expr);
       return this.sparql.createTermExpression(varName ?
-        this.graph.variable(varName) : await this.jrql.toObjectTerm(expr, context));
+        this.graph.variable(varName) : this.jrql.toObjectTerm(expr, ctx));
     }
   }
 
@@ -338,8 +327,8 @@ export class JrqlGraph {
     return term;
   }
 
-  private async resolve(iri: Iri, context?: Context): Promise<NamedNode> {
-    return this.graph.namedNode(context ? expandTerm(iri, await activeCtx(context)) : iri);
+  private resolve(iri: Iri, ctx = this.defaultCtx): NamedNode {
+    return this.graph.namedNode(expandTerm(iri, ctx));
   }
 
   private bound(binding: Binding, term: Term): Term | undefined {

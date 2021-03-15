@@ -63,7 +63,7 @@ describe('Single-valued constraint', () => {
   test('Fails a single-valued additive property update', async () => {
     await data.transact({
       prepare: async () => ({
-        patch: await graph.update({
+        patch: await graph.write({
           '@insert': { '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Fred' }
         })
       })
@@ -110,7 +110,7 @@ describe('Single-valued constraint', () => {
   test('applies to a single-valued additive property update', async () => {
     await data.transact({
       prepare: async () => ({
-        patch: await graph.update({
+        patch: await graph.write({
           '@insert': { '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Fred' }
         })
       })
@@ -133,7 +133,7 @@ describe('Single-valued constraint', () => {
     // Test case arose from compliance tests
     await data.transact({
       prepare: async () => ({
-        patch: await graph.update({
+        patch: await graph.write({
           '@insert': [
             { '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Fred' },
             { '@id': 'http://test.m-ld.org/wilma', 'http://test.m-ld.org/#name': 'Wilma' }

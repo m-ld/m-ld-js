@@ -1,10 +1,10 @@
 import { Options, processContext } from 'jsonld';
 import { Context, Iri } from 'jsonld/jsonld-spec';
-import { getInitialContext, expandIri, ActiveContext } from 'jsonld/lib/context';
 import { compactIri as _compactIri } from 'jsonld/lib/compact';
+import { getInitialContext, expandIri, ActiveContext } from 'jsonld/lib/context';
 
 export * from 'jsonld/lib/util';
-export * from 'jsonld/lib/context';
+export { ActiveContext, getContextValue } from 'jsonld/lib/context';
 
 export function expandTerm(value: string, ctx: ActiveContext,
   options?: Options.Expand & { vocab?: boolean }): Iri {
@@ -21,8 +21,18 @@ export function compactIri(iri: Iri, ctx?: ActiveContext,
   }) : iri;
 }
 
-export async function activeCtx(ctx: Context, options?: Options.DocLoader): Promise<ActiveContext> {
-  return processContext(getInitialContext({}), ctx, options ?? {});
+export async function activeCtx(context: Context,
+  options?: Options.DocLoader): Promise<ActiveContext> {
+  return nextCtx(initialCtx(), context, options);
+}
+
+export function initialCtx(): ActiveContext {
+  return getInitialContext({});
+}
+
+export async function nextCtx(ctx: ActiveContext, context?: Context,
+  options?: Options.DocLoader): Promise<ActiveContext> {
+  return context != null ? processContext(ctx, context, options ?? {}) : ctx;
 }
 
 /**

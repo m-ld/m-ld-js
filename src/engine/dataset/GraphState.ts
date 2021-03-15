@@ -1,7 +1,6 @@
 import { MeldReadState, Resource, readResult } from '../../api';
 import { Subject, Read } from '../../jrql-support';
 import { JrqlGraph } from './JrqlGraph';
-import { map } from 'rxjs/operators';
 
 /**
  * Utility class to directly coerce a JrqlGraph to be a MeldReadState, with no
@@ -12,7 +11,7 @@ export class GraphState implements MeldReadState {
     readonly graph: JrqlGraph) {
   }
 
-  read<S>(request: Read) {
+  read(request: Read) {
     return readResult(this.graph.read(request));
   }
 

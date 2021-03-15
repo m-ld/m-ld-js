@@ -65,8 +65,8 @@ const DELTA_CONTEXT = {
 };
 
 export class MeldEncoding {
-  ctx: ActiveContext;
-  ready: Promise<unknown>;
+  private /*readonly*/ ctx: ActiveContext;
+  private readonly ready: Promise<unknown>;
 
   constructor(
     readonly domain: string,
@@ -74,6 +74,8 @@ export class MeldEncoding {
     this.ready = activeCtx(new DomainContext(domain, DELTA_CONTEXT))
       .then(ctx => this.ctx = ctx);
   }
+
+  initialise = () => this.ready;
 
   private name = lazy(name => this.makeRdf.namedNode(name));
 
@@ -109,7 +111,7 @@ export class MeldEncoding {
   }
 
   jsonFromTriples = (triples: Triple[]): any => {
-    const json = SubjectGraph.fromRDF(triples, this);
+    const json = SubjectGraph.fromRDF(triples, { ctx: this.ctx });
     // Recreates JSON-LD compaction behaviour
     return json.length == 0 ? {} : json.length == 1 ? json[0] : json;
   }

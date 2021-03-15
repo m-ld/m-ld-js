@@ -3,8 +3,9 @@ import { Quad, Quad_Object, Term } from 'rdf-js';
 import { Graph } from '.';
 import { GraphSubject, blank } from '../..';
 import {
-  Context, Subject, Result, Value, Atom, Reference} from '../../jrql-support';
-import { activeCtx, compactIri } from '../jsonld';
+  Subject, Result, Value, Atom, Reference
+} from '../../jrql-support';
+import { ActiveContext, compactIri } from '../jsonld';
 import { inPosition } from '../quads';
 import { jrql } from '../../ns';
 import { SubjectGraph } from '../SubjectGraph';
@@ -23,15 +24,15 @@ export class JrqlQuads {
     readonly graph: Graph) {
   }
 
-  async solutionSubject(
-    results: Result[] | Result, solution: Binding, context: Context): Promise<GraphSubject> {
+  solutionSubject(
+    results: Result[] | Result, solution: Binding, ctx: ActiveContext): GraphSubject {
     const solutionId = this.graph.blankNode(blank());
     const pseudoPropertyQuads = Object.entries(solution).map(([variable, term]) => this.graph.quad(
       solutionId,
       this.graph.namedNode(jrql.hiddenVar(variable.slice(1))),
       inPosition('object', term)));
     // Construct quads that represent the solution's variable values
-    const subject = await this.toApiSubject(pseudoPropertyQuads, [/* TODO: list-items */], context);
+    const subject = this.toApiSubject(pseudoPropertyQuads, [ /* TODO: list-items */], ctx);
     // Unhide the variables and strip out anything that's not selected
     return <GraphSubject>mapObject(subject, (key, value) => {
       switch (key) {
@@ -44,10 +45,9 @@ export class JrqlQuads {
     });
   }
 
-  async quads(subjects: Subject | Subject[],
-    opts: JrqlQuadsOptions, context: Context): Promise<Quad[]> {
-    const processor = new SubjectQuads(
-      opts.mode, await activeCtx(context), this.graph, opts.vars);
+  quads(subjects: Subject | Subject[],
+    opts: JrqlQuadsOptions, ctx: ActiveContext): Quad[] {
+    const processor = new SubjectQuads(opts.mode, ctx, this.graph, opts.vars);
     return [...processor.quads(subjects)];
   }
 
@@ -56,18 +56,17 @@ export class JrqlQuads {
    * @param listItemQuads subject-index-item quads for list-like subjects
    * @returns a single subject compacted against the given context
    */
-  async toApiSubject(
-    propertyQuads: Quad[], listItemQuads: Quad[], context: Context): Promise<GraphSubject> {
-    const subjects = await SubjectGraph.fromRDF(propertyQuads).withContext(context);
+  toApiSubject(
+    propertyQuads: Quad[], listItemQuads: Quad[], ctx: ActiveContext): GraphSubject {
+    const subjects = SubjectGraph.fromRDF(propertyQuads, { ctx });
     const subject = { ...subjects[0] };
     if (listItemQuads.length) {
-      const ctx = await activeCtx(context);
       // Sort the list items lexically by index
       // TODO: Allow for a list implementation-specific ordering
       const indexes = new Set(listItemQuads.map(iq => iq.predicate.value).sort()
         .map(index => compactIri(index, ctx)));
       // Create a subject containing only the list items
-      const list = await this.toApiSubject(listItemQuads, [], context);
+      const list = this.toApiSubject(listItemQuads, [], ctx);
       subject['@list'] = [...indexes].map(index => <Value>list[index]);
     }
     return subject;
@@ -85,8 +84,8 @@ export class JrqlQuads {
     }
   }
 
-  async toObjectTerm(value: Atom | Reference, context: Context): Promise<Quad_Object> {
-    return new SubjectQuads('match', await activeCtx(context), this.graph).objectTerm(value);
+  toObjectTerm(value: Atom | Reference, ctx: ActiveContext): Quad_Object {
+    return new SubjectQuads('match', ctx, this.graph).objectTerm(value);
   }
 }
 

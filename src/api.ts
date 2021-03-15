@@ -1,6 +1,6 @@
 import * as spec from '@m-ld/m-ld-spec';
 import {
-  Subject, Update, Reference, Variable, Read, Write, Context, SubjectProperty
+  Subject, Update, Reference, Variable, Read, Write, SubjectProperty
 } from './jrql-support';
 import { Observable, Subscription } from 'rxjs';
 import { toArray } from 'rxjs/operators';
@@ -159,13 +159,6 @@ export interface GraphSubjects extends Array<GraphSubject> {
    * by serialised to JSON as it may not be acyclic.
    */
   graph: ReadonlyMap<Iri, GraphSubject>;
-  /**
-   * Transforms the collection of Subjects using the given JSON-LD context.
-   * @param context a JSON-LD context, which may affect all identifiers in the
-   * Subjects, at key, property or value positions.
-   * @see https://w3c.github.io/json-ld-syntax/#the-context
-   */
-  withContext(context: Context): Promise<GraphSubjects>;
 }
 
 /**

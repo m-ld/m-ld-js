@@ -17,10 +17,11 @@ describe('Meld State API', () => {
     let clone = new DatasetEngine({
       dataset: await memStore({ context }),
       remotes: mockRemotes(),
-      config: testConfig()
+      config: testConfig(),
+      context
     });
     await clone.initialise();
-    api = new ApiStateMachine(context, clone);
+    api = new ApiStateMachine(clone);
     captureUpdate = new Future;
   });
 
