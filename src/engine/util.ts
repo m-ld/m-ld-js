@@ -6,7 +6,7 @@ import { publish, tap, mergeMap, switchAll, scan, endWith, pluck, filter } from 
 import { LogLevelDesc, getLogger, getLoggers } from 'loglevel';
 import * as performance from 'marky';
 import { encode as rawEncode, decode as rawDecode } from '@ably/msgpack-js';
-import { EventEmitter } from 'events';
+import { AsyncIterator } from 'asynciterator';
 
 export const isArray = Array.isArray;
 
@@ -159,32 +159,35 @@ export function onErrorNever<T>(v: ObservableInput<T>): Observable<T> {
   return onErrorResumeNext(v, NEVER);
 }
 
-export function observeStream<T>(startStream: () => Promise<EventEmitter>): Observable<T> {
+export function observeAsyncIterator<T>(start: () => Promise<AsyncIterator<T>>): Observable<T> {
   return new Observable<T>(subs => {
     const subscription = new Subscription;
-    startStream().then(stream => {
+    start().then(iterator => {
       if (!subscription.closed) {
-        const dataHandler = (datum: T) => {
-          if (!subscription.closed)
-            subs.next(datum);
-        };
-        const errorHandler = (err: any) => subs.error(err);
-        const endHandler = () => subs.complete();
-        stream
-          .on('data', dataHandler)
-          .on('error', errorHandler)
-          .on('end', endHandler);
-        subscription.add(() => {
-          stream
-            .off('data', dataHandler)
-            .off('error', errorHandler)
-            .off('end', endHandler);
-          const maybeAsyncIterator = <any>stream;
-          if (maybeAsyncIterator != null &&
-            typeof maybeAsyncIterator.close == 'function' &&
-            !maybeAsyncIterator.ended)
-            (<any>stream).close();
-        });
+        if (iterator.done) {
+          subs.complete();
+        } else {
+          const dataHandler = (datum: T) => {
+            if (!subscription.closed)
+              subs.next(datum);
+          };
+          const errorHandler = (err: any) => subs.error(err);
+          const endHandler = () => subs.complete();
+          iterator
+            .on('end', endHandler)
+            .on('close', endHandler)
+            .on('error', errorHandler)
+            .on('data', dataHandler);
+          subscription.add(() => {
+            iterator
+              .off('end', endHandler)
+              .off('close', endHandler)
+              .off('error', errorHandler)
+              .off('data', dataHandler);
+            if (!iterator.ended)
+              iterator.close();
+          });
+        }
       }
     }).catch(err => subs.error(err));
     return subscription;
@@ -345,7 +348,7 @@ export function* deepValues(o: any,
     yield [path, o];
   else if (typeof o == 'object')
     for (let key in o)
-      yield *deepValues(o[key], filter, path.concat(key));
+      yield* deepValues(o[key], filter, path.concat(key));
 }
 
 export function setAtPath<T>(o: any, path: string[], value: T,

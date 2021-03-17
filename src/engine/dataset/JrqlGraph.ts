@@ -15,7 +15,7 @@ import { Algebra, Factory as SparqlFactory } from 'sparqlalgebrajs';
 import { jrql } from '../../ns';
 import { JrqlQuads } from './JrqlQuads';
 import { MeldError } from '../MeldError';
-import { any, array, GraphSubject } from '../..';
+import { anyName, array, GraphSubject } from '../..';
 import { binaryFold, flatten, fromPromise, isArray } from '../util';
 import { ConstructTemplate } from './ConstructTemplate';
 
@@ -93,8 +93,6 @@ export class JrqlGraph {
                 [vars.subject])),
             this.gatherSubjectData(vars)),
           [vars.subject, vars.property, vars.value, vars.item])), ctx).pipe(
-            // TODO: Comunica bug? Cannot read property 'close' of undefined, if stream empty
-            catchError(err => err instanceof TypeError ? EMPTY : throwError(err)),
             // TODO: Ordering annoyance: sometimes subjects interleave, so
             // cannot use toArrays(quad => quad.subject.value),
             groupBy(binding => this.bound(binding, vars.subject)),
@@ -110,10 +108,10 @@ export class JrqlGraph {
       subject: this.resolve(describe, ctx),
       property: this.any(), value: this.any(), item: this.any()
     };
-    return this.graph.query(this.sparql.createProject(
-      this.gatherSubjectData(vars), [vars.property, vars.value, vars.item]))
-      .pipe(toArray(), mergeMap(bindings =>
-        bindings.length ? of(this.toSubject(bindings, vars, ctx)) : EMPTY));
+    const projection = this.sparql.createProject(
+      this.gatherSubjectData(vars), [vars.property, vars.value, vars.item]);
+    return this.graph.query(projection).pipe(toArray(), mergeMap(bindings =>
+      bindings.length ? of(this.toSubject(bindings, vars, ctx)) : EMPTY));
   }
 
   construct(construct: Subject | Subject[],
@@ -353,7 +351,7 @@ export class JrqlGraph {
   }
 
   private any() {
-    return this.graph.variable(any().slice(1));
+    return this.graph.variable(anyName());
   }
 }
 

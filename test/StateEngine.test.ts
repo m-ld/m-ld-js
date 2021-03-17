@@ -9,7 +9,7 @@ describe('State Engine', () => {
     tick = 0;
     readonly lock = new LockManager<'state'>();
     readonly dataUpdates = new Source<MeldUpdate>();
-    read = () => of({ tick: this.tick });
+    read = () => of({ '@id': 'state', tick: this.tick });
     write = async () => {
       this.dataUpdates.next({
         '@delete': new SubjectGraph([]),

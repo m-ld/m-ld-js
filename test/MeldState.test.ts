@@ -169,6 +169,13 @@ describe('Meld State API', () => {
       })).resolves.toEqual([]);
     });
 
+    test('describes not found', async () => {
+      await api.write({ '@id': 'fred', name: 'Fred' } as Subject);
+      await expect(api.read<Describe>({
+        '@describe': 'wilma'
+      })).resolves.toEqual([]);
+    });
+
     test('describes where', async () => {
       await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
       await api.write<Subject>({ '@id': 'wilma', name: 'Wilma' });

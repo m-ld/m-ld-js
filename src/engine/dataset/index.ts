@@ -1,11 +1,12 @@
 import {
   Quad, DefaultGraph, NamedNode, Quad_Subject,
-  Quad_Predicate, Quad_Object, DataFactory} from 'rdf-js';
+  Quad_Predicate, Quad_Object, DataFactory
+} from 'rdf-js';
 import { Quadstore } from 'quadstore';
 import { AbstractChainedBatch, AbstractLevelDOWN } from 'abstract-leveldown';
 import { Observable } from 'rxjs';
 import { generate as uuid } from 'short-uuid';
-import { check, observeStream, Stopwatch } from '../util';
+import { check, observeAsyncIterator, Stopwatch } from '../util';
 import { LockManager } from '../locks';
 import { QuadSet, RdfFactory } from '../quads';
 import { Filter } from '../indices';
@@ -15,7 +16,8 @@ import { activeCtx, compactIri, expandTerm, ActiveContext } from '../jsonld';
 import { Algebra } from 'sparqlalgebrajs';
 import { newEngine } from 'quadstore-comunica';
 import { DataFactory as RdfDataFactory } from 'rdf-data-factory';
-import { mld, rdf, jrql, xs, qs } from '../../ns'
+import { mld, rdf, jrql, xs, qs } from '../../ns';
+import { wrap, EmptyIterator } from 'asynciterator';
 
 /**
  * Atomically-applied patch to a quad-store.
@@ -285,17 +287,25 @@ class QuadStoreGraph implements Graph {
   query(query: Algebra.Describe): Observable<Quad>;
   query(query: Algebra.Project): Observable<Binding>;
   query(query: Algebra.Project | Algebra.Describe | Algebra.Construct): Observable<Binding | Quad> {
-    return observeStream(async () => {
-      const stream = await this.dataset.store.sparqlStream(query);
-      if (stream.type === ResultType.BINDINGS || stream.type === ResultType.QUADS)
-        return stream.iterator;
-      else
-        throw new Error('Expected bindings or quads');
-    })
+    return observeAsyncIterator(async () => {
+      try {
+        const stream = await this.dataset.store.sparqlStream(query);
+        if (stream.type === ResultType.BINDINGS || stream.type === ResultType.QUADS)
+          return stream.iterator;
+        else
+          throw new Error('Expected bindings or quads');
+      } catch (err) {
+        // TODO: Comunica bug? Cannot read property 'close' of undefined, if stream empty
+        if (err instanceof TypeError)
+          return new EmptyIterator();
+        throw err;
+      }
+    });
   }
 
   match(subject?: Quad_Subject, predicate?: Quad_Predicate, object?: Quad_Object): Observable<Quad> {
-    return observeStream(async () => this.dataset.store.match(subject, predicate, object, this.name));
+    return observeAsyncIterator(async () =>
+      wrap(this.dataset.store.match(subject, predicate, object, this.name)));
   }
 
   skolem = () => this.dataset.dataFactory.namedNode(
