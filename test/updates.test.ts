@@ -1,6 +1,6 @@
 import { mockFn } from 'jest-mock-extended';
 import {
-  asSubjectUpdates, includesValue, includeValues, Reference, Resource, Subject, updateSubject
+  asSubjectUpdates, includesValue, includeValues, Reference, Subject, updateSubject
 } from '../src';
 import { SubjectGraph } from '../src/engine/SubjectGraph';
 
@@ -24,7 +24,7 @@ describe('Update utilities', () => {
     })).toEqual({
       'foo': {
         '@delete': { '@id': 'foo', friend: { '@id': 'bar' } },
-        '@insert': {}
+        '@insert': undefined
       }
     });
   });
@@ -45,7 +45,7 @@ describe('Update utilities', () => {
     });
   });
 
-  interface Box {
+  interface Box extends Subject {
     '@id': string;
     size: number;
     label?: string;
@@ -57,13 +57,13 @@ describe('Update utilities', () => {
   }
 
   test('include single value in subject', () => {
-    const box: Resource<Box> = { '@id': 'bar', size: 10 };
+    const box: Box = { '@id': 'bar', size: 10 };
     includeValues(box, 'label', 'My Box');
     expect(box.label).toBe('My Box');
   });
 
   test('include multiple values in subject', () => {
-    const box: Resource<Box> = { '@id': 'bar', size: 10 };
+    const box: Box = { '@id': 'bar', size: 10 };
     includeValues(box, 'label', 'My Box');
     includeValues(box, 'label', 'Your Box');
     expect(box.label).toEqual(['My Box', 'Your Box']);
@@ -77,7 +77,7 @@ describe('Update utilities', () => {
   });
 
   test('includes value in subject', () => {
-    const box: Resource<Box> = { '@id': 'bar', size: 10, label: 'My Box' };
+    const box: Box = { '@id': 'bar', size: 10, label: 'My Box' };
     expect(includesValue(box, 'label', 'My Box')).toBe(true);
   });
 
@@ -88,49 +88,49 @@ describe('Update utilities', () => {
   });
 
   test('does not update mismatching ids', () => {
-    const box: Resource<Box> = { '@id': 'bar', size: 10, label: 'My box' };
-    updateSubject(box, { '@insert': { '@id': 'foo', size: 20 }, '@delete': {} });
+    const box: Box = { '@id': 'bar', size: 10, label: 'My box' };
+    updateSubject(box, { '@insert': { '@id': 'foo', size: 20 }, '@delete': undefined });
     expect(box).toEqual({ '@id': 'bar', size: 10, label: 'My box' });
   });
 
   test('adds a missing value', () => {
-    const box: Resource<Box> = { '@id': 'foo', size: 10 };
-    updateSubject(box, { '@insert': { '@id': 'foo', label: 'My box' }, '@delete': {} });
+    const box: Box = { '@id': 'foo', size: 10 };
+    updateSubject(box, { '@insert': { '@id': 'foo', label: 'My box' }, '@delete': undefined });
     expect(box).toEqual({ '@id': 'foo', size: 10, label: 'My box' });
   });
 
   test('adds an array value', () => {
-    const box: Resource<Box> = { '@id': 'foo', size: 10 };
-    updateSubject(box, { '@insert': { '@id': 'foo', size: [20, 30] }, '@delete': {} });
+    const box: Box = { '@id': 'foo', size: 10 };
+    updateSubject(box, { '@insert': { '@id': 'foo', size: [20, 30] }, '@delete': undefined });
     expect(box).toEqual({ '@id': 'foo', size: [10, 20, 30] });
   });
 
   test('does not add an empty array value', () => {
-    const box: Resource<Box> = { '@id': 'foo', size: 10 };
-    updateSubject(box, { '@insert': { '@id': 'foo', size: [] }, '@delete': {} });
+    const box: Box = { '@id': 'foo', size: 10 };
+    updateSubject(box, { '@insert': { '@id': 'foo', size: [] }, '@delete': undefined });
     expect(box).toEqual({ '@id': 'foo', size: 10 });
   });
 
   test('adds an inserted value', () => {
-    const box: Resource<Box> = { '@id': 'foo', size: 10, label: 'My box' };
-    updateSubject(box, { '@insert': { '@id': 'foo', size: 20 }, '@delete': {} });
+    const box: Box = { '@id': 'foo', size: 10, label: 'My box' };
+    updateSubject(box, { '@insert': { '@id': 'foo', size: 20 }, '@delete': undefined });
     expect(box).toEqual({ '@id': 'foo', size: [10, 20], label: 'My box' });
   });
 
   test('does not insert a duplicate value', () => {
-    const box: Resource<Box> = { '@id': 'foo', size: 10, label: 'My box' };
-    updateSubject(box, { '@insert': { '@id': 'foo', size: 10 }, '@delete': {} });
+    const box: Box = { '@id': 'foo', size: 10, label: 'My box' };
+    updateSubject(box, { '@insert': { '@id': 'foo', size: 10 }, '@delete': undefined });
     expect(box).toEqual({ '@id': 'foo', size: 10, label: 'My box' });
   });
 
   test('removes a deleted value', () => {
-    const box: Resource<Box> = { '@id': 'foo', size: 10, label: 'My box' };
-    updateSubject(box, { '@delete': { '@id': 'foo', size: 10 }, '@insert': {} });
+    const box: Box = { '@id': 'foo', size: 10, label: 'My box' };
+    updateSubject(box, { '@delete': { '@id': 'foo', size: 10 }, '@insert': undefined });
     expect(box).toEqual({ '@id': 'foo', label: 'My box' });
   });
 
   test('updates a value', () => {
-    const box: Resource<Box> = { '@id': 'foo', size: 10, label: 'My box' };
+    const box: Box = { '@id': 'foo', size: 10, label: 'My box' };
     updateSubject(box, {
       '@insert': { '@id': 'foo', size: 20 },
       '@delete': { '@id': 'foo', size: 10 }
@@ -139,7 +139,7 @@ describe('Update utilities', () => {
   });
 
   test('updates unchanged value', () => {
-    const box: Resource<Box> = { '@id': 'foo', size: 10, label: 'My box' };
+    const box: Box = { '@id': 'foo', size: 10, label: 'My box' };
     updateSubject(box, {
       '@insert': { '@id': 'foo', size: 10 },
       '@delete': { '@id': 'foo', size: 10 }
@@ -149,25 +149,23 @@ describe('Update utilities', () => {
 
   // FIXME This breaks the Node type, but not possible to prevent at runtime
   test('adds a singleton reference as a singleton if array property undefined', () => {
-    const box: Resource<Box> = { '@id': 'foo', size: 10 };
+    const box: Box = { '@id': 'foo', size: 10 };
     updateSubject(box, {
-      '@insert': { '@id': 'foo', contents: { '@id': 'bar' } },
-      '@delete': {}
+      '@insert': { '@id': 'foo', contents: { '@id': 'bar' } }, '@delete': undefined
     });
     expect(box).toEqual({ '@id': 'foo', size: 10, contents: { '@id': 'bar' } });
   });
 
   test('adds a singleton reference into array if array property defined', () => {
-    const box: Resource<Box> = { '@id': 'foo', size: 10, contents: [] };
+    const box: Box = { '@id': 'foo', size: 10, contents: [] };
     updateSubject(box, {
-      '@insert': { '@id': 'foo', contents: { '@id': 'bar' } },
-      '@delete': {}
+      '@insert': { '@id': 'foo', contents: { '@id': 'bar' } }, '@delete': undefined
     });
     expect(box).toEqual({ '@id': 'foo', size: 10, contents: [{ '@id': 'bar' }] });
   });
 
   test('updates a reference', () => {
-    const box: Resource<Box> = { '@id': 'foo', size: 10, contents: [{ '@id': 'bar' }] };
+    const box: Box = { '@id': 'foo', size: 10, contents: [{ '@id': 'bar' }] };
     updateSubject(box, {
       '@delete': { '@id': 'foo', contents: { '@id': 'bar' } },
       '@insert': { '@id': 'foo', contents: { '@id': 'baz' } }
@@ -177,7 +175,7 @@ describe('Update utilities', () => {
 
   describe('Deep updates', () => {
     test('updates nested subject', () => {
-      const box: Resource<Box> = {
+      const box: Box = {
         '@id': 'foo', size: 10, contents: [{
           '@id': 'bar', size: 5
         }]
@@ -194,7 +192,7 @@ describe('Update utilities', () => {
     });
 
     test('updates nested subject with graph', () => {
-      const box: Resource<Box> = {
+      const box: Box = {
         '@id': 'foo', size: 10, contents: [{
           '@id': 'bar', size: 5
         }]
@@ -217,7 +215,7 @@ describe('Update utilities', () => {
     });
 
     test('updates nested subject with subject updates', () => {
-      const box: Resource<Box> = {
+      const box: Box = {
         '@id': 'foo', size: 10, contents: [{
           '@id': 'bar', size: 5
         }]
@@ -240,7 +238,7 @@ describe('Update utilities', () => {
     });
 
     test('updates circular nesting', () => {
-      const box: Resource<Box> = { '@id': 'foo', size: 10 };
+      const box: Box = { '@id': 'foo', size: 10 };
       box.contents = [box];
       updateSubject(box, {
         '@delete': { '@id': 'foo', size: 10 },
@@ -255,11 +253,11 @@ describe('Update utilities', () => {
   describe('List updates', () => {
     // Note: List updates are always expressed with identified slots
     test('appends one item to a list', () => {
-      const box: Resource<Box> = {
+      const box: Box = {
         '@id': 'foo', size: 10, history: { '@id': 'foo-history', '@list': [] }
       };
       updateSubject(box, {
-        '@delete': {},
+        '@delete': undefined,
         '@insert': {
           '@id': 'foo-history',
           '@list': { 0: { '@id': 'slot1', '@item': 'made' } }
@@ -271,7 +269,7 @@ describe('Update utilities', () => {
     });
 
     test('removes one item from a list', () => {
-      const box: Resource<Box> = {
+      const box: Box = {
         '@id': 'foo', size: 10, history: { '@id': 'foo-history', '@list': ['made'] }
       };
       updateSubject(box, {
@@ -279,7 +277,7 @@ describe('Update utilities', () => {
           '@id': 'foo-history',
           '@list': { 0: { '@id': 'slot1' } }
         },
-        '@insert': {}
+        '@insert': undefined
       });
       expect(box).toEqual({
         '@id': 'foo', size: 10, history: { '@id': 'foo-history', '@list': [] }
@@ -287,7 +285,7 @@ describe('Update utilities', () => {
     });
 
     test('replaces one item in a list', () => {
-      const box: Resource<Box> = {
+      const box: Box = {
         '@id': 'foo', size: 10, history: { '@id': 'foo-history', '@list': ['made'] }
       };
       updateSubject(box, {
@@ -309,7 +307,7 @@ describe('Update utilities', () => {
       const splice = mockFn().mockImplementation([].splice);
       const history = ['made', 'filled', 'sold', 'disposed'];
       history.splice = splice;
-      const box: Resource<Box> = {
+      const box: Box = {
         '@id': 'foo', size: 10, history: { '@id': 'foo-history', '@list': history }
       };
       updateSubject(box, {
@@ -333,7 +331,7 @@ describe('Update utilities', () => {
     });
 
     test('updates nested list subject', () => {
-      const box: Resource<Box> = {
+      const box: Box = {
         '@id': 'foo', size: 10, history: {
           '@id': 'foo-history',
           '@list': [{

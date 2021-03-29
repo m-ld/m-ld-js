@@ -51,7 +51,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
   private readonly networkTimeout: number;
   private readonly genesisClaim: boolean;
   readonly status: Observable<MeldStatus> & LiveStatus;
-  
+
   constructor({ dataset, remotes, constraints, config, context }: {
     dataset: Dataset;
     remotes: MeldRemotes;
@@ -478,10 +478,9 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
     });
   }
 
-  private logRequest(type: 'read'|'write', request: Pattern) {
+  private logRequest(type: 'read' | 'write', request: Pattern) {
     if (this.log.getLevel() <= levels.DEBUG)
-      this.log.debug(type, 'request',
-        JSON.stringify({ ...request, '@context': undefined }));
+      this.log.debug(type, 'request', JSON.stringify(request));
   }
 
   private createStatus(): Observable<MeldStatus> & LiveStatus {

@@ -96,7 +96,7 @@ export interface MeldReadState {
    * @param id the Subject `@id`
    * @returns a promise resolving to the requested Subject, or `undefined` if not found
    */
-  get<S = Subject>(id: string): Promise<Resource<S> | undefined>;
+  get(id: string): Promise<GraphSubject | undefined>;
 }
 
 /**
@@ -255,6 +255,7 @@ export interface MeldStateMachine extends MeldState {
    * perform the request in the scope of a read procedure instead.
    *
    * @param request the declarative read description
+   * @typeParam R one of the {@link Read} types
    * @returns read subjects
    */
   read<R extends Read = Read>(request: R): ReadResult;
@@ -267,8 +268,8 @@ export interface MeldStateMachine extends MeldState {
    * Promise resolves or rejects.
    *
    * @param procedure a procedure to run against the current state. This
-   * procedure is able to modify the given state incrementally using its `write`
-   * method
+   * procedure is able to modify the given state, incrementally using its
+   * `write` method
    */
   write(procedure: StateProc<MeldState>): Promise<MeldState>;
 
@@ -415,27 +416,3 @@ export interface InterimUpdate {
    */
   readonly update: Promise<MeldUpdate>;
 }
-
-/**
- * Captures **m-ld** [data&nbsp;semantics](http://spec.m-ld.org/#data-semantics)
- * as applied to an app-specific subject type `T`. Applies the following changes
- * to `T`:
- * - Always includes an `@id` property, as the subject identity
- * - Non-array properties are redefined to allow arrays (note this is
- *   irrespective of any `single-valued` constraint, which is applied at
- *   runtime)
- * - Required properties are redefined to allow `undefined`
- *
- * Since any property can have zero to many values, it may be convenient to
- * combine use of this type with the {@link array} utility when processing
- * updates.
- *
- * Note that a Resource always contains concrete data, unlike Subject, which can
- * include variables and filters as required for its role in query
- * specification.
- * 
- * @typeParam T the app-specific subject type of interest
- */
-export type Resource<T> = Subject & Reference & {
-  [P in keyof T]: T[P] extends Array<unknown> ? T[P] | undefined : T[P] | T[P][] | undefined;
-};

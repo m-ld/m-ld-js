@@ -2,7 +2,7 @@ import { Subject, Describe, Update, Read, Write } from '../jrql-support';
 import { Observable, Subscription } from 'rxjs';
 import { take } from 'rxjs/operators';
 import {
-  MeldState, Resource, any, MeldStateMachine,
+  MeldState, any, MeldStateMachine,
   ReadResult, StateProc, UpdateProc, readResult, GraphSubject
 } from '../api';
 import { CloneEngine, EngineState, EngineUpdateProc, StateEngine } from './StateEngine';
@@ -29,8 +29,8 @@ abstract class ApiState implements MeldState {
     });
   }
 
-  get<S = Subject>(id: string): Promise<Resource<S> | undefined> {
-    return this.read<Describe>({ '@describe': id }).pipe(take<Resource<S>>(1)).toPromise();
+  get(id: string): Promise<GraphSubject | undefined> {
+    return this.read<Describe>({ '@describe': id }).pipe(take(1)).toPromise();
   }
 
   protected abstract construct(state: EngineState): MeldState;

@@ -1,4 +1,4 @@
-import { MeldReadState, Resource, readResult } from '../../api';
+import { MeldReadState, readResult } from '../../api';
 import { Subject, Read } from '../../jrql-support';
 import { JrqlGraph } from './JrqlGraph';
 
@@ -15,7 +15,7 @@ export class GraphState implements MeldReadState {
     return readResult(this.graph.read(request));
   }
 
-  get<S = Subject>(id: string) {
-    return <Promise<Resource<S> | undefined>>this.graph.describe1(id).toPromise();
+  get(id: string) {
+    return this.graph.describe1(id).toPromise();
   }
 }

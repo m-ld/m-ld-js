@@ -1,4 +1,6 @@
-import { MeldConstraint, MeldReadState, asSubjectUpdates, updateSubject, InterimUpdate } from '..';
+import {
+  MeldConstraint, MeldReadState, asSubjectUpdates, updateSubject, InterimUpdate, GraphSubject
+} from '..';
 import { Iri } from 'jsonld/jsonld-spec';
 import { map, filter, take, concatMap } from 'rxjs/operators';
 import { Subject, Select, Value, isValueObject, Reference } from '../jrql-support';
@@ -63,7 +65,7 @@ export class SingleValued implements MeldConstraint {
       })).toPromise();
   }
 
-  private affected(state: MeldReadState, update: DeleteInsert<Subject[]>): Observable<Subject> {
+  private affected(state: MeldReadState, update: DeleteInsert<GraphSubject[]>): Observable<Subject> {
     const propertyInserts = update['@insert'].filter(this.hasProperty);
     // Fail earliest if there are no inserts for the property
     return !propertyInserts.length ? EMPTY :
