@@ -644,7 +644,7 @@ export function isUpdate(p: Pattern): p is Update {
 /** @internal */
 export interface Slot extends Subject {
   '@id': Iri;
-  '@item': Value | Value[];
+  '@item': Value;
   '@index'?: number;
 }
 

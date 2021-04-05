@@ -104,7 +104,7 @@ function unReifyRefs(subject: Subject) {
  * @see http://spec.m-ld.org/#data-semantics
  */
 export function updateSubject<T extends Subject & Reference>(
-  subject: T, update: SubjectUpdate | SubjectUpdates | DeleteInsert<GraphSubjects>): T {
+  subject: T, update: SubjectUpdates | DeleteInsert<GraphSubjects>): T {
   return new SubjectUpdater(update).update(subject);
 }
 
@@ -118,14 +118,10 @@ export class SubjectUpdater {
     (subject: GraphSubject, key: keyof DeleteInsert<any>) => GraphSubject | undefined;
   readonly done = new Set<object>();
 
-  constructor(update: SubjectUpdate | SubjectUpdates | DeleteInsert<GraphSubjects>) {
+  constructor(update: SubjectUpdates | DeleteInsert<GraphSubjects>) {
     if (isDeleteInsert(update))
-      if (isGraphUpdate(update))
-        this.delOrInsForSubject = (subject, key) =>
-          update[key].graph.get(subject['@id']);
-      else
-        this.delOrInsForSubject = (subject, key) =>
-          update[key]?.['@id'] === subject['@id'] ? update[key] : undefined;
+      this.delOrInsForSubject = (subject, key) =>
+        update[key].graph.get(subject['@id']);
     else
       this.delOrInsForSubject = (subject, key) =>
         subject['@id'] in update ? update[subject['@id']][key] : undefined;
@@ -162,7 +158,6 @@ export class SubjectUpdater {
   }
 
   private updateList(subject: GraphSubject, deletes?: GraphSubject, inserts?: GraphSubject) {
-    
     if (isList(subject)) {
       if (isListUpdate(deletes) || isListUpdate(inserts))
         this.updateListIndexes(subject['@list'],
@@ -175,7 +170,8 @@ export class SubjectUpdater {
   private updateListIndexes(list: List['@list'], deletes: List['@list'], inserts: List['@list']) {
     const splice = typeof list.splice == 'function' ? list.splice : (() => {
       // Array splice operation must have a length field to behave
-      list.length = Math.max(...Object.keys(list).map(Number).filter(isNaturalNumber));
+      const maxIndex = Math.max(...Object.keys(list).map(Number).filter(isNaturalNumber));
+      list.length = isFinite(maxIndex) ? maxIndex + 1 : 0;
       return [].splice;
     })();
     const splices: { deleteCount: number, items?: any[] }[] = []; // Sparse
@@ -185,7 +181,7 @@ export class SubjectUpdater {
       (splices[i] ??= { deleteCount: 0 }).items =
         // List updates are always expressed with identified slots, but the list
         // is assumed to contain direct items, not slots
-        array(inserts[i]).map((slot: Slot) => slot['@item']);
+        array(inserts[i]).map((slot: Slot) => this.update(slot)['@item']);
     let deleteCount = 0, items: any[] = [];
     for (let i of Object.keys(splices).reverse().map(Number)) {
       deleteCount += splices[i].deleteCount;
@@ -201,12 +197,6 @@ export class SubjectUpdater {
 /** @internal */
 function isListUpdate(updatePart?: Subject): updatePart is List {
   return updatePart != null && isList(updatePart);
-}
-
-/** @internal */
-function isGraphUpdate(update: SubjectUpdate | DeleteInsert<GraphSubjects>):
-  update is DeleteInsert<GraphSubjects> {
-  return isArray(update['@insert']) && isArray(update['@delete']);
 }
 
 /** @internal */

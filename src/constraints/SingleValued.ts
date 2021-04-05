@@ -89,7 +89,7 @@ export class SingleValued implements MeldConstraint {
           // Weirdness to construct a subject from the select result
           // TODO: Support `@construct`
           const subject = { '@id': sid, [this.property]: selectResult['?o'] };
-          return updateSubject(subject, subjectUpdates[sid]);
+          return updateSubject(subject, subjectUpdates);
         }));
       }));
   }

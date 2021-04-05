@@ -182,7 +182,7 @@ export class SubjectQuads {
 
     if (isString(value)) {
       if (property === '@type' || type === '@id' || type === '@vocab')
-        return this.expandNode(value, type === '@vocab');
+        return this.expandNode(value, property === '@type' || type === '@vocab');
       if (property != null)
         language = getContextValue(this.ctx, property, '@language');
       if (language != null)

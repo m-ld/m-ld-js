@@ -38,6 +38,12 @@ describe('Meld State API', () => {
   });
 
   describe('basic writes', () => {
+    test('writes a subject with a type', async () => {
+      await api.write<Subject>({ '@id': 'fred', '@type': 'Flintstone', name: 'Fred' });
+      await expect(api.get('fred'))
+        .resolves.toEqual({ '@id': 'fred', '@type': 'Flintstone', name: 'Fred' });
+    });
+
     test('deletes a subject by update', async () => {
       await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
       api.follow(captureUpdate.resolve);

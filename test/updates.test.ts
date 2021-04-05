@@ -89,51 +89,53 @@ describe('Update utilities', () => {
 
   test('does not update mismatching ids', () => {
     const box: Box = { '@id': 'bar', size: 10, label: 'My box' };
-    updateSubject(box, { '@insert': { '@id': 'foo', size: 20 }, '@delete': undefined });
+    updateSubject(box, { foo: { '@insert': { '@id': 'foo', size: 20 }, '@delete': undefined } });
     expect(box).toEqual({ '@id': 'bar', size: 10, label: 'My box' });
   });
 
   test('adds a missing value', () => {
     const box: Box = { '@id': 'foo', size: 10 };
-    updateSubject(box, { '@insert': { '@id': 'foo', label: 'My box' }, '@delete': undefined });
+    updateSubject(box, { foo: { '@insert': { '@id': 'foo', label: 'My box' }, '@delete': undefined } });
     expect(box).toEqual({ '@id': 'foo', size: 10, label: 'My box' });
   });
 
   test('adds an array value', () => {
     const box: Box = { '@id': 'foo', size: 10 };
-    updateSubject(box, { '@insert': { '@id': 'foo', size: [20, 30] }, '@delete': undefined });
+    updateSubject(box, { foo: { '@insert': { '@id': 'foo', size: [20, 30] }, '@delete': undefined } });
     expect(box).toEqual({ '@id': 'foo', size: [10, 20, 30] });
   });
 
   test('does not add an empty array value', () => {
     const box: Box = { '@id': 'foo', size: 10 };
-    updateSubject(box, { '@insert': { '@id': 'foo', size: [] }, '@delete': undefined });
+    updateSubject(box, { foo: { '@insert': { '@id': 'foo', size: [] }, '@delete': undefined } });
     expect(box).toEqual({ '@id': 'foo', size: 10 });
   });
 
   test('adds an inserted value', () => {
     const box: Box = { '@id': 'foo', size: 10, label: 'My box' };
-    updateSubject(box, { '@insert': { '@id': 'foo', size: 20 }, '@delete': undefined });
+    updateSubject(box, { foo: { '@insert': { '@id': 'foo', size: 20 }, '@delete': undefined } });
     expect(box).toEqual({ '@id': 'foo', size: [10, 20], label: 'My box' });
   });
 
   test('does not insert a duplicate value', () => {
     const box: Box = { '@id': 'foo', size: 10, label: 'My box' };
-    updateSubject(box, { '@insert': { '@id': 'foo', size: 10 }, '@delete': undefined });
+    updateSubject(box, { foo: { '@insert': { '@id': 'foo', size: 10 }, '@delete': undefined } });
     expect(box).toEqual({ '@id': 'foo', size: 10, label: 'My box' });
   });
 
   test('removes a deleted value', () => {
     const box: Box = { '@id': 'foo', size: 10, label: 'My box' };
-    updateSubject(box, { '@delete': { '@id': 'foo', size: 10 }, '@insert': undefined });
+    updateSubject(box, { foo: { '@delete': { '@id': 'foo', size: 10 }, '@insert': undefined } });
     expect(box).toEqual({ '@id': 'foo', label: 'My box' });
   });
 
   test('updates a value', () => {
     const box: Box = { '@id': 'foo', size: 10, label: 'My box' };
     updateSubject(box, {
-      '@insert': { '@id': 'foo', size: 20 },
-      '@delete': { '@id': 'foo', size: 10 }
+      foo: {
+        '@insert': { '@id': 'foo', size: 20 },
+        '@delete': { '@id': 'foo', size: 10 }
+      }
     });
     expect(box).toEqual({ '@id': 'foo', size: 20, label: 'My box' });
   });
@@ -141,8 +143,10 @@ describe('Update utilities', () => {
   test('updates unchanged value', () => {
     const box: Box = { '@id': 'foo', size: 10, label: 'My box' };
     updateSubject(box, {
-      '@insert': { '@id': 'foo', size: 10 },
-      '@delete': { '@id': 'foo', size: 10 }
+      foo: {
+        '@insert': { '@id': 'foo', size: 10 },
+        '@delete': { '@id': 'foo', size: 10 }
+      }
     });
     expect(box).toEqual({ '@id': 'foo', size: 10, label: 'My box' });
   });
@@ -151,7 +155,9 @@ describe('Update utilities', () => {
   test('adds a singleton reference as a singleton if array property undefined', () => {
     const box: Box = { '@id': 'foo', size: 10 };
     updateSubject(box, {
-      '@insert': { '@id': 'foo', contents: { '@id': 'bar' } }, '@delete': undefined
+      foo: {
+        '@insert': { '@id': 'foo', contents: { '@id': 'bar' } }, '@delete': undefined
+      }
     });
     expect(box).toEqual({ '@id': 'foo', size: 10, contents: { '@id': 'bar' } });
   });
@@ -159,7 +165,9 @@ describe('Update utilities', () => {
   test('adds a singleton reference into array if array property defined', () => {
     const box: Box = { '@id': 'foo', size: 10, contents: [] };
     updateSubject(box, {
-      '@insert': { '@id': 'foo', contents: { '@id': 'bar' } }, '@delete': undefined
+      foo: {
+        '@insert': { '@id': 'foo', contents: { '@id': 'bar' } }, '@delete': undefined
+      }
     });
     expect(box).toEqual({ '@id': 'foo', size: 10, contents: [{ '@id': 'bar' }] });
   });
@@ -167,8 +175,10 @@ describe('Update utilities', () => {
   test('updates a reference', () => {
     const box: Box = { '@id': 'foo', size: 10, contents: [{ '@id': 'bar' }] };
     updateSubject(box, {
-      '@delete': { '@id': 'foo', contents: { '@id': 'bar' } },
-      '@insert': { '@id': 'foo', contents: { '@id': 'baz' } }
+      foo: {
+        '@delete': { '@id': 'foo', contents: { '@id': 'bar' } },
+        '@insert': { '@id': 'foo', contents: { '@id': 'baz' } }
+      }
     });
     expect(box).toEqual({ '@id': 'foo', size: 10, contents: [{ '@id': 'baz' }] });
   });
@@ -181,8 +191,10 @@ describe('Update utilities', () => {
         }]
       };
       updateSubject(box, {
-        '@delete': { '@id': 'bar', size: 5 },
-        '@insert': { '@id': 'bar', size: 6 }
+        bar: {
+          '@delete': { '@id': 'bar', size: 5 },
+          '@insert': { '@id': 'bar', size: 6 }
+        }
       });
       expect(box).toEqual({
         '@id': 'foo', size: 10, contents: [{
@@ -241,8 +253,10 @@ describe('Update utilities', () => {
       const box: Box = { '@id': 'foo', size: 10 };
       box.contents = [box];
       updateSubject(box, {
-        '@delete': { '@id': 'foo', size: 10 },
-        '@insert': { '@id': 'foo', size: 11 }
+        foo: {
+          '@delete': { '@id': 'foo', size: 10 },
+          '@insert': { '@id': 'foo', size: 11 }
+        }
       });
       expect(box['@id']).toBe('foo');
       expect(box.size).toBe(11);
@@ -257,10 +271,16 @@ describe('Update utilities', () => {
         '@id': 'foo', size: 10, history: { '@id': 'foo-history', '@list': [] }
       };
       updateSubject(box, {
-        '@delete': undefined,
-        '@insert': {
-          '@id': 'foo-history',
-          '@list': { 0: { '@id': 'slot1', '@item': 'made' } }
+        'foo-history': {
+          '@delete': undefined,
+          '@insert': {
+            '@id': 'foo-history',
+            '@list': { 0: { '@id': 'slot1' } }
+          }
+        },
+        slot1: {
+          '@delete': undefined,
+          '@insert': { '@id': 'slot1', '@item': 'made' }
         }
       });
       expect(box).toEqual({
@@ -273,11 +293,13 @@ describe('Update utilities', () => {
         '@id': 'foo', size: 10, history: { '@id': 'foo-history', '@list': ['made'] }
       };
       updateSubject(box, {
-        '@delete': {
-          '@id': 'foo-history',
-          '@list': { 0: { '@id': 'slot1' } }
-        },
-        '@insert': undefined
+        'foo-history': {
+          '@delete': {
+            '@id': 'foo-history',
+            '@list': { 0: { '@id': 'slot1' } }
+          },
+          '@insert': undefined
+        }
       });
       expect(box).toEqual({
         '@id': 'foo', size: 10, history: { '@id': 'foo-history', '@list': [] }
@@ -289,13 +311,18 @@ describe('Update utilities', () => {
         '@id': 'foo', size: 10, history: { '@id': 'foo-history', '@list': ['made'] }
       };
       updateSubject(box, {
-        '@delete': {
-          '@id': 'foo-history',
-          '@list': { 0: { '@id': 'slot1' } }
+        'foo-history': {
+          '@delete': {
+            '@id': 'foo-history',
+            '@list': { 0: { '@id': 'slot1' } }
+          },
+          '@insert': {
+            '@id': 'foo-history',
+            '@list': { 0: { '@id': 'slot1' } }
+          }
         },
-        '@insert': {
-          '@id': 'foo-history',
-          '@list': { 0: { '@id': 'slot1', '@item': 'manufactured' } }
+        'slot1': {
+          '@insert': { '@id': 'slot1', '@item': 'manufactured' }, '@delete': undefined
         }
       });
       expect(box).toEqual({
@@ -311,11 +338,16 @@ describe('Update utilities', () => {
         '@id': 'foo', size: 10, history: { '@id': 'foo-history', '@list': history }
       };
       updateSubject(box, {
-        '@delete': {
-          '@id': 'foo-history', '@list': { 1: { '@id': 'slot1' }, 2: { '@id': 'slot2' } }
+        'foo-history': {
+          '@delete': {
+            '@id': 'foo-history', '@list': { 1: { '@id': 'slot1' }, 2: { '@id': 'slot2' } }
+          },
+          '@insert': {
+            '@id': 'foo-history', '@list': { 1: { '@id': 'slot3' } }
+          }
         },
-        '@insert': {
-          '@id': 'foo-history', '@list': { 1: { '@id': 'slot3', '@item': 'soled' } }
+        'slot3': {
+          '@insert': { '@id': 'slot3', '@item': 'soled' }, '@delete': undefined
         }
       });
       // @ts-ignore Remove mock impl which affects toEqual
@@ -340,8 +372,10 @@ describe('Update utilities', () => {
         }
       };
       updateSubject(box, {
-        '@delete': { '@id': 'bar', size: 5 },
-        '@insert': { '@id': 'bar', size: 6 }
+        bar: {
+          '@delete': { '@id': 'bar', size: 5 },
+          '@insert': { '@id': 'bar', size: 6 }
+        }
       });
       expect(box).toEqual({
         '@id': 'foo', size: 10, history: {
