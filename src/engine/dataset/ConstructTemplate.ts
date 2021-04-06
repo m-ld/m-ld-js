@@ -54,10 +54,10 @@ class SubjectTemplate {
 
   constructor(construct: Subject, readonly ctx: ActiveContext) {
     // Discover or create the subject identity variable
-    this.templateId = construct['@id'];
-    if (this.templateId != null)
-      withNamedVar(matchVar(this.templateId),
-        variable => this.variableId = variable);
+    if (construct['@id'] != null)
+      withNamedVar(matchVar(construct['@id']),
+        variable => this.variableId = variable,
+        () => this.templateId = construct['@id']);
     // Discover List variables
     if (isList(construct))
       for (let [index, item] of listItems(construct['@list'], 'match'))
@@ -146,7 +146,10 @@ class SubjectTemplate {
       if (nested != null)
         populator(property).populateWith(() => nested);
     }
-    return result;
+    // Ignore empty object
+    for (let key in result)
+      if (sid != null || this.templateId != null || key != '@id')
+        return result;
   }
 
   private propertyPopulator(result: Subject, solution: Binding) {
@@ -166,7 +169,7 @@ class SubjectTemplate {
         populateWith = getObject =>
           addPropertyObject(result, patternProp, getObject(patternProp), () => []);
       else
-        populateWith = () => {};
+        populateWith = () => { };
       return { populateWith };
     };
   }

@@ -300,6 +300,22 @@ describe('Meld State API', () => {
       }]);
     });
 
+    test('constructs with nested optional no-match subject', async () => {
+      await api.write<Subject>({ '@id': 'barney', name: 'Barney', wife: { '@id': 'betty' } });
+      await api.write<Subject>({ '@id': 'wilma', name: 'Wilma' });
+      await expect(api.read<Construct>({
+        '@construct': { '@id': 'barney', name: '?name', wife: { name: '?wife' } },
+        '@where': {
+          '@union': [
+            { '@id': 'barney', name: '?name' },
+            { '@id': 'barney', wife: { name: '?wife' } }
+          ]
+        }
+      })).resolves.toEqual([{
+        '@id': 'barney', name: 'Barney'
+      }]);
+    });
+
     test('constructs with overlapping bindings', async () => {
       await api.write<Subject>({ '@id': 'fred', name: 'Fred', wife: { '@id': 'wilma' } });
       await api.write<Subject>({ '@id': 'wilma', name: 'Wilma' });
