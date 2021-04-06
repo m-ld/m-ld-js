@@ -8,6 +8,7 @@ import { Dataset } from '../src/engine/dataset';
 import { from } from 'rxjs';
 import { Describe, MeldConstraint, Subject } from '../src';
 import { jsonify } from './testUtil';
+import { SubjectGraph } from '../src/engine/SubjectGraph';
 
 const fred = {
   '@id': 'http://test.m-ld.org/fred',
@@ -153,7 +154,49 @@ describe('SU-Set Dataset', () => {
         test('answers a snapshot', async () => {
           const snapshot = await ssd.takeSnapshot();
           expect(snapshot.lastTime.equals(localTime.scrubId())).toBe(true);
-          await expect(snapshot.quads.toPromise()).resolves.toBeDefined();
+          const data = await snapshot.quads.toPromise();
+          expect(SubjectGraph.fromRDF(data)).toMatchObject([{
+            '@type': 'http://www.w3.org/1999/02/22-rdf-syntax-ns#Statement',
+            'http://m-ld.org/#tid': firstTid,
+            'http://www.w3.org/1999/02/22-rdf-syntax-ns#subject': {
+              '@id': 'http://test.m-ld.org/fred'
+            },
+            'http://www.w3.org/1999/02/22-rdf-syntax-ns#predicate': {
+              '@id': 'http://test.m-ld.org/#name'
+            },
+            'http://www.w3.org/1999/02/22-rdf-syntax-ns#object': 'Fred'
+          }]);
+        });
+
+        test('snapshot includes entailed triples', async () => {
+          // Prepare some entailed information which does not have any
+          // transaction identity. Using the dataset this way is a back door and
+          // may be brittle if the way that entailments work changes.
+          await dataset.transact({
+            prepare: async () => ({
+              patch: await ssd.write({
+                '@insert': {
+                  '@id': 'http://test.m-ld.org/fred',
+                  'http://test.m-ld.org/#sex': 'male'
+                }
+              })
+            })
+          });
+          const snapshot = await ssd.takeSnapshot();
+          const data = await snapshot.quads.toPromise();
+          expect(SubjectGraph.fromRDF(data)).toMatchObject(expect.arrayContaining([
+            expect.objectContaining({
+              '@type': 'http://www.w3.org/1999/02/22-rdf-syntax-ns#Statement',
+              // No tids here
+              'http://www.w3.org/1999/02/22-rdf-syntax-ns#subject': {
+                '@id': 'http://test.m-ld.org/fred'
+              },
+              'http://www.w3.org/1999/02/22-rdf-syntax-ns#predicate': {
+                '@id': 'http://test.m-ld.org/#sex'
+              },
+              'http://www.w3.org/1999/02/22-rdf-syntax-ns#object': 'male'
+            })
+          ]));
         });
 
         test('applies a snapshot', async () => {

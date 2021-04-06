@@ -169,17 +169,28 @@ describe('Meld State API', () => {
     });
 
     test('selects not found', async () => {
-      await api.write({ '@id': 'fred', name: 'Fred' } as Subject);
+      await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
       await expect(api.read<Select>({
         '@select': '?w', '@where': { '@id': '?w', name: 'Wilma' }
       })).resolves.toEqual([]);
     });
 
     test('describes not found', async () => {
-      await api.write({ '@id': 'fred', name: 'Fred' } as Subject);
+      await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
       await expect(api.read<Describe>({
         '@describe': 'wilma'
       })).resolves.toEqual([]);
+    });
+
+    test('describes two subjects', async () => {
+      await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
+      await api.write<Subject>({ '@id': 'wilma', name: 'Wilma' });
+      await expect(api.read<Describe>({
+        '@describe': ['wilma', 'fred']
+      })).resolves.toEqual(expect.arrayContaining([
+        { '@id': 'fred', name: 'Fred' },
+        { '@id': 'wilma', name: 'Wilma' }
+      ]));
     });
 
     test('describes where', async () => {

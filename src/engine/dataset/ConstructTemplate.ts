@@ -161,10 +161,10 @@ class SubjectTemplate {
       let populateWith: (getObject: (resultProp: SubjectProperty) => Value) => void;
       if (substitute != null)
         populateWith = getObject =>
-          addPropertyObject(result, substitute, getObject(substitute));
+          addPropertyObject(result, substitute, getObject(substitute), () => []);
       else if (includeAll)
         populateWith = getObject =>
-          addPropertyObject(result, patternProp, getObject(patternProp));
+          addPropertyObject(result, patternProp, getObject(patternProp), () => []);
       else
         populateWith = () => {};
       return { populateWith };

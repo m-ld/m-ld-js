@@ -7,7 +7,7 @@ import {
 import { NamedNode, Quad, Term } from 'rdf-js';
 import { Graph, PatchQuads } from '.';
 import { toArray, mergeMap, groupBy, catchError, reduce, map } from 'rxjs/operators';
-import { EMPTY, Observable, of, throwError } from 'rxjs';
+import { EMPTY, merge, Observable, of, throwError } from 'rxjs';
 import { canPosition, inPosition, TriplePos } from '../quads';
 import { ActiveContext, expandTerm, initialCtx, nextCtx } from "../jsonld";
 import { Binding } from 'quadstore';
@@ -41,8 +41,8 @@ export class JrqlGraph {
 
   read(query: Read, ctx = this.defaultCtx): Observable<GraphSubject> {
     return fromPromise(nextCtx(ctx, query['@context']), ctx => {
-      if (isDescribe(query) && !isArray(query['@describe']))
-        return this.describe(query['@describe'], query['@where'], ctx);
+      if (isDescribe(query))
+        return this.describe(array(query['@describe']), query['@where'], ctx);
       else if (isSelect(query) && query['@where'] != null)
         return this.select(query['@select'], query['@where'], ctx);
       else if (isConstruct(query))
@@ -72,35 +72,37 @@ export class JrqlGraph {
       map(solution => this.jrql.solutionSubject(select, solution, ctx)));
   }
 
-  describe(describe: Iri | Variable,
+  describe(describes: (Iri | Variable)[],
     where?: Subject | Subject[] | Group,
     ctx = this.defaultCtx): Observable<GraphSubject> {
-    const describedVarName = jrql.matchVar(describe);
-    if (describedVarName) {
-      const vars = {
-        subject: this.any(), property: this.any(),
-        value: this.any(), item: this.any(),
-        described: this.graph.variable(describedVarName)
-      };
-      return this.solutions(where ?? {}, op =>
-        this.graph.query(this.sparql.createProject(
-          this.sparql.createJoin(
-            // Sub-select DISTINCT to fetch subject ids
-            this.sparql.createDistinct(
-              this.sparql.createProject(
-                this.sparql.createExtend(op, vars.subject,
-                  this.sparql.createTermExpression(vars.described)),
-                [vars.subject])),
-            this.gatherSubjectData(vars)),
-          [vars.subject, vars.property, vars.value, vars.item])), ctx).pipe(
-            // TODO: Ordering annoyance: sometimes subjects interleave, so
-            // cannot use toArrays(quad => quad.subject.value),
-            groupBy(binding => this.bound(binding, vars.subject)),
-            mergeMap(subjectBindings => subjectBindings.pipe(toArray())),
-            map(subjectBindings => this.toSubject(subjectBindings, vars, ctx)));
-    } else {
-      return this.describe1(describe, ctx);
-    }
+    return merge(...describes.map(describe => {
+      const describedVarName = jrql.matchVar(describe);
+      if (describedVarName) {
+        const vars = {
+          subject: this.any(), property: this.any(),
+          value: this.any(), item: this.any(),
+          described: this.graph.variable(describedVarName)
+        };
+        return this.solutions(where ?? {}, op =>
+          this.graph.query(this.sparql.createProject(
+            this.sparql.createJoin(
+              // Sub-select DISTINCT to fetch subject ids
+              this.sparql.createDistinct(
+                this.sparql.createProject(
+                  this.sparql.createExtend(op, vars.subject,
+                    this.sparql.createTermExpression(vars.described)),
+                  [vars.subject])),
+              this.gatherSubjectData(vars)),
+            [vars.subject, vars.property, vars.value, vars.item])), ctx).pipe(
+              // TODO: Ordering annoyance: sometimes subjects interleave, so
+              // cannot use toArrays(quad => quad.subject.value),
+              groupBy(binding => this.bound(binding, vars.subject)),
+              mergeMap(subjectBindings => subjectBindings.pipe(toArray())),
+              map(subjectBindings => this.toSubject(subjectBindings, vars, ctx)));
+      } else {
+        return this.describe1(describe, ctx);
+      }
+    }));
   }
 
   describe1(describe: Iri, ctx = this.defaultCtx): Observable<GraphSubject> {

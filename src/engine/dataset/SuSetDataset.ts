@@ -367,11 +367,11 @@ export class SuSetDataset {
     });
   }
 
-  private async findTriplesTids(quads: Quad[]): Promise<QuadMap<Quad[]>> {
+  private async findTriplesTids(quads: Quad[], includeEmpty?: 'includeEmpty'): Promise<QuadMap<Quad[]>> {
     const quadTriplesTids = new QuadMap<Quad[]>();
     await Promise.all(quads.map(async quad => {
       const tripleTids = await this.findTripleTids(tripleId(quad));
-      if (tripleTids.length)
+      if (tripleTids.length || includeEmpty)
         quadTriplesTids.set(quad, tripleTids);
     }));
     return quadTriplesTids;
@@ -432,7 +432,7 @@ export class SuSetDataset {
             quads: this.userGraph.graph.match().pipe(
               bufferCount(10), // TODO batch size config
               mergeMap(async batch => this.encoding.reifyTriplesTids(
-                asTriplesTids(await this.findTriplesTids(batch)))),
+                asTriplesTids(await this.findTriplesTids(batch, 'includeEmpty')))),
               tapComplete(dataEmitted))
           });
           await dataEmitted; // If this rejects, data will error

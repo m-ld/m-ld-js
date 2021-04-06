@@ -490,7 +490,7 @@ export interface Describe extends Read {
    * identified variable will be output as a [Subject](/interfaces/subject.html)
    * with its top-level properties.
    */
-  '@describe': Iri | Variable;
+  '@describe': Iri | Variable | (Iri | Variable)[];
 }
 
 /** @internal */

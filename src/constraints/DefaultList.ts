@@ -6,7 +6,7 @@ import { LseqDef, LseqIndexRewriter, PosItem } from '../engine/lseq';
 import * as meld from '../ns/m-ld';
 import { lazy } from '../engine/util';
 import {
-  isList, isPropertyObject, isReference, isSlot, List, SubjectProperty
+  isList, isPropertyObject, isReference, isSlot, isSubjectObject, List, SubjectProperty
 } from '../jrql-support';
 import { includesValue } from '../updates';
 import { SingleValued } from './SingleValued';
@@ -74,7 +74,7 @@ export class DefaultList implements MeldConstraint {
         if (isList(subject))
           this.addItems(subject, rewriter);
         for (let property in subject)
-          this.addItemIfPosId(subject, property, rewriter, isSlot);
+          this.addItemIfPosId(subject, property, rewriter);
       }
     } else {
       /**
@@ -114,10 +114,14 @@ export class DefaultList implements MeldConstraint {
   }
 
   private addItemIfPosId(subject: GraphSubject, property: string,
-    rewriter: (listId: string) => ListRewriter, filter = isReference) {
+    rewriter: (listId: string) => ListRewriter) {
     const posId = meld.matchRdflseqPosId(property), object = subject[property];
-    if (posId != null && isPropertyObject(property, object) && filter(object))
-      rewriter(subject['@id']).addInsert({ property: property, id: object['@id'] }, posId);
+    if (posId != null && isPropertyObject(property, object) &&
+      (isReference(object) || isSubjectObject(object))) {
+      const slotId = object['@id'];
+      if (slotId != null)
+        rewriter(subject['@id']).addInsert({ property: property, id: slotId }, posId);
+    }
   }
 }
 
