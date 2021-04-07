@@ -10,7 +10,7 @@ import { check, observeAsyncIterator, Stopwatch } from '../util';
 import { LockManager } from '../locks';
 import { QuadSet, RdfFactory } from '../quads';
 import { Filter } from '../indices';
-import { BatchOpts, Binding, DefaultGraphMode, ResultType } from 'quadstore/dist/lib/types';
+import { BatchOpts, Binding, ResultType } from 'quadstore/dist/lib/types';
 import { Context, Iri } from 'jsonld/jsonld-spec';
 import { activeCtx, compactIri, expandTerm, ActiveContext } from '../jsonld';
 import { Algebra } from 'sparqlalgebrajs';
@@ -179,8 +179,7 @@ export class QuadStoreDataset implements Dataset {
       prefixes: activeCtx == null ? undefined : {
         expandTerm: term => expandTerm(term, activeCtx),
         compactIri: iri => compactIri(iri, activeCtx)
-      },
-      defaultGraphMode: DefaultGraphMode.DEFAULT
+      }
     });
     await this.store.open();
     return this;

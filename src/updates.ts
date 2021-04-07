@@ -221,7 +221,7 @@ class SubjectPropertyUpdater {
     this.subject[this.property] = values.length === 0 ? [] : // See next
       // Properties which were not an array before get collapsed
       values.length === 1 && !this.wasArray ? values[0] : values;
-    if (!this.wasArray && values.length === 0)
+    if (values.length === 0)
       delete this.subject[this.property];
   }
 

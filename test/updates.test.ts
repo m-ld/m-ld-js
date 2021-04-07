@@ -105,6 +105,18 @@ describe('Update utilities', () => {
     expect(box).toEqual({ '@id': 'foo', size: [10, 20, 30] });
   });
 
+  test('removes a value to leave undefined', () => {
+    const box: Box = { '@id': 'foo', size: 10 };
+    updateSubject(box, { foo: { '@insert': undefined, '@delete': { '@id': 'foo', size: 10 } } });
+    expect(box).toEqual({ '@id': 'foo' });
+  });
+
+  test('removes last array value to leave undefined', () => {
+    const box = { '@id': 'foo', size: [10, 20] };
+    updateSubject(box, { foo: { '@insert': undefined, '@delete': { '@id': 'foo', size: [10, 20] } } });
+    expect(box).toEqual({ '@id': 'foo' });
+  });
+
   test('does not add an empty array value', () => {
     const box: Box = { '@id': 'foo', size: 10 };
     updateSubject(box, { foo: { '@insert': { '@id': 'foo', size: [] }, '@delete': undefined } });

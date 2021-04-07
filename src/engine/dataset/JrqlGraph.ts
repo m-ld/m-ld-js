@@ -6,7 +6,7 @@ import {
 } from '../../jrql-support';
 import { NamedNode, Quad, Term } from 'rdf-js';
 import { Graph, PatchQuads } from '.';
-import { toArray, mergeMap, groupBy, catchError, reduce, map } from 'rxjs/operators';
+import { toArray, mergeMap, groupBy, reduce, map } from 'rxjs/operators';
 import { EMPTY, merge, Observable, of, throwError } from 'rxjs';
 import { canPosition, inPosition, TriplePos } from '../quads';
 import { ActiveContext, expandTerm, initialCtx, nextCtx } from "../jsonld";

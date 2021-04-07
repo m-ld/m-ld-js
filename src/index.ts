@@ -11,7 +11,7 @@ import { MeldStatus, LiveStatus } from '@m-ld/m-ld-spec';
 import { Observable } from 'rxjs';
 
 export {
-  Pattern, Reference, Context, Variable, Value, Describe,
+  Pattern, Reference, Context, Variable, Value, Describe, Construct,
   Group, Query, Read, Result, Select, Subject, Update,
   isRead, isWrite
 } from './jrql-support';
