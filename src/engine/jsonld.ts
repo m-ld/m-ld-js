@@ -3,7 +3,7 @@ import { Context, Iri } from 'jsonld/jsonld-spec';
 import { compactIri as _compactIri } from 'jsonld/lib/compact';
 import { getInitialContext, expandIri, ActiveContext } from 'jsonld/lib/context';
 
-export * from 'jsonld/lib/util';
+export { compareValues, hasProperty, hasValue } from 'jsonld/lib/util';
 export { ActiveContext, getContextValue } from 'jsonld/lib/context';
 
 export function expandTerm(value: string, ctx: ActiveContext,

@@ -67,8 +67,9 @@ ui.on('show', async () => {
 ### Handling Updates
 Clone [updates](interfaces/meldupdate.html) obtained from a read handler specify
 the exact Subject property values that have been deleted or inserted during the
-update. Utility methods are provided to help update app views of data
-based on updates notified via the {@link read} method:
-- [asSubjectUpdates](#assubjectupdates)
+update. Utilities are provided to help update app views of data based on updates
+notified via the {@link read} method:
 - [updateSubject](#updatesubject)
+- [SubjectUpdater](/classes/subjectupdater.html)
+- [asSubjectUpdates](#assubjectupdates)
 - [includesValue](#includesvalue)

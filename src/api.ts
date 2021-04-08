@@ -290,7 +290,7 @@ export interface MeldStateMachine extends MeldState {
  * on-disk and in-browser persistence options are available (see
  * [Getting&nbsp;Started](/#getting-started)).
  *
- * @see https://spec.m-ld.org/interfaces/meldclone.html
+ * @see [m-ld Specification](https://spec.m-ld.org/interfaces/meldclone.html)
  */
 export interface MeldClone extends MeldStateMachine {
   /**
@@ -320,7 +320,7 @@ export interface MeldClone extends MeldStateMachine {
  * of some rule.
  *
  * > 🚧 *Data constraints are currently an experimental feature. Please
- * > [contact&nbsp;us](mailto:info@m-ld.io) to discuss constraints required for
+ * > [contact&nbsp;us](https://m-ld.org/hello/) to discuss constraints required for
  * > your use-case.*
  *
  * In this clone engine, constraints are checked and applied for updates prior
@@ -328,7 +328,7 @@ export interface MeldClone extends MeldStateMachine {
  * constraint requires to know the final state, it must infer it from the given
  * reader and the update.
  *
- * @see http://m-ld/org/doc/#concurrency
+ * @see [m-ld concurrency](http://m-ld/org/doc/#concurrency)
  */
 export interface MeldConstraint {
   /**

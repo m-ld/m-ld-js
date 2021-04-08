@@ -71,9 +71,8 @@ function unReifyRefs(subject: Subject) {
 }
 
 /**
- * Applies an update to the given subject, expressed as a {@link Resource}. This
- * method will correctly apply the deleted and inserted properties from the
- * update, accounting for **m-ld**
+ * Applies an update to the given subject. This method will correctly apply the
+ * deleted and inserted properties from the update, accounting for **m-ld**
  * [data&nbsp;semantics](http://spec.m-ld.org/#data-semantics).
  *
  * Referenced Subjects will also be updated if they have been affected by the
@@ -101,7 +100,7 @@ function unReifyRefs(subject: Subject) {
  * @param update the update, as a {@link MeldUpdate} or obtained from
  * {@link asSubjectUpdates}
  * @typeParam T the app-specific subject type of interest
- * @see http://spec.m-ld.org/#data-semantics
+ * @see [m-ld data semantics](http://spec.m-ld.org/#data-semantics)
  */
 export function updateSubject<T extends Subject & Reference>(
   subject: T, update: SubjectUpdates | DeleteInsert<GraphSubjects>): T {

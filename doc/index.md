@@ -36,7 +36,7 @@ A **m-ld** clone uses a 'remotes' object to communicate with other clones.
 
 > 🚧 *If your architecture includes some other publish/subscribe service like
 > AMQP, or you would like to use a fully peer-to-peer protocol, please
-> [contact&nbsp;us](mailto:info@m-ld.io) to discuss your use-case.*
+> [contact&nbsp;us](https://m-ld.org/hello/) to discuss your use-case.*
 
 ### Initialisation
 The [clone](#clone) function initialises the m-ld engine with a leveldb back-end
