@@ -64,7 +64,7 @@
     }
   },
   "dependencies": {
-    "@m-ld/m-ld-spec": "^0.6.1",
+    "@m-ld/m-ld-spec": "^0.6.2-0",
     "@types/abstract-leveldown": "^5.0.1",
     "@types/detect-node": "^2.0.0",
     "@types/jsonld": "^1.5.2",
