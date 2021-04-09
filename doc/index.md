@@ -26,8 +26,8 @@ LevelDB-compatible storage backend.
   (memory storage).
 - In the browser, use [level-js](https://github.com/Level/level-js)
   (browser-local storage).
-- In a service, use [leveldown](https://github.com/level/leveldown/)
-  (file system storage).
+- In a service or native application, use
+  [leveldown](https://github.com/level/leveldown/) (file system storage).
 
 ### Connecting to Other Clones
 A **m-ld** clone uses a 'remotes' object to communicate with other clones.

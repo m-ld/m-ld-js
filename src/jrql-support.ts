@@ -84,12 +84,53 @@ export { operators } from 'json-rql';
  * Used to express an ordered set of data. A List object is reified to a Subject
  * (unlike in JSON-LD) and so it has an @id, which can be set by the user.
  *
- * Note that this reification is only possible when using the `@list` keyword,
- * and not if the active context specifies `"@container": "@list"` for a
- * property, in which case the list itself is anonymous.
+ * ## Examples:
+ *
+ * ---
+ * *A priority list of preferences*
+ *
+ * The second subject in this array shows how the first subject (the List) can
+ * be referenced by another subject. When inserting data it might be more
+ * readable to simply nest the list under the `interests` property in the outer
+ * subject, fred.
+ * ```json
+ * [{
+ *   "@id": "fredInterests",
+ *   "@list": ["Lounging", "Bowling", "Pool", "Golf", "Poker"]
+ * }, {
+ *   "@id": "fred",
+ *   "interests": { "@id": "fredInterests" }
+ * }]
+ * ```
+ * ---
+ * *A chronology of referenced subjects*
+ * ```json
+ * {
+ *   "@id": "fredAppearsIn",
+ *   "@list": [
+ *     { "@type": "Episode", "name": "The Flintstone Flyer" },
+ *     { "@type": "Episode", "name": "Hot Lips Hannigan" },
+ *     { "@type": "Episode", "name": "The Swimming Pool" }
+ *   ]
+ * }
+ * ```
+ *
+ * > 🚧 This engine does not support use of the `@list` keyword in a JSON-LD
+ * > Context term definition.
+ *
+ * @see [m-ld Lists specification](https://spec.m-ld.org/#lists)
  * @see [json-rql list](https://json-rql.org/interfaces/list.html)
  */
 export interface List extends Subject {
+  /**
+   * An array or indexed-object representation of the list contents. Each "item"
+   * in the list can be any of the normal subject property objects, such as
+   * strings, numbers, booleans or References to other subjects.
+   *
+   * The indexed-object notation is used to insert or delete items at a specific
+   * list index, expressed as a number or numeric string. For more explanation,
+   * see the [m-ld Lists specification](https://spec.m-ld.org/#lists).
+   */
   '@list': SubjectPropertyObject[] | { [key in string | number]: SubjectPropertyObject };
 }
 
@@ -132,8 +173,9 @@ export type Result = '*' | Variable | Variable[];
 /**
  * A resource, represented as a JSON object, that is part of the domain data.
  * 
- * Examples:
+ * ## Examples:
  * 
+ * ---
  * *A subject with one property: "fred's name is Fred"*
  * ```json
  * {
@@ -141,6 +183,7 @@ export type Result = '*' | Variable | Variable[];
  *   "name": "Fred"
  * }
  * ```
+ * ---
  * *A subject with a {@link Reference} property: "fred's wife is wilma"*
  * ```json
  * {
@@ -148,6 +191,7 @@ export type Result = '*' | Variable | Variable[];
  *   "wife": { "@id": "wilma" }
  * }
  * ```
+ * ---
  * *A subject with another nested subject: "fred's wife is wilma, and her name is Wilma"*
  * ```json
  * {
@@ -162,7 +206,6 @@ export type Result = '*' | Variable | Variable[];
  * @see [json-rql subject](https://json-rql.org/interfaces/subject.html)
  */
 export interface Subject extends Pattern {
-  // No support for inline filters
   /**
    * The unique identity of the subject in the domain.
    * > 🚧 *Subjects strictly need not be identified with an `@id`, but the data
@@ -181,6 +224,7 @@ export interface Subject extends Pattern {
    * to a set of one or more values.
    */
   [key: string]: SubjectPropertyObject | Context | undefined;
+  // No support for inline filters
 }
 
 /**
@@ -218,16 +262,16 @@ export function isSubjectObject(o: SubjectPropertyObject): o is Subject {
  * An operator-based constraint of the form `{ <operator> : [<expression>...]
  * }`. The key is the operator, and the value is the array of arguments. If the
  * operator is unary, the expression need not be wrapped in an array.
- * @see [json-rql operators](https://json-rql.org/globals.html#operators)
  * @see [json-rql constraint](https://json-rql.org/interfaces/constraint.html)
  */
 export interface Constraint {
   /**
    * Operators are based on SPARQL expression keywords, lowercase with '@' prefix.
-   * It's not practical to constrain the types further here, see #isConstraint
+   * @see [json-rql operators](https://json-rql.org/globals.html#operators)
    * @see [SPARQL conditional](https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#rConditionalOrExpression)
    */
   [operator: string]: Expression | Expression[]
+  // It's not practical to constrain the types further here, see #isConstraint
 };
 
 /** @internal */
@@ -239,8 +283,9 @@ export function isConstraint(value: Expression): value is Constraint {
  * Used to express a group of patterns to match, or a group of subjects to write
  * (when used as a transaction pattern).
  *
- * Examples:
- *
+ * ## Examples:
+ * 
+ * ---
  * *Insert multiple subjects*
  * ```json
  * {
@@ -256,6 +301,7 @@ export function isConstraint(value: Expression): value is Constraint {
  *   ]
  * }
  * ```
+ * ---
  * *Delete all properties of subject `fred` **and** all properties of other
  * subjects that reference it*
  * ```json
@@ -272,7 +318,7 @@ export function isConstraint(value: Expression): value is Constraint {
  *   }
  * }
  * ```
- *
+ * ---
  * > Note that when used in a `@where` clause, a plain array can substitute for
  * > a Group, as follows:
  * >
@@ -355,8 +401,9 @@ export interface Query extends Pattern {
    * used as placeholders to capture matching properties and values in the
    * domain.
    * 
-   * Examples:
+   * ## Examples:
    * 
+   * ---
    * *Match a subject by its `@id`*
    * ```json
    * {
@@ -364,6 +411,7 @@ export interface Query extends Pattern {
    *   "@where": { "@id": "fred" }
    * }
    * ```
+   * ---
    * *Match a subject where any property has a given value*
    * ```json
    * {
@@ -374,6 +422,7 @@ export interface Query extends Pattern {
    *   }
    * }
    * ```
+   * ---
    * *Match a subject with a given property, having any value*
    * ```json
    * {
@@ -445,14 +494,16 @@ export function isWrite(p: Pattern): p is Write {
  * A simple means to get the properties of a specific subject, or a set of
  * subjects matching some `@where` clause.
  *
- * Examples:
+ * ## Examples:
  *
+ * ---
  * *Describe a specific subject whose `@id` is `fred`*
  * ```json
  * {
  *   "@describe": "fred"
  * }
  * ```
+ * ---
  * *Describe all subjects in the domain*
  * ```json
  * {
@@ -460,6 +511,7 @@ export function isWrite(p: Pattern): p is Write {
  *   "@where": { "@id": "?id" }
  * }
  * ```
+ * ---
  * *Describe subjects with a property `age` of `40`*
  * ```json
  * {
@@ -470,6 +522,7 @@ export function isWrite(p: Pattern): p is Write {
  *   }
  * }
  * ```
+ * ---
  * *Describe all subjects referenced by `fred` via any property*
  * ```json
  * {
@@ -520,8 +573,9 @@ export function isDescribe(p: Pattern): p is Describe {
  * data already in the domain, or with a `@where` clause to create new data
  * structures.
  *
- * Examples:
+ * ## Examples:
  *
+ * ---
  * *Pattern match an identified subject with nested content*
  * ```json
  * {
@@ -544,12 +598,13 @@ export function isDescribe(p: Pattern): p is Describe {
  * }
  * ```
  *
+ * ---
  * *Pattern match list content*
  * ```json
  * {
  *   "@construct": {
  *     "@id": "fred",
- *     "episodes": {
+ *     "appearsIn": {
  *       "@list": { "1": "?" }
  *     }
  *   }
@@ -559,7 +614,7 @@ export function isDescribe(p: Pattern): p is Describe {
  * ```json
  * {
  *   "@id": "fred",
- *   "episodes": {
+ *   "appearsIn": {
  *     "@list": [
  *       null,
  *       { "@id": "hotLipsHannigan" }
@@ -568,6 +623,7 @@ export function isDescribe(p: Pattern): p is Describe {
  * }
  * ```
  *
+ * ---
  * *Construct new information based on existing information*
  * ```json
  * {
@@ -624,8 +680,9 @@ export function isConstruct(p: Pattern): p is Construct {
  *   ...
  * }
  * ```
- * Examples:
+ * ## Examples:
  * 
+ * ---
  * *Select the ids of subjects having a given name*
  * ```json
  * {
@@ -636,6 +693,7 @@ export function isConstruct(p: Pattern): p is Construct {
  *   }
  * }
  * ```
+ * ---
  * *Select the ids and names of all subjects*
  * ```json
  * {
@@ -666,8 +724,9 @@ export function isSelect(p: Pattern): p is Select {
 /**
  * A pattern to update the properties of matching subjects in the domain.
  * 
- * Examples:
+ * ## Examples:
  * 
+ * ---
  * *Delete a subject property*
  * ```json
  * {
@@ -677,6 +736,7 @@ export function isSelect(p: Pattern): p is Select {
  *   }
  * }
  * ```
+ * ---
  * *Delete a property, where another property has a value*
  * ```json
  * {
@@ -691,6 +751,7 @@ export function isSelect(p: Pattern): p is Select {
  *   }
  * }
  * ```
+ * ---
  * *Update a subject property*
  * ```json
  * {
@@ -704,6 +765,7 @@ export function isSelect(p: Pattern): p is Select {
  *   }
  * }
  * ```
+ * ---
  * *Replace all of a subject's properties*
  * ```json
  * {

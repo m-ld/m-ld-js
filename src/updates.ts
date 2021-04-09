@@ -71,9 +71,9 @@ function unReifyRefs(subject: Subject) {
 }
 
 /**
- * Applies an update to the given subject. This method will correctly apply the
- * deleted and inserted properties from the update, accounting for **m-ld**
- * [data&nbsp;semantics](http://spec.m-ld.org/#data-semantics).
+ * Applies an update to the given subject in-place. This method will correctly
+ * apply the deleted and inserted properties from the update, accounting for
+ * **m-ld** [data&nbsp;semantics](http://spec.m-ld.org/#data-semantics).
  *
  * Referenced Subjects will also be updated if they have been affected by the
  * given update, deeply. If a reference property has changed to a different
@@ -113,9 +113,9 @@ export function updateSubject<T extends Subject & Reference>(
  * @see {@link updateSubject}
  */
 export class SubjectUpdater {
-  readonly delOrInsForSubject:
+  private readonly delOrInsForSubject:
     (subject: GraphSubject, key: keyof DeleteInsert<any>) => GraphSubject | undefined;
-  readonly done = new Set<object>();
+  private readonly done = new Set<object>();
 
   constructor(update: SubjectUpdates | DeleteInsert<GraphSubjects>) {
     if (isDeleteInsert(update))
@@ -127,6 +127,9 @@ export class SubjectUpdater {
   }
 
   /**
+   * Applies an update to the given subject in-place.
+   * 
+   * @returns the given subject, for convenience
    * @see {@link updateSubject}
    */
   update<T extends Subject & Reference>(subject: T): T {
@@ -150,6 +153,7 @@ export class SubjectUpdater {
     return subject;
   }
 
+  /** @internal */
   updateValues(values: Iterable<any>) {
     for (let value of values)
       if (typeof value == 'object' && '@id' in value && !isReference(value))
