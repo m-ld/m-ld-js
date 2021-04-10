@@ -11,7 +11,8 @@ module.exports = {
     './src/types/**',
     './src/ns/**',
     './src/ably/**',
-    './src/mqtt/**'
+    './src/mqtt/**',
+    './src/wrtc/**'
   ],
   excludePrivate: true,
   excludeProtected: true,

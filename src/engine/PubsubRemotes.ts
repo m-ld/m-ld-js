@@ -4,8 +4,9 @@ import { TreeClock } from './clocks';
 import { generate as uuid } from 'short-uuid';
 import { Response, Request } from './ControlMessage';
 import { MsgPack, Future, toJson, Stopwatch } from './util';
-import { finalize, flatMap, reduce, toArray, first, concatMap, materialize, timeout, share } from 'rxjs/operators';
-import { MeldEncoding } from './MeldEncoding';
+import {
+  finalize, mergeMap, reduce, toArray, first, concatMap, materialize, timeout, share
+} from 'rxjs/operators';
 import { MeldError, MeldErrorStatus } from './MeldError';
 import { AbstractMeld } from './AbstractMeld';
 import { MeldConfig, shortId } from '..';
@@ -18,24 +19,35 @@ export interface JsonNotification {
   error?: any;
 }
 
-export interface DirectParams {
+/** Parameters for sending, receiving and notifying a peer */
+export interface PeerParams {
   toId: string;
   fromId: string;
+}
+
+/** Parameters for sending a single message */
+export interface SendParams extends PeerParams {
   messageId: string;
 }
 
-export interface ReplyParams extends DirectParams {
+/** Parameters for replying to a message */
+export interface ReplyParams extends SendParams {
   sentMessageId: string;
+}
+
+/** Parameters for multiple messages on some channel */
+export interface NotifyParams extends PeerParams {
+  channelId: string;
 }
 
 export interface SubPub {
   readonly id: string;
   publish(msg: Buffer): Promise<unknown>;
+  close(): void;
 }
 
 export interface SubPubsub extends SubPub {
   subscribe(): Promise<unknown>;
-  unsubscribe(): Promise<unknown>;
 }
 
 export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes {
@@ -44,7 +56,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     [messageId: string]: [(res: Response | null) => void, PromiseLike<void> | null]
   } = {};
   private readonly recentlySentTo: Set<string> = new Set;
-  private readonly consuming: { [address: string]: Observer<Buffer> } = {};
+  private readonly consuming: { [subPubId: string]: Observer<Buffer> } = {};
   private readonly sendTimeout: number;
   private readonly activity: Set<PromiseLike<void>> = new Set;
   /**
@@ -112,11 +124,11 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
 
   protected abstract present(): Observable<string>;
 
-  protected abstract notifier(toId: string, id: string): SubPubsub;
+  protected abstract notifier(params: NotifyParams): SubPubsub | Promise<SubPubsub>;
 
-  protected abstract sender(toId: string, messageId: string): SubPub;
+  protected abstract sender(params: SendParams): SubPub | Promise<SubPub>;
 
-  protected abstract replier(toId: string, messageId: string, sentMessageId: string): SubPub;
+  protected abstract replier(params: ReplyParams): SubPub | Promise<SubPub>;
 
   async close(err?: any) {
     if (err)
@@ -137,7 +149,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
 
   async newClock(): Promise<TreeClock> {
     const sw = new Stopwatch('clock', shortId(4));
-    const res = await this.send<Response.NewClock>(new Request.NewClock, { sw });
+    const { res } = await this.send<Response.NewClock>(new Request.NewClock, { sw });
     sw.stop();
     return res.clock;
   }
@@ -145,19 +157,21 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
   async snapshot(): Promise<Snapshot> {
     const ack = new Future;
     const sw = new Stopwatch('snapshot', shortId(4));
-    const res = await this.send<Response.Snapshot>(new Request.Snapshot, { ack, sw });
+    const { res, from } = await this.send<Response.Snapshot>(new Request.Snapshot, { ack, sw });
     sw.next('consume');
     // Subscribe in parallel (subscription can be slow)
     const [quads, updates] = await Promise.all([
-      this.consume(res.quadsAddress, this.triplesFromBuffer, 'failIfSlow'),
-      this.consume(res.updatesAddress, DeltaMessage.decode)
+      this.consume(from, res.quadsAddress, this.triplesFromBuffer, 'failIfSlow'),
+      this.consume(from, res.updatesAddress, DeltaMessage.decode)
     ]);
     sw.stop();
-    return { lastTime: res.lastTime, quads: defer(() => {
-      // Ack the response to start the streams
-      ack.resolve();
-      return quads;
-    }), updates };
+    return {
+      lastTime: res.lastTime, quads: defer(() => {
+        // Ack the response to start the streams
+        ack.resolve();
+        return quads;
+      }), updates
+    };
   }
 
   private triplesFromBuffer = (payload: Buffer) =>
@@ -166,20 +180,22 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
   async revupFrom(time: TreeClock): Promise<Revup | undefined> {
     const ack = new Future;
     const sw = new Stopwatch('revup', shortId(4));
-    const res = await this.send<Response.Revup>(new Request.Revup(time), {
+    const { res, from } = await this.send<Response.Revup>(new Request.Revup(time), {
       // Try everyone until we find someone who can revup
       ack, check: res => res.lastTime != null, sw
     });
     if (res.lastTime != null) {
       sw.next('consume');
       const updates = await this.consume(
-        res.updatesAddress, DeltaMessage.decode, 'failIfSlow');
+        from, res.updatesAddress, DeltaMessage.decode, 'failIfSlow');
       sw.stop();
-      return { lastTime: res.lastTime, updates: defer(() => {
-        // Ack the response to start the streams
-        ack.resolve();
-        return updates;
-      }) };
+      return {
+        lastTime: res.lastTime, updates: defer(() => {
+          // Ack the response to start the streams
+          ack.resolve();
+          return updates;
+        })
+      };
     } // else return undefined
     sw.stop();
   }
@@ -214,7 +230,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
       this.closeSafely(new MeldError('Bad update'));
   }
 
-  protected async onSent(payload: Buffer, sentParams: DirectParams) {
+  protected async onSent(payload: Buffer, sentParams: SendParams) {
     // Ignore control messages before we have a clone
     const replyRejected = (err: any) => {
       this.reply(sentParams, new Response.Rejected(asMeldErrorStatus(err)))
@@ -269,15 +285,15 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     }
   }
 
-  protected onNotify(id: string, payload: Buffer) {
-    if (id in this.consuming) {
+  protected onNotify(subPubId: string, payload: Buffer) {
+    if (subPubId in this.consuming) {
       const json = MsgPack.decode(payload);
       if (json.next)
-        this.consuming[id].next(json.next);
+        this.consuming[subPubId].next(json.next);
       else if (json.complete)
-        this.consuming[id].complete();
+        this.consuming[subPubId].complete();
       else if (json.error)
-        this.consuming[id].error(MeldError.from(json.error));
+        this.consuming[subPubId].error(MeldError.from(json.error));
     }
   }
 
@@ -308,8 +324,8 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
       check?: (res: T) => boolean;
       sw: Stopwatch;
     },
-    tried: { [address: string]: PromiseLike<T> } = {},
-    messageId: string = uuid()): Promise<T> {
+    tried: { [address: string]: PromiseLike<{ res: T, from: string }> } = {},
+    messageId: string = uuid()): Promise<{ res: T, from: string }> {
     sw.next('sender');
     const sender = await this.nextSender(messageId);
     if (sender == null) {
@@ -322,12 +338,15 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     }
     this.log.debug('Sending request', messageId, request, sender.id);
     sw.next('send');
-    const sent = sender.publish(MsgPack.encode(request.toJson()));
-    tried[sender.id] = this.getResponse<T>(sent, messageId, ack ?? null);
+    const sent = sender
+      .publish(MsgPack.encode(request.toJson()))
+      .finally(() => sender.close());
+    tried[sender.id] = this.getResponse<T>(sent, messageId, ack ?? null)
+      .then(res => ({ res, from: sender.id }));
     // If the publish fails, don't keep trying other addresses
     await sent;
     // If the caller doesn't like this response, try again
-    return tried[sender.id].then(res => check == null || check(res) ? res :
+    return tried[sender.id].then(rtn => check == null || check(rtn.res) ? rtn :
       this.send(request, { ack, check, sw }, tried, messageId),
       () => this.send(request, { ack, check, sw }, tried, messageId));
   }
@@ -339,11 +358,11 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     const response = new Future<T>();
     // Three possible outcomes:
     // 1. Response times out
-    const timer = setTimeout(() => {
+    const timer = this.timeout(() => {
       delete this.replyResolvers[messageId];
       this.log.debug(`Message ${messageId} timed out.`)
       response.reject(new Error('Send timeout exceeded.'));
-    }, this.sendTimeout);
+    });
     // 2. Send fails - abandon the response
     sent.catch(err => {
       delete this.replyResolvers[messageId];
@@ -362,6 +381,10 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     return response;
   }
 
+  protected timeout(callback: (...args: any[]) => void) {
+    return setTimeout(callback, this.sendTimeout);
+  }
+
   private active(): Future {
     const active = new Future();
     const done = active.then(() => { this.activity.delete(done); });
@@ -369,51 +392,58 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     return active;
   }
 
-  private async replyClock(sentParams: DirectParams, clock: TreeClock) {
+  private async replyClock(sentParams: SendParams, clock: TreeClock) {
     await this.reply(sentParams, new Response.NewClock(clock));
   }
 
-  private async replySnapshot(sentParams: DirectParams, snapshot: Snapshot): Promise<void> {
+  private async replySnapshot(sentParams: SendParams, snapshot: Snapshot): Promise<void> {
     const { lastTime, quads, updates } = snapshot;
     const quadsAddress = uuid(), updatesAddress = uuid();
-    await this.reply(sentParams, new Response.Snapshot(
-      lastTime, quadsAddress, updatesAddress
-    ), 'expectAck');
+    const [, quadsNotifier, updatesNotifier] = await Promise.all([
+      this.reply(sentParams, new Response.Snapshot(
+        lastTime, quadsAddress, updatesAddress), 'expectAck'),
+      this.notifier({ toId: sentParams.fromId, fromId: this.id, channelId: quadsAddress }),
+      this.notifier({ toId: sentParams.fromId, fromId: this.id, channelId: updatesAddress })
+    ]);
     // Ack has been sent, start streaming the data and updates concurrently
     await Promise.all([
-      this.produce(quads, sentParams.fromId, quadsAddress, this.bufferFromTriples, 'snapshot'),
-      this.produce(updates, sentParams.fromId, updatesAddress, msg => msg.encode(), 'updates')
+      this.produce(quads, quadsNotifier, this.bufferFromTriples, 'snapshot'),
+      this.produce(updates, updatesNotifier, msg => msg.encode(), 'updates')
     ]);
   }
 
   private bufferFromTriples = (triples: Triple[]) =>
     MsgPack.encode(this.requireClone().encoding.jsonFromTriples(triples));
 
-  private async replyRevup(sentParams: DirectParams, revup: Revup | undefined) {
+  private async replyRevup(sentParams: SendParams, revup: Revup | undefined) {
     if (revup) {
       const updatesAddress = uuid();
-      await this.reply(sentParams, new Response.Revup(revup.lastTime, updatesAddress), 'expectAck');
+      const [, notifier] = await Promise.all([
+        this.reply(sentParams, new Response.Revup(revup.lastTime, updatesAddress), 'expectAck'),
+        this.notifier({ toId: sentParams.fromId, fromId: this.id, channelId: updatesAddress })
+      ]);
       // Ack has been sent, start streaming the updates
-      await this.produce(revup.updates, sentParams.fromId, updatesAddress, msg => msg.encode(), 'updates');
+      await this.produce(revup.updates, notifier, msg => msg.encode(), 'updates');
     } else if (this.clone) {
       await this.reply(sentParams, new Response.Revup(null, this.clone.id));
     }
   }
 
   private async consume<T>(
-    subAddress: string,
+    fromId: string,
+    channelId: string,
     map: (payload: Buffer) => T | Promise<T>,
     failIfSlow?: 'failIfSlow'): Promise<Observable<T>> {
-    const notifier = this.notifier(this.id, subAddress);
+    const notifier = await this.notifier({ toId: this.id, fromId, channelId });
     const src = this.consuming[notifier.id] = new Source;
     await notifier.subscribe();
     const consumed = src.pipe(
       // Unsubscribe from the sub-channel when a complete or error arrives.
       finalize(() => {
-        notifier.unsubscribe();
+        notifier.close();
         delete this.consuming[notifier.id];
       }),
-      flatMap(async payload => map(payload)));
+      mergeMap(async payload => map(payload)));
     // Rev-up and snapshot update channels are expected to be very fast, as they
     // are streamed directly from the dataset. So if there is a pause in the
     // delivery this probably indicates a failure e.g. the collaborator is dead.
@@ -423,42 +453,48 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
       .pipe(share()); // TODO unit test this
   }
 
-  private produce<T>(data: Observable<T>, toId: string, subAddress: string,
+  private async produce<T>(data: Observable<T>, notifier: SubPub,
     datumToPayload: (datum: T) => Promise<Buffer> | Buffer, type: string) {
-    const notifier = this.notifier(toId, subAddress);
-    const notifyError: (error: any) => Promise<unknown> = error => {
-      this.log.warn('Notifying error on', subAddress, error);
-      return notify({ error: toJson(error) });
+    const notifyError = (error: any, final = true) => {
+      this.log.warn('Notifying error on', notifier.id, error);
+      return notify({ error: toJson(error) }, final);
     }
-    const notify: (notification: JsonNotification) => Promise<unknown> = notification => {
-      if (notification.complete)
-        this.log.debug('Completed production of', type);
+    const notifyComplete = () => {
+      this.log.debug('Completed production of', type);
+      return notify({ complete: true }, true);
+    };
+    const notify = async (notification: JsonNotification, final = false) => {
       try {
-        return notifier.publish(MsgPack.encode(notification));
+        await notifier.publish(MsgPack.encode(notification));
       } catch (error) {
         // If notifications fail due to channel death, the recipient will find
-        // out from the broker so here we make best efforts to notify an error
+        // out from the network so here we make best efforts to notify an error
         // and then give up.
-        return notifyError(error);
+        await notifyError(error, !final); // Don't re-close if already final
+      } finally {
+        if (final)
+          notifier.close();
       }
     }
     return data.pipe(
       // concatMap guarantees delivery ordering despite toJson promise ordering
       concatMap(async datum => await datumToPayload(datum)),
       materialize(),
-      flatMap(notification => notification.do(
+      mergeMap(notification => notification.do(
         next => notify({ next }),
         error => notifyError(error),
-        () => notify({ complete: true }))))
+        () => notifyComplete())))
       .toPromise();
   }
 
   private async reply(
-    { fromId: toId, messageId: sentMessageId }: DirectParams, res: Response | null, expectAck?: 'expectAck') {
+    { fromId: toId, messageId: sentMessageId }: SendParams, res: Response | null, expectAck?: 'expectAck') {
     const messageId = uuid();
-    const replier = this.replier(toId, messageId, sentMessageId);
+    const replier = await this.replier({ fromId: this.id, toId, messageId, sentMessageId });
     this.log.debug('Replying response', messageId, 'to', sentMessageId, res, replier.id);
-    const replied = replier.publish(MsgPack.encode(res == null ? null : res.toJson()));
+    const replied = replier
+      .publish(MsgPack.encode(res == null ? null : res.toJson()))
+      .finally(() => replier.close());
     if (expectAck)
       return this.getResponse<null>(replied, messageId, null);
     else
@@ -474,7 +510,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     const toId = present.filter(id => !this.recentlySentTo.has(id))[0];
     if (toId != null) {
       this.recentlySentTo.add(toId);
-      return this.sender(toId, messageId);
+      return this.sender({ fromId: this.id, toId, messageId });
     }
     return null;
   }

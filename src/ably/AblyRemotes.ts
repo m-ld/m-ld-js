@@ -5,10 +5,13 @@
  */
 import * as Ably from 'ably';
 import { MeldConfig } from '..';
-import { PubsubRemotes, SubPubsub, SubPub, DirectParams, ReplyParams } from '../engine/PubsubRemotes';
+import {
+  PubsubRemotes, SubPubsub, SubPub, SendParams, ReplyParams, NotifyParams, PeerParams
+} from '../engine/PubsubRemotes';
 import { Observable, from, identity } from 'rxjs';
-import { flatMap, filter, map } from 'rxjs/operators';
+import { mergeMap, filter, map } from 'rxjs/operators';
 import { AblyTraffic, AblyTrafficConfig } from './AblyTraffic';
+import type { WrtcPeering, PeerSignaller, PeerSignal } from '../wrtc/WrtcPeering';
 
 export interface AblyMeldConfig extends
   Omit<Ably.Types.ClientOptions, 'echoMessages' | 'clientId'>,
@@ -19,28 +22,36 @@ export interface MeldAblyConfig extends MeldConfig {
   ably: AblyMeldConfig;
 }
 
-interface SendTypeParams extends DirectParams { type: '__send'; }
-interface ReplyTypeParams extends ReplyParams { type: '__reply'; }
-interface NotifyTypeParams { type: '__notify'; toId: string; id: string; }
-type DirectTypeParams = SendTypeParams | ReplyTypeParams | NotifyTypeParams;
+export const ablyConnect =
+  (opts: Ably.Types.ClientOptions) => new Ably.Realtime.Promise(opts);
 
-export class AblyRemotes extends PubsubRemotes {
+interface SendTypeParams extends SendParams { type: '__send'; }
+interface ReplyTypeParams extends ReplyParams { type: '__reply'; }
+interface NotifyTypeParams extends NotifyParams { type: '__notify' }
+interface SignalTypeParams extends PeerParams { type: '__signal'; channelId: string; }
+type PeerTypeParams = SendTypeParams | ReplyTypeParams | NotifyTypeParams | SignalTypeParams;
+
+export class AblyRemotes extends PubsubRemotes implements PeerSignaller {
   private readonly client: Ably.Types.RealtimePromise;
   private readonly operations: Ably.Types.RealtimeChannelPromise;
   private readonly direct: Ably.Types.RealtimeChannelPromise;
   private readonly traffic: AblyTraffic;
   private readonly subscribed: Promise<unknown>;
+  private readonly peering?: WrtcPeering;
 
   constructor(config: MeldAblyConfig,
-    connect: (opts: Ably.Types.ClientOptions) => Ably.Types.RealtimePromise
-      = opts => new Ably.Realtime.Promise(opts)) {
+    impl: typeof ablyConnect | { connect?: typeof ablyConnect, peering: WrtcPeering } = ablyConnect) {
     super(config);
-    this.client = connect({ ...config.ably, echoMessages: false, clientId: config['@id'] });
-    this.operations = this.client.channels.get(this.channelName('operations'));
+    if (typeof impl != 'function') {
+      this.peering = impl.peering;
+      impl = impl.connect ?? ablyConnect;
+    }
+    this.client = impl({ ...config.ably, echoMessages: false, clientId: config['@id'] });
+    this.operations = this.channel('operations');
     this.traffic = new AblyTraffic(config.ably);
     // Direct channel that is specific to us, for sending and replying to
     // requests and receiving notifications
-    this.direct = this.client.channels.get(this.channelName(config['@id']));
+    this.direct = this.channel(config['@id']);
     // Ensure we are fully subscribed before we make any presence claims
     this.subscribed = Promise.all([
       this.traffic.subscribe(this.operations, data => this.onRemoteUpdate(data)),
@@ -65,14 +76,14 @@ export class AblyRemotes extends PubsubRemotes {
     this.client.connection.close();
   }
 
-  private channelName(id: string) {
+  private channel(id: string) {
     // https://www.ably.io/documentation/realtime/channels#channel-namespaces
-    return `${this.domain}:${id}`;
+    return this.client.channels.get(`${this.domain}:${id}`);
   }
 
   private onDirectMessage = async (data: any, name: string, clientId: string) => {
     try {
-      const params = this.getParams(name, clientId);
+      const params = this.toParams(name, clientId);
       switch (params?.type) {
         case '__send':
           await this.onSent(data, params);
@@ -81,7 +92,10 @@ export class AblyRemotes extends PubsubRemotes {
           await this.onReply(data, params);
           break;
         case '__notify':
-          this.onNotify(params.id, data);
+          this.onNotify(params.channelId, data);
+          break;
+        case '__signal':
+          this.onSignal(params, data);
       }
     } catch (err) {
       this.warnError(err);
@@ -101,49 +115,101 @@ export class AblyRemotes extends PubsubRemotes {
 
   protected present(): Observable<string> {
     return from(this.operations.presence.get()).pipe(
-      flatMap(identity), // flatten the array of presence messages
+      mergeMap(identity), // flatten the array of presence messages
       filter(present => present.data === '__live'),
       map(present => present.clientId));
   }
 
-  protected notifier(toId: string, id: string): SubPubsub {
-    return this.directSubPub({ type: '__notify', toId, id });
+  protected async notifier(params: NotifyParams): Promise<SubPubsub> {
+    // Try to create a peer-to-peer notifier
+    return (await this.peerSubPub(params)) ??
+      this.directSubPub({ type: '__notify', ...params });
   }
 
-  protected sender(toId: string, messageId: string): SubPub {
-    return this.directSubPub({ type: '__send', toId, messageId, fromId: this.id });
+  protected sender(params: SendParams): SubPub {
+    return this.directSubPub({ type: '__send', ...params });
   }
 
-  protected replier(toId: string, messageId: string, sentMessageId: string): SubPub {
-    return this.directSubPub({ type: '__reply', toId, messageId, sentMessageId, fromId: this.id });
+  protected replier(params: ReplyParams): SubPub {
+    return this.directSubPub({ type: '__reply', ...params });
   }
 
-  private getParams(name: string, clientId: string): DirectTypeParams | undefined {
+  private toParams(msgName: string, clientId: string): PeerTypeParams | undefined {
     // Message name is concatenated type:id:sentMessageId, where id is type-specific info
-    const [type, id, sentMessageId] = name.split(':');
+    const [type, ...id] = msgName.split(':');
     const params = { fromId: clientId, toId: this.id };
     switch (type) {
-      case '__send': return { type, messageId: id, ...params };
-      case '__reply': return { type, messageId: id, sentMessageId, ...params };
-      case '__notify': return { type, id, ...params };
+      case '__send':
+        return { type, messageId: id[0], ...params };
+      case '__reply':
+        return { type, messageId: id[0], sentMessageId: id[1], ...params };
+      case '__notify':
+        return { type, channelId: id[0], ...params };
+      case '__signal':
+        return { type, channelId: id[0], ...params };
     }
   }
 
-  private directSubPub(params: DirectTypeParams): SubPubsub {
-    const channelName = this.channelName(params.toId);
-    const channel = this.client.channels.get(channelName);
-    const [id, name] = (function () {
-      switch (params.type) {
-        case '__send': return [params.toId, `__send:${params.messageId}`];
-        case '__reply': return [params.toId, `__reply:${params.messageId}:${params.sentMessageId}`];
-        case '__notify': return [params.id, `__notify:${params.id}`];
-      }
-    })();
+  private fromParams(params: PeerTypeParams): { msgName: string, subPubId: string } {
+    switch (params.type) {
+      case '__send':
+        return { subPubId: params.toId, msgName: `__send:${params.messageId}` };
+      case '__reply':
+        return { subPubId: params.toId, msgName: `__reply:${params.messageId}:${params.sentMessageId}` };
+      case '__notify':
+        return { subPubId: params.channelId, msgName: `__notify:${params.channelId}` };
+      case '__signal':
+        return { subPubId: params.channelId, msgName: `__signal:${params.channelId}` };
+    }
+  }
+
+  private directSubPub(params: PeerTypeParams): SubPubsub {
+    const channel = this.channel(params.toId);
+    const { subPubId, msgName } = this.fromParams(params);
     return {
-      // Ensure we are subscribed before sending anything, or we won't get the reply
-      id, publish: msg => this.subscribed.then(() => this.traffic.publish(channel, name, msg)),
-      // Never need to subscribe since we are just using our direct channel
-      subscribe: async () => null, unsubscribe: async () => null
+      id: subPubId,
+      publish: msg => this.duplexPublish(channel, msgName, msg),
+      // Subscription not needed, always using our own direct channel
+      subscribe: async () => null, close: () => { }
     };
+  }
+
+  private async duplexPublish(
+    channel: Ably.Types.RealtimeChannelPromise, name: string, msg: Buffer | object): Promise<unknown> {
+    // Ensure we are subscribed before sending anything, or we won't get the reply
+    await this.subscribed;
+    return this.traffic.publish(channel, name, msg);
+  }
+
+  private async peerSubPub(params: NotifyParams): Promise<SubPubsub | undefined> {
+    if (this.peering != null) {
+      try {
+        return this.peering.peerSubPub(params, this);
+      } catch (err) {
+        this.log.info('Cannot use peer-to-peer notifier due to', err);
+        // Fall through to use a direct pubsub
+      }
+    }
+  }
+
+  private onSignal({ fromId, channelId }: SignalTypeParams, data: PeerSignal) {
+    if (this.peering == null)
+      // Someone is trying to peer with us but we can't. Signal an error back.
+      this.signal(fromId, channelId, { unavailable: true }).catch(this.warnError);
+    else
+      this.peering.onSignal(fromId, channelId, data, this);
+  }
+
+  /** override to make public */
+  onNotify(subPubId: string, payload: Buffer) {
+    super.onNotify(subPubId, payload);
+  }
+
+  /** implements PeerSignaller.signal */
+  signal(peerId: string, channelId: string, data: PeerSignal) {
+    const { msgName } = this.fromParams({
+      type: '__signal', channelId, fromId: this.id, toId: peerId
+    });
+    return this.duplexPublish(this.channel(peerId), msgName, data);
   }
 }

@@ -1,6 +1,6 @@
 import { QuadStoreDataset } from './engine/dataset';
 import { DatasetEngine } from './engine/dataset/DatasetEngine';
-import { AbstractLevelDOWN, AbstractOpenOptions } from 'abstract-leveldown';
+import { AbstractLevelDOWN } from 'abstract-leveldown';
 import { ApiStateMachine } from "./engine/MeldState";
 import { LogLevelDesc } from 'loglevel';
 import { ConstraintConfig, constraintFromConfig } from './constraints';
@@ -9,6 +9,7 @@ import { Context } from './jrql-support';
 import { MeldClone, MeldConstraint } from './api';
 import { MeldStatus, LiveStatus } from '@m-ld/m-ld-spec';
 import { Observable } from 'rxjs';
+import { MeldRemotes } from './engine';
 
 export {
   Pattern, Reference, Context, Variable, Value, Describe, Construct,
@@ -93,7 +94,7 @@ export interface MeldConfig {
  */
 export async function clone(
   backend: AbstractLevelDOWN,
-  remotes: dist.mqtt.MqttRemotes | dist.ably.AblyRemotes,
+  remotes: MeldRemotes | (new (config: MeldConfig) => MeldRemotes),
   config: MeldConfig,
   constraints?: MeldConstraint[]): Promise<MeldClone> {
 
@@ -123,22 +124,5 @@ class DatasetClone extends ApiStateMachine implements MeldClone {
 
   close(err?: any): Promise<unknown> {
     return this.dataset.close(err);
-  }
-}
-
-// The m-ld remotes API is not yet public, so here we just declare the available
-// modules for documentation purposes.
-declare module dist {
-  module mqtt {
-    /**
-     * MQTT remotes implementation, see [MQTT Remotes](/#mqtt-remotes)
-     */
-    export type MqttRemotes = any;
-  }
-  module ably {
-    /**
-     * Ably remotes implementation, see [Ably Remotes](/#ably-remotes)
-     */
-    export type AblyRemotes = any;
   }
 }

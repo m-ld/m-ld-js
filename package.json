@@ -7,7 +7,8 @@
   "exports": {
     ".": "./dist/index.js",
     "./dist/mqtt": "./dist/mqtt/index.js",
-    "./dist/ably": "./dist/ably/index.js"
+    "./dist/ably": "./dist/ably/index.js",
+    "./dist/wrtc": "./dist/wrtc/index.js"
   },
   "scripts": {
     "link-locals": "npm link ../m-ld-spec ../json-rql ../typedoc-theme",
@@ -69,6 +70,7 @@
     "@types/detect-node": "^2.0.0",
     "@types/jsonld": "^1.5.2",
     "@types/rdf-js": "^4.0.1",
+    "@types/simple-peer": "^9.6.2",
     "@types/valid-data-url": "^2.0.0",
     "ably": "^1.2.4",
     "async-mqtt": "^2.6.1",
@@ -84,6 +86,7 @@
     "rdf-data-factory": "^1.0.4",
     "rxjs": "^6.6.3",
     "short-uuid": "^4.1.0",
+    "simple-peer": "^9.10.0",
     "valid-data-url": "^3.0.1"
   }
 }
