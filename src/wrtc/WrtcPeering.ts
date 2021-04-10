@@ -29,7 +29,8 @@ export class WrtcPeering {
   } = {};
   protected readonly log: Logger;
 
-  constructor(config: MeldWrtcConfig) {
+  constructor(config: MeldWrtcConfig,
+    private readonly createPeer = (opts: PeerOpts) => new SimplePeer(opts)) {
     this.id = config['@id'];
     this.config = config.wrtc ?? {};
     this.timeout = callback => setTimeout(callback, config.networkTimeout ?? 5000);
@@ -73,7 +74,7 @@ export class WrtcPeering {
         .catch(err => this.log.debug(logName, 'errored with', err))
         .finally(() => clearTimeout(timer));
       const peers = this.peers;
-      const peer = new SimplePeer({ config: this.config, initiator });
+      const peer = this.createPeer({ config: this.config, initiator });
       peer.on('signal', (data: SignalData) =>
         signaller.signal(peerId, channelId, data).catch(connected.reject));
       peer.on('connect', connected.resolve);
