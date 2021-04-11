@@ -157,12 +157,12 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
   async snapshot(): Promise<Snapshot> {
     const ack = new Future;
     const sw = new Stopwatch('snapshot', shortId(4));
-    const { res, from } = await this.send<Response.Snapshot>(new Request.Snapshot, { ack, sw });
+    const { res, fromId } = await this.send<Response.Snapshot>(new Request.Snapshot, { ack, sw });
     sw.next('consume');
     // Subscribe in parallel (subscription can be slow)
     const [quads, updates] = await Promise.all([
-      this.consume(from, res.quadsAddress, this.triplesFromBuffer, 'failIfSlow'),
-      this.consume(from, res.updatesAddress, DeltaMessage.decode)
+      this.consume(fromId, res.quadsAddress, this.triplesFromBuffer, 'failIfSlow'),
+      this.consume(fromId, res.updatesAddress, DeltaMessage.decode)
     ]);
     sw.stop();
     return {
@@ -180,7 +180,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
   async revupFrom(time: TreeClock): Promise<Revup | undefined> {
     const ack = new Future;
     const sw = new Stopwatch('revup', shortId(4));
-    const { res, from } = await this.send<Response.Revup>(new Request.Revup(time), {
+    const { res, fromId: from } = await this.send<Response.Revup>(new Request.Revup(time), {
       // Try everyone until we find someone who can revup
       ack, check: res => res.lastTime != null, sw
     });
@@ -324,8 +324,8 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
       check?: (res: T) => boolean;
       sw: Stopwatch;
     },
-    tried: { [address: string]: PromiseLike<{ res: T, from: string }> } = {},
-    messageId: string = uuid()): Promise<{ res: T, from: string }> {
+    tried: { [address: string]: PromiseLike<{ res: T, fromId: string }> } = {},
+    messageId: string = uuid()): Promise<{ res: T, fromId: string }> {
     sw.next('sender');
     const sender = await this.nextSender(messageId);
     if (sender == null) {
@@ -342,7 +342,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
       .publish(MsgPack.encode(request.toJson()))
       .finally(() => sender.close());
     tried[sender.id] = this.getResponse<T>(sent, messageId, ack ?? null)
-      .then(res => ({ res, from: sender.id }));
+      .then(res => ({ res, fromId: sender.id }));
     // If the publish fails, don't keep trying other addresses
     await sent;
     // If the caller doesn't like this response, try again
@@ -429,12 +429,10 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     }
   }
 
-  private async consume<T>(
-    fromId: string,
-    channelId: string,
+  private async consume<T>(fromId: string, channelId: string,
     map: (payload: Buffer) => T | Promise<T>,
     failIfSlow?: 'failIfSlow'): Promise<Observable<T>> {
-    const notifier = await this.notifier({ toId: this.id, fromId, channelId });
+    const notifier = await this.notifier({ fromId, toId: this.id, channelId });
     const src = this.consuming[notifier.id] = new Source;
     await notifier.subscribe();
     const consumed = src.pipe(

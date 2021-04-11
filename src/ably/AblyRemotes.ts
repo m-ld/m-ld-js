@@ -44,6 +44,7 @@ export class AblyRemotes extends PubsubRemotes implements PeerSignaller {
     super(config);
     if (typeof impl != 'function') {
       this.peering = impl.peering;
+      this.peering.signaller = this;
       impl = impl.connect ?? ablyConnect;
     }
     this.client = impl({ ...config.ably, echoMessages: false, clientId: config['@id'] });
@@ -92,7 +93,7 @@ export class AblyRemotes extends PubsubRemotes implements PeerSignaller {
           await this.onReply(data, params);
           break;
         case '__notify':
-          this.onNotify(params.channelId, data);
+          this.notify(params.channelId, data);
           break;
         case '__signal':
           this.onSignal(params, data);
@@ -174,6 +175,7 @@ export class AblyRemotes extends PubsubRemotes implements PeerSignaller {
     };
   }
 
+  /** "duplex" because expecting a response */
   private async duplexPublish(
     channel: Ably.Types.RealtimeChannelPromise, name: string, msg: Buffer | object): Promise<unknown> {
     // Ensure we are subscribed before sending anything, or we won't get the reply
@@ -181,27 +183,24 @@ export class AblyRemotes extends PubsubRemotes implements PeerSignaller {
     return this.traffic.publish(channel, name, msg);
   }
 
-  private async peerSubPub(params: NotifyParams): Promise<SubPubsub | undefined> {
-    if (this.peering != null) {
-      try {
-        return this.peering.peerSubPub(params, this);
-      } catch (err) {
-        this.log.info('Cannot use peer-to-peer notifier due to', err);
-        // Fall through to use a direct pubsub
-      }
-    }
+  private peerSubPub(params: NotifyParams): Promise<SubPubsub | undefined> {
+    return this.peering != null ? this.peering.pubSub(params).catch(err => {
+      this.log.info(`Cannot use peer-to-peer notifier due to ${err}`);
+      // Fall through to use a direct pubsub
+      return undefined;
+    }) : Promise.resolve(undefined);
   }
 
   private onSignal({ fromId, channelId }: SignalTypeParams, data: PeerSignal) {
     if (this.peering == null)
-      // Someone is trying to peer with us but we can't. Signal an error back.
+      // Someone is trying to peer with us but we can't
       this.signal(fromId, channelId, { unavailable: true }).catch(this.warnError);
     else
-      this.peering.onSignal(fromId, channelId, data, this);
+      this.peering.signal(fromId, channelId, data);
   }
 
   /** override to make public */
-  onNotify(subPubId: string, payload: Buffer) {
+  notify(subPubId: string, payload: Buffer) {
     super.onNotify(subPubId, payload);
   }
 
