@@ -365,7 +365,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
       // If we don't have journal from our ticks on the collaborator's clock, this
       // will lose data! – Close and let the app decide what to do.
       if (recent == null)
-        throw new MeldError('Clone outdated');
+        throw new MeldError('Clone outdated', `Missing local ticks since ${recovery.lastTime}`);
       else
         return recent.pipe(tap(this.nextUpdate), ret).toPromise();
     }

@@ -3,7 +3,7 @@ import * as SimplePeer from 'simple-peer';
 import { getIdLogger } from '../engine/util';
 import type { Instance as Peer, Options as PeerOpts, SignalData } from 'simple-peer';
 import type { MeldConfig } from '..';
-import type { SubPubsub, NotifyParams } from '../engine/PubsubRemotes';
+import type { SubPub, NotifyParams } from '../engine/PubsubRemotes';
 import { timer } from 'rxjs';
 
 export type CreatePeer = (opts?: PeerOpts) => Peer;
@@ -50,7 +50,7 @@ export class WrtcPeering {
     this.client = signaller;
   }
 
-  async pubSub({ toId, fromId, channelId }: NotifyParams): Promise<SubPubsub> {
+  async pubSub({ toId, fromId, channelId }: NotifyParams): Promise<SubPub> {
     // Determine the notification direction, from us or to us?
     const outbound = fromId === this.id;
     const peerId = outbound ? toId : fromId;
@@ -65,9 +65,9 @@ export class WrtcPeering {
       id: channelId,
       // Peer should always exist if connected resolved
       publish: async msg => peer.send(msg),
-      // Never need to subscribe, peer data is always enabled
-      subscribe: async () => null,
-      close: async () => peer.destroy()
+      // Wait a bit before destroying so the socket flushes
+      // https://github.com/feross/simple-peer/blob/9ea1805d992a8164a42b750160ed3425f2a494f1/index.js#L580
+      close: () => timer(1000).subscribe(() => peer.destroy())
     }
   }
 
@@ -104,7 +104,11 @@ export class WrtcPeering {
     } else {
       const timer = this.timeout(() =>
         peer.destroy(new Error('connection timeout exceeded.')));
-      const peer = this.createPeer({ config: this.config, initiator });
+      const peer = this.createPeer({
+        channelConfig: { ordered: true },
+        config: this.config,
+        initiator
+      });
       this.log.debug(`Channel ${channelId} peer ${peerId}`, 'created.');
       const connected = new Promise((resolve, reject) => {
         peer.on('connect', resolve);

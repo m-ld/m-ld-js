@@ -8,7 +8,7 @@ import { MqttTopic, SEND_TOPIC, REPLY_TOPIC, SendAddressParams, } from './MqttTo
 import { TopicParams } from 'mqtt-pattern';
 import { MqttPresence } from './MqttPresence';
 import { MeldConfig } from '..';
-import { ReplyParams, PubsubRemotes, SubPubsub, SubPub, NotifyParams, SendParams } from '../engine/PubsubRemotes';
+import { ReplyParams, PubsubRemotes, SubPub, NotifyParams, SendParams } from '../engine/PubsubRemotes';
 
 export interface MeldMqttConfig extends MeldConfig {
   mqtt?: Omit<IClientOptions, 'will' | 'clientId'> & ({ hostname: string } | { host: string, port: number })
@@ -113,12 +113,13 @@ export class MqttRemotes extends PubsubRemotes {
     return this.presence.present(this.controlTopic.address);
   }
 
-  protected notifier({ channelId }: NotifyParams): SubPubsub {
+  protected async notifier({ channelId, toId }: NotifyParams): Promise<SubPub> {
     const address = this.notifyTopic.with({ channelId }).address;
+    if (toId === this.id)
+      await this.mqtt.subscribe(address, { qos: 1 });
     return {
       id: channelId,
       publish: notification => this.mqtt.publish(address, notification),
-      subscribe: () => this.mqtt.subscribe(address, { qos: 1 }),
       close: () => this.mqtt.unsubscribe(address).catch(this.warnError)
     };
   }

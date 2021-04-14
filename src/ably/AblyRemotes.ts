@@ -6,7 +6,7 @@
 import * as Ably from 'ably';
 import { MeldConfig } from '..';
 import {
-  PubsubRemotes, SubPubsub, SubPub, SendParams, ReplyParams, NotifyParams, PeerParams
+  PubsubRemotes, SubPub, SendParams, ReplyParams, NotifyParams, PeerParams
 } from '../engine/PubsubRemotes';
 import { Observable, from, identity } from 'rxjs';
 import { mergeMap, filter, map } from 'rxjs/operators';
@@ -121,7 +121,7 @@ export class AblyRemotes extends PubsubRemotes implements PeerSignaller {
       map(present => present.clientId));
   }
 
-  protected async notifier(params: NotifyParams): Promise<SubPubsub> {
+  protected async notifier(params: NotifyParams): Promise<SubPub> {
     // Try to create a peer-to-peer notifier
     return (await this.peerSubPub(params)) ??
       this.directSubPub({ type: '__notify', ...params });
@@ -164,14 +164,13 @@ export class AblyRemotes extends PubsubRemotes implements PeerSignaller {
     }
   }
 
-  private directSubPub(params: PeerTypeParams): SubPubsub {
+  private directSubPub(params: PeerTypeParams): SubPub {
     const channel = this.channel(params.toId);
     const { subPubId, msgName } = this.fromParams(params);
     return {
       id: subPubId,
       publish: msg => this.duplexPublish(channel, msgName, msg),
-      // Subscription not needed, always using our own direct channel
-      subscribe: async () => null, close: () => { }
+      close: () => { }
     };
   }
 
@@ -183,7 +182,7 @@ export class AblyRemotes extends PubsubRemotes implements PeerSignaller {
     return this.traffic.publish(channel, name, msg);
   }
 
-  private peerSubPub(params: NotifyParams): Promise<SubPubsub | undefined> {
+  private peerSubPub(params: NotifyParams): Promise<SubPub | undefined> {
     return this.peering != null ? this.peering.pubSub(params).catch(err => {
       this.log.info(`Cannot use peer-to-peer notifier due to ${err}`);
       // Fall through to use a direct pubsub
@@ -200,8 +199,8 @@ export class AblyRemotes extends PubsubRemotes implements PeerSignaller {
   }
 
   /** override to make public */
-  notify(subPubId: string, payload: Buffer) {
-    super.onNotify(subPubId, payload);
+  notify(channelId: string, payload: Buffer) {
+    super.onNotify(channelId, payload);
   }
 
   /** implements PeerSignaller.signal */

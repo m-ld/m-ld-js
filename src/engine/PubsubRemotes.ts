@@ -7,7 +7,7 @@ import { generate as uuid } from 'short-uuid';
 import { Response, Request } from './ControlMessage';
 import { MsgPack, Future, toJson, Stopwatch } from './util';
 import {
-  finalize, mergeMap, reduce, toArray, first, concatMap, materialize, timeout, share, delay
+  finalize, reduce, toArray, first, concatMap, materialize, timeout, share, delay, map
 } from 'rxjs/operators';
 import { MeldError, MeldErrorStatus } from './MeldError';
 import { AbstractMeld } from './AbstractMeld';
@@ -46,10 +46,6 @@ export interface SubPub {
   readonly id: string;
   publish(msg: Buffer): Promise<unknown>;
   close(): void;
-}
-
-export interface SubPubsub extends SubPub {
-  subscribe(): Promise<unknown>;
 }
 
 /** A m-ld ack is a reply to a reply with a null body */
@@ -133,7 +129,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
 
   protected abstract present(): Observable<string>;
 
-  protected abstract notifier(params: NotifyParams): SubPubsub | Promise<SubPubsub>;
+  protected abstract notifier(params: NotifyParams): SubPub | Promise<SubPub>;
 
   protected abstract sender(params: SendParams): SubPub | Promise<SubPub>;
 
@@ -295,15 +291,16 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     }
   }
 
-  protected onNotify(subPubId: string, payload: Buffer) {
-    if (subPubId in this.consuming) {
+  protected onNotify(channelId: string, payload: Buffer) {
+    if (channelId in this.consuming) {
       const json = MsgPack.decode(payload);
+      this.log.debug(`Notified on channel ${channelId}:`, json);
       if (json.next)
-        this.consuming[subPubId].next(json.next);
+        this.consuming[channelId].next(json.next);
       else if (json.complete)
-        this.consuming[subPubId].complete();
+        this.consuming[channelId].complete();
       else if (json.error)
-        this.consuming[subPubId].error(MeldError.from(json.error));
+        this.consuming[channelId].error(MeldError.from(json.error));
     }
   }
 
@@ -450,58 +447,50 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
   }
 
   private async consume<T>(fromId: string, channelId: string,
-    map: (payload: Buffer) => T | Promise<T>,
+    datumFromPayload: (payload: Buffer) => T,
     failIfSlow?: 'failIfSlow'): Promise<Observable<T>> {
     const notifier = await this.notifier({ fromId, toId: this.id, channelId });
-    const src = this.consuming[notifier.id] = new Source;
-    await notifier.subscribe();
-    const consumed = src.pipe(
-      // Unsubscribe from the sub-channel when a complete or error arrives.
-      finalize(() => {
-        notifier.close();
-        delete this.consuming[notifier.id];
-      }),
-      mergeMap(async payload => map(payload)));
+    const src = this.consuming[channelId] = new Source;
+    src.pipe(finalize(() => {
+      // TODO unit test this
+      notifier.close();
+      delete this.consuming[channelId];
+    })).subscribe();
+    const consumed = src.pipe(map(datumFromPayload));
     // Rev-up and snapshot update channels are expected to be very fast, as they
     // are streamed directly from the dataset. So if there is a pause in the
     // delivery this probably indicates a failure e.g. the collaborator is dead.
     // TODO unit test this
-    return (failIfSlow ? consumed.pipe(timeout(this.sendTimeout)) : consumed)
-      // Share so that the finalize on the Source is only done once
-      .pipe(share()); // TODO unit test this
+    return failIfSlow ? consumed.pipe(timeout(this.sendTimeout)) : consumed;
   }
 
   private async produce<T>(data: Observable<T>, notifier: SubPub,
-    datumToPayload: (datum: T) => Promise<Buffer> | Buffer, type: string) {
-    const notifyError = (error: any, final = true) => {
+    datumToPayload: (datum: T) => Buffer, type: string) {
+    const notifyError = (error: any) => {
       this.log.warn('Notifying error on', notifier.id, error);
-      return notify({ error: toJson(error) }, final);
+      return notify({ error: toJson(error) });
     }
     const notifyComplete = () => {
-      this.log.debug('Completed production of', type);
-      return notify({ complete: true }, true);
+      this.log.debug(`Completed production of ${type} on ${notifier.id}`);
+      return notify({ complete: true });
     };
-    const notify = async (notification: JsonNotification, final = false) => {
-      try {
-        await notifier.publish(MsgPack.encode(notification));
-      } catch (error) {
+    const notify: (notification: JsonNotification) => Promise<unknown> = notification =>
+      notifier.publish(MsgPack.encode(notification))
         // If notifications fail due to channel death, the recipient will find
         // out from the network so here we make best efforts to notify an error
         // and then give up.
-        await notifyError(error, !final); // Don't re-close if already final
-      } finally {
-        if (final)
-          notifier.close();
-      }
-    }
+        .catch(err => notifyError(err));
     return data.pipe(
-      // concatMap guarantees delivery ordering despite toJson promise ordering
-      concatMap(async datum => await datumToPayload(datum)),
+      map(datumToPayload),
       materialize(),
-      mergeMap(notification => notification.do(
-        next => notify({ next }),
-        error => notifyError(error),
-        () => notifyComplete())))
+      concatMap(notification => {
+        switch (notification.kind) {
+          case 'N': return notify({ next: notification.value });
+          case 'E': return notifyError(notification.error);
+          case 'C': return notifyComplete();
+        }
+      }),
+      finalize(() => notifier.close()))
       .toPromise();
   }
 
