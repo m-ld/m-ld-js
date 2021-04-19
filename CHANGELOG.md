@@ -1,3 +1,6 @@
+## v0.6
+This version 
+
 ## v0.5
 This version includes an overhaul of the experimental Constraints API and a
 prototype implementation of multi-collaborator editable Lists.

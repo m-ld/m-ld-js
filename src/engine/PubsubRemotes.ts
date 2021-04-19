@@ -1,13 +1,14 @@
 import { Snapshot, DeltaMessage, MeldRemotes, MeldLocal, Revup } from '.';
 import {
-  Observable, Subject as Source, BehaviorSubject, identity, defer, Observer, Subscription, from, of
+  Observable, Subject as Source, BehaviorSubject, identity, defer,
+  Observer, Subscription, from, of, EMPTY, onErrorResumeNext
 } from 'rxjs';
 import { TreeClock } from './clocks';
 import { generate as uuid } from 'short-uuid';
 import { Response, Request } from './ControlMessage';
 import { MsgPack, Future, toJson, Stopwatch } from './util';
 import {
-  finalize, reduce, toArray, first, concatMap, materialize, timeout, share, delay, map
+  finalize, reduce, toArray, first, concatMap, materialize, timeout, delay, map
 } from 'rxjs/operators';
 import { MeldError, MeldErrorStatus } from './MeldError';
 import { AbstractMeld } from './AbstractMeld';
@@ -451,11 +452,12 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     failIfSlow?: 'failIfSlow'): Promise<Observable<T>> {
     const notifier = await this.notifier({ fromId, toId: this.id, channelId });
     const src = this.consuming[channelId] = new Source;
-    src.pipe(finalize(() => {
+    const complete = () => {
       // TODO unit test this
       notifier.close();
       delete this.consuming[channelId];
-    })).subscribe();
+    };
+    onErrorResumeNext(src, EMPTY).subscribe({ complete });
     const consumed = src.pipe(map(datumFromPayload));
     // Rev-up and snapshot update channels are expected to be very fast, as they
     // are streamed directly from the dataset. So if there is a pause in the

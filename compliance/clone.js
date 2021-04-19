@@ -53,7 +53,8 @@ clone(leveldown(tmpDirName), new MqttRemotes(config), config).then(meld => {
 });
 
 function send(requestId, type, params) {
-  process.send({ requestId, '@type': type, ...params });
+  process.send({ requestId, '@type': type, ...params },
+    err => err && LOG.warn('Clone orphaned from orchestrator', err));
 }
 
 function errorHandler(message) {
