@@ -1,5 +1,15 @@
 ## v0.6
-This version 
+- Expanded **json-rql** support: `@construct`, `@filter` (with operators) and
+  `@values`.
+- [#69](https://github.com/m-ld/m-ld-js/issues/69) List updates are given using
+  the `@list` key and indexed-object notation, with explicit slots [breaking].
+- Performance improvements to all operations by use of synchronous JSON-LD
+  compaction and expansion.
+- WebRTC support for the Ably remotes engine [experimental].
+
+This version is not backwards-compatible with previous versions for storage or
+network transmission, so it cannot be used with old persisted data or with other
+non-upgraded clones.
 
 ## v0.5
 This version includes an overhaul of the experimental Constraints API and a
