@@ -1,7 +1,7 @@
 import { LiveStatus, MeldStatus, MeldConstraint } from '../../api';
 import { Snapshot, DeltaMessage, MeldRemotes, MeldLocal, Revup, Recovery } from '..';
 import { liveRollup } from "../LiveValue";
-import { Subject, Read, Write, Pattern } from '../../jrql-support';
+import { Read, Write, Pattern, Context } from '../../jrql-support';
 import {
   Observable, merge, from, EMPTY,
   concat, BehaviorSubject, Subscription, interval, of, Subscriber, OperatorFunction, partition
@@ -19,11 +19,10 @@ import { delayUntil, Future, tapComplete, fromArrayPromise, poisson } from '../u
 import { LockManager } from "../locks";
 import { levels } from 'loglevel';
 import { AbstractMeld, comesAlive } from '../AbstractMeld';
-import { MeldConfig } from '../..';
+import { GraphSubject, MeldConfig } from '../..';
 import { RemoteUpdates } from './RemoteUpdates';
 import { CloneEngine } from '../StateEngine';
 import { MeldError, MeldErrorStatus } from '../MeldError';
-import { MeldEncoding } from '../MeldEncoding';
 
 enum ConnectStyle {
   SOFT, HARD
@@ -53,27 +52,28 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
   private readonly genesisClaim: boolean;
   readonly status: Observable<MeldStatus> & LiveStatus;
 
-  constructor({ dataset, remotes, constraints, config }: {
+  constructor({ dataset, remotes, constraints, config, context }: {
     dataset: Dataset;
     remotes: MeldRemotes;
     constraints?: MeldConstraint[];
     config: MeldConfig;
+    context?: Context;
   }) {
-    super(config['@id'], config.logLevel);
-    this.dataset = new SuSetDataset(dataset,
-      constraints ?? [],
-      new MeldEncoding(config['@domain']),
-      config);
+    super(config);
+    this.dataset = new SuSetDataset(dataset, context ?? {}, constraints ?? [], config);
     this.subs.add(this.dataUpdates
       .pipe(map(update => update['@ticks']))
       .subscribe(this.latestTicks));
     this.remotes = remotes;
-    this.remotes.setLocal(this);
     this.remoteUpdates = new RemoteUpdates(remotes);
     this.networkTimeout = config.networkTimeout ?? 5000;
     this.genesisClaim = config.genesis;
     this.status = this.createStatus();
     this.subs.add(this.status.subscribe(status => this.log.debug(status)));
+  }
+
+  get encoding() {
+    return this.dataset.encoding;
   }
 
   /**
@@ -90,6 +90,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
   @AbstractMeld.checkNotClosed.async
   async initialise(): Promise<void> {
     await this.dataset.initialise();
+    this.remotes.setLocal(this);
     // Establish a clock for this clone
     let time = await this.dataset.loadClock();
     if (!time) {
@@ -364,7 +365,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
       // If we don't have journal from our ticks on the collaborator's clock, this
       // will lose data! – Close and let the app decide what to do.
       if (recent == null)
-        throw new MeldError('Clone outdated');
+        throw new MeldError('Clone outdated', `Missing local ticks since ${recovery.lastTime}`);
       else
         return recent.pipe(tap(this.nextUpdate), ret).toPromise();
     }
@@ -449,8 +450,8 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
   }
 
   @AbstractMeld.checkNotClosed.rx
-  read(request: Read): Observable<Subject> {
-    return new Observable<Subject>(subs => {
+  read(request: Read): Observable<GraphSubject> {
+    return new Observable<GraphSubject>(subs => {
       this.lock.share('live', () => new Promise<void>(resolve => {
         this.logRequest('read', request);
         // Only leave the live-lock when the results have been fully streamed
@@ -477,10 +478,9 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
     });
   }
 
-  private logRequest(type: 'read'|'write', request: Pattern) {
+  private logRequest(type: 'read' | 'write', request: Pattern) {
     if (this.log.getLevel() <= levels.DEBUG)
-      this.log.debug(type, 'request',
-        JSON.stringify({ ...request, '@context': undefined }));
+      this.log.debug(type, 'request', JSON.stringify(request));
   }
 
   private createStatus(): Observable<MeldStatus> & LiveStatus {

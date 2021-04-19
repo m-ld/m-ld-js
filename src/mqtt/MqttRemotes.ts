@@ -4,29 +4,32 @@
  */
 import { Observable } from 'rxjs';
 import { AsyncMqttClient, IClientOptions, ISubscriptionMap, connect as defaultConnect } from 'async-mqtt';
-import { MqttTopic, SEND_TOPIC, REPLY_TOPIC, SendParams, } from './MqttTopic';
+import { MqttTopic, SEND_TOPIC, REPLY_TOPIC, SendAddressParams, } from './MqttTopic';
 import { TopicParams } from 'mqtt-pattern';
 import { MqttPresence } from './MqttPresence';
 import { MeldConfig } from '..';
-import { ReplyParams, PubsubRemotes, SubPubsub, SubPub } from '../engine/PubsubRemotes';
+import { ReplyParams, PubsubRemotes, SubPub, NotifyParams, SendParams } from '../engine/PubsubRemotes';
 
 export interface MeldMqttConfig extends MeldConfig {
   mqtt?: Omit<IClientOptions, 'will' | 'clientId'> & ({ hostname: string } | { host: string, port: number })
 }
 
-interface DomainParams extends TopicParams { domain: string; }
-interface NoEchoParams extends DomainParams { clientId: string; }
-interface NotifyParams extends DomainParams { id: string; }
-const OPERATIONS_TOPIC = new MqttTopic<NoEchoParams>({ '+': 'domain' }, 'operations', { '+': 'clientId' });
-const CONTROL_TOPIC = new MqttTopic<DomainParams>({ '+': 'domain' }, 'control');
-const NOTIFY_TOPIC = new MqttTopic<NotifyParams>({ '+': 'domain' }, 'control', { '+': 'id' });
+interface DomainTopicParams extends TopicParams { domain: string; }
+interface NoEchoTopicParams extends DomainTopicParams { clientId: string; }
+interface NotifyTopicParams extends DomainTopicParams { channelId: string; }
+const OPERATIONS_TOPIC =
+  new MqttTopic<NoEchoTopicParams>({ '+': 'domain' }, 'operations', { '+': 'clientId' });
+const CONTROL_TOPIC =
+  new MqttTopic<DomainTopicParams>({ '+': 'domain' }, 'control');
+const NOTIFY_TOPIC =
+  new MqttTopic<NotifyTopicParams>({ '+': 'domain' }, 'control', { '+': 'channelId' });
 
 export class MqttRemotes extends PubsubRemotes {
   private readonly mqtt: AsyncMqttClient;
-  private readonly operationsTopic: MqttTopic<NoEchoParams>;
-  private readonly controlTopic: MqttTopic<DomainParams>;
-  private readonly notifyTopic: MqttTopic<NotifyParams>;
-  private readonly sentTopic: MqttTopic<SendParams & TopicParams>;
+  private readonly operationsTopic: MqttTopic<NoEchoTopicParams>;
+  private readonly controlTopic: MqttTopic<DomainTopicParams>;
+  private readonly notifyTopic: MqttTopic<NotifyTopicParams>;
+  private readonly sentTopic: MqttTopic<SendAddressParams & TopicParams>;
   private readonly replyTopic: MqttTopic<ReplyParams & TopicParams>;
   private readonly presence: MqttPresence;
 
@@ -34,7 +37,7 @@ export class MqttRemotes extends PubsubRemotes {
     connect: (opts: IClientOptions) => AsyncMqttClient = defaultConnect) {
     super(config);
 
-    const id = config['@id'], domain = config['@domain'];
+    const { id, domain } = this;
     this.operationsTopic = OPERATIONS_TOPIC.with({ domain });
     this.controlTopic = CONTROL_TOPIC.with({ domain });
     this.notifyTopic = NOTIFY_TOPIC.with({ domain });
@@ -53,7 +56,7 @@ export class MqttRemotes extends PubsubRemotes {
       });
       this.sentTopic.match(topic, sent => this.onSent(payload, sent));
       this.replyTopic.match(topic, replied => this.onReply(payload, replied));
-      this.notifyTopic.match(topic, notify => this.onNotify(notify.id, payload));
+      this.notifyTopic.match(topic, notify => this.onNotify(notify.channelId, payload));
     });
 
     // When MQTT.js receives an error just log - it will try to reconnect
@@ -110,33 +113,34 @@ export class MqttRemotes extends PubsubRemotes {
     return this.presence.present(this.controlTopic.address);
   }
 
-  protected notifier(_toId: string, id: string): SubPubsub {
-    const address = this.notifyTopic.with({ id }).address;
+  protected async notifier({ channelId, toId }: NotifyParams): Promise<SubPub> {
+    const address = this.notifyTopic.with({ channelId }).address;
+    if (toId === this.id)
+      await this.mqtt.subscribe(address, { qos: 1 });
     return {
-      id,
+      id: channelId,
       publish: notification => this.mqtt.publish(address, notification),
-      subscribe: () => this.mqtt.subscribe(address, { qos: 1 }),
-      unsubscribe: () => this.mqtt.unsubscribe(address)
+      close: () => this.mqtt.unsubscribe(address).catch(this.warnError)
     };
   }
 
-  protected sender(toId: string, messageId: string): SubPub {
+  protected sender(params: SendParams): SubPub {
     const address = SEND_TOPIC.with({
-      toId, fromId: this.id, messageId, address: this.controlTopic.path
+      ...params, address: this.controlTopic.path
     }).address;
     return {
       id: address,
-      publish: request => this.mqtt.publish(address, request)
+      publish: request => this.mqtt.publish(address, request),
+      close: () => { }
     };
   }
 
-  protected replier(toId: string, messageId: string, sentMessageId: string): SubPub {
-    const address = REPLY_TOPIC.with({
-      messageId, fromId: this.id, toId, sentMessageId
-    }).address;
+  protected replier(params: ReplyParams): SubPub {
+    const address = REPLY_TOPIC.with({ ...params }).address;
     return {
       id: address,
-      publish: res => this.mqtt.publish(address, res)
+      publish: res => this.mqtt.publish(address, res),
+      close: () => { }
     };
   }
 }

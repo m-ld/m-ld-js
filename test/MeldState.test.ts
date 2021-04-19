@@ -2,190 +2,475 @@ import { any, MeldUpdate } from '../src/api';
 import { ApiStateMachine } from '../src/engine/MeldState';
 import { memStore, mockRemotes, testConfig } from './testClones';
 import { DatasetEngine } from '../src/engine/dataset/DatasetEngine';
-import { Group, Subject, Select, Describe, Update, Reference } from '../src/jrql-support';
+import { Group, Subject, Select, Describe, Update, Reference, Construct } from '../src/jrql-support';
 import { DomainContext } from '../src/engine/MeldEncoding';
 import { Future } from '../src/engine/util';
-import { genIdRegex } from './testUtil';
+import { blankRegex, genIdRegex } from './testUtil';
+import { SubjectGraph } from '../src/engine/SubjectGraph';
 
 describe('Meld State API', () => {
   let api: ApiStateMachine;
+  let captureUpdate: Future<MeldUpdate>;
 
   beforeEach(async () => {
     const context = new DomainContext('test.m-ld.org');
     let clone = new DatasetEngine({
       dataset: await memStore({ context }),
       remotes: mockRemotes(),
-      config: testConfig()
+      config: testConfig(),
+      context
     });
     await clone.initialise();
-    api = new ApiStateMachine(context, clone);
+    api = new ApiStateMachine(clone);
+    captureUpdate = new Future;
   });
 
   test('retrieves a JSON-LD subject', async () => {
-    const captureUpdate = new Future<MeldUpdate>();
     api.follow(captureUpdate.resolve);
     await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
     await expect(captureUpdate).resolves.toEqual({
       '@ticks': 1,
-      '@insert': [{ '@id': 'fred', name: 'Fred' }],
-      '@delete': []
+      '@insert': new SubjectGraph([{ '@id': 'fred', name: 'Fred' }]),
+      '@delete': new SubjectGraph([])
     });
     await expect(api.get('fred'))
       .resolves.toEqual({ '@id': 'fred', name: 'Fred' });
   });
 
-  test('deletes a subject by update', async () => {
-    await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
-    const captureUpdate = new Future<MeldUpdate>();
-    api.follow(captureUpdate.resolve);
-    await api.write<Update>({ '@delete': { '@id': 'fred' } });
-    await expect(api.get('fred')).resolves.toBeUndefined();
-    await expect(captureUpdate).resolves.toEqual({
-      '@ticks': 2,
-      '@delete': [{ '@id': 'fred', name: 'Fred' }],
-      '@insert': []
+  describe('basic writes', () => {
+    test('writes a subject with a type', async () => {
+      await api.write<Subject>({ '@id': 'fred', '@type': 'Flintstone', name: 'Fred' });
+      await expect(api.get('fred'))
+        .resolves.toEqual({ '@id': 'fred', '@type': 'Flintstone', name: 'Fred' });
+    });
+
+    test('deletes a subject by update', async () => {
+      await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
+      api.follow(captureUpdate.resolve);
+      await api.write<Update>({ '@delete': { '@id': 'fred' } });
+      await expect(api.get('fred')).resolves.toBeUndefined();
+      await expect(captureUpdate).resolves.toEqual({
+        '@ticks': 2,
+        '@delete': [{ '@id': 'fred', name: 'Fred' }],
+        '@insert': []
+      });
+    });
+
+    test('deletes a property by update', async () => {
+      await api.write<Subject>({ '@id': 'fred', name: 'Fred', height: 5 });
+      api.follow(captureUpdate.resolve);
+      await api.write<Update>({ '@delete': { '@id': 'fred', height: 5 } });
+      await expect(api.get('fred'))
+        .resolves.toEqual({ '@id': 'fred', name: 'Fred' });
+      await expect(captureUpdate).resolves.toEqual({
+        '@ticks': 2,
+        '@delete': [{ '@id': 'fred', height: 5 }],
+        '@insert': []
+      });
+    });
+
+    test('deletes where any', async () => {
+      await api.write<Subject>({ '@id': 'fred', name: 'Fred', height: 5 });
+      await api.write<Update>({ '@delete': { '@id': 'fred', height: any() } });
+      await expect(api.get('fred'))
+        .resolves.toEqual({ '@id': 'fred', name: 'Fred' });
+    });
+
+    test('updates a property', async () => {
+      await api.write<Subject>({ '@id': 'fred', name: 'Fred', height: 5 });
+      api.follow(captureUpdate.resolve);
+      await api.write<Update>({
+        '@delete': { '@id': 'fred', height: 5 },
+        '@insert': { '@id': 'fred', height: 6 }
+      });
+      await expect(api.get('fred'))
+        .resolves.toEqual({ '@id': 'fred', name: 'Fred', height: 6 });
+      await expect(captureUpdate).resolves.toEqual({
+        '@ticks': 2,
+        '@delete': [{ '@id': 'fred', height: 5 }],
+        '@insert': [{ '@id': 'fred', height: 6 }]
+      });
+    });
+
+    test('delete where must match all', async () => {
+      await api.write<Subject>({ '@id': 'fred', name: 'Fred', height: 5 });
+      // This write has no effect because we're asking for triples with subject of
+      // both fred and bambam
+      await api.write<Update>({
+        '@delete': [{ '@id': 'fred', height: 5 }, { '@id': 'bambam' }]
+      });
+      await expect(api.get('fred'))
+        .resolves.toEqual({ '@id': 'fred', name: 'Fred', height: 5 });
+    });
+
+    test('inserts a subject by update', async () => {
+      api.follow(captureUpdate.resolve);
+      await api.write<Update>({ '@insert': { '@id': 'fred', name: 'Fred' } });
+      await expect(api.get('fred')).resolves.toBeDefined();
+      await expect(captureUpdate).resolves.toEqual({
+        '@ticks': 1,
+        '@delete': [],
+        '@insert': [{ '@id': 'fred', name: 'Fred' }]
+      });
+    });
+
+    test('deletes a subject by path', async () => {
+      await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
+      api.follow(captureUpdate.resolve);
+      await api.delete('fred');
+      await expect(api.get('fred')).resolves.toBeUndefined();
+      await expect(captureUpdate).resolves.toEqual({
+        '@ticks': 2,
+        '@delete': [{ '@id': 'fred', name: 'Fred' }],
+        '@insert': []
+      });
+    });
+
+    test('deletes a property by path', async () => {
+      await api.write<Subject>({ '@id': 'fred', name: 'Fred', wife: { '@id': 'wilma' } });
+      await api.delete('wilma');
+      await expect(api.get('fred')).resolves.toEqual({ '@id': 'fred', name: 'Fred' });
+    });
+
+    test('deletes an object by path', async () => {
+      await api.write<Subject>({ '@id': 'fred', wife: { '@id': 'wilma' } });
+      await api.delete('wilma');
+      await expect(api.get('fred')).resolves.toBeUndefined();
     });
   });
 
-  test('deletes a property by update', async () => {
-    await api.write<Subject>({ '@id': 'fred', name: 'Fred', height: 5 });
-    const captureUpdate = new Future<MeldUpdate>();
-    api.follow(captureUpdate.resolve);
-    await api.write<Update>({ '@delete': { '@id': 'fred', height: 5 } });
-    await expect(api.get('fred'))
-      .resolves.toEqual({ '@id': 'fred', name: 'Fred' });
-    await expect(captureUpdate).resolves.toEqual({
-      '@ticks': 2,
-      '@delete': [{ '@id': 'fred', height: 5 }],
-      '@insert': []
+  describe('basic reads', () => {
+    test('selects where', async () => {
+      await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
+      await api.write<Subject>({ '@id': 'wilma', name: 'Wilma' });
+      await expect(api.read<Select>({
+        '@select': '?f', '@where': { '@id': '?f', name: 'Fred' }
+      })).resolves.toMatchObject([{ '?f': { '@id': 'fred' } }]);
     });
-  });
 
-  test('deletes where any', async () => {
-    await api.write<Subject>({ '@id': 'fred', name: 'Fred', height: 5 });
-    await api.write<Update>({ '@delete': { '@id': 'fred', height: any() } });
-    await expect(api.get('fred'))
-      .resolves.toEqual({ '@id': 'fred', name: 'Fred' });
-  });
-
-  test('updates a property', async () => {
-    await api.write<Subject>({ '@id': 'fred', name: 'Fred', height: 5 });
-    const captureUpdate = new Future<MeldUpdate>();
-    api.follow(captureUpdate.resolve);
-    await api.write<Update>({
-      '@delete': { '@id': 'fred', height: 5 },
-      '@insert': { '@id': 'fred', height: 6 }
+    test('selects where union', async () => {
+      await api.write<Group>({
+        '@graph': [
+          { '@id': 'fred', name: 'Fred' },
+          { '@id': 'wilma', name: 'Wilma' }
+        ]
+      });
+      await expect(api.read<Select>({
+        '@select': '?s', '@where': {
+          '@union': [
+            { '@id': '?s', name: 'Wilma' },
+            { '@id': '?s', name: 'Fred' }
+          ]
+        }
+      })).resolves.toEqual(expect.arrayContaining([
+        expect.objectContaining({ '?s': { '@id': 'fred' } }),
+        expect.objectContaining({ '?s': { '@id': 'wilma' } })
+      ]));
     });
-    await expect(api.get('fred'))
-      .resolves.toEqual({ '@id': 'fred', name: 'Fred', height: 6 });
-    await expect(captureUpdate).resolves.toEqual({
-      '@ticks': 2,
-      '@delete': [{ '@id': 'fred', height: 5 }],
-      '@insert': [{ '@id': 'fred', height: 6 }]
+
+    test('selects not found', async () => {
+      await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
+      await expect(api.read<Select>({
+        '@select': '?w', '@where': { '@id': '?w', name: 'Wilma' }
+      })).resolves.toEqual([]);
     });
-  });
 
-  test('delete where must match all', async () => {
-    await api.write<Subject>({ '@id': 'fred', name: 'Fred', height: 5 });
-    // This write has no effect because we're asking for triples with subject of
-    // both fred and bambam
-    await api.write<Update>({
-      '@delete': [{ '@id': 'fred', height: 5 }, { '@id': 'bambam' }]
+    test('describes not found', async () => {
+      await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
+      await expect(api.read<Describe>({
+        '@describe': 'wilma'
+      })).resolves.toEqual([]);
     });
-    await expect(api.get('fred'))
-      .resolves.toEqual({ '@id': 'fred', name: 'Fred', height: 5 });
-  });
 
-  test('inserts a subject by update', async () => {
-    const captureUpdate = new Future<MeldUpdate>();
-    api.follow(captureUpdate.resolve);
-    await api.write<Update>({ '@insert': { '@id': 'fred', name: 'Fred' } });
-    await expect(api.get('fred')).resolves.toBeDefined();
-    await expect(captureUpdate).resolves.toEqual({
-      '@ticks': 1,
-      '@delete': [],
-      '@insert': [{ '@id': 'fred', name: 'Fred' }]
-    });
-  });
-
-  test('deletes a subject by path', async () => {
-    await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
-    const captureUpdate = new Future<MeldUpdate>();
-    api.follow(captureUpdate.resolve);
-    await api.delete('fred');
-    await expect(api.get('fred')).resolves.toBeUndefined();
-    await expect(captureUpdate).resolves.toEqual({
-      '@ticks': 2,
-      '@delete': [{ '@id': 'fred', name: 'Fred' }],
-      '@insert': []
-    });
-  });
-
-  test('deletes a property by path', async () => {
-    await api.write<Subject>({ '@id': 'fred', name: 'Fred', wife: { '@id': 'wilma' } });
-    await api.delete('wilma');
-    await expect(api.get('fred')).resolves.toEqual({ '@id': 'fred', name: 'Fred' });
-  });
-
-  test('deletes an object by path', async () => {
-    await api.write<Subject>({ '@id': 'fred', wife: { '@id': 'wilma' } });
-    await api.delete('wilma');
-    await expect(api.get('fred')).resolves.toBeUndefined();
-  });
-
-  test('selects where', async () => {
-    await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
-    await api.write<Subject>({ '@id': 'wilma', name: 'Wilma' });
-    await expect(api.read<Select>({
-      '@select': '?f', '@where': { '@id': '?f', name: 'Fred' }
-    })).resolves.toMatchObject([{ '?f': { '@id': 'fred' } }]);
-  });
-
-  test('selects where union', async () => {
-    await api.write<Group>({
-      '@graph': [
+    test('describes two subjects', async () => {
+      await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
+      await api.write<Subject>({ '@id': 'wilma', name: 'Wilma' });
+      await expect(api.read<Describe>({
+        '@describe': ['wilma', 'fred']
+      })).resolves.toEqual(expect.arrayContaining([
         { '@id': 'fred', name: 'Fred' },
         { '@id': 'wilma', name: 'Wilma' }
-      ]
+      ]));
     });
-    await expect(api.read<Select>({
-      '@select': '?s', '@where': {
-        '@union': [
-          { '@id': '?s', name: 'Wilma' },
-          { '@id': '?s', name: 'Fred' }
-        ]
-      }
-    })).resolves.toEqual(expect.arrayContaining([
-      expect.objectContaining({ '?s': { '@id': 'fred' } }),
-      expect.objectContaining({ '?s': { '@id': 'wilma' } })
-    ]));
+
+    test('describes where', async () => {
+      await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
+      await api.write<Subject>({ '@id': 'wilma', name: 'Wilma' });
+      await expect(api.read<Describe>({
+        '@describe': '?f', '@where': { '@id': '?f', name: 'Fred' }
+      })).resolves.toEqual([{ '@id': 'fred', name: 'Fred' }]);
+    });
+
+    test('describes with boolean value', async () => {
+      await api.write<Subject>({ '@id': 'fred', married: true });
+      await expect(api.read<Describe>({ '@describe': 'fred' }))
+        .resolves.toEqual([{ '@id': 'fred', married: true }]);
+    });
+
+    test('describes with double value', async () => {
+      await api.write<Subject>({ '@id': 'fred', name: 'Fred', age: 40.5 });
+      await expect(api.read<Describe>({ '@describe': 'fred' }))
+        .resolves.toMatchObject([{ '@id': 'fred', name: 'Fred', age: 40.5 }]);
+    });
+
+    test('constructs basic match', async () => {
+      await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
+      await api.write<Subject>({ '@id': 'wilma', name: 'Wilma' });
+      await expect(api.read<Construct>({
+        '@construct': { '@id': 'fred', name: '?' }
+      })).resolves.toMatchObject([{
+        '@id': 'fred', name: 'Fred'
+      }]);
+    });
+
+    test('constructs where', async () => {
+      await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
+      await api.write<Subject>({ '@id': 'wilma', name: 'Wilma' });
+      await expect(api.read<Construct>({
+        '@construct': { name: '?name' },
+        '@where': { '@id': 'fred', name: '?name' }
+      })).resolves.toMatchObject([{
+        '@id': expect.stringMatching(blankRegex),
+        name: 'Fred'
+      }]);
+    });
+
+    test('constructs where two matches', async () => {
+      await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
+      await api.write<Subject>({ '@id': 'wilma', name: 'Wilma' });
+      await expect(api.read<Construct>({
+        '@construct': { name: '?name' },
+        '@where': { name: '?name' }
+      })).resolves.toMatchObject([{
+        '@id': expect.stringMatching(blankRegex),
+        name: expect.arrayContaining(['Fred', 'Wilma'])
+      }]);
+    });
+
+    test('constructs new ID from existing', async () => {
+      await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
+      await api.write<Subject>({ '@id': 'wilma', name: 'Wilma' });
+      await expect(api.read<Construct>({
+        '@construct': { '@id': 'fake', name: '?name' },
+        '@where': { '@id': 'fred', name: '?name' }
+      })).resolves.toMatchObject([{
+        '@id': 'fake', name: 'Fred'
+      }]);
+    });
+
+    test('constructs two matches', async () => {
+      await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
+      await api.write<Subject>({ '@id': 'wilma', name: 'Wilma' });
+      await expect(api.read<Construct>({
+        '@construct': { name: '?' }
+      })).resolves.toMatchObject([{
+        '@id': expect.stringMatching(blankRegex),
+        name: expect.arrayContaining(['Fred', 'Wilma'])
+      }]);
+    });
+
+    test('constructs two identified matches', async () => {
+      await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
+      await api.write<Subject>({ '@id': 'wilma', name: 'Wilma' });
+      await expect(api.read<Construct>({
+        '@construct': { '@id': '?', name: '?' }
+      })).resolves.toMatchObject(expect.arrayContaining([
+        { '@id': 'fred', name: 'Fred' },
+        { '@id': 'wilma', name: 'Wilma' }
+      ]));
+    });
+
+    test('constructs with two matched properties', async () => {
+      await api.write<Subject>({ '@id': 'fred', name: 'Fred', height: 6 });
+      await api.write<Subject>({ '@id': 'wilma', name: 'Wilma' });
+      await expect(api.read<Construct>({
+        '@construct': { '@id': 'fred', '?': '?' }
+      })).resolves.toMatchObject([{
+        '@id': 'fred', name: 'Fred', height: 6
+      }]);
+    });
+
+    test('constructs with nested subject', async () => {
+      await api.write<Subject>({ '@id': 'fred', name: 'Fred', wife: { '@id': 'wilma' } });
+      await api.write<Subject>({ '@id': 'wilma', name: 'Wilma' });
+      await expect(api.read<Construct>({
+        '@construct': { '@id': 'fred', wife: { name: '?' } }
+      })).resolves.toMatchObject([{
+        '@id': 'fred', wife: { name: 'Wilma' }
+      }]);
+    });
+
+    test('constructs with nested optional no-match subject', async () => {
+      await api.write<Subject>({ '@id': 'barney', name: 'Barney', wife: { '@id': 'betty' } });
+      await api.write<Subject>({ '@id': 'wilma', name: 'Wilma' });
+      await expect(api.read<Construct>({
+        '@construct': { '@id': 'barney', name: '?name', wife: { name: '?wife' } },
+        '@where': {
+          '@union': [
+            { '@id': 'barney', name: '?name' },
+            { '@id': 'barney', wife: { name: '?wife' } }
+          ]
+        }
+      })).resolves.toEqual([{
+        '@id': 'barney', name: 'Barney'
+      }]);
+    });
+
+    test('constructs with overlapping bindings', async () => {
+      await api.write<Subject>({ '@id': 'fred', name: 'Fred', wife: { '@id': 'wilma' } });
+      await api.write<Subject>({ '@id': 'wilma', name: 'Wilma' });
+      await expect(api.read<Construct>({
+        '@construct': { '@id': 'fred', '?': '?', wife: { '@id': '?', name: '?' } }
+      })).resolves.toMatchObject([{
+        '@id': 'fred', name: 'Fred',
+        // Comes from both '?' and wife property matches
+        wife: { '@id': 'wilma', name: 'Wilma' }
+      }]);
+    });
+
+    test('constructs list', async () => {
+      await api.write<Subject>({ '@id': 'shopping', '@list': ['Bread', 'Milk'] });
+      await expect(api.read<Construct>({
+        '@construct': { '@id': 'shopping', '@list': { '?': '?' } }
+      })).resolves.toMatchObject([{
+        '@id': 'shopping', '@list': { '0': 'Bread', '1': 'Milk' }
+      }]);
+    });
+
+    test('constructs item from list', async () => {
+      await api.write<Subject>({ '@id': 'shopping', '@list': ['Bread', 'Milk'] });
+      await expect(api.read<Construct>({
+        '@construct': { '@id': 'shopping', '@list': { 1: '?' } }
+      })).resolves.toMatchObject([{
+        '@id': 'shopping', '@list': { '1': 'Milk' }
+      }]);
+    });
   });
 
-  test('selects not found', async () => {
-    await api.write({ '@id': 'fred', name: 'Fred' } as Subject);
-    await expect(api.read<Select>({
-      '@select': '?w', '@where': { '@id': '?w', name: 'Wilma' }
-    })).resolves.toEqual([]);
-  });
+  describe('filters', () => {
+    test('selects name equal', async () => {
+      await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
+      await api.write<Subject>({ '@id': 'wilma', name: 'Wilma' });
+      const selection = await api.read<Select>({
+        '@select': '?f',
+        '@where': {
+          '@graph': { '@id': '?f', name: '?n' },
+          '@filter': { '@eq': ['?n', 'Fred'] }
+        }
+      });
+      expect(selection).toEqual([{
+        '@id': expect.stringMatching(blankRegex),
+        '?f': { '@id': 'fred' }
+      }]);
+    });
 
-  test('describes where', async () => {
-    await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
-    await api.write<Subject>({ '@id': 'wilma', name: 'Wilma' });
-    await expect(api.read<Describe>({
-      '@describe': '?f', '@where': { '@id': '?f', name: 'Fred' }
-    })).resolves.toEqual([{ '@id': 'fred', name: 'Fred' }]);
-  });
+    test('selects name in', async () => {
+      await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
+      await api.write<Subject>({ '@id': 'wilma', name: 'Wilma' });
+      await api.write<Subject>({ '@id': 'barney', name: 'Barney' });
+      const selection = await api.read<Select>({
+        '@select': '?f',
+        '@where': {
+          '@graph': { '@id': '?f', name: '?n' },
+          '@filter': { '@in': ['?n', 'Fred', 'Wilma'] }
+        }
+      });
+      expect(selection.length).toBe(2);
+      expect(selection).toEqual(expect.arrayContaining([
+        { '@id': expect.stringMatching(blankRegex), '?f': { '@id': 'fred' } },
+        { '@id': expect.stringMatching(blankRegex), '?f': { '@id': 'wilma' } }
+      ]));
+    });
 
-  test('describes with boolean value', async () => {
-    await api.write<Subject>({ '@id': 'fred', married: true });
-    await expect(api.read<Describe>({ '@describe': 'fred' }))
-      .resolves.toEqual([{ '@id': 'fred', married: true }]);
-  });
+    test('selects @id in', async () => {
+      await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
+      await api.write<Subject>({ '@id': 'wilma', name: 'Wilma' });
+      await api.write<Subject>({ '@id': 'barney', name: 'Barney' });
+      const selection = await api.read<Select>({
+        '@select': '?f',
+        '@where': {
+          '@graph': { '@id': '?f' },
+          '@filter': { '@in': ['?f', { '@id': 'fred' }, { '@id': 'wilma' }] }
+        }
+      });
+      expect(selection.length).toBe(2);
+      expect(selection).toEqual(expect.arrayContaining([
+        { '@id': expect.stringMatching(blankRegex), '?f': { '@id': 'fred' } },
+        { '@id': expect.stringMatching(blankRegex), '?f': { '@id': 'wilma' } }
+      ]));
+    });
 
-  test('describes with double value', async () => {
-    await api.write<Subject>({ '@id': 'fred', name: 'Fred', age: 40.5 });
-    await expect(api.read<Describe>({ '@describe': 'fred' }))
-      .resolves.toMatchObject([{ '@id': 'fred', name: 'Fred', age: 40.5 }]);
+    test('selects @id from values', async () => {
+      await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
+      await api.write<Subject>({ '@id': 'wilma', name: 'Wilma' });
+      await api.write<Subject>({ '@id': 'barney', name: 'Barney' });
+      const selection = await api.read<Select>({
+        '@select': '?n',
+        '@where': {
+          '@graph': { '@id': '?f', name: '?n' },
+          '@values': [{ '?f': { '@id': 'fred' } }, { '?f': { '@id': 'wilma' } }]
+        }
+      });
+      expect(selection.length).toBe(2);
+      expect(selection).toEqual(expect.arrayContaining([
+        { '@id': expect.stringMatching(blankRegex), '?n': 'Fred' },
+        { '@id': expect.stringMatching(blankRegex), '?n': 'Wilma' }
+      ]));
+    });
+
+    test('selects name or other name', async () => {
+      await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
+      await api.write<Subject>({ '@id': 'wilma', name: 'Wilma' });
+      await api.write<Subject>({ '@id': 'barney', name: 'Barney' });
+      const selection = await api.read<Select>({
+        '@select': '?f',
+        '@where': {
+          '@graph': { '@id': '?f', name: '?n' },
+          '@filter': { '@or': [{ '@eq': ['?n', 'Fred'] }, { '@eq': ['?n', 'Wilma'] }] }
+        }
+      });
+      expect(selection.length).toBe(2);
+      expect(selection).toEqual(expect.arrayContaining([
+        { '@id': expect.stringMatching(blankRegex), '?f': { '@id': 'fred' } },
+        { '@id': expect.stringMatching(blankRegex), '?f': { '@id': 'wilma' } }
+      ]));
+    });
+
+    test('selects string gte', async () => {
+      await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
+      await api.write<Subject>({ '@id': 'wilma', name: 'Wilma' });
+      await api.write<Subject>({ '@id': 'barney', name: 'Barney' });
+      const selection = await api.read<Select>({
+        '@select': '?f',
+        '@where': {
+          '@graph': { '@id': '?f', name: '?n' },
+          '@filter': { '@gte': ['?n', 'Fred'] }
+        }
+      });
+      expect(selection.length).toBe(2);
+      expect(selection).toEqual(expect.arrayContaining([
+        { '@id': expect.stringMatching(blankRegex), '?f': { '@id': 'fred' } },
+        { '@id': expect.stringMatching(blankRegex), '?f': { '@id': 'wilma' } }
+      ]));
+    });
+
+    test('selects number gte', async () => {
+      await api.write<Subject>({ '@id': 'fred', height: 6 });
+      await api.write<Subject>({ '@id': 'wilma', height: 5 });
+      await api.write<Subject>({ '@id': 'barney', height: 4 });
+      const selection = await api.read<Select>({
+        '@select': '?f',
+        '@where': {
+          '@graph': { '@id': '?f', height: '?h' },
+          '@filter': { '@gte': ['?h', 5] }
+        }
+      });
+      expect(selection.length).toBe(2);
+      expect(selection).toEqual(expect.arrayContaining([
+        { '@id': expect.stringMatching(blankRegex), '?f': { '@id': 'fred' } },
+        { '@id': expect.stringMatching(blankRegex), '?f': { '@id': 'wilma' } }
+      ]));
+    });
   });
 
   describe('anonymous subjects', () => {
@@ -287,8 +572,22 @@ describe('Meld State API', () => {
 
   describe('lists', () => {
     test('inserts a list as a property', async () => {
+      api.follow(captureUpdate.resolve);
       await api.write<Subject>({
         '@id': 'fred', shopping: { '@list': ['Bread', 'Milk'] }
+      });
+      expect([...(await captureUpdate)['@insert'].graph.values()]).toContainEqual({
+        '@id': 'fred',
+        shopping: {
+          '@id': expect.stringMatching(genIdRegex),
+          '@type': 'http://m-ld.org/RdfLseq',
+          '@list': {
+            0: [
+              { '@id': expect.stringMatching(genIdRegex), '@item': 'Bread', '@index': 0 },
+              { '@id': expect.stringMatching(genIdRegex), '@item': 'Milk', '@index': 1 }
+            ]
+          }
+        }
       });
       const fred = (await api.read<Describe>({ '@describe': 'fred' }))[0];
       expect(fred).toMatchObject({
@@ -342,8 +641,15 @@ describe('Meld State API', () => {
       await api.write<Subject>({
         '@id': 'shopping', '@list': ['Bread']
       });
+      api.follow(captureUpdate.resolve);
       await api.write<Subject>({
         '@id': 'shopping', '@list': { 2: 'Milk' }
+      });
+      expect([...(await captureUpdate)['@insert'].graph.values()]).toContainEqual({
+        '@id': 'shopping',
+        '@list': {
+          1: [{ '@id': expect.stringMatching(genIdRegex), '@item': 'Milk', '@index': 1 }]
+        }
       });
       await expect(api.read<Describe>({ '@describe': 'shopping' })).resolves.toMatchObject([{
         '@id': 'shopping',
@@ -356,8 +662,15 @@ describe('Meld State API', () => {
       await api.write<Subject>({
         '@id': 'shopping', '@list': { 0: 'Milk' }
       });
+      api.follow(captureUpdate.resolve);
       await api.write<Subject>({
         '@id': 'shopping', '@list': { 0: 'Bread' }
+      });
+      expect([...(await captureUpdate)['@insert'].graph.values()]).toContainEqual({
+        '@id': 'shopping',
+        '@list': {
+          0: [{ '@id': expect.stringMatching(genIdRegex), '@item': 'Bread', '@index': 0 }]
+        }
       });
       await expect(api.read<Describe>({ '@describe': 'shopping' })).resolves.toMatchObject([{
         '@id': 'shopping',
@@ -378,8 +691,18 @@ describe('Meld State API', () => {
       await api.write<Subject>({
         '@id': 'shopping', '@list': { 0: 'Milk' }
       });
+      api.follow(captureUpdate.resolve);
       await api.write<Subject>({
         '@id': 'shopping', '@list': { 0: ['Bread', 'Candles'] }
+      });
+      expect([...(await captureUpdate)['@insert'].graph.values()]).toContainEqual({
+        '@id': 'shopping',
+        '@list': {
+          0: [
+            { '@id': expect.stringMatching(genIdRegex), '@item': 'Bread', '@index': 0 },
+            { '@id': expect.stringMatching(genIdRegex), '@item': 'Candles', '@index': 1 }
+          ]
+        }
       });
       await expect(api.read<Describe>({ '@describe': 'shopping' })).resolves.toMatchObject([{
         '@id': 'shopping',
@@ -455,7 +778,15 @@ describe('Meld State API', () => {
         '@where': { '@id': 'shopping', '@list': { '?': { '@id': '?slot', '@item': '?' } } }
       }))[0]['?slot'])['@id'];
 
+      api.follow(captureUpdate.resolve);
       await api.write<Update>({ '@delete': { '@id': 'shopping', '@list': { 0: '?' } } });
+
+      expect([...(await captureUpdate)['@delete'].graph.values()]).toContainEqual({
+        '@id': 'shopping',
+        '@list': {
+          0: { '@id': expect.stringMatching(genIdRegex), '@item': 'Milk', '@index': 0 }
+        }
+      });
       await expect(api.read<Describe>({ '@describe': 'shopping' }))
         .resolves.toEqual([{
           '@id': 'shopping',
@@ -467,12 +798,26 @@ describe('Meld State API', () => {
 
     test('move a slot by index', async () => {
       await api.write<Subject>({ '@id': 'shopping', '@list': ['Milk', 'Bread', 'Spam'] });
+      api.follow(captureUpdate.resolve);
       await api.write<Update>({
         '@delete': {
           '@id': 'shopping', '@list': { 1: { '@id': '?slot', '@item': '?item' } }
         },
         '@insert': {
           '@id': 'shopping', '@list': { 0: { '@id': '?slot', '@item': '?item' } }
+        }
+      });
+      expect([...(await captureUpdate)['@delete'].graph.values()]).toContainEqual({
+        '@id': 'shopping',
+        '@list': {
+          // @item is not included in delete for a move
+          1: { '@id': expect.stringMatching(genIdRegex), '@index': 1 }
+        }
+      });
+      expect([...(await captureUpdate)['@insert'].graph.values()]).toContainEqual({
+        '@id': 'shopping',
+        '@list': {
+          0: [{ '@id': expect.stringMatching(genIdRegex), '@item': 'Bread', '@index': 0 }]
         }
       });
       await expect(api.read<Describe>({ '@describe': 'shopping' }))
@@ -485,12 +830,26 @@ describe('Meld State API', () => {
 
     test('move a slot by value', async () => {
       await api.write<Subject>({ '@id': 'shopping', '@list': ['Milk', 'Bread', 'Spam'] });
+      api.follow(captureUpdate.resolve);
       await api.write<Update>({
         '@delete': {
           '@id': 'shopping', '@list': { '?i': { '@id': '?slot', '@item': 'Spam' } }
         },
         '@insert': {
           '@id': 'shopping', '@list': { 0: { '@id': '?slot', '@item': 'Spam' } }
+        }
+      });
+      expect([...(await captureUpdate)['@delete'].graph.values()]).toContainEqual({
+        '@id': 'shopping',
+        '@list': {
+          // @item is not included in delete for a move
+          2: { '@id': expect.stringMatching(genIdRegex), '@index': 2 }
+        }
+      });
+      expect([...(await captureUpdate)['@insert'].graph.values()]).toContainEqual({
+        '@id': 'shopping',
+        '@list': {
+          0: [{ '@id': expect.stringMatching(genIdRegex), '@item': 'Spam', '@index': 0 }]
         }
       });
       await expect(api.read<Describe>({ '@describe': 'shopping' }))
@@ -512,9 +871,16 @@ describe('Meld State API', () => {
 
     test('change an item', async () => {
       await api.write<Subject>({ '@id': 'shopping', '@list': ['Milk', 'Bread'] });
+      api.follow(captureUpdate.resolve);
       await api.write<Update>({
         '@delete': { '@id': 'shopping', '@list': { '?1': 'Bread' } },
         '@insert': { '@id': 'shopping', '@list': { '?1': 'Spam' } }
+      });
+      expect([...(await captureUpdate)['@delete'].graph.values()]).toContainEqual({
+        '@id': expect.stringMatching(genIdRegex), '@item': 'Bread'
+      });
+      expect([...(await captureUpdate)['@insert'].graph.values()]).toContainEqual({
+        '@id': expect.stringMatching(genIdRegex), '@item': 'Spam'
       });
       await expect(api.read<Describe>({ '@describe': 'shopping' }))
         .resolves.toEqual([{
@@ -525,8 +891,31 @@ describe('Meld State API', () => {
     });
 
     test('nested lists are created', async () => {
+      api.follow(captureUpdate.resolve);
       await api.write<Subject>({
         '@id': 'shopping', '@list': ['Milk', ['Bread', 'Spam']]
+      });
+      expect([...(await captureUpdate)['@insert'].graph.values()]).toContainEqual({
+        '@id': 'shopping',
+        '@type': 'http://m-ld.org/RdfLseq',
+        '@list': {
+          0: [{
+            '@id': expect.stringMatching(genIdRegex), '@item': 'Milk', '@index': 0
+          }, {
+            '@id': expect.stringMatching(genIdRegex),
+            '@item': {
+              '@id': expect.stringMatching(genIdRegex),
+              '@type': 'http://m-ld.org/RdfLseq',
+              '@list': {
+                0: [
+                  { '@id': expect.stringMatching(genIdRegex), '@item': 'Bread', '@index': 0 },
+                  { '@id': expect.stringMatching(genIdRegex), '@item': 'Spam', '@index': 1 }
+                ]
+              }
+            },
+            '@index': 1
+          }]
+        }
       });
       await expect(api.read<Describe>({ '@describe': 'shopping' }))
         .resolves.toMatchObject([{

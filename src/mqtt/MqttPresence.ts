@@ -3,8 +3,8 @@ import { MqttTopic } from './MqttTopic';
 import { AsyncMqttClient, IClientOptions, IClientPublishOptions, ISubscriptionMap } from 'async-mqtt';
 import { Future, getIdLogger } from '../engine/util';
 import { EventEmitter } from 'events';
-import { BehaviorSubject, from, Observable } from 'rxjs';
-import { first, mergeMap } from 'rxjs/operators';
+import { from, Observable } from 'rxjs';
+import { mergeMap } from 'rxjs/operators';
 import { Logger, LogLevelDesc } from 'loglevel';
 
 interface PresenceParams extends TopicParams {

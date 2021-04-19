@@ -80,6 +80,7 @@ export function mockMqtt(): MockMqtt & MockProxy<AsyncMqttClient> {
   mqtt = mock<MockMqtt>(mqtt);
   // jest-mock-extended typing is confused by the AsyncMqttClient overloads, hence <any>
   mqtt.subscribe.mockReturnValue(<any>Promise.resolve([]));
+  mqtt.unsubscribe.mockReturnValue(<any>Promise.resolve());
   mqtt.publish.mockImplementation(
     (topic, payload: Buffer | string) => <any>mqtt.mockPublish(topic, payload));
   return mqtt;

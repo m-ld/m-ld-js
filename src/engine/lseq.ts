@@ -67,7 +67,7 @@ export class LseqDef {
       ids.push({ pos, site });
     }
     assert(ids[ids.length - 1].pos > 0, 'badId', id);
-    return new LseqPosId(ids, this);
+    return new LseqPosId(ids, this, id);
   }
 
   compatible(that: LseqDef) {
@@ -77,9 +77,15 @@ export class LseqDef {
 }
 
 class LseqPosId {
+  /**
+   * @param ids the parsed position Id
+   * @param lseq the LSEQ definition to use
+   * @param id the position Id as a string, if available
+   */
   constructor(
     readonly ids: { pos: number, site: string | null }[],
-    readonly lseq: LseqDef) {
+    readonly lseq: LseqDef,
+    private id?: string) {
   }
 
   equals(that: LseqPosId): boolean {
@@ -87,14 +93,26 @@ class LseqPosId {
       this.ids.every((id, level) => id === that.ids[level]);
   }
 
+  toString(): string {
+    if (this.id == null) {
+      if (this.ids[this.ids.length - 1].pos === 0) // min
+        this.id = '0';
+      else if (this.ids[0].pos === this.lseq.radix) // max
+        this.id = String.fromCharCode((this.lseq.radix - 1)
+          .toString(this.lseq.radix).charCodeAt(0) + 1);
+      else
+        this.id = this.ids.reduce((str, id, i) =>
+          str + id.pos.toString(this.lseq.radix).padStart(i + 1, '0') + id.site, '');
+    }
+    return this.id;
+  }
+
   /**
    * `this` and `that` must be adjacent in the list.
    * @this is the lower bound for the new position
    * @param that the upper bound for the new position
    */
-  // TODO: Make this method able to return multiple positions, and allocate the
-  // range of positions optimally
-  between(that: LseqPosId, site: string): LseqPosId {
+  between(that: LseqPosId, site: string, count: number = 1): LseqPosId[] {
     assert(this.lseq.compatible(that.lseq), 'incompatibleLseq');
     for (let level = 0; level < this.ids.length || level < that.ids.length; level++) {
       if (this.pos(level) > that.pos(level)) {
@@ -112,37 +130,38 @@ class LseqPosId {
             // We can legitimately extend ourselves up to the base
             for (level++; true; level++)
               if (this.pos(level) < this.base(level) - 1)
-                return this.cloneWith(level, this.pos(level), this.base(level), site);
+                return this.alloc(level, this.pos(level), this.base(level), that, site, count);
         // otherwise continue loop as equal pos and site
       } else if (this.pos(level) === that.pos(level) - 1) {
         // No gap at this level but space above this or below that.
         // Keep looping until someone can be extended up (this) or down (that)
         for (level++; true; level++) {
           if (this.pos(level) < this.base(level) - 1)
-            return this.cloneWith(level, this.pos(level), this.base(level), site);
+            return this.alloc(level, this.pos(level), this.base(level), that, site, count);
           else if (that.pos(level) > 1)
-            return that.cloneWith(level, 0, that.pos(level), site);
+            return that.alloc(level, 0, that.pos(level), that, site, count);
         }
       } else {
         // Gap available at this level
-        return this.cloneWith(level, this.pos(level), that.pos(level), site);
+        return this.alloc(level, this.pos(level), that.pos(level), that, site, count);
       }
     }
     throw new Error(ERRORS.equalPosId);
   }
 
-  toString(): string {
-    if (this.ids[this.ids.length - 1].pos === 0) // min
-      return '0';
-    else if (this.ids[0].pos === this.lseq.radix) // max
-      return String.fromCharCode((this.lseq.radix - 1)
-        .toString(this.lseq.radix).charCodeAt(0) + 1);
-    else
-      return this.ids.reduce((str, id, i) =>
-        str + id.pos.toString(this.lseq.radix).padStart(i + 1, '0') + id.site, '');
+  private alloc(level: number, lbound: number, ubound: number, next: LseqPosId, site: string, count: number) {
+    const positions = this.allocIntegers(lbound, ubound, count);
+    const posIds = positions.map(pos => this.cloneWith(level, pos, site));
+    if (posIds.length < count) {
+      const div = Math.ceil((count - posIds.length) / posIds.length);
+      for (let i = 0; i < posIds.length && posIds.length < count; i += div + 1)
+        posIds.splice(i + 1, 0, ...posIds[i].between(posIds[i + 1] ?? next, site, div));
+    }
+    // Drop any excess due to div > 1
+    return posIds.slice(0, count);
   }
 
-  private cloneWith(level: number, lbound: number, ubound: number, site: string): LseqPosId {
+  private cloneWith(level: number, pos: number, site: string): LseqPosId {
     site = site.slice(0, this.lseq.siteLength).padEnd(this.lseq.siteLength, '_');
     const ids: LseqPosId['ids'] = new Array(level);
     // If extending lseq.min, fill in a null site. Also clone for safety.
@@ -151,13 +170,26 @@ class LseqPosId {
     // Pad with zero up to the requested level
     ids.fill({ pos: 0, site }, this.ids.length);
     // Add the new level with a generated position
-    ids.push({ pos: this.newPos(lbound, ubound), site });
+    ids.push({ pos, site });
     return new LseqPosId(ids, this.lseq);
   }
 
-  private newPos(lbound: number, ubound: number): number {
-    const skewedRand = Math.pow(Math.random(), this.lseq.skew);
-    return lbound + Math.floor(skewedRand * (ubound - lbound - 1)) + 1;
+  /**
+   * Allocates as many positions as it can between the bounds. May return an
+   * array with fewer than count positions, if there's not enough room.
+   */
+  private allocIntegers(lbound: number, ubound: number, count: number): number[] {
+    const available = (ubound - lbound - 1);
+    const mid = Math.pow(0.5, this.lseq.skew) * available;
+    const spread = Math.min(mid, available - mid);
+    const gap = count > 1 ? Math.floor(spread / (count - 1)) : 0;
+    let pos = lbound + Math.floor(mid - (spread / 2)) + 1;
+    const positions: number[] = [];
+    while (pos < ubound && positions.length < count) {
+      positions.push(pos);
+      pos += gap || 1;
+    }
+    return positions;
   }
 
   private pos(level: number) {
@@ -182,7 +214,7 @@ function assert(condition: any, err: keyof typeof ERRORS, detail?: string) {
 
 export interface LseqIndexNotify<T> {
   deleted(value: T, posId: string, index: number): void,
-  inserted(value: T, posId: string, index: number): void,
+  inserted(value: T, posId: string, index: number, oldIndex: [number, number]): void,
   reindexed(value: T, posId: string, index: number): void
 }
 
@@ -246,6 +278,10 @@ export class LseqIndexRewriter<T> {
     }
   }
 
+  removeInsert(posId: string) {
+    this.posIdInserts.delete(posId);
+  }
+
   /**
    * Indicates the domain of indexes and position IDs that this rewriter will
    * affect in a call to {@link rewriteIndexes}, so long as no further calls to
@@ -276,57 +312,108 @@ export class LseqIndexRewriter<T> {
    * - value >= domain.posId.min
    */
   rewriteIndexes(existing: PosItem<T>[], notify: LseqIndexNotify<T>) {
-    let oldIndex = minIndexOfSparse(existing) ?? 0, newIndex = oldIndex;
-    let posId = (oldIndex - 1) in existing ?
-      this.lseq.parse(existing[oldIndex - 1].posId) : this.lseq.min;
-    let prevPosId = '';
-    const posIdInsertQueue: PosItem<T>[] = [...this.posIdInserts.entries()]
-      .map(([posId, value]) => ({ posId, value }))
-      .sort((e1, e2) => e1.posId.localeCompare(e2.posId));
-    while (posId.toString() !== prevPosId || oldIndex < this.indexInserts.length ||
+    let index = minIndexOfSparse(existing) ?? 0, newIndex = index;
+    let posId = (index - 1) in existing ?
+      this.lseq.parse(existing[index - 1].posId) : this.lseq.min;
+    const posIdInsertQueue = new PosIdInsertsQueue<T>(this.posIdInserts);
+    const indexInsertBatch = new IndexInsertBatch<T>(this.site, notify.inserted);
+    for (let prevPosId = '';
+      index < this.indexInserts.length ||
+      posId.toString() !== prevPosId ||
       // Don't keep iterating if all inserts are processed and index done
-      (oldIndex < existing.length && oldIndex !== newIndex)) {
+      (index < existing.length && index !== newIndex);
+      index++
+    ) {
       prevPosId = posId.toString();
-      const exists: PosItem<T> | undefined = existing[oldIndex];
-      // posId is the lower bound on the next position created
-      const upper = exists != null ? this.lseq.parse(exists.posId) : this.lseq.max,
-        upperStr = upper.toString();
-      // Insert items before this position if requested
-      while (posIdInsertQueue.length > 0 && posIdInsertQueue[0].posId < upperStr) {
-        const insert = posIdInsertQueue.shift() as PosItem<T>;
-        notify.inserted(insert.value, insert.posId, newIndex);
-        posId = this.lseq.parse(insert.posId);
-        newIndex++;
+      const exists: PosItem<T> | undefined = existing[index];
+      // posId is already the lower bound on the next position created
+      const upper = exists != null ? this.lseq.parse(exists.posId) : this.lseq.max;
+      // Prepare insert items before this position if they exist
+      let subIndex = 0;
+      for (let inserted of posIdInsertQueue.dequeue(upper)) {
+        posId = this.lseq.parse(inserted.posId);
+        notify.inserted(inserted.value, inserted.posId, newIndex++, [index, subIndex++]);
       }
-      // Insert items at this (old) index if requested
-      for (let value of this.indexInserts[oldIndex] ?? []) {
-        posId = posId.between(upper, this.site);
-        notify.inserted(value, posId.toString(), newIndex);
-        newIndex++;
-      }
+      // Prepare insertion of items at this (old) index if requested
+      newIndex += indexInsertBatch.addAll(this.indexInserts[index], newIndex,
+        Math.min(index, existing.length)); // Report beyond-end as at-end
       if (exists != null) {
         if (this.deletes.has(exists.posId)) {
-          notify.deleted(exists.value, exists.posId, oldIndex);
+          notify.deleted(exists.value, exists.posId, index);
           // Do not increment the position or new index
         } else {
+          // Flush any index-based insertions prior to next old item
+          posId = indexInsertBatch.flush(posId, upper);
           // If the index of the old value has change, notify
-          if (newIndex !== oldIndex)
+          if (newIndex !== index)
             notify.reindexed(exists.value, exists.posId, newIndex);
           // Next loop iteration must jump over the old value
           posId = this.lseq.parse(exists.posId);
           newIndex++;
         }
       }
-      oldIndex++;
     }
+    // Flush any remaining index-based insertions
+    indexInsertBatch.flush(posId, this.lseq.max);
   }
 
-  private * iterateInserts() {
+  private *iterateInserts() {
     for (let index in this.indexInserts) // Copes with sparsity
       for (let value of this.indexInserts[index])
         if (value != null)
           yield { index: Number(index), value };
     for (let [posId, value] of this.posIdInserts.entries())
       yield { posId, value };
+  }
+}
+
+class PosIdInsertsQueue<T> {
+  queue: PosItem<T>[];
+
+  constructor(posIdInserts: Map<string, T>) {
+    this.queue = [...posIdInserts.entries()]
+      .map(([posId, value]) => ({ posId, value }))
+      .sort((e1, e2) => e1.posId.localeCompare(e2.posId));
+  }
+
+  *dequeue(upper: LseqPosId) {
+    while (this.queue.length > 0 && this.queue[0].posId < upper.toString())
+      yield (this.queue.shift() as PosItem<T>);
+  }
+}
+
+class IndexInsertBatch<T> {
+  batch: { start: number, values: T[], oldIndex: number } | null = null;
+
+  constructor(
+    readonly site: string,
+    readonly inserted: LseqIndexNotify<T>['inserted']) {
+  }
+
+  /** @returns count inserted */
+  addAll(indexInserts: T[] | undefined, start: number, oldIndex: number) {
+    if (indexInserts != null) {
+      this.batch ??= { start, values: [], oldIndex };
+      const size = this.batch.values.length;
+      const values = this.batch.values;
+      // indexInserts may be sparse, so using forEach
+      indexInserts.forEach(value => values.push(value));
+      return this.batch.values.length - size;
+    }
+    return 0;
+  }
+
+  /** @returns last inserted position ID */
+  flush(posId: LseqPosId, upper: LseqPosId) {
+    if (this.batch) {
+      const positions = posId.between(upper, this.site, this.batch.values.length);
+      for (let i = 0; i < positions.length; i++) {
+        posId = positions[i];
+        this.inserted(this.batch.values[i], posId.toString(),
+          this.batch.start + i, [this.batch.oldIndex, i]);
+      }
+    }
+    this.batch = null;
+    return posId;
   }
 }

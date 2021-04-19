@@ -6,16 +6,18 @@ import { Quadstore } from 'quadstore';
 import { AbstractChainedBatch, AbstractLevelDOWN } from 'abstract-leveldown';
 import { Observable } from 'rxjs';
 import { generate as uuid } from 'short-uuid';
-import { check, observeStream, Stopwatch } from '../util';
+import { check, observeAsyncIterator, Stopwatch } from '../util';
 import { LockManager } from '../locks';
-import { QuadSet } from '../quads';
+import { QuadSet, RdfFactory } from '../quads';
 import { Filter } from '../indices';
-import dataFactory = require('@rdfjs/data-model');
-import { BatchOpts, Binding, DefaultGraphMode, ResultType, TermName } from 'quadstore/dist/lib/types';
-import { Context } from 'jsonld/jsonld-spec';
+import { BatchOpts, Binding, ResultType } from 'quadstore/dist/lib/types';
+import { Context, Iri } from 'jsonld/jsonld-spec';
 import { activeCtx, compactIri, expandTerm, ActiveContext } from '../jsonld';
 import { Algebra } from 'sparqlalgebrajs';
 import { newEngine } from 'quadstore-comunica';
+import { DataFactory as RdfDataFactory } from 'rdf-data-factory';
+import { mld, rdf, jrql, xs, qs } from '../../ns';
+import { wrap, EmptyIterator } from 'asynciterator';
 
 /**
  * Atomically-applied patch to a quad-store.
@@ -126,9 +128,8 @@ const notClosed = check((d: Dataset) => !d.closed, () => new Error('Dataset clos
 /**
  * Read-only utility interface for reading Quads from a Dataset.
  */
-export interface Graph {
+export interface Graph extends RdfFactory {
   readonly name: GraphName;
-  readonly dataFactory: Required<DataFactory>;
 
   match(subject?: Quad_Subject, predicate?: Quad_Predicate, object?: Quad_Object): Observable<Quad>;
 
@@ -142,22 +143,26 @@ export interface Graph {
  * optimise (minimise) both control and user content.
  */
 export const STORAGE_CONTEXT: Context = {
-  qs: 'http://qs.m-ld.org/',
-  xs: 'http://www.w3.org/2001/XMLSchema#',
-  rdf: 'http://www.w3.org/1999/02/22-rdf-syntax-ns#'
+  qs: qs.$base,
+  jrql: jrql.$base,
+  mld: mld.$base,
+  xs: xs.$base,
+  rdf: rdf.$base
 }
 
 export class QuadStoreDataset implements Dataset {
   readonly location: string;
-  private /* readonly */ store: Quadstore;
+  /* readonly */ store: Quadstore;
   private readonly activeCtx?: Promise<ActiveContext>;
   private readonly lock = new LockManager;
   private isClosed: boolean = false;
+  base: Iri | undefined;
 
   constructor(private readonly backend: AbstractLevelDOWN, context?: Context) {
     // Internal of level-js and leveldown
     this.location = (<any>backend).location ?? uuid();
-    this.activeCtx = activeCtx(Object.assign({}, STORAGE_CONTEXT, context));
+    this.activeCtx = activeCtx({ ...STORAGE_CONTEXT, ...context });
+    this.base = context?.['@base'] ?? undefined;
   }
 
   async initialise(): Promise<QuadStoreDataset> {
@@ -165,7 +170,7 @@ export class QuadStoreDataset implements Dataset {
     this.store = new Quadstore({
       backend: this.backend,
       comunica: newEngine(),
-      dataFactory,
+      dataFactory: new RdfDataFactory(),
       indexes: [
         ['graph', 'subject', 'predicate', 'object'],
         ['graph', 'object', 'subject', 'predicate'],
@@ -174,8 +179,7 @@ export class QuadStoreDataset implements Dataset {
       prefixes: activeCtx == null ? undefined : {
         expandTerm: term => expandTerm(term, activeCtx),
         compactIri: iri => compactIri(iri, activeCtx)
-      },
-      defaultGraphMode: DefaultGraphMode.DEFAULT
+      }
     });
     await this.store.open();
     return this;
@@ -186,7 +190,7 @@ export class QuadStoreDataset implements Dataset {
   };
 
   graph(name?: GraphName): Graph {
-    return new QuadStoreGraph(this.store, name || this.dataFactory.defaultGraph());
+    return new QuadStoreGraph(this, name || this.dataFactory.defaultGraph());
   }
 
   @notClosed.async
@@ -274,28 +278,44 @@ export class QuadStoreDataset implements Dataset {
 
 class QuadStoreGraph implements Graph {
   constructor(
-    readonly store: Quadstore,
+    readonly dataset: QuadStoreDataset,
     readonly name: GraphName) {
   }
-
-  get dataFactory() {
-    return <Required<DataFactory>>this.store.dataFactory;
-  };
 
   query(query: Algebra.Construct): Observable<Quad>;
   query(query: Algebra.Describe): Observable<Quad>;
   query(query: Algebra.Project): Observable<Binding>;
   query(query: Algebra.Project | Algebra.Describe | Algebra.Construct): Observable<Binding | Quad> {
-    return observeStream(async () => {
-      const stream = await this.store.sparqlStream(query);
-      if (stream.type === ResultType.BINDINGS || stream.type === ResultType.QUADS)
-        return stream.iterator;
-      else
-        throw new Error('Expected bindings or quads');
-    })
+    return observeAsyncIterator(async () => {
+      try {
+        const stream = await this.dataset.store.sparqlStream(query);
+        if (stream.type === ResultType.BINDINGS || stream.type === ResultType.QUADS)
+          return stream.iterator;
+        else
+          throw new Error('Expected bindings or quads');
+      } catch (err) {
+        // TODO: Comunica bug? Cannot read property 'close' of undefined, if stream empty
+        if (err instanceof TypeError)
+          return new EmptyIterator();
+        throw err;
+      }
+    });
   }
 
   match(subject?: Quad_Subject, predicate?: Quad_Predicate, object?: Quad_Object): Observable<Quad> {
-    return observeStream(async () => this.store.match(subject, predicate, object, this.name));
+    return observeAsyncIterator(async () =>
+      wrap(this.dataset.store.match(subject, predicate, object, this.name)));
   }
+
+  skolem = () => this.dataset.dataFactory.namedNode(
+    new URL(`/.well-known/genid/${uuid()}`, this.dataset.base).href)
+
+  namedNode = this.dataset.dataFactory.namedNode;
+  blankNode = this.dataset.dataFactory.blankNode;
+  literal = this.dataset.dataFactory.literal;
+  variable = this.dataset.dataFactory.variable;
+  defaultGraph = this.dataset.dataFactory.defaultGraph;
+
+  quad = (subject: Quad_Subject, predicate: Quad_Predicate, object: Quad_Object) =>
+    this.dataset.dataFactory.quad(subject, predicate, object, this.name);
 }

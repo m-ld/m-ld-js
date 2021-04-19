@@ -1,4 +1,4 @@
-import { Future } from '../src/engine/util';
+import { deepValues, Future, setAtPath } from '../src/engine/util';
 import { array, shortId, any } from '../src';
 
 test('Future can be resolved', async () => {
@@ -89,4 +89,42 @@ test('short Id for strings are different', () => {
 
 test('any var is always different', () => {
   expect(any()).not.toEqual(any());
+});
+
+test('get deep values of an object', () => {
+  expect([...deepValues({})]).toEqual([]);
+  expect([...deepValues([])]).toEqual([]);
+  expect([...deepValues([0])]).toEqual([[['0'], 0]]);
+  expect([...deepValues({ 'a': 1 })]).toEqual([[['a'], 1]]);
+  expect([...deepValues({ 'a': [0] })]).toEqual([[['a', '0'], 0]]);
+});
+
+test('set shallow path value of an array', () => {
+  const a = [0];
+  setAtPath(a, ['0'], 1);
+  expect(a).toEqual([1]);
+});
+
+test('set shallow path value of an object', () => {
+  const a = { a: 1 };
+  setAtPath(a, ['a'], 2);
+  expect(a).toEqual({ a: 2 });
+});
+
+test('set deep path value of an object', () => {
+  const a = { a: {} };
+  setAtPath(a, ['a', 'b'], 2);
+  expect(a).toEqual({ a: { b: 2 } });
+});
+
+test('set created path object value of an object', () => {
+  const a = {};
+  setAtPath(a, ['a', 'b'], 2, () => ({}));
+  expect(a).toEqual({ a: { b: 2 } });
+});
+
+test('set created path array value of an object', () => {
+  const a = {};
+  setAtPath(a, ['a', '0'], 2, () => []);
+  expect(a).toEqual({ a: [2] });
 });

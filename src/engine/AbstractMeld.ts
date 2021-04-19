@@ -1,11 +1,12 @@
 import { Meld, Snapshot, DeltaMessage, Revup } from '.';
 import { LiveValue } from "./LiveValue";
 import { TreeClock } from './clocks';
-import { Observable, Subject as Source, BehaviorSubject, asapScheduler, of } from 'rxjs';
+import { Observable, BehaviorSubject, asapScheduler, of } from 'rxjs';
 import { observeOn, tap, distinctUntilChanged, first, skip, catchError } from 'rxjs/operators';
-import { LogLevelDesc, Logger } from 'loglevel';
-import { getIdLogger, check, HotSwitch, delayUntil, PauseableSource } from './util';
+import { Logger } from 'loglevel';
+import { getIdLogger, check, PauseableSource } from './util';
 import { MeldError } from './MeldError';
+import { MeldConfig } from '..';
 
 export abstract class AbstractMeld implements Meld {
   protected static checkLive =
@@ -22,8 +23,13 @@ export abstract class AbstractMeld implements Meld {
   private closed = false;
   protected readonly log: Logger;
 
-  constructor(readonly id: string, logLevel: LogLevelDesc = 'info') {
-    this.log = getIdLogger(this.constructor, id, logLevel);
+  readonly id: string;
+  readonly domain: string;
+
+  constructor(config: MeldConfig) {
+    this.id = config['@id'];
+    this.domain = config['@domain'];
+    this.log = getIdLogger(this.constructor, this.id, config.logLevel ?? 'info');
 
     // Update notifications are delayed to ensure internal processing has priority
     this.updates = this.updateSource.pipe(observeOn(asapScheduler),

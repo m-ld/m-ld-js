@@ -9,7 +9,7 @@ import { compact } from 'jsonld';
  *   property can be given in unexpanded form, as it appears in JSON subjects
  *   when using the API, or as its full IRI reference.
  *
- * > 🚧 *Please [contact&nbsp;us](mailto:info@m-ld.io) to discuss data
+ * > 🚧 *Please [contact&nbsp;us](https://m-ld.org/hello/) to discuss data
  * > constraints required for your use-case.*
  */
 export type ConstraintConfig = SingleValuedConfig;

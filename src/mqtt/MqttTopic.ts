@@ -1,6 +1,6 @@
 import { exec, TopicParams } from 'mqtt-pattern';
 import { flatten } from '../engine/util';
-import { DirectParams, ReplyParams } from '../engine/PubsubRemotes';
+import { SendParams, ReplyParams } from '../engine/PubsubRemotes';
 import { array } from '../util';
 
 type TopicPart<P> = string | { '+': keyof P; } | { '#': keyof P; };
@@ -43,11 +43,11 @@ export class MqttTopic<P extends TopicParams = TopicParams> {
   }
 }
 
-export interface SendParams extends DirectParams {
+export interface SendAddressParams extends SendParams {
   address: string[];
 }
 
-export const SEND_TOPIC = new MqttTopic<SendParams & TopicParams>
+export const SEND_TOPIC = new MqttTopic<SendAddressParams & TopicParams>
   ('__send', { '+': 'toId' }, { '+': 'fromId' }, { '+': 'messageId' }, { '#': 'address' });
 
 export const REPLY_TOPIC = new MqttTopic<ReplyParams & TopicParams>

@@ -1,24 +1,9 @@
-import { Quad, Term, Literal } from 'rdf-js';
-// FIXME: Make this a data factory field of some class
-import { namedNode, defaultGraph, variable, blankNode, literal, quad as newQuad } from '@rdfjs/data-model';
+import { Quad, Term, DataFactory, NamedNode } from 'rdf-js';
 import { IndexMap, IndexSet } from "./indices";
 import { memoise } from './util';
 
 export type Triple = Omit<Quad, 'graph'>;
 export type TriplePos = 'subject' | 'predicate' | 'object';
-
-export namespace rdf {
-  export const $id = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#';
-  export const type = namedNode(`${$id}type`);
-  export const Statement = namedNode(`${$id}Statement`);
-  export const subject = namedNode(`${$id}subject`);
-  export const predicate = namedNode(`${$id}predicate`);
-  export const object = namedNode(`${$id}object`);
-  export const List = namedNode(`${$id}List`);
-  export const first = namedNode(`${$id}first`);
-  export const rest = namedNode(`${$id}rest`);
-  export const nil = namedNode(`${$id}nil`);
-}
 
 export class QuadMap<T> extends IndexMap<Quad, T> {
   protected getIndex(key: Quad): string {
@@ -67,32 +52,6 @@ const tripleIndexKey = memoise((triple: Triple) =>
 const quadIndexKey = memoise((quad: Quad) => 
   [quad.graph.value].concat(tripleKey(quad)).join('^'));
 
-export function cloneQuad(quad: Quad): Quad {
-  return newQuad(
-    cloneTerm(quad.subject),
-    cloneTerm(quad.predicate),
-    cloneTerm(quad.object),
-    cloneTerm(quad.graph));
-}
-
-export function cloneTerm<T extends Term>(term: T): T {
-  switch (term.termType) {
-    case 'Quad':
-      return <T>cloneQuad(<Quad>term);
-    case 'BlankNode':
-      return <T>blankNode(term.value);
-    case 'DefaultGraph':
-      return <T>defaultGraph();
-    case 'Literal':
-      const lit = <Literal>term;
-      return <T>literal(term.value, lit.language != null ? lit.language : cloneTerm(lit.datatype));
-    case 'NamedNode':
-      return <T>namedNode(term.value);
-    case 'Variable':
-      return <T>variable(term.value);
-  }
-}
-
 export function canPosition<P extends TriplePos>(pos: P, value?: Term): value is Quad[P] {
   if (!value)
     return false;
@@ -110,4 +69,13 @@ export function inPosition<P extends TriplePos>(pos: P, value?: Term): Quad[P] {
     return value;
   else
     throw new Error(`${value} cannot be used in ${pos} position`);
+}
+
+export interface RdfFactory extends Required<DataFactory> {
+  /**
+   * Generates a new skolemization IRI. The dataset base is allowed to be
+   * `undefined` but the function will throw a `TypeError` if it is.
+   * @see https://www.w3.org/TR/rdf11-concepts/#h3_section-skolemization
+   */
+  skolem?(): NamedNode;
 }

@@ -8,6 +8,7 @@ import { DeltaMessage, MeldRemotes, Snapshot } from '../src/engine';
 import { MeldConfig, Subject, Describe, Update } from '../src';
 import MemDown from 'memdown';
 import { AbstractLevelDOWN } from 'abstract-leveldown';
+import { jsonify } from './testUtil';
 
 describe('Dataset engine', () => {
   describe('as genesis', () => {
@@ -361,7 +362,7 @@ describe('Dataset engine', () => {
       // Also enqueue a no-op write, which we can wait for - relying on queue ordering
       await clone.write({ '@insert': [] } as Update);
       await clone.close(); // Will complete the updates
-      const arrived = await updates;
+      const arrived = jsonify(await updates);
       expect(arrived.length).toBe(1);
       expect(arrived[0]).toMatchObject({ '@insert': [{ "@id": "http://test.m-ld.org/wilma" }] })
     });

@@ -2,15 +2,20 @@ import { of, Subject as Source } from 'rxjs';
 import { MeldUpdate } from '../src/api';
 import { LockManager } from '../src/engine/locks';
 import { CloneEngine, StateEngine } from '../src/engine/StateEngine';
+import {SubjectGraph} from '../src/engine/SubjectGraph'
 
 describe('State Engine', () => {
   class MockCloneEngine implements CloneEngine {
     tick = 0;
     readonly lock = new LockManager<'state'>();
     readonly dataUpdates = new Source<MeldUpdate>();
-    read = () => of({ tick: this.tick });
+    read = () => of({ '@id': 'state', tick: this.tick });
     write = async () => {
-      this.dataUpdates.next({ '@delete': [], '@insert': [], '@ticks': ++this.tick });
+      this.dataUpdates.next({
+        '@delete': new SubjectGraph([]),
+        '@insert': new SubjectGraph([]),
+        '@ticks': ++this.tick
+      });
     }
   }
   let clone: MockCloneEngine;

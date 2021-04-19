@@ -1,28 +1,23 @@
-import { Context, Subject, Describe, Pattern, Update, Read, Write } from '../jrql-support';
+import { Subject, Describe, Update, Read, Write } from '../jrql-support';
 import { Observable, Subscription } from 'rxjs';
-import { map, take } from 'rxjs/operators';
-import { flatten, JsonLdDocument } from 'jsonld';
+import { take } from 'rxjs/operators';
 import {
-  MeldUpdate, MeldState, Resource, any, MeldStateMachine,
-  ReadResult, StateProc, UpdateProc, readResult
+  MeldState, any, MeldStateMachine,
+  ReadResult, StateProc, UpdateProc, readResult, GraphSubject
 } from '../api';
 import { CloneEngine, EngineState, EngineUpdateProc, StateEngine } from './StateEngine';
 
 abstract class ApiState implements MeldState {
   constructor(
-    protected readonly context: Context,
     private readonly state: EngineState) {
   }
 
-  read<R extends Read = Read, S = Subject>(request: R): ReadResult<Resource<S>> {
-    const result = this.state.read(this.applyRequestContext(request));
-    return readResult(result.pipe(map((subject: Subject) =>
-      // Strip the domain context from each subject
-      <Resource<S>>this.stripSubjectContext(subject))));
+  read<R extends Read = Read>(request: R): ReadResult {
+    return readResult(this.state.read(request));
   }
 
   async write<W = Write>(request: W): Promise<MeldState> {
-    return this.construct(await this.state.write(this.applyRequestContext(request)));
+    return this.construct(await this.state.write(request));
   }
 
   delete(id: string): Promise<MeldState> {
@@ -34,31 +29,16 @@ abstract class ApiState implements MeldState {
     });
   }
 
-  get<S = Subject>(id: string): Promise<Resource<S> | undefined> {
-    return this.read<Describe, S>({ '@describe': id }).pipe(take(1)).toPromise();
+  get(id: string): Promise<GraphSubject | undefined> {
+    return this.read<Describe>({ '@describe': id }).pipe(take(1)).toPromise();
   }
 
   protected abstract construct(state: EngineState): MeldState;
-
-  private applyRequestContext<P extends Pattern>(request: P): P {
-    return {
-      ...request,
-      // Apply the domain context to the request, explicit context wins
-      '@context': { ...this.context, ...request['@context'] || {} }
-    };
-  }
-
-  private stripSubjectContext(jsonld: Subject): Subject {
-    const { '@context': context, ...rtn } = jsonld;
-    if (context)
-      Object.keys(this.context).forEach((k: keyof Context) => delete context[k]);
-    return context && Object.keys(context).length ? { ...rtn, '@context': context } : rtn;
-  }
 }
 
 class ImmutableState extends ApiState {
   protected construct(state: EngineState): MeldState {
-    return new ImmutableState(this.context, state);
+    return new ImmutableState(state);
   }
 }
 
@@ -68,10 +48,10 @@ class ImmutableState extends ApiState {
 export class ApiStateMachine extends ApiState implements MeldStateMachine {
   private readonly engine: StateEngine;
 
-  constructor(context: Context, engine: CloneEngine) {
+  constructor(engine: CloneEngine) {
     const stateEngine = new StateEngine(engine);
-    super(context, {
-      read: (request: Read): Observable<Subject> => {
+    super({
+      read: (request: Read): Observable<GraphSubject> => {
         return new Observable(subs => {
           const subscription = new Subscription;
           // This does not wait for results before returning control
@@ -88,8 +68,7 @@ export class ApiStateMachine extends ApiState implements MeldStateMachine {
   }
 
   private updateHandler(handler: UpdateProc): EngineUpdateProc {
-    return async (update, state) =>
-      handler(await this.applyUpdateContext(update), new ImmutableState(this.context, state))
+    return async (update, state) => handler(update, new ImmutableState(state));
   }
 
   follow(handler: UpdateProc): Subscription {
@@ -97,11 +76,11 @@ export class ApiStateMachine extends ApiState implements MeldStateMachine {
   }
 
   read(procedure: StateProc, handler?: UpdateProc): Subscription;
-  read<R extends Read = Read, S = Subject>(request: R): ReadResult<Resource<S>>;
+  read<R extends Read = Read, S = Subject>(request: R): ReadResult;
   read(request: Read | StateProc, handler?: UpdateProc) {
     if (typeof request == 'function') {
       return this.engine.read(
-        state => request(new ImmutableState(this.context, state)),
+        state => request(new ImmutableState(state)),
         handler != null ? this.updateHandler(handler) : undefined);
     } else {
       return super.read(request);
@@ -112,7 +91,7 @@ export class ApiStateMachine extends ApiState implements MeldStateMachine {
   write<W = Write>(request: W): Promise<MeldState>;
   async write(request: Write | StateProc<MeldState>) {
     if (typeof request == 'function') {
-      await this.engine.write(state => request(new ImmutableState(this.context, state)));
+      await this.engine.write(state => request(new ImmutableState(state)));
       return this;
     } else {
       return super.write(request);
@@ -122,20 +101,5 @@ export class ApiStateMachine extends ApiState implements MeldStateMachine {
   protected construct(): MeldState {
     // For direct read and write, we are mutable
     return this;
-  }
-
-  private async applyUpdateContext(update: MeldUpdate): Promise<MeldUpdate> {
-    return {
-      '@ticks': update['@ticks'],
-      '@delete': await this.regroup(update['@delete']),
-      '@insert': await this.regroup(update['@insert'])
-    }
-  }
-
-  private async regroup(subjects: Subject[]): Promise<Subject[]> {
-    // TODO: Cast required due to
-    // https://github.com/DefinitelyTyped/DefinitelyTyped/issues/50909
-    const graph: any = await flatten(<JsonLdDocument>subjects, this.context);
-    return graph['@graph'];
   }
 }

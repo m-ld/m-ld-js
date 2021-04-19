@@ -1,24 +1,17 @@
 import { Context } from '../../jrql-support';
-// FIXME: Get the data factory from somewhere
-import { namedNode } from '@rdfjs/data-model';
-import { NamedNode } from 'rdf-js';
 import { Iri } from 'jsonld/jsonld-spec';
 import { Triple, tripleKey } from '../quads';
 import { createHash } from 'crypto';
 import { TreeClock } from '../clocks';
 import { MsgPack } from '../util';
+import { qs } from '../../ns';
 
 /**
  * Context for SU-Set Dataset code to manipulate control content.
  */
 export const SUSET_CONTEXT: Context = {
-  qs: 'http://qs.m-ld.org/',
-  tid: 'qs:#tid', // Property of triple hash
-  thash: 'qs:thash/' // Namespace for triple hashes
-}
-
-export function qsName(name: string): NamedNode {
-  return namedNode(SUSET_CONTEXT.qs + name);
+  tid: qs.tid, // Property of triple hash
+  thash: qs.thash // Namespace for triple hashes
 }
 
 export function toPrefixedId(prefix: string, ...path: string[]): Iri {

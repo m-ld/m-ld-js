@@ -1,24 +1,33 @@
-import rdf = require('@rdfjs/data-model');
-import { JrqlQuads, toIndexNumber } from '../src/engine/dataset/JrqlQuads';
+import { DataFactory as RdfDataFactory } from 'rdf-data-factory';
+import { JrqlQuads } from '../src/engine/dataset/JrqlQuads';
 import * as N3 from 'n3';
-const XSD_INTEGER = rdf.namedNode('http://www.w3.org/2001/XMLSchema#integer');
+import { Graph } from '../src/engine/dataset';
+import { mock } from 'jest-mock-extended';
+import { uuid } from '../src';
+import { ActiveContext, activeCtx } from '../src/engine/jsonld';
 
 describe('json-rql Quads translation', () => {
+  const rdf = new RdfDataFactory();
+  Object.assign(rdf, { skolem: () => rdf.namedNode(`http://test.m-ld.org/${uuid()}`) });
+
   let jrql: JrqlQuads;
-  const context = { '@base': 'http://test.m-ld.org/', '@vocab': '#' };
+  let context: ActiveContext;
 
-  beforeEach(() => jrql = new JrqlQuads(rdf, rdf.defaultGraph(), context['@base']));
+  beforeEach(async () => {
+    context = await activeCtx({ '@base': 'http://test.m-ld.org/', '@vocab': '#' });
+    jrql = new JrqlQuads(mock<Graph>(rdf));
+  });
 
-  test('quadifies @id-only top-level subject with variable p-o', async () => {
-    const quads = await jrql.quads({ '@id': 'fred' }, { query: true }, context);
+  test('quadifies @id-only top-level subject with variable p-o', () => {
+    const quads = jrql.quads({ '@id': 'fred' }, { mode: 'match' }, context);
     expect(quads.length).toBe(1);
     expect(rdf.namedNode('http://test.m-ld.org/fred').equals(quads[0].subject)).toBe(true);
     expect(quads[0].predicate.termType).toBe('Variable');
     expect(quads[0].object.termType).toBe('Variable');
   });
 
-  test('quadifies anonymous subject', async () => {
-    const quads = await jrql.quads({ 'name': 'Fred' }, { query: true }, context);
+  test('quadifies anonymous subject', () => {
+    const quads = jrql.quads({ 'name': 'Fred' }, { mode: 'match' }, context);
     expect(quads.length).toBe(1);
     expect(quads[0].subject.termType).toBe('Variable');
     expect(rdf.namedNode('http://test.m-ld.org/#name').equals(quads[0].predicate)).toBe(true);
@@ -26,8 +35,8 @@ describe('json-rql Quads translation', () => {
     expect(quads[0].object.value).toBe('Fred');
   });
 
-  test('quadifies anonymous variable predicate', async () => {
-    const quads = await jrql.quads({ '?': 'Fred' }, { query: true }, context);
+  test('quadifies anonymous variable predicate', () => {
+    const quads = jrql.quads({ '?': 'Fred' }, { mode: 'match' }, context);
     expect(quads.length).toBe(1);
     expect(quads[0].subject.termType).toBe('Variable');
     expect(quads[0].predicate.termType).toBe('Variable');
@@ -35,8 +44,8 @@ describe('json-rql Quads translation', () => {
     expect(quads[0].object.value).toBe('Fred');
   });
 
-  test('quadifies anonymous reference predicate', async () => {
-    const quads = await jrql.quads({ '?': { '@id': 'fred' } }, { query: true }, context);
+  test('quadifies anonymous reference predicate', () => {
+    const quads = jrql.quads({ '?': { '@id': 'fred' } }, { mode: 'match' }, context);
     expect(quads.length).toBe(1);
     expect(quads[0].subject.termType).toBe('Variable');
     expect(quads[0].predicate.termType).toBe('Variable');
@@ -44,8 +53,8 @@ describe('json-rql Quads translation', () => {
     expect(quads[0].object.value).toBe('http://test.m-ld.org/fred');
   });
 
-  test('quadifies with numeric property', async () => {
-    const quads = await jrql.quads({ '@id': 'fred', age: 40 }, { query: true }, context);
+  test('quadifies with numeric property', () => {
+    const quads = jrql.quads({ '@id': 'fred', age: 40 }, { mode: 'match' }, context);
     expect(quads.length).toBe(1);
     expect(rdf.namedNode('http://test.m-ld.org/fred').equals(quads[0].subject)).toBe(true);
     expect(rdf.namedNode('http://test.m-ld.org/#age').equals(quads[0].predicate)).toBe(true);
@@ -53,8 +62,8 @@ describe('json-rql Quads translation', () => {
     expect(quads[0].object.value).toBe('40');
   });
 
-  test('quadifies with numeric array property', async () => {
-    const quads = await jrql.quads({ '@id': 'fred', age: [40] }, { query: true }, context);
+  test('quadifies with numeric array property', () => {
+    const quads = jrql.quads({ '@id': 'fred', age: [40] }, { mode: 'match' }, context);
     expect(quads.length).toBe(1);
     expect(rdf.namedNode('http://test.m-ld.org/fred').equals(quads[0].subject)).toBe(true);
     expect(rdf.namedNode('http://test.m-ld.org/#age').equals(quads[0].predicate)).toBe(true);
@@ -63,41 +72,17 @@ describe('json-rql Quads translation', () => {
   });
 
   describe('lists', () => {
-    test('converts key to index number', () => {
-      expect(toIndexNumber(undefined)).toBeUndefined();
-      expect(toIndexNumber(null)).toBeUndefined();
-      expect(toIndexNumber('a')).toBeUndefined();
-      expect(toIndexNumber([0])).toBeUndefined();
-      expect(toIndexNumber('[0]')).toBeUndefined();
-
-      // Allow numeric keys (Javascript object)
-      expect(toIndexNumber(0)).toBe(0);
-      expect(toIndexNumber(10)).toBe(10);
-
-      expect(toIndexNumber('0')).toBe(0);
-      expect(toIndexNumber('10')).toBe(10);
-
-      expect(toIndexNumber('0,0')).toEqual([0, 0]);
-      expect(toIndexNumber('0,10')).toEqual([0, 10]);
-
-      expect(toIndexNumber('data:,0')).toBe(0);
-      expect(toIndexNumber('data:,10')).toBe(10);
-
-      expect(toIndexNumber('data:,0,0')).toEqual([0, 0]);
-      expect(toIndexNumber('data:,0,10')).toEqual([0, 10]);
-    });
-
-    test('quadifies a top-level singleton list', async () => {
+    test('quadifies a top-level singleton list', () => {
       const store = new N3.Store();
-      store.addQuads(await jrql.quads({
+      store.addQuads(jrql.quads({
         '@id': 'shopping',
         '@list': 'Bread'
-      }, { query: false }, context));
+      }, { mode: 'load' }, context));
       expect(store.size).toBe(2);
 
       const shoppingBread = store.getQuads(
         rdf.namedNode('http://test.m-ld.org/shopping'),
-        rdf.namedNode('data:,0'), null, null)[0];
+        rdf.namedNode('data:application/mld-li,0'), null, null)[0];
       expect(shoppingBread.object.termType).toBe('NamedNode');
 
       expect(store.getQuads(
@@ -106,12 +91,12 @@ describe('json-rql Quads translation', () => {
         rdf.literal('Bread'), null)[0]).toBeDefined();
     });
 
-    test('quadifies a singleton list property', async () => {
+    test('quadifies a singleton list property', () => {
       const store = new N3.Store();
-      store.addQuads(await jrql.quads({
+      store.addQuads(jrql.quads({
         '@id': 'fred',
         shopping: { '@list': 'Bread' }
-      }, { query: false }, context));
+      }, { mode: 'load' }, context));
       expect(store.size).toBe(3);
 
       const fredShopping = store.getQuads(
@@ -121,7 +106,7 @@ describe('json-rql Quads translation', () => {
 
       const shoppingBread = store.getQuads(
         fredShopping.object,
-        rdf.namedNode('data:,0'), null, null)[0];
+        rdf.namedNode('data:application/mld-li,0'), null, null)[0];
       expect(shoppingBread.object.termType).toBe('NamedNode');
 
       expect(store.getQuads(
@@ -130,22 +115,22 @@ describe('json-rql Quads translation', () => {
         rdf.literal('Bread'), null)[0]).toBeDefined();
     });
 
-    test('quadifies a top-level array list', async () => {
+    test('quadifies a top-level array list', () => {
       const store = new N3.Store();
-      store.addQuads(await jrql.quads({
+      store.addQuads(jrql.quads({
         '@id': 'shopping',
         '@list': ['Bread', 'Jam']
-      }, { query: false }, context));
+      }, { mode: 'load' }, context));
       expect(store.size).toBe(4);
 
       const shoppingBread = store.getQuads(
         rdf.namedNode('http://test.m-ld.org/shopping'),
-        rdf.namedNode('data:,0'), null, null)[0];
+        rdf.namedNode('data:application/mld-li,0'), null, null)[0];
       expect(shoppingBread.object.termType).toBe('NamedNode');
 
       const shoppingJam = store.getQuads(
         rdf.namedNode('http://test.m-ld.org/shopping'),
-        rdf.namedNode('data:,1'), null, null)[0];
+        rdf.namedNode('data:application/mld-li,1'), null, null)[0];
       expect(shoppingJam.object.termType).toBe('NamedNode');
 
       expect(store.getQuads(
@@ -159,17 +144,17 @@ describe('json-rql Quads translation', () => {
         rdf.literal('Jam'), null)[0]).toBeDefined();
     });
 
-    test('quadifies a top-level indexed hash list', async () => {
+    test('quadifies a top-level indexed hash list', () => {
       const store = new N3.Store();
-      store.addQuads(await jrql.quads({
+      store.addQuads(jrql.quads({
         '@id': 'shopping',
         '@list': { '1': 'Bread' }
-      }, { query: false }, context));
+      }, { mode: 'load' }, context));
       expect(store.size).toBe(2);
 
       const shoppingBread = store.getQuads(
         rdf.namedNode('http://test.m-ld.org/shopping'),
-        rdf.namedNode('data:,1'), null, null)[0];
+        rdf.namedNode('data:application/mld-li,1'), null, null)[0];
       expect(shoppingBread.object.termType).toBe('NamedNode');
 
       expect(store.getQuads(
@@ -178,17 +163,17 @@ describe('json-rql Quads translation', () => {
         rdf.literal('Bread'), null)[0]).toBeDefined();
     });
 
-    test('quadifies a top-level indexed hash list with multiple items', async () => {
+    test('quadifies a top-level indexed hash list with multiple items', () => {
       const store = new N3.Store();
-      store.addQuads(await jrql.quads({
+      store.addQuads(jrql.quads({
         '@id': 'shopping',
         '@list': { '1': ['Bread', 'Milk'] }
-      }, { query: false }, context));
+      }, { mode: 'load' }, context));
       expect(store.size).toBe(4);
 
       const shoppingBread = store.getQuads(
         rdf.namedNode('http://test.m-ld.org/shopping'),
-        rdf.namedNode('data:,1,0'), null, null)[0];
+        rdf.namedNode('data:application/mld-li,1,0'), null, null)[0];
       expect(shoppingBread.object.termType).toBe('NamedNode');
 
       expect(store.getQuads(
@@ -198,7 +183,7 @@ describe('json-rql Quads translation', () => {
 
       const shoppingMilk = store.getQuads(
         rdf.namedNode('http://test.m-ld.org/shopping'),
-        rdf.namedNode('data:,1,1'), null, null)[0];
+        rdf.namedNode('data:application/mld-li,1,1'), null, null)[0];
       expect(shoppingBread.object.termType).toBe('NamedNode');
 
       expect(store.getQuads(
@@ -207,17 +192,17 @@ describe('json-rql Quads translation', () => {
         rdf.literal('Milk'), null)[0]).toBeDefined();
     });
 
-    test('quadifies a top-level data URL indexed hash list', async () => {
+    test('quadifies a top-level data URL indexed hash list', () => {
       const store = new N3.Store();
-      store.addQuads(await jrql.quads({
+      store.addQuads(jrql.quads({
         '@id': 'shopping',
-        '@list': { 'data:,1': 'Bread' }
-      }, { query: false }, context));
+        '@list': { 'data:application/mld-li,1': 'Bread' }
+      }, { mode: 'load' }, context));
       expect(store.size).toBe(2);
 
       const shoppingBread = store.getQuads(
         rdf.namedNode('http://test.m-ld.org/shopping'),
-        rdf.namedNode('data:,1'), null, null)[0];
+        rdf.namedNode('data:application/mld-li,1'), null, null)[0];
       expect(shoppingBread.object.termType).toBe('NamedNode');
 
       expect(store.getQuads(
@@ -226,16 +211,16 @@ describe('json-rql Quads translation', () => {
         rdf.literal('Bread'), null)[0]).toBeDefined();
     });
 
-    test('rejects a list with bad indexes', async () => {
-      await expect(jrql.quads({
-        '@id': 'shopping', '@list': { 'data:,x': 'Bread' }
-      }, { query: false }, context)).rejects.toThrow();
-      await expect(jrql.quads({
+    test('rejects a list with bad indexes', () => {
+      expect(() => jrql.quads({
+        '@id': 'shopping', '@list': { 'data:application/mld-li,x': 'Bread' }
+      }, { mode: 'load' }, context)).toThrow()
+      expect(() => jrql.quads({
         '@id': 'shopping', '@list': { 'x': 'Bread' }
-      }, { query: false }, context)).rejects.toThrow();
-      await expect(jrql.quads({
+      }, { mode: 'load' }, context)).toThrow();
+      expect(() => jrql.quads({
         '@id': 'shopping', '@list': { 'http://example.org/Bad': 'Bread' }
-      }, { query: false }, context)).rejects.toThrow();
+      }, { mode: 'load' }, context)).toThrow();
     });
   });
 });

@@ -6,7 +6,9 @@ import { publish, tap, mergeMap, switchAll, scan, endWith, pluck, filter } from 
 import { LogLevelDesc, getLogger, getLoggers } from 'loglevel';
 import * as performance from 'marky';
 import { encode as rawEncode, decode as rawDecode } from '@ably/msgpack-js';
-import { EventEmitter } from 'events';
+import { AsyncIterator } from 'asynciterator';
+
+export const isArray = Array.isArray;
 
 export namespace MsgPack {
   export const encode = (value: any) => Buffer.from(rawEncode(value).buffer);
@@ -17,9 +19,12 @@ export function flatten<T>(bumpy: T[][]): T[] {
   return ([] as T[]).concat(...bumpy);
 }
 
+export function fromPromise<T, P>(promise: Promise<P>, map: (p: P) => Observable<T>): Observable<T> {
+  return from(promise).pipe(mergeMap(map));
+}
+
 export function fromArrayPromise<T>(promise: Promise<T[]>): Observable<T> {
-  // Rx weirdness exemplified in 26 characters
-  return from(promise).pipe(mergeMap(from));
+  return fromPromise(promise, from);
 }
 
 export function toJson(thing: any): any {
@@ -154,25 +159,35 @@ export function onErrorNever<T>(v: ObservableInput<T>): Observable<T> {
   return onErrorResumeNext(v, NEVER);
 }
 
-export function observeStream<T>(startStream: () => Promise<EventEmitter>): Observable<T> {
+export function observeAsyncIterator<T>(start: () => Promise<AsyncIterator<T>>): Observable<T> {
   return new Observable<T>(subs => {
     const subscription = new Subscription;
-    startStream().then(stream => {
+    start().then(iterator => {
       if (!subscription.closed) {
-        subscription.add(() => {
-          const maybeAsyncIterator = <any>stream;
-          if (maybeAsyncIterator != null &&
-            typeof maybeAsyncIterator.close == 'function' &&
-            !maybeAsyncIterator.ended)
-            (<any>stream).close();
-        });
-        stream
-          .on('data', datum => {
+        if (iterator.done) {
+          subs.complete();
+        } else {
+          const dataHandler = (datum: T) => {
             if (!subscription.closed)
               subs.next(datum);
-          })
-          .on('error', err => subs.error(err))
-          .on('end', () => subs.complete());
+          };
+          const errorHandler = (err: any) => subs.error(err);
+          const endHandler = () => subs.complete();
+          iterator
+            .on('end', endHandler)
+            .on('close', endHandler)
+            .on('error', errorHandler)
+            .on('data', dataHandler);
+          subscription.add(() => {
+            iterator
+              .off('end', endHandler)
+              .off('close', endHandler)
+              .off('error', errorHandler)
+              .off('data', dataHandler);
+            if (!iterator.ended)
+              iterator.close();
+          });
+        }
       }
     }).catch(err => subs.error(err));
     return subscription;
@@ -310,3 +325,49 @@ export function minIndexOfSparse<T>(arr: T[]) {
   arr.some((_, i) => (min = i) != null);
   return min;
 }
+
+export function binaryFold<T, R>(
+  input: T[],
+  map: (t: T) => R,
+  fold: (r1: R, r2: R) => R): R | null {
+  return input.reduce<R | null>((r1, t) => {
+    const r2 = map(t);
+    return r1 == null ? r2 : fold(r1, r2);
+  }, null);
+}
+
+export function mapObject(
+  o: {}, fn: (k: string, v: any) => { [key: string]: any } | undefined): { [key: string]: any } {
+  return Object.assign({}, ...Object.entries(o).map(([k, v]) => fn(k, v)));
+}
+
+export function* deepValues(o: any,
+  filter: (o: any, path: string[]) => boolean = o => typeof o != 'object',
+  path: string[] = []): IterableIterator<[string[], any]> {
+  if (filter(o, path))
+    yield [path, o];
+  else if (typeof o == 'object')
+    for (let key in o)
+      yield* deepValues(o[key], filter, path.concat(key));
+}
+
+export function setAtPath<T>(o: any, path: string[], value: T,
+  createAt: (path: string[]) => any = path => { throw `nothing at ${path}`; },
+  start = 0): T {
+  if (path.length > start)
+    if (path.length - start === 1)
+      o[path[start]] = value; // no-op for primitives, throws for null/undefined
+    else
+      setAtPath(o[path[start]] ??= createAt(path.slice(0, start + 1)),
+        path, value, createAt, start + 1);
+  return value;
+}
+
+export function trimTail<T>(arr: T[]): T[] {
+  while (arr[arr.length - 1] == null)
+    arr.length--;
+  return arr;
+}
+
+export const isNaturalNumber = (n: any) =>
+  typeof n == 'number' && Number.isSafeInteger(n) && n >= 0;

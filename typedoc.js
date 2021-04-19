@@ -8,8 +8,11 @@ module.exports = {
   includes: './doc/includes',
   exclude: [
     './src/engine/**',
+    './src/types/**',
+    './src/ns/**',
     './src/ably/**',
-    './src/mqtt/**'
+    './src/mqtt/**',
+    './src/wrtc/**'
   ],
   excludePrivate: true,
   excludeProtected: true,

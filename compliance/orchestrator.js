@@ -28,7 +28,7 @@ Object.entries({ start, transact, stop, kill, destroy, partition })
 http.on('after', req => delete requests[req.id()]);
 http.listen(port, () => {
   LOG.info(`Orchestrator listening on ${httpUrl}`);
-  process.send('listening');
+  process.send('listening', err => err && LOG.warn('Orchestrator orphaned', err));
   process.on('exit', () => {
     LOG.info(`Orchestrator shutting down`);
     Object.values(clones).forEach(
@@ -157,9 +157,8 @@ function start(req, res, next) {
       destroyed: message => {
         const { requestId } = message;
         const [res, next] = requests[requestId];
-        destroyData(cloneId, tmpDir);
         killCloneProcess(cloneId, 'destroyed', res, next);
-        delete clones[cloneId];
+        destroyAndForget(cloneId, tmpDir);
       },
       stopped: message => {
         const { requestId } = message;
@@ -182,7 +181,7 @@ function transact(req, res, next) {
       id: req.id(),
       '@type': 'transact',
       request: req.body
-    });
+    }, err => err && next(err));
     res.header('transfer-encoding', 'chunked');
   }, next);
 }
@@ -192,7 +191,16 @@ function stop(req, res, next) {
   const { cloneId } = req.query;
   withClone(cloneId, ({ process }) => {
     LOG.debug(`${cloneId}: Stopping clone`);
-    process.send({ id: req.id(), '@type': 'stop' });
+    process.send({
+      id: req.id(), '@type': 'stop'
+    }, err => {
+      if (err) {
+        // This clone process is already killed
+        LOG.debug(`${cloneId}: Already killed`, err);
+        res.send({ '@type': 'stopped', cloneId });
+        next();
+      }
+    });
   }, next);
 }
 
@@ -206,13 +214,23 @@ function destroy(req, res, next) {
   const { cloneId } = req.query;
   withClone(cloneId, ({ process, tmpDir }) => {
     LOG.debug(`${cloneId}: Destroying clone`);
-    if (process) {
-      process.send({ id: req.id(), '@type': 'destroy' });
-    } else {
-      destroyData(cloneId, tmpDir);
-      delete clones[cloneId];
+    function done() {
+      destroyAndForget(cloneId, tmpDir);
       res.send({ '@type': 'destroyed', cloneId });
       next();
+    }
+    if (process) {
+      process.send({
+        id: req.id(), '@type': 'destroy'
+      }, err => {
+        if (err) {
+          // This clone process is already killed
+          LOG.debug(`${cloneId}: Already killed`, err);
+          done();
+        }
+      });
+    } else {
+      done();
     }
   }, next);
 }
@@ -250,9 +268,10 @@ function partition(req, res, next) {
   });
 }
 
-function destroyData(cloneId, tmpDir) {
+function destroyAndForget(cloneId, tmpDir) {
   LOG.info(`${cloneId}: Destroying clone data`);
   tmpDir.removeCallback();
+  delete clones[cloneId];
 }
 
 function registerRequest(req, res, next) {

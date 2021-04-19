@@ -1,29 +1,40 @@
 import * as spec from '@m-ld/m-ld-spec';
 import {
-  Subject, Update, Reference, Variable, Read, Write
+  Subject, Update, Reference, Variable, Read, Write, SubjectProperty
 } from './jrql-support';
 import { Observable, Subscription } from 'rxjs';
 import { toArray } from 'rxjs/operators';
 import { shortId } from './util';
+import { Iri } from 'jsonld/jsonld-spec';
+import { SubjectGraph } from './engine/SubjectGraph';
 
 /**
  * A convenience type for a struct with a `@insert` and `@delete` property, like
  * a {@link MeldUpdate}.
  */
 export interface DeleteInsert<T> {
-  '@delete': T;
-  '@insert': T;
+  readonly '@delete': T;
+  readonly '@insert': T;
+}
+
+/** @internal */
+export function isDeleteInsert(o: any): o is DeleteInsert<unknown> {
+  return '@insert' in o && '@delete' in o;
 }
 
 /**
  * A utility to generate a variable with a unique Id. Convenient to use when
  * generating query patterns in code.
  */
-export function any(): Variable {
-  return `?${shortId((nextAny++).toString(16))}`;
-}
+export const any = (): Variable => `?${anyName()}`
+/**
+ * A utility to generate a unique blank node.
+ */
+export const blank = () => '_:' + anyName();
 /** @internal */
 let nextAny = 0x1111;
+/** @internal */
+export const anyName = (): string => shortId((nextAny++).toString(16))
 
 // Unchanged from m-ld-spec
 /** @see m-ld [specification](http://spec.m-ld.org/interfaces/livestatus.html) */
@@ -34,7 +45,7 @@ export type MeldStatus = spec.MeldStatus;
 /**
  * Convenience return type for reading data from a clone. Use as a
  * [Promise](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise)
- * with `.then` or `await` to obtain the results as an array of
+ * with `.then` or `await` to obtain the results as an array of identified
  * {@link Subject}s. Use as an
  * [Observable](https://rxjs.dev/api/index/class/Observable) with `.subscribe`
  * (or other RxJS methods) to be notified of individual Subjects as they arrive.
@@ -44,13 +55,13 @@ export type MeldStatus = spec.MeldStatus;
  *
  * @see {@link MeldStateMachine.read}
  */
-export type ReadResult<T> = Observable<T> & PromiseLike<T[]>;
+export type ReadResult = Observable<GraphSubject> & PromiseLike<GraphSubjects>;
 
 /** @internal */
-export function readResult<T>(result: Observable<T>): ReadResult<T> {
-  const then: PromiseLike<T[]>['then'] =
-    (onfulfilled, onrejected) => result.pipe(toArray()).toPromise()
-      .then(onfulfilled, onrejected);
+export function readResult(result: Observable<GraphSubject>): ReadResult {
+  const then: PromiseLike<GraphSubjects>['then'] =
+    (onfulfilled, onrejected) => result.pipe(toArray<GraphSubject>()).toPromise()
+      .then(onfulfilled == null ? null : graph => onfulfilled(new SubjectGraph(graph)), onrejected);
   return Object.assign(result, { then });
 }
 
@@ -78,14 +89,14 @@ export interface MeldReadState {
    * @returns read subjects
    * @see {@link MeldStateMachine.read}
    */
-  read<R extends Read = Read, S = Subject>(request: R): ReadResult<Resource<S>>;
+  read<R extends Read = Read>(request: R): ReadResult;
   /**
    * Shorthand method for retrieving a single Subject by its `@id`, if it exists.
    * 
    * @param id the Subject `@id`
    * @returns a promise resolving to the requested Subject, or `undefined` if not found
    */
-  get<S = Subject>(id: string): Promise<Resource<S> | undefined>;
+  get(id: string): Promise<GraphSubject | undefined>;
 }
 
 /**
@@ -131,21 +142,41 @@ export interface MeldState extends MeldReadState {
 }
 
 /**
+ * A fully-identified Subject from the backend.
+ */
+export type GraphSubject = Readonly<Subject & Reference>;
+
+/**
+ * Convenience for collections of identified Subjects, such as found in a
+ * {@link MeldUpdate}. Extends `Array` and serialisable to JSON-LD as such.
+ */
+export interface GraphSubjects extends Array<GraphSubject> {
+  /**
+   * Subjects in the collection indexed by `@id`. In addition, if a Subject in
+   * the graph references another Subject in the same graph, the reference is
+   * realised as a Javascript reference, so it is possible to traverse the graph
+   * from some known root object. This means that the graph cannot necessarily
+   * by serialised to JSON as it may not be acyclic.
+   */
+  graph: ReadonlyMap<Iri, GraphSubject>;
+}
+
+/**
  * @see m-ld [specification](http://spec.m-ld.org/interfaces/meldupdate.html)
  */
-export interface MeldUpdate {
+export interface MeldUpdate extends DeleteInsert<GraphSubjects> {
   /**
    * Partial subjects, containing properties that have been deleted from the
    * domain. Note that deletion of a property (even of all properties) does not
    * necessarily indicate that the subject's identity is not longer represented
    * in the domain.
    */
-  readonly '@delete': Subject[];
+  readonly '@delete': GraphSubjects;
   /**
    * Partial subjects, containing properties that have been inserted into the
    * domain.
    */
-  readonly '@insert': Subject[];
+  readonly '@insert': GraphSubjects;
   /**
    * Current local clock ticks at the time of the update.
    * @see MeldStatus.ticks
@@ -224,9 +255,10 @@ export interface MeldStateMachine extends MeldState {
    * perform the request in the scope of a read procedure instead.
    *
    * @param request the declarative read description
+   * @typeParam R one of the {@link Read} types
    * @returns read subjects
    */
-  read<R extends Read = Read, S = Subject>(request: R): ReadResult<Resource<S>>;
+  read<R extends Read = Read>(request: R): ReadResult;
 
   /**
    * Performs some write procedure on the current state.
@@ -236,8 +268,8 @@ export interface MeldStateMachine extends MeldState {
    * Promise resolves or rejects.
    *
    * @param procedure a procedure to run against the current state. This
-   * procedure is able to modify the given state incrementally using its `write`
-   * method
+   * procedure is able to modify the given state, incrementally using its
+   * `write` method
    */
   write(procedure: StateProc<MeldState>): Promise<MeldState>;
 
@@ -258,7 +290,7 @@ export interface MeldStateMachine extends MeldState {
  * on-disk and in-browser persistence options are available (see
  * [Getting&nbsp;Started](/#getting-started)).
  *
- * @see https://spec.m-ld.org/interfaces/meldclone.html
+ * @see [m-ld Specification](https://spec.m-ld.org/interfaces/meldclone.html)
  */
 export interface MeldClone extends MeldStateMachine {
   /**
@@ -288,7 +320,7 @@ export interface MeldClone extends MeldStateMachine {
  * of some rule.
  *
  * > 🚧 *Data constraints are currently an experimental feature. Please
- * > [contact&nbsp;us](mailto:info@m-ld.io) to discuss constraints required for
+ * > [contact&nbsp;us](https://m-ld.org/hello/) to discuss constraints required for
  * > your use-case.*
  *
  * In this clone engine, constraints are checked and applied for updates prior
@@ -296,7 +328,7 @@ export interface MeldClone extends MeldStateMachine {
  * constraint requires to know the final state, it must infer it from the given
  * reader and the update.
  *
- * @see http://m-ld/org/doc/#concurrency
+ * @see [m-ld concurrency](http://m-ld/org/doc/#concurrency)
  */
 export interface MeldConstraint {
   /**
@@ -320,7 +352,7 @@ export interface MeldConstraint {
 /**
  * An update to which further updates can be asserted or entailed.
  */
-export interface InterimUpdate extends MeldUpdate {
+export interface InterimUpdate {
   /**
    * An assertion is an update that maintains the data integrity of the domain
    * by changing data that the app created, or that was the result of a prior
@@ -366,32 +398,21 @@ export interface InterimUpdate extends MeldUpdate {
    */
   remove(key: keyof DeleteInsert<any>, pattern: Subject | Subject[]): void;
   /**
-   * A promise that resolves when all pending modifications made by the methods
-   * above have affected this updates `@insert` and `@delete` properties.
+   * Substitutes the given alias for the given property subject, property, or
+   * subject and property, in updates provided to the application. This allows a
+   * constraint to hide a data implementation detail.
+   *
+   * @param subjectId the subject to which the alias applies
+   * @param property if `@id`, the subject IRI is aliased. Otherwise, the
+   * property is aliased.
+   * @param alias the alias for the given subject and/or property. It is an
+   * error if the property is `@id` and a `SubjectProperty` alias is provided.
    */
-  ready: Promise<unknown>;
+  alias(subjectId: Iri | null, property: '@id' | Iri, alias: Iri | SubjectProperty): void;
+  /**
+   * A promise that resolves to the current update. If any modifications made by
+   * the methods above have affected the `@insert` and `@delete` of the update,
+   * they will have been applied.
+   */
+  readonly update: Promise<MeldUpdate>;
 }
-
-/**
- * Captures **m-ld** [data&nbsp;semantics](http://spec.m-ld.org/#data-semantics)
- * as applied to an app-specific subject type `T`. Applies the following changes
- * to `T`:
- * - Always includes an `@id` property, as the subject identity
- * - Non-array properties are redefined to allow arrays (note this is
- *   irrespective of any `single-valued` constraint, which is applied at
- *   runtime)
- * - Required properties are redefined to allow `undefined`
- *
- * Since any property can have zero to many values, it may be convenient to
- * combine use of this type with the {@link array} utility when processing
- * updates.
- *
- * Note that a Resource always contains concrete data, unlike Subject, which can
- * include variables and filters as required for its role in query
- * specification.
- * 
- * @typeParam T the app-specific subject type of interest
- */
-export type Resource<T> = Subject & Reference & {
-  [P in keyof T]: T[P] extends Array<unknown> ? T[P] | undefined : T[P] | T[P][] | undefined;
-};

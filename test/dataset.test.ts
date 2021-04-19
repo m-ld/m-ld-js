@@ -1,22 +1,23 @@
 import { PatchQuads } from '../src/engine/dataset';
-import { quad, defaultGraph, namedNode } from '@rdfjs/data-model';
+import { DataFactory as RdfDataFactory } from 'rdf-data-factory';
+const rdf = new RdfDataFactory();
 
 describe('Patch quads', () => {
-  const a = quad(
-      namedNode('ns:subject1'),
-      namedNode('ns:predicate1'),
-      namedNode('ns:object1'),
-      defaultGraph()),
-    b = quad(
-      namedNode('ns:subject2'),
-      namedNode('ns:predicate1'),
-      namedNode('ns:object1'),
-      namedNode('ns:graph1')),
-    c = quad(
-      namedNode('ns:subject1'),
-      namedNode('ns:predicate1'),
-      namedNode('ns:object2'),
-      namedNode('ns:graph1'));
+  const a = rdf.quad(
+    rdf.namedNode('ns:subject1'),
+    rdf.namedNode('ns:predicate1'),
+    rdf.namedNode('ns:object1'),
+    rdf.defaultGraph()),
+    b = rdf.quad(
+      rdf.namedNode('ns:subject2'),
+      rdf.namedNode('ns:predicate1'),
+      rdf.namedNode('ns:object1'),
+      rdf.namedNode('ns:graph1')),
+    c = rdf.quad(
+      rdf.namedNode('ns:subject1'),
+      rdf.namedNode('ns:predicate1'),
+      rdf.namedNode('ns:object2'),
+      rdf.namedNode('ns:graph1'));
 
   test('Construct empty', () => {
     const patch = new PatchQuads();

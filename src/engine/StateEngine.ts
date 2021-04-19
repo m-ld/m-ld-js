@@ -1,5 +1,5 @@
-import { Subject, Read, Write } from '../jrql-support';
-import { MeldUpdate } from '../api';
+import { Read, Write } from '../jrql-support';
+import { GraphSubject, MeldUpdate } from '../api';
 import { LockManager } from './locks';
 import { Observable, Subscription } from 'rxjs';
 
@@ -9,12 +9,12 @@ export interface CloneEngine {
   /** An update MUST happen during a write OR when 'state' is exclusively locked */
   readonly dataUpdates: Observable<MeldUpdate>;
 
-  read(request: Read): Observable<Subject>;
+  read(request: Read): Observable<GraphSubject>;
   write(request: Write): Promise<unknown>;
 }
 
 export interface EngineState {
-  read(request: Read): Observable<Subject>;
+  read(request: Read): Observable<GraphSubject>;
   write(request: Write): Promise<EngineState>;
 }
 

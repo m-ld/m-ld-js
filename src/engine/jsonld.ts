@@ -1,47 +1,38 @@
-import { Quad } from 'rdf-js';
-import { fromRDF, toRDF, Options, processContext } from 'jsonld';
-import { cloneQuad } from './quads';
-import { Context, Iri, Url } from 'jsonld/jsonld-spec';
-import { getInitialContext, expandIri, ActiveContext } from 'jsonld/lib/context';
+import { Options, processContext } from 'jsonld';
+import { Context, Iri } from 'jsonld/jsonld-spec';
 import { compactIri as _compactIri } from 'jsonld/lib/compact';
-export { Options } from 'jsonld';
-export { ActiveContext } from 'jsonld/lib/context';
-import validDataUrl = require('valid-data-url');
+import { getInitialContext, expandIri, ActiveContext } from 'jsonld/lib/context';
 
-export * from 'jsonld/lib/util';
-export * from 'jsonld/lib/context';
+export { compareValues, hasProperty, hasValue } from 'jsonld/lib/util';
+export { ActiveContext, getContextValue } from 'jsonld/lib/context';
 
-export function rdfToJson(quads: Iterable<Quad>): Promise<any> {
-  // Using native types to avoid unexpected value objects
-  return fromRDF(quads, { useNativeTypes: true });
+export function expandTerm(value: string, ctx: ActiveContext,
+  options?: Options.Expand & { vocab?: boolean }): Iri {
+  return expandIri(ctx, value, {
+    base: true, vocab: options?.vocab
+  }, options ?? {});
 }
 
-export async function jsonToRdf(json: any): Promise<Quad[]> {
-  const quads = await toRDF(json) as Quad[];
-  // jsonld produces quad members without equals
-  return quads.map(cloneQuad);
+export function compactIri(iri: Iri, ctx?: ActiveContext,
+  options?: Options.CompactIri & { vocab?: boolean }): string {
+  return ctx != null ? _compactIri({
+    activeCtx: ctx, iri, ...options,
+    ...options?.vocab ? { relativeTo: { vocab: options.vocab } } : null
+  }) : iri;
 }
 
-export function expandTerm(value: string, ctx: ActiveContext, options?: Options.Expand): Iri {
-  return expandIri(ctx, value, { base: true }, options ?? {});
+export async function activeCtx(context: Context,
+  options?: Options.DocLoader): Promise<ActiveContext> {
+  return nextCtx(initialCtx(), context, options);
 }
 
-export function compactIri(iri: Iri, ctx: ActiveContext, options?: Options.CompactIri): string {
-  return _compactIri({ activeCtx: ctx, iri, ...options });
+export function initialCtx(): ActiveContext {
+  return getInitialContext({});
 }
 
-export async function activeCtx(ctx: Context, options?: Options.DocLoader): Promise<ActiveContext> {
-  return await processContext(getInitialContext({}), ctx, options ?? {});
-}
-
-export function dataUrlData(url: Url, ...contentTypes: string[]): string | undefined {
-  const match = url.trim().match(validDataUrl.regex);
-  const data = match?.[match.length - 1];
-  if (data != null) {
-    const contentType = match?.[1]?.split(';')[0]?.toLowerCase() || 'text/plain';
-    if (contentTypes.includes(contentType))
-      return data;
-  }
+export async function nextCtx(ctx: ActiveContext, context?: Context,
+  options?: Options.DocLoader): Promise<ActiveContext> {
+  return context != null ? processContext(ctx, context, options ?? {}) : ctx;
 }
 
 /**
@@ -54,4 +45,8 @@ export function dataUrlData(url: Url, ...contentTypes: string[]): string | undef
  */
 export function getValues(subject: { [key: string]: any }, property: string): Array<any> {
   return [].concat(subject[property] ?? []);
+}
+
+export function canonicalDouble(value: number) {
+  return value.toExponential(15).replace(/(\d)0*e\+?/, '$1E');
 }

@@ -5,7 +5,7 @@ import { comesAlive } from '../src/engine/AbstractMeld';
 import { DeltaMessage } from '../src/engine';
 import { mockLocal } from './testClones';
 import { Subject as Source, BehaviorSubject } from 'rxjs';
-import { Future } from '../src/engine/util';
+import { Future, isArray } from '../src/engine/util';
 import { TreeClock } from '../src/engine/clocks';
 import { Request, Response } from '../src/engine/ControlMessage';
 import { MsgPack } from '../src/engine/util';
@@ -55,7 +55,7 @@ describe('Ably remotes', () => {
     client.connection.on.mockImplementation((events, cb) => {
       if (typeof events == 'string')
         connCallbacks[events] = cb;
-      else if (Array.isArray(events))
+      else if (isArray(events))
         events.forEach(event => connCallbacks[event] = cb);
     });
   });
