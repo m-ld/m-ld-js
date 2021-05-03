@@ -156,7 +156,6 @@ describe('SU-Set Dataset', () => {
           expect(snapshot.lastTime.equals(localTime.scrubId())).toBe(true);
           const data = await snapshot.quads.toPromise();
           expect(SubjectGraph.fromRDF(data)).toMatchObject([{
-            '@type': 'http://www.w3.org/1999/02/22-rdf-syntax-ns#Statement',
             'http://m-ld.org/#tid': firstTid,
             'http://www.w3.org/1999/02/22-rdf-syntax-ns#subject': {
               '@id': 'http://test.m-ld.org/fred'
@@ -186,7 +185,6 @@ describe('SU-Set Dataset', () => {
           const data = await snapshot.quads.toPromise();
           expect(SubjectGraph.fromRDF(data)).toMatchObject(expect.arrayContaining([
             expect.objectContaining({
-              '@type': 'http://www.w3.org/1999/02/22-rdf-syntax-ns#Statement',
               // No tids here
               'http://www.w3.org/1999/02/22-rdf-syntax-ns#subject': {
                 '@id': 'http://test.m-ld.org/fred'
@@ -225,7 +223,6 @@ describe('SU-Set Dataset', () => {
 
           expect(await EncodedDelta.decode(ins)).toEqual({});
           expect(await EncodedDelta.decode(del)).toMatchObject({
-            '@type': 'rdf:Statement',
             'tid': firstTid,
             's': 'fred',
             'p': '#name',
@@ -240,8 +237,7 @@ describe('SU-Set Dataset', () => {
             remoteTime.ticks,
             remoteTime = remoteTime.ticked(),
             // Deleting the triple based on the inserted Transaction ID
-            [1, `{"@type":"rdf:Statement",
-              "tid":"${firstTid}","o":"Fred","p":"#name", "s":"fred"}`, '{}']),
+            [1, `{"tid":"${firstTid}","o":"Fred","p":"#name", "s":"fred"}`, '{}']),
             localTime = localTime.update(remoteTime).ticked(),
             localTime = localTime.ticked());
           expect(willUpdate).resolves.toHaveProperty('@delete', [fred]);
@@ -288,9 +284,7 @@ describe('SU-Set Dataset', () => {
           await ssd.apply(new DeltaMessage(
             thirdTime.ticks,
             thirdTime = thirdTime.ticked(),
-            [1, `{"@type":"rdf:Statement",
-              "tid":"${firstTid}","o":"Fred","p":"#name",
-              "s":"fred"}`, '{}']),
+            [1, `{"tid":"${firstTid}","o":"Fred","p":"#name","s":"fred"}`, '{}']),
             localTime = localTime.update(thirdTime).ticked(),
             localTime = localTime.ticked());
 
@@ -377,9 +371,7 @@ describe('SU-Set Dataset', () => {
           await ssd.apply(new DeltaMessage(
             remoteTime.ticks,
             unpersistedTime,
-            [1, `{"@type":"rdf:Statement",
-              "tid":"${firstTid}","o":"Fred","p":"#name",
-              "s":"fred"}`, '{}']),
+            [1, `{"tid":"${firstTid}","o":"Fred","p":"#name","s":"fred"}`, '{}']),
             localTime = localTime.update(unpersistedTime).ticked(),
             localTime = localTime.ticked());
 
@@ -541,8 +533,7 @@ describe('SU-Set Dataset', () => {
       await ssd.apply(new DeltaMessage(
         remoteTime.ticks,
         remoteTime = remoteTime.ticked(),
-        [1, `{"@type":"rdf:Statement",
-              "tid":"${tid}","o":"Wilma","p":"#name", "s":"wilma"}`, '{}']),
+        [1, `{"tid":"${tid}","o":"Wilma","p":"#name", "s":"wilma"}`, '{}']),
         localTime = localTime.update(remoteTime).ticked(),
         localTime = localTime.ticked());
 

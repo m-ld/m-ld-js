@@ -83,7 +83,8 @@ export class MeldEncoding {
     return flatten([...triplesTids].map(([triple, tids]) => {
       const rid = this.rdf.blankNode();
       return [
-        this.rdf.quad(rid, this.name(RDF.type), this.name(RDF.Statement)),
+        // Reification must be known, so Statement type is redundant
+        // this.rdf.quad(rid, this.name(RDF.type), this.name(RDF.Statement)),
         this.rdf.quad(rid, this.name(RDF.subject), triple.subject),
         this.rdf.quad(rid, this.name(RDF.predicate), triple.predicate),
         this.rdf.quad(rid, this.name(RDF.object), triple.object)
