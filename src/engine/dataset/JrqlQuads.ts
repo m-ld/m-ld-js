@@ -7,7 +7,7 @@ import {
 } from '../../jrql-support';
 import { ActiveContext, compactIri } from '../jsonld';
 import { inPosition } from '../quads';
-import { jrql } from '../../ns';
+import { JRQL } from '../../ns';
 import { SubjectGraph } from '../SubjectGraph';
 import { JrqlMode, toIndexDataUrl } from '../jrql-util';
 import { isArray, mapObject } from '../util';
@@ -29,7 +29,7 @@ export class JrqlQuads {
     const solutionId = this.graph.blankNode(blank());
     const pseudoPropertyQuads = Object.entries(solution).map(([variable, term]) => this.graph.quad(
       solutionId,
-      this.graph.namedNode(jrql.hiddenVar(variable.slice(1))),
+      this.graph.namedNode(JRQL.hiddenVar(variable.slice(1))),
       inPosition('object', term)));
     // Construct quads that represent the solution's variable values
     const subject = this.toApiSubject(pseudoPropertyQuads, [ /* TODO: list-items */], ctx);
@@ -38,7 +38,7 @@ export class JrqlQuads {
       switch (key) {
         case '@id': return { [key]: value };
         default:
-          const varName = jrql.matchHiddenVar(key), newKey = (varName ? '?' + varName : key);
+          const varName = JRQL.matchHiddenVar(key), newKey = (varName ? '?' + varName : key);
           if (isSelected(results, newKey))
             return { [newKey]: value };
       }
@@ -72,7 +72,7 @@ export class JrqlQuads {
     return subject;
   }
 
-  genSubValue(parentValue: Term, subVarName: jrql.SubVarName) {
+  genSubValue(parentValue: Term, subVarName: JRQL.SubVarName) {
     switch (subVarName) {
       case 'listKey':
         // Generating a data URL for the index key

@@ -12,7 +12,7 @@ import { canPosition, inPosition, TriplePos } from '../quads';
 import { ActiveContext, expandTerm, initialCtx, nextCtx } from "../jsonld";
 import { Binding } from 'quadstore';
 import { Algebra, Factory as SparqlFactory } from 'sparqlalgebrajs';
-import { jrql } from '../../ns';
+import { JRQL } from '../../ns';
 import { JrqlQuads } from './JrqlQuads';
 import { MeldError } from '../MeldError';
 import { anyName, array, GraphSubject } from '../..';
@@ -76,7 +76,7 @@ export class JrqlGraph {
     where?: Subject | Subject[] | Group,
     ctx = this.defaultCtx): Observable<GraphSubject> {
     return merge(...describes.map(describe => {
-      const describedVarName = jrql.matchVar(describe);
+      const describedVarName = JRQL.matchVar(describe);
       if (describedVarName) {
         const vars = {
           subject: this.any(), property: this.any(),
@@ -150,7 +150,7 @@ export class JrqlGraph {
       this.sparql.createBgp([this.sparql.createPattern(
         subject, property, value, this.graph.name)]),
       this.sparql.createBgp([this.sparql.createPattern(
-        value, this.graph.namedNode(jrql.item), item, this.graph.name)]));
+        value, this.graph.namedNode(JRQL.item), item, this.graph.name)]));
   }
 
   findQuads(jrqlPattern: Subject, ctx = this.defaultCtx): Observable<Quad> {
@@ -255,7 +255,7 @@ export class JrqlGraph {
     const variablesTerms = values.map<{ [variable: string]: Term }>(
       variableExpr => Object.entries(variableExpr).reduce<{ [variable: string]: Term }>(
         (variableTerms, [variable, expr]) => {
-          const varName = jrql.matchVar(variable);
+          const varName = JRQL.matchVar(variable);
           if (!varName)
             throw new Error('Variable not specified in a values expression');
           variableNames.add(varName);
@@ -299,7 +299,7 @@ export class JrqlGraph {
     if (isConstraint(expr)) {
       return this.constraintExpr([expr], ctx);
     } else {
-      const varName = typeof expr == 'string' && jrql.matchVar(expr);
+      const varName = typeof expr == 'string' && JRQL.matchVar(expr);
       return this.sparql.createTermExpression(varName ?
         this.graph.variable(varName) : this.jrql.toObjectTerm(expr, ctx));
     }
@@ -339,7 +339,7 @@ export class JrqlGraph {
           return value;
 
         // If this variable is a sub-variable, see if the parent variable is bound
-        const [varName, subVarName] = jrql.matchSubVarName(term.value);
+        const [varName, subVarName] = JRQL.matchSubVarName(term.value);
         const genValue = subVarName != null ?
           this.jrql.genSubValue(binding[`?${varName}`], subVarName) : null;
         if (genValue != null)

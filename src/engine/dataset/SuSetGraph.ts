@@ -4,14 +4,14 @@ import { Triple, tripleKey } from '../quads';
 import { createHash } from 'crypto';
 import { TreeClock } from '../clocks';
 import { MsgPack } from '../util';
-import { qs } from '../../ns';
+import { QS } from '../../ns';
 
 /**
  * Context for SU-Set Dataset code to manipulate control content.
  */
 export const SUSET_CONTEXT: Context = {
-  tid: qs.tid, // Property of triple hash
-  thash: qs.thash // Namespace for triple hashes
+  tid: QS.tid, // Property of triple hash
+  thash: QS.thash // Namespace for triple hashes
 }
 
 export function toPrefixedId(prefix: string, ...path: string[]): Iri {

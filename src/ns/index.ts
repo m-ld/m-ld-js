@@ -1,5 +1,5 @@
-export * as jrql from './json-rql';
-export * as mld from './m-ld';
-export * as rdf from './rdf';
-export * as xs from './xs';
-export * as qs from './quadstore';
+export * as JRQL from './json-rql';
+export * as M_LD from './m-ld';
+export * as RDF from './rdf';
+export * as XS from './xs';
+export * as QS from './quadstore';

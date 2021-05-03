@@ -22,7 +22,7 @@ import { GraphSubject, MeldConfig, Read } from '../..';
 import { QuadMap, TripleMap, Triple } from '../quads';
 import { CheckList } from '../../constraints/CheckList';
 import { DefaultList } from '../../constraints/DefaultList';
-import { qs } from '../../ns';
+import { QS } from '../../ns';
 import { InterimUpdatePatch } from './InterimUpdatePatch';
 import { GraphState } from './GraphState';
 import { ActiveContext } from 'jsonld/lib/context';
@@ -82,7 +82,7 @@ export class SuSetDataset {
     this.userCtx = await activeCtx(this.context);
     this.userGraph = new JrqlGraph(this.dataset.graph());
     this.tidsGraph = new JrqlGraph(this.dataset.graph(
-      this.dataset.dataFactory.namedNode(qs.tids)), await activeCtx(SUSET_CONTEXT));
+      this.dataset.dataFactory.namedNode(QS.tids)), await activeCtx(SUSET_CONTEXT));
     this.state = new GraphState(this.userGraph);
     await this.encoding.initialise();
     // Check for exclusive access to the dataset location

@@ -6,7 +6,7 @@ import {
 } from '../jrql-support';
 import { expandTerm, canonicalDouble } from './jsonld';
 import { RdfFactory } from './quads';
-import { jrql, rdf, xs } from '../ns';
+import { JRQL, RDF, XS } from '../ns';
 import { JrqlMode, ListIndex, listItems, toIndexDataUrl } from './jrql-util';
 import { ActiveContext, getContextValue } from 'jsonld/lib/context';
 import { isString, isBoolean, isDouble, isNumber } from 'jsonld/lib/types';
@@ -16,7 +16,7 @@ export class SubjectQuads {
   constructor(
     readonly mode: JrqlMode,
     readonly ctx: ActiveContext,
-    readonly makeRdf: RdfFactory,
+    readonly rdf: RdfFactory,
     readonly vars?: Set<string>) {
   }
 
@@ -36,7 +36,7 @@ export class SubjectQuads {
         yield* this.subjectQuads(value, outer, property);
       else if (outer != null && property != null)
         // This is an atom, so yield one quad
-        yield this.makeRdf.quad(outer, this.predicate(property),
+        yield this.rdf.quad(outer, this.predicate(property),
           this.objectTerm(value, property));
       // TODO: What if the property expands to a keyword in the context?
       else
@@ -51,10 +51,10 @@ export class SubjectQuads {
 
     if (outer != null && property != null)
       // Yield the outer quad referencing this subject
-      yield this.makeRdf.quad(outer, this.predicate(property), sid);
+      yield this.rdf.quad(outer, this.predicate(property), sid);
     else if (this.mode === 'match' && isReference(subject))
       // References at top level => implicit wildcard p-o
-      yield this.makeRdf.quad(sid, this.genVar(), this.genVar());
+      yield this.rdf.quad(sid, this.genVar(), this.genVar());
 
     // Process predicates and objects
     for (let [property, value] of Object.entries(subject))
@@ -68,15 +68,15 @@ export class SubjectQuads {
   private subjectId(subject: Subject) {
     if (subject['@id'] != null)
       if (subject['@id'].startsWith('_:'))
-        return this.makeRdf.blankNode(subject['@id']);
+        return this.rdf.blankNode(subject['@id']);
       else
         return this.expandNode(subject['@id']);
     else if (this.mode === 'match')
       return this.genVar();
-    else if (this.mode === 'load' && this.makeRdf.skolem != null)
-      return this.makeRdf.skolem();
+    else if (this.mode === 'load' && this.rdf.skolem != null)
+      return this.rdf.skolem();
     else
-      return this.makeRdf.blankNode(blank());
+      return this.rdf.blankNode(blank());
   }
 
   private *listQuads(lid: Quad_Subject, list: SubjectPropertyObject): Iterable<Quad> {
@@ -93,18 +93,18 @@ export class SubjectQuads {
     if (typeof index === 'string') {
       // Index is a variable
       index ||= this.genVarName(); // We need the var name now to generate sub-var names
-      indexKey = jrql.subVar(index, 'listKey');
+      indexKey = JRQL.subVar(index, 'listKey');
       // Generate the slot id variable if not available
       if (!('@id' in slot))
-        slot['@id'] = jrql.subVar(index, 'slotId');
+        slot['@id'] = JRQL.subVar(index, 'slotId');
     } else if (this.mode !== 'match') {
       // Inserting at a numeric index
       indexKey = toIndexDataUrl(index);
     } else {
       // Index is specified numerically in match mode. The value will be matched
       // with the slot index below, and the key index with the slot ID, if present
-      const slotVarName = slot['@id'] != null && jrql.matchVar(slot['@id']);
-      indexKey = slotVarName ? jrql.subVar(slotVarName, 'listKey') : any();
+      const slotVarName = slot['@id'] != null && JRQL.matchVar(slot['@id']);
+      indexKey = slotVarName ? JRQL.subVar(slotVarName, 'listKey') : any();
     }
     // Slot index is never asserted, only entailed
     if (this.mode === 'match')
@@ -128,28 +128,28 @@ export class SubjectQuads {
 
   private matchVar(term: string) {
     if (this.mode !== 'graph') {
-      const varName = jrql.matchVar(term);
+      const varName = JRQL.matchVar(term);
       if (varName != null) {
         if (!varName)
           // Allow anonymous variables as '?'
           return this.genVar();
         this.vars?.add(varName);
-        return this.makeRdf.variable(varName);
+        return this.rdf.variable(varName);
       }
     }
   }
 
   private predicate = lazy(property => {
     switch (property) {
-      case '@type': return this.makeRdf.namedNode(rdf.type);
-      case '@index': return this.makeRdf.namedNode(jrql.index);
-      case '@item': return this.makeRdf.namedNode(jrql.item);
+      case '@type': return this.rdf.namedNode(RDF.type);
+      case '@index': return this.rdf.namedNode(JRQL.index);
+      case '@item': return this.rdf.namedNode(JRQL.item);
       default: return this.expandNode(property, true);
     }
   });
 
   private expandNode(term: string, vocab = false) {
-    return this.matchVar(term) ?? this.makeRdf.namedNode(expandTerm(term, this.ctx, { vocab }));
+    return this.matchVar(term) ?? this.rdf.namedNode(expandTerm(term, this.ctx, { vocab }));
   }
 
   private genVarName() {
@@ -159,7 +159,7 @@ export class SubjectQuads {
   }
 
   private genVar() {
-    return this.makeRdf.variable(this.genVarName());
+    return this.rdf.variable(this.genVarName());
   }
 
   objectTerm(value: Atom | Reference, property?: string): Quad_Object {
@@ -186,25 +186,25 @@ export class SubjectQuads {
       if (property != null)
         language = getContextValue(this.ctx, property, '@language');
       if (language != null)
-        return this.makeRdf.literal(value, language);
-      if (type === xs.double)
+        return this.rdf.literal(value, language);
+      if (type === XS.double)
         value = canonicalDouble(parseFloat(value));
     } else if (isBoolean(value)) {
       value = value.toString();
-      type ??= xs.boolean;
+      type ??= XS.boolean;
     } else if (isNumber(value)) {
       if (isDouble(value)) {
         value = canonicalDouble(value);
-        type ??= xs.double;
+        type ??= XS.double;
       } else {
         value = value.toFixed(0);
-        type ??= xs.integer;
+        type ??= XS.integer;
       }
     }
 
     if (type && type !== '@none')
-      return this.makeRdf.literal(value, this.makeRdf.namedNode(type));
+      return this.rdf.literal(value, this.rdf.namedNode(type));
     else
-      return this.makeRdf.literal(value);
+      return this.rdf.literal(value);
   }
 }

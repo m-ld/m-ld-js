@@ -16,7 +16,7 @@ import { activeCtx, compactIri, expandTerm, ActiveContext } from '../jsonld';
 import { Algebra } from 'sparqlalgebrajs';
 import { newEngine } from 'quadstore-comunica';
 import { DataFactory as RdfDataFactory } from 'rdf-data-factory';
-import { mld, rdf, jrql, xs, qs } from '../../ns';
+import { M_LD, RDF, JRQL, XS, QS } from '../../ns';
 import { wrap, EmptyIterator } from 'asynciterator';
 
 /**
@@ -143,11 +143,11 @@ export interface Graph extends RdfFactory {
  * optimise (minimise) both control and user content.
  */
 export const STORAGE_CONTEXT: Context = {
-  qs: qs.$base,
-  jrql: jrql.$base,
-  mld: mld.$base,
-  xs: xs.$base,
-  rdf: rdf.$base
+  qs: QS.$base,
+  jrql: JRQL.$base,
+  mld: M_LD.$base,
+  xs: XS.$base,
+  rdf: RDF.$base
 }
 
 export class QuadStoreDataset implements Dataset {

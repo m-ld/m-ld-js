@@ -5,7 +5,7 @@ import { Context, ExpandedTermDef } from '../jrql-support';
 import { Iri } from 'jsonld/jsonld-spec';
 import { RdfFactory, Triple, TripleMap } from './quads';
 import { activeCtx } from "./jsonld";
-import { mld, rdf } from '../ns';
+import { M_LD, RDF } from '../ns';
 import { SubjectGraph } from './SubjectGraph';
 import { ActiveContext } from 'jsonld/lib/context';
 import { SubjectQuads } from './SubjectQuads';
@@ -31,18 +31,18 @@ export function unreify(reifications: Triple[]): [Triple, UUID[]][] {
     const rid = reification.subject.value;
     let [triple, tids] = rids[rid] || [{}, []];
     switch (reification.predicate.value) {
-      case rdf.subject:
+      case RDF.subject:
         if (reification.object.termType == 'NamedNode')
           triple.subject = reification.object;
         break;
-      case rdf.predicate:
+      case RDF.predicate:
         if (reification.object.termType == 'NamedNode')
           triple.predicate = reification.object;
         break;
-      case rdf.object:
+      case RDF.object:
         triple.object = reification.object;
         break;
-      case mld.tid:
+      case M_LD.tid:
         tids.push(reification.object.value);
         break;
     }
@@ -56,9 +56,9 @@ export function unreify(reifications: Triple[]): [Triple, UUID[]][] {
  * @see m-ld/m-ld-core/src/main/java/org/m_ld/MeldResource.java
  */
 const DELTA_CONTEXT = {
-  rdf: rdf.$base,
+  rdf: RDF.$base,
   xs: 'http://www.w3.org/2001/XMLSchema#',
-  tid: mld.tid,
+  tid: M_LD.tid,
   s: { '@type': '@id', '@id': 'rdf:subject' },
   p: { '@type': '@id', '@id': 'rdf:predicate' },
   o: 'rdf:object'
@@ -70,25 +70,25 @@ export class MeldEncoding {
 
   constructor(
     readonly domain: string,
-    readonly makeRdf: RdfFactory) {
+    readonly rdf: RdfFactory) {
     this.ready = activeCtx(new DomainContext(domain, DELTA_CONTEXT))
       .then(ctx => this.ctx = ctx);
   }
 
   initialise = () => this.ready;
 
-  private name = lazy(name => this.makeRdf.namedNode(name));
+  private name = lazy(name => this.rdf.namedNode(name));
 
   reifyTriplesTids(triplesTids: TripleMap<UUID[]>): Triple[] {
     return flatten([...triplesTids].map(([triple, tids]) => {
-      const rid = this.makeRdf.blankNode();
+      const rid = this.rdf.blankNode();
       return [
-        this.makeRdf.quad(rid, this.name(rdf.type), this.name(rdf.Statement)),
-        this.makeRdf.quad(rid, this.name(rdf.subject), triple.subject),
-        this.makeRdf.quad(rid, this.name(rdf.predicate), triple.predicate),
-        this.makeRdf.quad(rid, this.name(rdf.object), triple.object)
+        this.rdf.quad(rid, this.name(RDF.type), this.name(RDF.Statement)),
+        this.rdf.quad(rid, this.name(RDF.subject), triple.subject),
+        this.rdf.quad(rid, this.name(RDF.predicate), triple.predicate),
+        this.rdf.quad(rid, this.name(RDF.object), triple.object)
       ].concat(tids.map(tid =>
-        this.makeRdf.quad(rid, this.name(mld.tid), this.makeRdf.literal(tid))));
+        this.rdf.quad(rid, this.name(M_LD.tid), this.rdf.literal(tid))));
     }));
   }
 
@@ -117,11 +117,11 @@ export class MeldEncoding {
   }
 
   triplesFromJson = (json: any): Triple[] =>
-    [...new SubjectQuads('graph', this.ctx, this.makeRdf).quads(json)];
+    [...new SubjectQuads('graph', this.ctx, this.rdf).quads(json)];
 
-  toDomainQuad = (triple: Triple): Quad => this.makeRdf.quad(
+  toDomainQuad = (triple: Triple): Quad => this.rdf.quad(
     triple.subject,
     triple.predicate,
     triple.object,
-    this.makeRdf.defaultGraph());
+    this.rdf.defaultGraph());
 }
