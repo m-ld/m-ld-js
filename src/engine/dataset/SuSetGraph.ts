@@ -19,13 +19,16 @@ export function toPrefixedId(prefix: string, ...path: string[]): Iri {
 }
 
 export function tripleId(triple: Triple): string {
-  const hash = createHash('sha1'); // Fastest
-  tripleKey(triple).forEach(key => hash.update(key));
-  return toPrefixedId('thash', hash.digest('base64'));
+  return toPrefixedId('thash', fastDigest(...tripleKey(triple)));
 }
 
 export function txnId(time: TreeClock): string {
-  return createHash('sha1')
-    .update(MsgPack.encode(time.toJson()))
-    .digest('base64');
+  return fastDigest(MsgPack.encode(time.toJson()));
+}
+
+function fastDigest(...items: (string | Buffer)[]) {
+  const hash = createHash('sha1'); // Fastest
+  for (let item of items)
+    hash.update(item);
+  return hash.digest('base64');
 }
