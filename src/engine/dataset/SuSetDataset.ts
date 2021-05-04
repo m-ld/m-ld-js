@@ -1,6 +1,5 @@
-import {
-  MeldUpdate, MeldConstraint, MeldReadState, InterimUpdate} from '../../api';
-import { Snapshot, UUID, DeltaMessage, MeldDelta } from '..';
+import { MeldUpdate, MeldConstraint, MeldReadState} from '../../api';
+import { Snapshot, UUID, DeltaMessage, MeldDelta, txnId } from '..';
 import { Quad } from 'rdf-js';
 import { TreeClock } from '../clocks';
 import { Context, Subject, Write } from '../../jrql-support';
@@ -10,15 +9,15 @@ import { JrqlGraph } from './JrqlGraph';
 import { MeldEncoding, unreify } from '../MeldEncoding';
 import { Observable, from, Subject as Source, EMPTY } from 'rxjs';
 import {
-  bufferCount, mergeMap, reduce, map, filter, takeWhile, expand, toArray
+  bufferCount, mergeMap, map, filter, takeWhile, expand, toArray
 } from 'rxjs/operators';
 import { flatten, Future, tapComplete, getIdLogger, check } from '../util';
 import { Logger } from 'loglevel';
 import { MeldError } from '../MeldError';
 import { LocalLock } from '../local';
-import { SUSET_CONTEXT, tripleId, txnId } from './SuSetGraph';
+import { SUSET_CONTEXT, tripleId } from './SuSetGraph';
 import { SuSetJournalDataset, SuSetJournalEntry } from './SuSetJournal';
-import { GraphSubject, MeldConfig, Read } from '../..';
+import { array, GraphSubject, MeldConfig, Read } from '../..';
 import { QuadMap, TripleMap, Triple } from '../quads';
 import { CheckList } from '../../constraints/CheckList';
 import { DefaultList } from '../../constraints/DefaultList';
@@ -35,10 +34,9 @@ interface HashTid extends Subject {
 
 type DatasetSnapshot = Omit<Snapshot, 'updates'>;
 
-function asTriplesTids(quadTidQuads: QuadMap<Quad[]>): TripleMap<UUID[]> {
-  return new TripleMap<UUID[]>([...quadTidQuads].map(([quad, tidQuads]) => {
-    return [quad, tidQuads.map(tidQuad => tidQuad.object.value)];
-  }));
+function asTriplesTids(quadTidQuads: QuadMap<Quad[]>): [Triple, string[]][] {
+  return [...quadTidQuads].map(([quad, tidQuads]) =>
+    [quad, tidQuads.map(tidQuad => tidQuad.object.value)]);
 }
 
 /**
@@ -204,11 +202,12 @@ export class SuSetDataset {
 
         txc.sw.next('find-tids');
         const deletedTriplesTids = await this.findTriplesTids(patch.oldQuads);
-        const delta = await this.txnDelta(patch.newQuads, asTriplesTids(deletedTriplesTids));
+        const tid = txnId(time);
+        const delta = await this.txnDelta(tid, patch.newQuads, asTriplesTids(deletedTriplesTids));
 
         // Include tid changes in final patch
         txc.sw.next('new-tids');
-        const tidPatch = await this.txnTidPatch(txnId(time), patch.newQuads, deletedTriplesTids);
+        const tidPatch = await this.txnTidPatch(tid, patch.newQuads, deletedTriplesTids);
 
         // Include journaling in final patch
         txc.sw.next('journal');
@@ -231,26 +230,33 @@ export class SuSetDataset {
   }
 
   private deltaMessage(tail: SuSetJournalEntry, time: TreeClock, delta: MeldDelta) {
+    const prev = tail.gwc.getTicks(time);
     // Construct the delta message with the previous visible clock tick
-    const deltaMsg = new DeltaMessage(tail.gwc.getTicks(time), time, delta.encoded);
+    const deltaMsg = new DeltaMessage(prev, time, delta.encoded);
     if (deltaMsg.size > this.maxDeltaSize)
       throw new MeldError('Delta too big');
     return deltaMsg;
   }
 
   private async txnTidPatch(tid: string, insert: Quad[], deletedTriplesTids: QuadMap<Quad[]>) {
-    const tidPatch = await this.newTriplesTid(insert, tid);
+    const tidPatch = await this.newTriplesTids(insert.map(quad => [quad, [tid]]));
     tidPatch.append({ oldQuads: flatten([...deletedTriplesTids].map(([_, tids]) => tids)) });
     return tidPatch;
   }
 
-  private txnDelta(insert: Quad[], deletedTriplesTids: TripleMap<UUID[]>) {
+  private txnDelta(tid: string, inserts: Quad[], deletedTriplesTids: [Triple, string[]][]) {
     return this.encoding.newDelta({
-      insert,
+      inserts: inserts.map(quad => [quad, [tid]]),
       // Delta has reifications of old quads, which we infer from found triple tids
-      delete: this.encoding.reifyTriplesTids(deletedTriplesTids)
+      deletes: deletedTriplesTids
     });
   }
+
+  toUserQuad = (triple: Triple): Quad => this.encoding.rdf.quad(
+    triple.subject,
+    triple.predicate,
+    triple.object,
+    this.encoding.rdf.defaultGraph());
 
   @SuSetDataset.checkNotClosed.async
   async apply(msg: DeltaMessage, localTime: TreeClock, cxnTime: TreeClock): Promise<DeltaMessage | null> {
@@ -261,18 +267,22 @@ export class SuSetDataset {
         this.log.debug(`Applying delta: ${msg.time} @ ${localTime}`);
 
         txc.sw.next('unreify');
-        const delta = await this.encoding.asDelta(msg.data);
-        const patch = new PatchQuads({ newQuads: delta.insert.map(this.encoding.toDomainQuad) });
-        const tidPatch = await this.processSuDeletions(delta.delete, patch);
+        const delta = await this.encoding.asDelta(msg.time, msg.data);
+        const insertTids = new TripleMap(delta.inserts);
+        const patch = new PatchQuads({
+          newQuads: delta.inserts.map(([triple]) => this.toUserQuad(triple))
+        });
+        const tidPatch = await this.processSuDeletions(delta.deletes, patch);
+        // TODO Also delete triples from fused transactions
 
         txc.sw.next('apply-cx'); // "cx" = constraint
-        const tid = txnId(msg.time);
         const interim = new InterimUpdatePatch(this.userGraph, cxnTime, patch);
         await this.constraint.apply(this.state, interim);
         const { update, assertions, entailments } = await interim.finalise(this.userCtx);
-        const cxn = await this.constraintTxn(assertions, patch, tid, cxnTime);
-        // After applying the constraint, patch new quads might have changed
-        tidPatch.append(await this.newTriplesTid(patch.newQuads, tid));
+        const cxn = await this.constraintTxn(assertions, patch, insertTids, cxnTime);
+        // After applying the constraint, some new quads might have been removed
+        tidPatch.append(await this.newTriplesTids(
+          patch.newQuads.map(quad => [quad, array(insertTids.get(quad))])));
 
         // Done determining the applied delta patch. At this point we could
         // have an empty patch, but we still need to complete the journal
@@ -303,17 +313,16 @@ export class SuSetDataset {
 
   // The delta's delete contains reifications of deleted triples.
   // This method adds the resolved deletions to the given transaction patch.
-  private processSuDeletions(deltaDeletions: Triple[], patch: PatchQuads) {
-    return unreify(deltaDeletions)
-      .reduce(async (tripleTidPatch, [triple, theirTids]) => {
-        // For each unique deleted triple, subtract the claimed tids from the tids we have
-        const ourTripleTids = await this.findTripleTids(tripleId(triple));
-        const toRemove = ourTripleTids.filter(tripleTid => theirTids.includes(tripleTid.object.value));
-        // If no tids are left, delete the triple in our graph
-        if (toRemove.length > 0 && toRemove.length == ourTripleTids.length)
-          patch.append({ oldQuads: [this.encoding.toDomainQuad(triple)] });
-        return (await tripleTidPatch).append({ oldQuads: toRemove });
-      }, Promise.resolve(new PatchQuads()));
+  private processSuDeletions(deltaDeletions: [Triple, string[]][], patch: PatchQuads) {
+    return deltaDeletions.reduce(async (tripleTidPatch, [triple, theirTids]) => {
+      // For each unique deleted triple, subtract the claimed tids from the tids we have
+      const ourTripleTids = await this.findTripleTids(tripleId(triple));
+      const toRemove = ourTripleTids.filter(tripleTid => theirTids.includes(tripleTid.object.value));
+      // If no tids are left, delete the triple in our graph
+      if (toRemove.length > 0 && toRemove.length == ourTripleTids.length)
+        patch.append({ oldQuads: [this.toUserQuad(triple)] });
+      return (await tripleTidPatch).append({ oldQuads: toRemove });
+    }, Promise.resolve(new PatchQuads()));
   }
 
   /**
@@ -322,22 +331,23 @@ export class SuSetDataset {
    * @param localTime local clock time
    */
   private async constraintTxn(
-    assertions: PatchQuads, patch: PatchQuads, tid: string, cxnTime: TreeClock) {
+    assertions: PatchQuads, patch: PatchQuads, insertTids: TripleMap<UUID[]>, cxnTime: TreeClock) {
     if (!assertions.isEmpty) {
       // Triples that were inserted in the applied transaction may have been
       // deleted by the constraint - these need to be removed from the applied
       // transaction patch but still published in the constraint delta
       const deletedExistingTidQuads = await this.findTriplesTids(assertions.oldQuads);
-      const deletedTriplesTids = asTriplesTids(deletedExistingTidQuads);
+      const deletedTriplesTids = new TripleMap(asTriplesTids(deletedExistingTidQuads));
       patch.remove('newQuads', assertions.oldQuads)
-        .forEach(delQuad => deletedTriplesTids.with(delQuad, () => []).push(tid));
+        .forEach(delQuad => deletedTriplesTids.with(delQuad, () => [])
+          .push(...array(insertTids.get(delQuad))));
       // Anything deleted by the constraint that did not exist before the
       // applied transaction can now be removed from the constraint patch
       assertions.remove('oldQuads', quad => deletedExistingTidQuads.get(quad) == null);
+      const cxnId = txnId(cxnTime);
       return {
-        delta: await this.txnDelta(assertions.newQuads, deletedTriplesTids),
-        tidPatch: await this.txnTidPatch(
-          txnId(cxnTime), assertions.newQuads, deletedExistingTidQuads)
+        delta: await this.txnDelta(cxnId, assertions.newQuads, [...deletedTriplesTids]),
+        tidPatch: await this.txnTidPatch(cxnId, assertions.newQuads, deletedExistingTidQuads)
       };
     }
   }
@@ -354,16 +364,12 @@ export class SuSetDataset {
     return new PatchQuads(assertions).append(entailments).append(tidPatch);
   }
 
-  private newTriplesTid(triples: Triple[], tid: UUID): Promise<PatchQuads> {
+  private newTriplesTids(tripleTids: [Triple, UUID[]][]): Promise<PatchQuads> {
     return this.tidsGraph.write({
-      '@insert': triples.map<HashTid>(triple => ({ '@id': tripleId(triple), tid }))
-    });
-  }
-
-  private newTripleTids(triple: Triple, tids: UUID[]): Promise<PatchQuads> {
-    const theTripleId = tripleId(triple);
-    return this.tidsGraph.write({
-      '@insert': tids.map<HashTid>(tid => ({ '@id': theTripleId, tid }))
+      '@insert': flatten(tripleTids.map(([triple, tids]) => {
+        const theTripleId = tripleId(triple);
+        return tids.map<HashTid>(tid => ({ '@id': theTripleId, tid }));
+      }))
     });
   }
 
@@ -400,16 +406,14 @@ export class SuSetDataset {
       // For each batch of reified quads with TIDs, first unreify
       mergeMap(async batch => this.dataset.transact({
         id: 'snapshot-batch',
-        prepare: async () => ({
-          patch: await from(unreify(batch)).pipe(
-            // For each triple in the batch, insert the TIDs into the tids graph
-            mergeMap(async ([triple, tids]) => (await this.newTripleTids(triple, tids))
-              // And include the triple itself
-              .append({ newQuads: [this.encoding.toDomainQuad(triple)] })),
-            // Concat all of the resultant batch patches together
-            reduce((batchPatch, entryPatch) => batchPatch.append(entryPatch)))
-            .toPromise()
-        })
+        prepare: async () => {
+          const triplesTids = unreify(batch);
+          // For each triple in the batch, insert the TIDs into the tids graph
+          const patch = await this.newTriplesTids(triplesTids);
+          // And include the triples themselves
+          patch.append({ newQuads: triplesTids.map(([triple]) => this.toUserQuad(triple)) });
+          return { patch };
+        }
       }))).toPromise();
   }
 

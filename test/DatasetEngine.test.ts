@@ -151,7 +151,7 @@ describe('Dataset engine', () => {
         'http://test.m-ld.org/#name': 'Fred'
       } as Subject);
       remoteUpdates.next(new DeltaMessage(remoteTime.ticks, remoteTime.ticked(),
-        [1, '{}', '{"@id":"http://test.m-ld.org/wilma","http://test.m-ld.org/#name":"Wilma"}']));
+        [2, false, '{}', '{"@id":"http://test.m-ld.org/wilma","http://test.m-ld.org/#name":"Wilma"}']));
       // Note extra tick for constraint application in remote update
       const received = await updates;
       expect(received.length).toBe(2);
@@ -164,7 +164,7 @@ describe('Dataset engine', () => {
     test('answers rev-up from next new clone after apply', async () => {
       const updated = clone.dataUpdates.pipe(take(1)).toPromise();
       remoteUpdates.next(new DeltaMessage(remoteTime.ticks, remoteTime.ticked(),
-        [1, '{}', '{"@id":"http://test.m-ld.org/wilma","http://test.m-ld.org/#name":"Wilma"}']));
+        [2, false, '{}', '{"@id":"http://test.m-ld.org/wilma","http://test.m-ld.org/#name":"Wilma"}']));
       await updated;
       const thirdTime = await clone.newClock();
       await expect(clone.revupFrom(thirdTime)).resolves.toBeDefined();
@@ -219,7 +219,7 @@ describe('Dataset engine', () => {
       await clone.initialise();
       const updates = clone.dataUpdates.pipe(count()).toPromise();
       remoteUpdates.next(new DeltaMessage(collabClock.ticks, collabClock.ticked(),
-        [1, '{}', '{"@id":"http://test.m-ld.org/wilma","http://test.m-ld.org/#name":"Wilma"}']));
+        [2, false, '{}', '{"@id":"http://test.m-ld.org/wilma","http://test.m-ld.org/#name":"Wilma"}']));
       // Also enqueue a no-op write, which we can wait for - relying on queue ordering
       await clone.write({ '@insert': [] } as Update);
       await clone.close(); // Will complete the updates
@@ -320,7 +320,7 @@ describe('Dataset engine', () => {
       });
       // Provide a rev-up that pre-dates the local siloed update
       revUps.next(new DeltaMessage(remoteTime.ticks, remoteTime.ticked(),
-        [1, '{}', '{"@id":"http://test.m-ld.org/wilma","http://test.m-ld.org/#name":"Wilma"}']));
+        [2, false, '{}', '{"@id":"http://test.m-ld.org/wilma","http://test.m-ld.org/#name":"Wilma"}']));
       revUps.complete();
       // Check that the updates are not out of order
       await expect(observedTicks).resolves.toEqual([1, 2]);
@@ -337,7 +337,7 @@ describe('Dataset engine', () => {
 
       // Push a delta claiming a missed tick
       remoteUpdates.next(new DeltaMessage(remoteTime.ticks + 1, remoteTime.ticked().ticked(),
-        [1, '{}', '{"@id":"http://test.m-ld.org/wilma","http://test.m-ld.org/#name":"Wilma"}']));
+        [2, false, '{}', '{"@id":"http://test.m-ld.org/wilma","http://test.m-ld.org/#name":"Wilma"}']));
 
       await expect(clone.status.becomes({ outdated: true })).resolves.toBeDefined();
       await expect(clone.status.becomes({ outdated: false })).resolves.toBeDefined();
@@ -354,7 +354,7 @@ describe('Dataset engine', () => {
 
       const updates = clone.dataUpdates.pipe(toArray()).toPromise();
       const delta = new DeltaMessage(remoteTime.ticks, remoteTime.ticked(),
-        [1, '{}', '{"@id":"http://test.m-ld.org/wilma","http://test.m-ld.org/#name":"Wilma"}']);
+        [2, false, '{}', '{"@id":"http://test.m-ld.org/wilma","http://test.m-ld.org/#name":"Wilma"}']);
       // Push a delta
       remoteUpdates.next(delta);
       // Push the same delta again

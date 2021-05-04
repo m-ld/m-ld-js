@@ -1,9 +1,8 @@
 import { SuSetDataset } from '../src/engine/dataset/SuSetDataset';
-import { txnId } from '../src/engine/dataset/SuSetGraph';
 import { memStore } from './testClones';
 import { TreeClock } from '../src/engine/clocks';
 import { first, toArray, isEmpty, take } from 'rxjs/operators';
-import { DeltaMessage, EncodedDelta } from '../src/engine';
+import { DeltaMessage, EncodedDelta, txnId } from '../src/engine';
 import { Dataset } from '../src/engine/dataset';
 import { from } from 'rxjs';
 import { Describe, MeldConstraint, Subject } from '../src';
@@ -99,11 +98,12 @@ describe('SU-Set Dataset', () => {
         expect(willUpdate).resolves.toHaveProperty('@insert', [fred]);
 
         expect(msg.time.equals(localTime)).toBe(true);
-        const [ver, del, ins] = msg.data;
-        expect(ver).toBe(1);
+        const [ver, fused, del, ins] = msg.data;
+        expect(ver).toBe(2);
 
         expect(await EncodedDelta.decode(ins))
           .toEqual({ '@id': 'fred', 'name': 'Fred' });
+        expect(fused).toBe(false);
         expect(await EncodedDelta.decode(del)).toEqual({});
       });
 
@@ -112,7 +112,7 @@ describe('SU-Set Dataset', () => {
 
         await ssd.apply(new DeltaMessage(
           remoteTime.ticks, remoteTime = remoteTime.ticked(),
-          [1, '{}', '{"@id":"fred","name":"Fred"}']),
+          [2, false, '{}', '{"@id":"fred","name":"Fred"}']),
           localTime = localTime.update(remoteTime).ticked(),
           localTime = localTime.ticked());
         expect(willUpdate).resolves.toHaveProperty('@insert', [fred]);
@@ -127,7 +127,7 @@ describe('SU-Set Dataset', () => {
 
         const msg = await ssd.apply(new DeltaMessage(
           remoteTime.ticks,
-          remoteTime = remoteTime.ticked(), [1, '{}', '{}']),
+          remoteTime = remoteTime.ticked(), [2, false, '{}', '{}']),
           localTime = localTime.update(remoteTime).ticked(),
           localTime = localTime.ticked());
 
@@ -219,8 +219,9 @@ describe('SU-Set Dataset', () => {
           expect(willUpdate).resolves.toHaveProperty('@delete', [fred]);
 
           expect(msg.time.equals(localTime)).toBe(true);
-          const [_, del, ins] = msg.data;
+          const [_, fused, del, ins] = msg.data;
 
+          expect(fused).toBe(false);
           expect(await EncodedDelta.decode(ins)).toEqual({});
           expect(await EncodedDelta.decode(del)).toMatchObject({
             'tid': firstTid,
@@ -237,7 +238,7 @@ describe('SU-Set Dataset', () => {
             remoteTime.ticks,
             remoteTime = remoteTime.ticked(),
             // Deleting the triple based on the inserted Transaction ID
-            [1, `{"tid":"${firstTid}","o":"Fred","p":"#name", "s":"fred"}`, '{}']),
+            [2, false, `{"tid":"${firstTid}","o":"Fred","p":"#name", "s":"fred"}`, '{}']),
             localTime = localTime.update(remoteTime).ticked(),
             localTime = localTime.ticked());
           expect(willUpdate).resolves.toHaveProperty('@delete', [fred]);
@@ -284,7 +285,7 @@ describe('SU-Set Dataset', () => {
           await ssd.apply(new DeltaMessage(
             thirdTime.ticks,
             thirdTime = thirdTime.ticked(),
-            [1, `{"tid":"${firstTid}","o":"Fred","p":"#name","s":"fred"}`, '{}']),
+            [2, false, `{"tid":"${firstTid}","o":"Fred","p":"#name","s":"fred"}`, '{}']),
             localTime = localTime.update(thirdTime).ticked(),
             localTime = localTime.ticked());
 
@@ -353,7 +354,7 @@ describe('SU-Set Dataset', () => {
           await ssd.apply(new DeltaMessage(
             localTime.ticks,
             localTime = localTime.ticked(),
-            [1, '{}', '{"@id":"wilma","name":"Wilma"}']),
+            [2, false, '{}', '{"@id":"wilma","name":"Wilma"}']),
             localTime,
             localTime = localTime.ticked());
 
@@ -371,7 +372,7 @@ describe('SU-Set Dataset', () => {
           await ssd.apply(new DeltaMessage(
             remoteTime.ticks,
             unpersistedTime,
-            [1, `{"tid":"${firstTid}","o":"Fred","p":"#name","s":"fred"}`, '{}']),
+            [2, false, `{"tid":"${firstTid}","o":"Fred","p":"#name","s":"fred"}`, '{}']),
             localTime = localTime.update(unpersistedTime).ticked(),
             localTime = localTime.ticked());
 
@@ -447,7 +448,7 @@ describe('SU-Set Dataset', () => {
       const msg = await ssd.apply(new DeltaMessage(
         remoteTime.ticks,
         remoteTime = remoteTime.update(localTime).ticked(),
-        [1, '{}', '{"@id":"fred","name":"Fred"}']),
+        [2, false, '{}', '{"@id":"fred","name":"Fred"}']),
         localTime = localTime.update(remoteTime).ticked(),
         localTime = localTime.ticked());
       expect(willUpdate).resolves.toEqual(
@@ -456,7 +457,9 @@ describe('SU-Set Dataset', () => {
       expect(msg).not.toBeNull();
       if (msg != null) {
         expect(msg.time.equals(localTime)).toBe(true);
-        expect(msg.data[1]).toBeTruthy();
+        const [, fused, del, ins] = msg.data;
+        expect(fused).toBe(false);
+        expect(del).toBeTruthy();
       }
       await expect(ssd.read<Describe>({
         '@describe': 'http://test.m-ld.org/wilma'
@@ -471,7 +474,8 @@ describe('SU-Set Dataset', () => {
       const entries = await ops.pipe(toArray()).toPromise();
       expect(entries.length).toBe(1);
       expect(entries[0].time.equals(localTime)).toBe(true);
-      const [, del, ins] = entries[0].data;
+      const [, fused, del, ins] = entries[0].data;
+      expect(fused).toBe(false);
       expect(del).toBe('{}');
       expect(ins).toBe('{\"@id\":\"wilma\",\"name\":\"Wilma\"}');
     });
@@ -488,7 +492,7 @@ describe('SU-Set Dataset', () => {
       await ssd.apply(new DeltaMessage(
         remoteTime.ticks,
         remoteTime = remoteTime.ticked(),
-        [1, '{}', '{"@id":"fred","name":"Fred"}']),
+        [2, false, '{}', '{"@id":"fred","name":"Fred"}']),
         localTime = localTime.update(remoteTime).ticked(),
         localTime = localTime.ticked());
       expect(willUpdate).resolves.toEqual(
@@ -507,7 +511,7 @@ describe('SU-Set Dataset', () => {
       await ssd.apply(new DeltaMessage(
         remoteTime.ticks,
         remoteTime = remoteTime.ticked(),
-        [1, '{}', '{"@id":"wilma","name":"Wilma"}']),
+        [2, false, '{}', '{"@id":"wilma","name":"Wilma"}']),
         localTime = localTime.update(remoteTime).ticked(),
         localTime = localTime.ticked());
 
@@ -533,7 +537,7 @@ describe('SU-Set Dataset', () => {
       await ssd.apply(new DeltaMessage(
         remoteTime.ticks,
         remoteTime = remoteTime.ticked(),
-        [1, `{"tid":"${tid}","o":"Wilma","p":"#name", "s":"wilma"}`, '{}']),
+        [2, false, `{"tid":"${tid}","o":"Wilma","p":"#name", "s":"wilma"}`, '{}']),
         localTime = localTime.update(remoteTime).ticked(),
         localTime = localTime.ticked());
 
@@ -560,5 +564,5 @@ describe('SU-Set Dataset', () => {
 });
 
 function remoteInsert(subject: Subject): EncodedDelta {
-  return [1, '{}', JSON.stringify(subject)];
+  return [2, false, '{}', JSON.stringify(subject)];
 }

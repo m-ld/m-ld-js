@@ -144,7 +144,7 @@ describe('Ably remotes', () => {
     await comesAlive(remotes);
     const time = TreeClock.GENESIS.forked().left;
     const entry = new DeltaMessage(time.ticks,
-      time.ticked(), [1, '{}', '{}']);
+      time.ticked(), [2, false, '{}', '{}']);
     const updates = new Source<DeltaMessage>();
     remotes.setLocal(mockLocal({ updates }));
     updates.next(entry);

@@ -4,7 +4,7 @@
 import { TreeClock } from './clocks';
 import { Observable } from 'rxjs';
 import { Message } from './messages';
-import { MsgPack, Future } from './util';
+import { MsgPack, Future, sha1Digest } from './util';
 import { LiveValue } from './LiveValue';
 import { MeldError } from './MeldError';
 import { gzip as gzipCb, gunzip as gunzipCb, InputType } from 'zlib';
@@ -22,22 +22,29 @@ export class DeltaMessage implements Message<TreeClock, EncodedDelta> {
   readonly delivered = new Future;
 
   constructor(
+    /** Previous public tick from the delta source */
     readonly prev: number,
+    /** Update time at the delta source */
     readonly time: TreeClock,
-    readonly data: EncodedDelta) {
+    /** Encoded update delta */
+    readonly data: EncodedDelta,
+    /** First tick included in update (= time.ticks unless fused) */
+    readonly from = time.ticks) {
+    const [, fused] = data;
+    if (from > time.ticks || fused !== (from < time.ticks))
+      throw new MeldError('Bad update');
   }
 
   encode(): Buffer {
-    return MsgPack.encode({
-      time: this.time.toJson(), prev: this.prev, data: this.data
-    });
+    const { prev, from, time, data } = this;
+    return MsgPack.encode({ prev, from, time: time.toJson(), data });
   }
 
   static decode(enc: Buffer): DeltaMessage {
     const json = MsgPack.decode(enc);
     const time = TreeClock.fromJson(json.time);
     if (time && json.data)
-      return new DeltaMessage(json.prev, time, json.data);
+      return new DeltaMessage(json.prev, time, json.data, json.from ?? time.ticks);
     else
       throw new MeldError('Bad update');
   }
@@ -81,8 +88,14 @@ export interface Meld {
 }
 
 export interface MeldDelta extends Object {
-  readonly insert: Triple[];
-  readonly delete: Triple[];
+  /**
+   * Inserted triples, reified with transaction IDs iff the encoding is fused.
+   */
+  readonly inserts: [Triple, string[]][];
+  /**
+   * Reified deleted triples, with transaction IDs.
+   */
+  readonly deletes: [Triple, string[]][];
   /**
    * Serialisation output of triples is not required to be normalised.
    * For any m-ld delta, there are many possible serialisations.
@@ -92,12 +105,26 @@ export interface MeldDelta extends Object {
 }
 
 /**
- * A tuple containing encoding version, delete and insert components of a
- * {@link MeldDelta}. The delete and insert components are UTF-8 encoded JSON-LD
- * strings, which may be GZIP compressed into a Buffer if bigger than a
- * threshold. Intended to be efficiently serialised with MessagePack.
+ * Formal mapping from a clock time to a transaction ID. Used in the creation of
+ * reified delta deletes and inserts.
+ * @param time the clock time
  */
-export type EncodedDelta = [1, string | Buffer, string | Buffer];
+export function txnId(time: TreeClock): string {
+  return sha1Digest(MsgPack.encode(time.toJson()));
+}
+
+/**
+ * A tuple containing encoding
+ * - `0`: version,
+ * - `1`: fused flag (multiple transactions; has reified insert),
+ * - `2`: delete, and
+ * - `3`: insert
+ *
+ * components of a {@link MeldDelta}. The delete and insert components are UTF-8
+ * encoded JSON-LD strings, which may be GZIP compressed into a Buffer if bigger
+ * than a threshold. Intended to be efficiently serialised with MessagePack.
+ */
+export type EncodedDelta = [2, boolean, string | Buffer, string | Buffer];
 
 export namespace EncodedDelta {
   export async function encode(json: any): Promise<Buffer | string> {

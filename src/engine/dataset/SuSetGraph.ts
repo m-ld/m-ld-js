@@ -1,9 +1,7 @@
 import { Context } from '../../jrql-support';
 import { Iri } from 'jsonld/jsonld-spec';
 import { Triple, tripleKey } from '../quads';
-import { createHash } from 'crypto';
-import { TreeClock } from '../clocks';
-import { MsgPack } from '../util';
+import { sha1Digest } from '../util';
 import { QS } from '../../ns';
 
 /**
@@ -19,16 +17,5 @@ export function toPrefixedId(prefix: string, ...path: string[]): Iri {
 }
 
 export function tripleId(triple: Triple): string {
-  return toPrefixedId('thash', fastDigest(...tripleKey(triple)));
-}
-
-export function txnId(time: TreeClock): string {
-  return fastDigest(MsgPack.encode(time.toJson()));
-}
-
-function fastDigest(...items: (string | Buffer)[]) {
-  const hash = createHash('sha1'); // Fastest
-  for (let item of items)
-    hash.update(item);
-  return hash.digest('base64');
+  return toPrefixedId('thash', sha1Digest(...tripleKey(triple)));
 }

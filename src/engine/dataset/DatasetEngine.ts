@@ -203,16 +203,16 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
         const applys: [DeltaMessage, TreeClock, TreeClock][] = [];
         const accepted = this.messageService.receive(delta, this.orderingBuffer, (msg, prevTime) => {
           // Check that we have the previous message from this clock ID
-          const expectedPrev = prevTime.getTicks(msg.time);
-          if (msg.prev < expectedPrev) {
+          const ticksSeen = prevTime.getTicks(msg.time);
+          if (msg.time.ticks <= ticksSeen) {
             // Already had this message.
             this.log.debug('Ignoring outdated', logBody);
-          } else if (msg.prev > expectedPrev) {
+          } else if (msg.prev > ticksSeen) {
             // We're missing a message. Reset the clock and trigger a re-connect.
             this.messageService.push(startTime);
             throw new MeldError('Update out of order', `
               Update claims prev is ${msg.prev} @ ${msg.time},
-              but local clock was ${expectedPrev} @ ${prevTime}`);
+              but local clock was ${ticksSeen} @ ${prevTime}`);
           } else {
             this.log.debug('Accepting', logBody);
             // Get the event time just before transacting the change, making an

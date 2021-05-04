@@ -79,8 +79,11 @@ describe('New MQTT remotes', () => {
     });
 
     test('emits remote operations', async () => {
+      const time = TreeClock.GENESIS.forked().left;
       mqtt.mockPublish('test.m-ld.org/operations/client2', MsgPack.encode({
-        time: TreeClock.GENESIS.forked().left.toJson(), data: [0, 't1', '{}', '{}']
+        prev: time.ticks,
+        time: time.ticked().toJson(),
+        data: [0, false, '{}', '{}']
       }));
       await expect(new Promise((resolve) => {
         remotes.updates.subscribe({ next: resolve });
@@ -114,7 +117,7 @@ describe('New MQTT remotes', () => {
 
       const time = TreeClock.GENESIS.forked().left;
       const entry = new DeltaMessage(time.ticks,
-        time.ticked(), [1, '{}', '{}']);
+        time.ticked(), [2, false, '{}', '{}']);
       const updates = new Source<DeltaMessage>();
       remotes.setLocal(mockLocal({ updates }));
       // Setting retained presence on the channel
@@ -141,7 +144,7 @@ describe('New MQTT remotes', () => {
 
       const time = TreeClock.GENESIS.forked().left;
       updates.next(new DeltaMessage(time.ticks,
-        time.ticked(), [1, '{}', '{}']));
+        time.ticked(), [2, false, '{}', '{}']));
 
       await expect(remotes.updates.toPromise()).rejects.toBe('Delivery failed');
     });
@@ -170,7 +173,7 @@ describe('New MQTT remotes', () => {
     test('can provide revup', async () => {
       // Local clone provides a rev-up on any request
       const { left: localTime, right: remoteTime } = TreeClock.GENESIS.forked();
-      const revupUpdate = new DeltaMessage(remoteTime.ticks, remoteTime.ticked(), [1, '{}', '{}']);
+      const revupUpdate = new DeltaMessage(remoteTime.ticks, remoteTime.ticked(), [2, false, '{}', '{}']);
       remotes.setLocal(mockLocal({
         revupFrom: () => Promise.resolve({ lastTime: remoteTime.ticked(), updates: of(revupUpdate) })
       }));

@@ -1,14 +1,14 @@
-import { MeldDelta, EncodedDelta, UUID } from '.';
-import { Quad } from 'rdf-js';
+import { MeldDelta, EncodedDelta, UUID, txnId } from '.';
 import { flatten, lazy } from './util';
 import { Context, ExpandedTermDef } from '../jrql-support';
 import { Iri } from 'jsonld/jsonld-spec';
-import { RdfFactory, Triple, TripleMap } from './quads';
+import { RdfFactory, Triple } from './quads';
 import { activeCtx } from "./jsonld";
 import { M_LD, RDF } from '../ns';
 import { SubjectGraph } from './SubjectGraph';
 import { ActiveContext } from 'jsonld/lib/context';
 import { SubjectQuads } from './SubjectQuads';
+import { TreeClock } from './clocks';
 
 export class DomainContext implements Context {
   '@base': Iri;
@@ -79,8 +79,8 @@ export class MeldEncoding {
 
   private name = lazy(name => this.rdf.namedNode(name));
 
-  reifyTriplesTids(triplesTids: TripleMap<UUID[]>): Triple[] {
-    return flatten([...triplesTids].map(([triple, tids]) => {
+  reifyTriplesTids(triplesTids: [Triple, string[]][]): Triple[] {
+    return flatten(triplesTids.map(([triple, tids]) => {
       const rid = this.rdf.blankNode();
       return [
         // Reification must be known, so Statement type is redundant
@@ -93,22 +93,40 @@ export class MeldEncoding {
     }));
   }
 
-  newDelta = async (delta: Omit<MeldDelta, 'encoded'>): Promise<MeldDelta> => {
-    const [del, ins] = await Promise.all([delta.delete, delta.insert]
+  newDelta = async (delta: Omit<MeldDelta, 'encoded'>, fused = false): Promise<MeldDelta> => {
+    const [deletes, inserts] = await Promise.all([delta.deletes, delta.inserts]
+      .map((triplesTids, i) => {
+          // Encoded inserts are only reified if fused
+        if (i === 1 && !fused)
+          return triplesTids.map(([triple]) => triple);
+        else
+          return this.reifyTriplesTids(triplesTids);
+      })
       .map(triples => EncodedDelta.encode(this.jsonFromTriples(triples))));
-    return { ...delta, encoded: [1, del, ins] };
+    return { ...delta, encoded: [2, fused, deletes, inserts] };
   }
 
-  asDelta = async (delta: EncodedDelta): Promise<MeldDelta> => {
-    const [ver, del, ins] = delta;
-    if (ver !== 1)
+  asDelta = async (time: TreeClock, encoded: EncodedDelta): Promise<MeldDelta> => {
+    const [ver] = encoded;
+    if (ver < 1)
       throw new Error(`Encoded delta version ${ver} not supported`);
+    let [, fused, del, ins] = encoded;
+    // @ts-ignore
+    if (ver === 1) {
+      fused = false;
+      // @ts-ignore
+      [, del, ins] = encoded;
+    }
     const jsons = await Promise.all([del, ins].map(EncodedDelta.decode));
-    const [delTriples, insTriples] = jsons.map(this.triplesFromJson);
-    return ({
-      insert: insTriples, delete: delTriples, encoded: delta,
+    const [deletes, inserts] = jsons.map(this.triplesFromJson);
+    // Note transaction ID is not needed if the encoding is fused
+    const tid = fused ? '' : txnId(time);
+    return {
+      inserts: fused ? unreify(inserts) : inserts.map(triple => [triple, [tid]]),
+      deletes: unreify(deletes),
+      encoded,
       toString: () => `${JSON.stringify(jsons)}`
-    });
+    };
   }
 
   jsonFromTriples = (triples: Triple[]): any => {
@@ -119,10 +137,4 @@ export class MeldEncoding {
 
   triplesFromJson = (json: any): Triple[] =>
     [...new SubjectQuads('graph', this.ctx, this.rdf).quads(json)];
-
-  toDomainQuad = (triple: Triple): Quad => this.rdf.quad(
-    triple.subject,
-    triple.predicate,
-    triple.object,
-    this.rdf.defaultGraph());
 }
