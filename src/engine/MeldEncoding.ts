@@ -1,4 +1,4 @@
-import { MeldDelta, EncodedDelta, UUID, txnId } from '.';
+import { MeldDelta, EncodedDelta, UUID, txnId, TID } from '.';
 import { flatten, lazy } from './util';
 import { Context, ExpandedTermDef } from '../jrql-support';
 import { Iri } from 'jsonld/jsonld-spec';
@@ -9,6 +9,12 @@ import { SubjectGraph } from './SubjectGraph';
 import { ActiveContext } from 'jsonld/lib/context';
 import { SubjectQuads } from './SubjectQuads';
 import { TreeClock } from './clocks';
+import { gzip as gzipCb, gunzip as gunzipCb, InputType } from 'zlib';
+const gzip = (input: InputType) => new Promise<Buffer>((resolve, reject) =>
+  gzipCb(input, (err, buf) => err ? reject(err) : resolve(buf)));
+const gunzip = (input: InputType) => new Promise<Buffer>((resolve, reject) =>
+  gunzipCb(input, (err, buf) => err ? reject(err) : resolve(buf)));
+const COMPRESS_THRESHOLD_BYTES = 1024;
 
 export class DomainContext implements Context {
   '@base': Iri;
@@ -93,38 +99,38 @@ export class MeldEncoding {
     }));
   }
 
-  newDelta = async (delta: Omit<MeldDelta, 'encoded'>, fused = false): Promise<MeldDelta> => {
+  newDelta = async (delta: Omit<MeldDelta, 'encoded'>): Promise<MeldDelta> => {
     const [deletes, inserts] = await Promise.all([delta.deletes, delta.inserts]
       .map((triplesTids, i) => {
           // Encoded inserts are only reified if fused
-        if (i === 1 && !fused)
+        if (i === 1 && delta.from === delta.time.ticks)
           return triplesTids.map(([triple]) => triple);
         else
           return this.reifyTriplesTids(triplesTids);
       })
-      .map(triples => EncodedDelta.encode(this.jsonFromTriples(triples))));
-    return { ...delta, encoded: [2, fused, deletes, inserts] };
+      .map(triples => MeldEncoding.bufferFromJson(this.jsonFromTriples(triples))));
+    return { ...delta, encoded: [2, delta.from, delta.time.toJson(), deletes, inserts] };
   }
 
-  asDelta = async (time: TreeClock, encoded: EncodedDelta): Promise<MeldDelta> => {
+  asDelta = async (encoded: EncodedDelta): Promise<MeldDelta> => {
     const [ver] = encoded;
-    if (ver < 1)
+    if (ver < 2)
       throw new Error(`Encoded delta version ${ver} not supported`);
-    let [, fused, del, ins] = encoded;
-    // @ts-ignore
-    if (ver === 1) {
-      fused = false;
-      // @ts-ignore
-      [, del, ins] = encoded;
+    let [, from, timeJson, delEnc, insEnc] = encoded;
+    const jsons = await Promise.all([delEnc, insEnc].map(MeldEncoding.jsonFromBuffer));
+    const [delTriples, insTriples] = jsons.map(this.triplesFromJson);
+    const time = TreeClock.fromJson(timeJson) as TreeClock;
+    const deletes = unreify(delTriples);
+    let inserts: MeldDelta['inserts'];
+    if (from === time.ticks) {
+      const tid = txnId(time);
+      inserts = insTriples.map(triple => [triple, [tid]]);
+    } else {
+      // No need to calculate transaction ID if the encoding is fused
+      inserts = unreify(insTriples);
     }
-    const jsons = await Promise.all([del, ins].map(EncodedDelta.decode));
-    const [deletes, inserts] = jsons.map(this.triplesFromJson);
-    // Note transaction ID is not needed if the encoding is fused
-    const tid = fused ? '' : txnId(time);
     return {
-      inserts: fused ? unreify(inserts) : inserts.map(triple => [triple, [tid]]),
-      deletes: unreify(deletes),
-      encoded,
+      from, time, inserts, deletes, encoded,
       toString: () => `${JSON.stringify(jsons)}`
     };
   }
@@ -137,4 +143,16 @@ export class MeldEncoding {
 
   triplesFromJson = (json: any): Triple[] =>
     [...new SubjectQuads('graph', this.ctx, this.rdf).quads(json)];
+
+  static async bufferFromJson(json: any): Promise<Buffer | string> {
+    const stringified = JSON.stringify(json);
+    return stringified.length > COMPRESS_THRESHOLD_BYTES ?
+      gzip(stringified) : stringified;
+  }
+
+  static async jsonFromBuffer(enc: string | Buffer): Promise<any> {
+    if (typeof enc != 'string')
+      enc = (await gunzip(enc)).toString();
+    return JSON.parse(enc);
+  }
 }

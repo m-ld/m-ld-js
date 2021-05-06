@@ -392,10 +392,10 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
     await this.dataset.saveClock(gwc => {
       const lastPublicTick = gwc.getTicks(this.localTime);
       // Back-date the clock to the last public tick before forking
-      const fork = this.localTime.forked(lastPublicTick);
+      const fork = this.localTime.ticked(lastPublicTick).forked();
       newClock.resolve(fork.right);
       // And re-apply the ticks to our local clock
-      const localClock = fork.left.ticked(this.localTime.ticks - lastPublicTick);
+      const localClock = fork.left.ticked(this.localTime.ticks);
       this.messageService.push(localClock);
       return localClock
     });

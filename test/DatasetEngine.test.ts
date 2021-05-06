@@ -1,5 +1,5 @@
 import { DatasetEngine } from '../src/engine/dataset/DatasetEngine';
-import { memStore, mockRemotes, hotLive, testConfig } from './testClones';
+import { memStore, mockRemotes, hotLive, testConfig, MockProcess } from './testClones';
 import { NEVER, Subject as Source, asapScheduler, EMPTY, throwError, BehaviorSubject } from 'rxjs';
 import { comesAlive } from '../src/engine/AbstractMeld';
 import { first, take, toArray, map, observeOn, count } from 'rxjs/operators';
@@ -116,7 +116,7 @@ describe('Dataset engine', () => {
 
   describe('as genesis with remote clone', () => {
     let clone: DatasetEngine;
-    let remoteTime: TreeClock;
+    let remote: MockProcess;
     let remoteUpdates: Source<DeltaMessage> = new Source;
 
     beforeEach(async () => {
@@ -126,14 +126,14 @@ describe('Dataset engine', () => {
       clone = new DatasetEngine({ dataset: await memStore(), remotes, config: testConfig() });
       await clone.initialise();
       await comesAlive(clone); // genesis is alive
-      remoteTime = await clone.newClock(); // no longer genesis
-      remotes.revupFrom = async () => ({ lastTime: remoteTime, updates: EMPTY });
+      remote = new MockProcess(await clone.newClock()); // no longer genesis
+      remotes.revupFrom = async () => ({ lastTime: remote.time, updates: EMPTY });
       remotesLive.next(true); // remotes come alive
       await clone.status.becomes({ outdated: false });
     });
 
     test('answers rev-up from the new clone', async () => {
-      const revup = await clone.revupFrom(remoteTime);
+      const revup = await clone.revupFrom(remote.time);
       expect(revup).toBeDefined();
       await expect(revup?.updates.toPromise()).resolves.toBeUndefined();
     });
@@ -150,8 +150,8 @@ describe('Dataset engine', () => {
         '@id': 'http://test.m-ld.org/fred',
         'http://test.m-ld.org/#name': 'Fred'
       } as Subject);
-      remoteUpdates.next(new DeltaMessage(remoteTime.ticks, remoteTime.ticked(),
-        [2, false, '{}', '{"@id":"http://test.m-ld.org/wilma","http://test.m-ld.org/#name":"Wilma"}']));
+      remoteUpdates.next(remote.sentDelta(
+        '{}', '{"@id":"http://test.m-ld.org/wilma","http://test.m-ld.org/#name":"Wilma"}'));
       // Note extra tick for constraint application in remote update
       const received = await updates;
       expect(received.length).toBe(2);
@@ -163,8 +163,8 @@ describe('Dataset engine', () => {
     // 1. a remote transaction, because of the clock space made for a constraint
     test('answers rev-up from next new clone after apply', async () => {
       const updated = clone.dataUpdates.pipe(take(1)).toPromise();
-      remoteUpdates.next(new DeltaMessage(remoteTime.ticks, remoteTime.ticked(),
-        [2, false, '{}', '{"@id":"http://test.m-ld.org/wilma","http://test.m-ld.org/#name":"Wilma"}']));
+      remoteUpdates.next(remote.sentDelta(
+        '{}', '{"@id":"http://test.m-ld.org/wilma","http://test.m-ld.org/#name":"Wilma"}'));
       await updated;
       const thirdTime = await clone.newClock();
       await expect(clone.revupFrom(thirdTime)).resolves.toBeDefined();
@@ -218,8 +218,10 @@ describe('Dataset engine', () => {
       const clone = new DatasetEngine({ dataset: await memStore(), remotes, config: testConfig({ genesis: false }) });
       await clone.initialise();
       const updates = clone.dataUpdates.pipe(count()).toPromise();
-      remoteUpdates.next(new DeltaMessage(collabClock.ticks, collabClock.ticked(),
-        [2, false, '{}', '{"@id":"http://test.m-ld.org/wilma","http://test.m-ld.org/#name":"Wilma"}']));
+      const prev = collabClock.ticks;
+      collabClock = collabClock.ticked();
+      remoteUpdates.next(new DeltaMessage(prev, [2, collabClock.ticks, collabClock.toJson(),
+        '{}', '{"@id":"http://test.m-ld.org/wilma","http://test.m-ld.org/#name":"Wilma"}']));
       // Also enqueue a no-op write, which we can wait for - relying on queue ordering
       await clone.write({ '@insert': [] } as Update);
       await clone.close(); // Will complete the updates
@@ -230,7 +232,7 @@ describe('Dataset engine', () => {
   describe('as post-genesis clone', () => {
     let backend: AbstractLevelDOWN;
     let config: MeldConfig;
-    let remoteTime: TreeClock;
+    let remote: MockProcess;
 
     beforeEach(async () => {
       backend = new MemDown();
@@ -238,7 +240,7 @@ describe('Dataset engine', () => {
       // Start a temporary genesis clone to initialise the store
       let clone = new DatasetEngine({ dataset: await memStore({ backend }), remotes: mockRemotes(), config });
       await clone.initialise();
-      remoteTime = await clone.newClock(); // Forks the clock so no longer genesis
+      remote = new MockProcess(await clone.newClock()); // Forks the clock so no longer genesis
       await clone.close();
       // Now the ldb represents a former genesis clone
     });
@@ -246,7 +248,7 @@ describe('Dataset engine', () => {
     test('is outdated while revving-up', async () => {
       // Re-start on the same data, with a rev-up that never completes
       const remotes = mockRemotes(NEVER, [true]);
-      remotes.revupFrom = async () => ({ lastTime: remoteTime, updates: NEVER });
+      remotes.revupFrom = async () => ({ lastTime: remote.time, updates: NEVER });
       const clone = new DatasetEngine({ dataset: await memStore({ backend }), remotes, config: testConfig() });
 
       // Check that we are never not outdated
@@ -261,7 +263,7 @@ describe('Dataset engine', () => {
     test('is not outdated when revved-up', async () => {
       // Re-start on the same data, with a rev-up that completes with no updates
       const remotes = mockRemotes(NEVER, [true]);
-      remotes.revupFrom = async () => ({ lastTime: remoteTime, updates: EMPTY });
+      remotes.revupFrom = async () => ({ lastTime: remote.time, updates: EMPTY });
       const clone = new DatasetEngine({ dataset: await memStore({ backend }), remotes, config: testConfig() });
 
       // Check that we do transition through an outdated state
@@ -287,8 +289,8 @@ describe('Dataset engine', () => {
     test('immediately re-connects if rev-up fails', async () => {
       const remotes = mockRemotes(NEVER, [true]);
       const revupFrom = jest.fn()
-        .mockReturnValueOnce(Promise.resolve({ lastTime: remoteTime, updates: throwError('boom') }))
-        .mockReturnValueOnce(Promise.resolve({ lastTime: remoteTime, updates: EMPTY }));
+        .mockReturnValueOnce(Promise.resolve({ lastTime: remote.time, updates: throwError('boom') }))
+        .mockReturnValueOnce(Promise.resolve({ lastTime: remote.time, updates: EMPTY }));
       remotes.revupFrom = revupFrom;
       const clone = new DatasetEngine({ dataset: await memStore({ backend }), remotes, config: testConfig() });
       await clone.initialise();
@@ -308,7 +310,7 @@ describe('Dataset engine', () => {
       // Need a remote with rev-ups to share
       const remotes = mockRemotes(NEVER, [true]);
       const revUps = new Source<DeltaMessage>();
-      remotes.revupFrom = async () => ({ lastTime: remoteTime.ticked(), updates: revUps });
+      remotes.revupFrom = async () => ({ lastTime: remote.time.ticked(), updates: revUps });
       // The clone will initialise into a revving-up state, waiting for a revUp
       clone = new DatasetEngine({ dataset: await memStore({ backend }), remotes, config: testConfig() });
       const observedTicks = clone.updates.pipe(map(next => next.time.ticks), take(2), toArray()).toPromise();
@@ -319,8 +321,8 @@ describe('Dataset engine', () => {
         'http://test.m-ld.org/#name': 'Flintstone'
       });
       // Provide a rev-up that pre-dates the local siloed update
-      revUps.next(new DeltaMessage(remoteTime.ticks, remoteTime.ticked(),
-        [2, false, '{}', '{"@id":"http://test.m-ld.org/wilma","http://test.m-ld.org/#name":"Wilma"}']));
+      revUps.next(remote.sentDelta(
+        '{}', '{"@id":"http://test.m-ld.org/wilma","http://test.m-ld.org/#name":"Wilma"}'));
       revUps.complete();
       // Check that the updates are not out of order
       await expect(observedTicks).resolves.toEqual([1, 2]);
@@ -330,14 +332,15 @@ describe('Dataset engine', () => {
       // Re-start on the same data
       const remoteUpdates = new Source<DeltaMessage>();
       const remotes = mockRemotes(remoteUpdates, [true]);
-      remotes.revupFrom = async () => ({ lastTime: remoteTime, updates: EMPTY });
+      remotes.revupFrom = async () => ({ lastTime: remote.time, updates: EMPTY });
       const clone = new DatasetEngine({ dataset: await memStore({ backend }), remotes, config: testConfig() });
       await clone.initialise();
       await clone.status.becomes({ outdated: false });
 
       // Push a delta claiming a missed tick
-      remoteUpdates.next(new DeltaMessage(remoteTime.ticks + 1, remoteTime.ticked().ticked(),
-        [2, false, '{}', '{"@id":"http://test.m-ld.org/wilma","http://test.m-ld.org/#name":"Wilma"}']));
+      remote.tick();
+      remoteUpdates.next(remote.sentDelta(
+        '{}', '{"@id":"http://test.m-ld.org/wilma","http://test.m-ld.org/#name":"Wilma"}'));
 
       await expect(clone.status.becomes({ outdated: true })).resolves.toBeDefined();
       await expect(clone.status.becomes({ outdated: false })).resolves.toBeDefined();
@@ -347,14 +350,14 @@ describe('Dataset engine', () => {
       // Re-start on the same data
       const remoteUpdates = new Source<DeltaMessage>();
       const remotes = mockRemotes(remoteUpdates, [true]);
-      remotes.revupFrom = async () => ({ lastTime: remoteTime, updates: EMPTY });
+      remotes.revupFrom = async () => ({ lastTime: remote.time, updates: EMPTY });
       const clone = new DatasetEngine({ dataset: await memStore({ backend }), remotes, config: testConfig() });
       await clone.initialise();
       await clone.status.becomes({ outdated: false });
 
       const updates = clone.dataUpdates.pipe(toArray()).toPromise();
-      const delta = new DeltaMessage(remoteTime.ticks, remoteTime.ticked(),
-        [2, false, '{}', '{"@id":"http://test.m-ld.org/wilma","http://test.m-ld.org/#name":"Wilma"}']);
+      const delta = remote.sentDelta(
+        '{}', '{"@id":"http://test.m-ld.org/wilma","http://test.m-ld.org/#name":"Wilma"}');
       // Push a delta
       remoteUpdates.next(delta);
       // Push the same delta again

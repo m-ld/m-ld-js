@@ -4,7 +4,7 @@ import { AsyncMqttClient } from 'async-mqtt';
 import { DeltaMessage } from '../src/engine';
 import { TreeClock } from '../src/engine/clocks';
 import { Subject as Source, of } from 'rxjs';
-import { mockLocal, MockMqtt, mockMqtt } from './testClones';
+import { mockLocal, MockMqtt, mockMqtt, MockProcess } from './testClones';
 import { take, toArray } from 'rxjs/operators';
 import { comesAlive } from '../src/engine/AbstractMeld';
 import { MeldErrorStatus } from '../src/engine/MeldError';
@@ -115,9 +115,7 @@ describe('New MQTT remotes', () => {
         '{"consumer2":"test.m-ld.org/control"}');
       await comesAlive(remotes);
 
-      const time = TreeClock.GENESIS.forked().left;
-      const entry = new DeltaMessage(time.ticks,
-        time.ticked(), [2, false, '{}', '{}']);
+      const entry = new MockProcess(TreeClock.GENESIS.forked().left).sentDelta('{}', '{}');
       const updates = new Source<DeltaMessage>();
       remotes.setLocal(mockLocal({ updates }));
       // Setting retained presence on the channel
@@ -142,9 +140,7 @@ describe('New MQTT remotes', () => {
 
       mqtt.publish.mockReturnValue(<any>Promise.reject('Delivery failed'));
 
-      const time = TreeClock.GENESIS.forked().left;
-      updates.next(new DeltaMessage(time.ticks,
-        time.ticked(), [2, false, '{}', '{}']));
+      updates.next(new MockProcess(TreeClock.GENESIS.forked().left).sentDelta('{}', '{}'));
 
       await expect(remotes.updates.toPromise()).rejects.toBe('Delivery failed');
     });
@@ -173,7 +169,7 @@ describe('New MQTT remotes', () => {
     test('can provide revup', async () => {
       // Local clone provides a rev-up on any request
       const { left: localTime, right: remoteTime } = TreeClock.GENESIS.forked();
-      const revupUpdate = new DeltaMessage(remoteTime.ticks, remoteTime.ticked(), [2, false, '{}', '{}']);
+      const revupUpdate = new MockProcess(remoteTime).sentDelta('{}', '{}');
       remotes.setLocal(mockLocal({
         revupFrom: () => Promise.resolve({ lastTime: remoteTime.ticked(), updates: of(revupUpdate) })
       }));

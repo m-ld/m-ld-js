@@ -49,6 +49,37 @@ export function mockLocal(
   return { ...mock<MeldLocal>(), updates: NEVER, live: hotLive(lives), ...impl };
 }
 
+/**
+ * Wraps a clock and provides mock MessageService-like test mutations
+ */
+export class MockProcess {
+  constructor(
+    public time: TreeClock) {
+  }
+
+  tick() {
+    this.time = this.time.ticked();
+    return this;
+  }
+
+  join(clock: MockProcess) {
+    this.time = this.time.update(clock.time);
+    return this;
+  }
+
+  fork() {
+    const { left, right } = this.time.forked();
+    this.time = left;
+    return new MockProcess(right);
+  }
+
+  sentDelta(deletes: string, inserts: string) {
+    const prev = this.time.ticks;
+    this.tick();
+    return new DeltaMessage(prev, [2, this.time.ticks, this.time.toJson(), deletes, inserts]);
+  }
+}
+
 export interface MockMqtt extends AsyncMqttClient {
   mockConnect(): void;
   mockClose(): void;

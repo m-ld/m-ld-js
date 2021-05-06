@@ -1,13 +1,13 @@
 import { toPrefixedId } from './SuSetGraph';
 import { MeldDelta, EncodedDelta } from '..';
-import { TreeClock } from '../clocks';
+import { TreeClock, TreeClockJson } from '../clocks';
 import { MsgPack } from '../util';
 import { Dataset, Kvps } from '.';
 
-/** There is only one journal with a fixed key */
+/** There is only one journal with a fixed key. */
 const JOURNAL_KEY = '_qs:journal';
 
-/** Journal entries are keyed as `_qs:entry:#tick`. */
+/** Journal entries are indexed by tick as `_qs:entry:${tick}`. */
 type EntryKey = ReturnType<typeof entryKey>;
 function entryKey(tick: number) {
   return toPrefixedId('_qs:entry', tick.toString());
@@ -21,36 +21,28 @@ interface JournalJson {
 type JournalEntryJson = [
   /** Raw delta - may contain Buffers */
   EncodedDelta,
-  /** JSON-encoded transaction message time */
-  any,
   /**
    * JSON-encoded public clock time ('global wall clock' or 'Great Westminster
    * Clock'). This has latest public ticks seen for all processes (not internal
-   * ticks), unlike the message time, which may be causally related to older
+   * ticks), unlike the delta time, which may be causally related to older
    * messages from third parties, and the journal time, which has internal ticks
    * for the local clone identity. This clock has no identity.
    */
-  any,
+  TreeClockJson,
   /** Next entry key */
   EntryKey | undefined
 ];
 
-export interface EntryCreateDetails {
-  delta: MeldDelta;
-  localTime: TreeClock;
-  remoteTime?: TreeClock;
-}
-
-/** Immutable */
+/** Immutable expansion of JournalEntryJson */
 export class SuSetJournalEntry {
   constructor(
     private readonly dataset: SuSetJournalDataset,
     private readonly json: JournalEntryJson,
     readonly key: EntryKey,
-    readonly delta = json[0],  // undefined iff head
-    readonly time = TreeClock.fromJson(json[1]) as TreeClock, // null iff temporary head
-    readonly gwc = TreeClock.fromJson(json[2]) as TreeClock,
-    readonly nextKey = json[3]) { // null iff temporary head
+    readonly delta = json[0],
+    readonly time = TreeClock.fromJson(delta[2]) as TreeClock,
+    readonly gwc = TreeClock.fromJson(json[1]) as TreeClock,
+    readonly nextKey = json[2]) {
   }
 
   async next(): Promise<SuSetJournalEntry | undefined> {
@@ -60,65 +52,63 @@ export class SuSetJournalEntry {
 
   static head(localTime?: TreeClock, gwc?: TreeClock): [EntryKey, Partial<JournalEntryJson>] {
     return [entryKey(localTime?.ticks ?? -1), [
-      undefined, // No delta for head
-      localTime?.toJson(),
+      // Dummy delta for head
+      [2, localTime?.ticks ?? -1, (localTime ?? TreeClock.GENESIS).toJson(), '{}', '{}'],
       gwc?.toJson()
     ]];
   }
 
-  builder(journal: SuSetJournal, entry: EntryCreateDetails): {
-    next: (entry: EntryCreateDetails) => void, commit: Kvps
+  builder(journal: SuSetJournal, delta: MeldDelta, localTime: TreeClock): {
+    next: (delta: MeldDelta, localTime: TreeClock) => void, commit: Kvps
   } {
     const dataset = this.dataset;
     class EntryBuild {
       key: EntryKey;
-      tick: number;
       gwc: TreeClock;
-      time: TreeClock;
       next?: EntryBuild;
-      constructor(prevGwc: TreeClock, readonly details: EntryCreateDetails) {
-        this.tick = details.localTime.ticks;
-        this.key = entryKey(this.tick);
-        this.time = details.remoteTime ?? details.localTime;
-        this.gwc = prevGwc.update(this.time);
+
+      constructor(prevGwc: TreeClock, readonly delta: MeldDelta, readonly localTime: TreeClock) {
+        this.key = entryKey(localTime.ticks);
+        this.gwc = prevGwc.update(delta.time);
       }
+
       *build(): Iterable<SuSetJournalEntry> {
         const nextKey = this.next != null ? this.next.key : undefined;
         const json: JournalEntryJson = [
-          this.details.delta.encoded,
-          this.time.toJson(),
+          this.delta.encoded,
           this.gwc.toJson(),
           nextKey
         ];
         yield new SuSetJournalEntry(dataset, json, this.key,
-          this.details.delta.encoded, this.time, this.gwc, nextKey);
+          this.delta.encoded, this.delta.time, this.gwc, nextKey);
         if (this.next)
           yield* this.next.build();
       }
     }
-    let head = new EntryBuild(this.gwc, entry), tail = head;
+    let head = new EntryBuild(this.gwc, delta, localTime), tail = head;
     return {
       /**
        * Adds another journal entry to this builder
        */
-      next: entry => {
-        tail = tail.next = new EntryBuild(tail.gwc, entry);
+      next: (delta, localTime) => {
+        tail = tail.next = new EntryBuild(tail.gwc, delta, localTime);
       },
       /**
        * Commits the built journal entries to the journal
        */
       commit: batch => {
-        const entries = Array.from(head.build());
+        const entries = [...head.build()];
         const newJson: JournalEntryJson = [...this.json];
-        newJson[3] = entries[0].key; // Next key
+        newJson[2] = entries[0].key; // Next key
         batch.put(this.key, MsgPack.encode(newJson));
         entries.forEach(entry => batch.put(entry.key, MsgPack.encode(entry.json)));
-        journal.commit(entries.slice(-1)[0], tail.details.localTime)(batch);
+        journal.commit(entries.slice(-1)[0], tail.localTime)(batch);
       }
     };
   }
 }
 
+/** Immutable expansion of JournalJson */
 export class SuSetJournal {
   /** Tail state cache */
   _tail: SuSetJournalEntry | null = null;
@@ -155,7 +145,7 @@ export class SuSetJournal {
     return async batch => {
       let tailKey = this.tailKey;
       if (newClone) {
-        // For a new clone, the journal's temp tail does not have a timestamp
+        // For a new clone, the journal's temp tail has a bogus timestamp
         batch.del(this.tailKey);
         // The dummy head time will only ever be used for a genesis clone, as all
         // other clones will have their journal reset with a snapshot. So, it's safe

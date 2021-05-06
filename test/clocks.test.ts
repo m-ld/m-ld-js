@@ -19,6 +19,12 @@ test('Genesis tick', () => {
   expect(TreeClock.GENESIS.ticked().ticked().ticks).toBe(2);
 });
 
+test('Genesis set tick', () => {
+  expect(TreeClock.GENESIS.ticked(0).ticks).toBe(0);
+  expect(TreeClock.GENESIS.ticked().ticked(0).ticks).toBe(0);
+  expect(() => TreeClock.GENESIS.ticked(-1)).toThrowError();
+});
+
 test('Fork tick', () => {
   expect(TreeClock.GENESIS.forked().left.ticked().ticks).toBe(1);
   expect(TreeClock.GENESIS.forked().left.ticked().ticked().ticks).toBe(2);
@@ -27,6 +33,11 @@ test('Fork tick', () => {
 test('Fork tick tick', () => {
   expect(TreeClock.GENESIS.forked().left.forked().left.ticked().ticks).toBe(1);
   expect(TreeClock.GENESIS.forked().left.forked().left.ticked().ticked().ticks).toBe(2);
+});
+
+test('Fork tick untick', () => {
+  expect(TreeClock.GENESIS.ticked().forked().left.ticked(1).ticks).toBe(1);
+  expect(() => TreeClock.GENESIS.ticked().forked().left.ticked(0)).toThrowError();
 });
 
 test('Tick fork', () => {
