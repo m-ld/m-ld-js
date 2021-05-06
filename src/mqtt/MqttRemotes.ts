@@ -103,7 +103,7 @@ export class MqttRemotes extends PubsubRemotes {
       return this.presence.leave(this.id);
   }
 
-  protected publishDelta(msg: Buffer): Promise<unknown> {
+  protected publishOperation(msg: Buffer): Promise<unknown> {
     return this.mqtt.publish(
       // Client Id is included to prevent echo
       this.operationsTopic.with({ clientId: this.id }).address, msg, { qos: 1 });

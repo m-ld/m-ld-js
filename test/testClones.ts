@@ -1,4 +1,4 @@
-import { MeldRemotes, DeltaMessage, MeldLocal } from '../src/engine';
+import { MeldRemotes, OperationMessage, MeldLocal } from '../src/engine';
 import { mock, MockProxy } from 'jest-mock-extended';
 import { Observable, NEVER, BehaviorSubject, from, asapScheduler } from 'rxjs';
 import { Dataset, QuadStoreDataset } from '../src/engine/dataset';
@@ -17,7 +17,7 @@ export function testConfig(config?: Partial<MeldConfig>): MeldConfig {
 }
 
 export function mockRemotes(
-  updates: Observable<DeltaMessage> = NEVER,
+  updates: Observable<OperationMessage> = NEVER,
   lives: Array<boolean | null> | LiveValue<boolean | null> = [false],
   newClock: TreeClock = TreeClock.GENESIS): MeldRemotes {
   // This weirdness is due to jest-mock-extended trying to mock arrays
@@ -73,10 +73,10 @@ export class MockProcess {
     return new MockProcess(right);
   }
 
-  sentDelta(deletes: string, inserts: string) {
+  sentOperation(deletes: string, inserts: string) {
     const prev = this.time.ticks;
     this.tick();
-    return new DeltaMessage(prev, [2, this.time.ticks, this.time.toJson(), deletes, inserts]);
+    return new OperationMessage(prev, [2, this.time.ticks, this.time.toJson(), deletes, inserts]);
   }
 }
 

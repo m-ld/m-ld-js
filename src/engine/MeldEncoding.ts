@@ -1,4 +1,4 @@
-import { MeldDelta, EncodedDelta, UUID, txnId, TID } from '.';
+import { MeldOperation, EncodedOperation, UUID, txnId, TID } from '.';
 import { flatten, lazy } from './util';
 import { Context, ExpandedTermDef } from '../jrql-support';
 import { Iri } from 'jsonld/jsonld-spec';
@@ -61,7 +61,7 @@ export function unreify(reifications: Triple[]): [Triple, UUID[]][] {
  * TODO: re-sync with Java
  * @see m-ld/m-ld-core/src/main/java/org/m_ld/MeldResource.java
  */
-const DELTA_CONTEXT = {
+const OPERATION_CONTEXT = {
   rdf: RDF.$base,
   xs: 'http://www.w3.org/2001/XMLSchema#',
   tid: M_LD.tid,
@@ -77,7 +77,7 @@ export class MeldEncoding {
   constructor(
     readonly domain: string,
     readonly rdf: RdfFactory) {
-    this.ready = activeCtx(new DomainContext(domain, DELTA_CONTEXT))
+    this.ready = activeCtx(new DomainContext(domain, OPERATION_CONTEXT))
       .then(ctx => this.ctx = ctx);
   }
 
@@ -99,29 +99,29 @@ export class MeldEncoding {
     }));
   }
 
-  newDelta = async (delta: Omit<MeldDelta, 'encoded'>): Promise<MeldDelta> => {
-    const [deletes, inserts] = await Promise.all([delta.deletes, delta.inserts]
+  newOperation = async (op: Omit<MeldOperation, 'encoded'>): Promise<MeldOperation> => {
+    const [deletes, inserts] = await Promise.all([op.deletes, op.inserts]
       .map((triplesTids, i) => {
           // Encoded inserts are only reified if fused
-        if (i === 1 && delta.from === delta.time.ticks)
+        if (i === 1 && op.from === op.time.ticks)
           return triplesTids.map(([triple]) => triple);
         else
           return this.reifyTriplesTids(triplesTids);
       })
       .map(triples => MeldEncoding.bufferFromJson(this.jsonFromTriples(triples))));
-    return { ...delta, encoded: [2, delta.from, delta.time.toJson(), deletes, inserts] };
+    return { ...op, encoded: [2, op.from, op.time.toJson(), deletes, inserts] };
   }
 
-  asDelta = async (encoded: EncodedDelta): Promise<MeldDelta> => {
+  asOperation = async (encoded: EncodedOperation): Promise<MeldOperation> => {
     const [ver] = encoded;
     if (ver < 2)
-      throw new Error(`Encoded delta version ${ver} not supported`);
+      throw new Error(`Encoded operation version ${ver} not supported`);
     let [, from, timeJson, delEnc, insEnc] = encoded;
     const jsons = await Promise.all([delEnc, insEnc].map(MeldEncoding.jsonFromBuffer));
     const [delTriples, insTriples] = jsons.map(this.triplesFromJson);
     const time = TreeClock.fromJson(timeJson) as TreeClock;
     const deletes = unreify(delTriples);
-    let inserts: MeldDelta['inserts'];
+    let inserts: MeldOperation['inserts'];
     if (from === time.ticks) {
       const tid = txnId(time);
       inserts = insTriples.map(triple => [triple, [tid]]);

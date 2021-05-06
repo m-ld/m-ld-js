@@ -1,5 +1,5 @@
 import { MeldUpdate, MeldConstraint, MeldReadState } from '../../api';
-import { Snapshot, UUID, DeltaMessage, MeldDelta, txnId } from '..';
+import { Snapshot, UUID, OperationMessage, MeldOperation, txnId } from '..';
 import { Quad } from 'rdf-js';
 import { TreeClock } from '../clocks';
 import { Context, Subject, Write } from '../../jrql-support';
@@ -41,7 +41,7 @@ function asTriplesTids(quadTidQuads: QuadMap<Quad[]>): [Triple, string[]][] {
 
 /**
  * Writeable Graph, similar to a Dataset, but with a slightly different transaction API.
- * Journals every transaction and creates m-ld compliant deltas.
+ * Journals every transaction and creates m-ld compliant operations.
  */
 export class SuSetDataset {
   private static checkNotClosed =
@@ -57,7 +57,7 @@ export class SuSetDataset {
   private readonly journalData: SuSetJournalDataset;
   private readonly updateSource: Source<MeldUpdate> = new Source;
   private readonly datasetLock: LocalLock;
-  private readonly maxDeltaSize: number;
+  private readonly maxOperationSize: number;
   private readonly log: Logger;
   private readonly constraint: CheckList;
 
@@ -65,12 +65,12 @@ export class SuSetDataset {
     private readonly dataset: Dataset,
     private readonly context: Context,
     constraints: MeldConstraint[],
-    config: Pick<MeldConfig, '@id' | '@domain' | 'maxDeltaSize' | 'logLevel'>) {
+    config: Pick<MeldConfig, '@id' | '@domain' | 'maxOperationSize' | 'logLevel'>) {
     this.encoding = new MeldEncoding(config['@domain'], dataset.dataFactory);
     this.journalData = new SuSetJournalDataset(dataset);
     // Update notifications are strictly ordered but don't hold up transactions
     this.datasetLock = new LocalLock(config['@id'], dataset.location);
-    this.maxDeltaSize = config.maxDeltaSize ?? Infinity;
+    this.maxOperationSize = config.maxOperationSize ?? Infinity;
     this.log = getIdLogger(this.constructor, config['@id'], config.logLevel);
     this.constraint = new CheckList(constraints.concat(new DefaultList(config['@id'])));
   }
@@ -156,8 +156,8 @@ export class SuSetDataset {
    */
   @SuSetDataset.checkNotClosed.async
   async operationsSince(time: TreeClock, lastTime?: Future<TreeClock>):
-    Promise<Observable<DeltaMessage> | undefined> {
-    return this.dataset.transact<Observable<DeltaMessage> | undefined>({
+    Promise<Observable<OperationMessage> | undefined> {
+    return this.dataset.transact<Observable<OperationMessage> | undefined>({
       id: 'suset-ops-since',
       prepare: async () => {
         const journal = await this.journalData.journal();
@@ -177,16 +177,16 @@ export class SuSetDataset {
             takeWhile<[SuSetJournalEntry, SuSetJournalEntry]>(([_, entry]) => entry != null),
             // Don't emit an entry if it's all less than the requested time
             filter(([_, entry]) => time.anyLt(entry.time, 'includeIds')),
-            map(([prev, entry]) => new DeltaMessage(
-              prev.gwc.getTicks(entry.time), entry.delta, entry.time)))
+            map(([prev, entry]) => new OperationMessage(
+              prev.gwc.getTicks(entry.time), entry.operation, entry.time)))
         };
       }
     });
   }
 
   @SuSetDataset.checkNotClosed.async
-  async transact(prepare: () => Promise<[TreeClock, PatchQuads]>): Promise<DeltaMessage | null> {
-    return this.dataset.transact<DeltaMessage | null>({
+  async transact(prepare: () => Promise<[TreeClock, PatchQuads]>): Promise<OperationMessage | null> {
+    return this.dataset.transact<OperationMessage | null>({
       prepare: async txc => {
         const [time, patch] = await prepare();
         if (patch.isEmpty)
@@ -200,7 +200,7 @@ export class SuSetDataset {
         txc.sw.next('find-tids');
         const deletedTriplesTids = await this.findTriplesTids(patch.oldQuads);
         const tid = txnId(time);
-        const delta = await this.txnDelta(tid, time, patch.newQuads, asTriplesTids(deletedTriplesTids));
+        const op = await this.txnOperation(tid, time, patch.newQuads, asTriplesTids(deletedTriplesTids));
 
         // Include tid changes in final patch
         txc.sw.next('new-tids');
@@ -209,12 +209,12 @@ export class SuSetDataset {
         // Include journaling in final patch
         txc.sw.next('journal');
         const journal = await this.journalData.journal(), tail = await journal.tail();
-        const journaling = tail.builder(journal, delta, time);
+        const journaling = tail.builder(journal, op, time);
 
         return {
           patch: this.transactionPatch(patch, entailments, tidPatch),
           kvps: journaling.commit,
-          return: this.deltaMessage(tail, time, delta),
+          return: this.operationMessage(tail, time, op),
           after: () => this.emitUpdate(update)
         };
       }
@@ -226,13 +226,13 @@ export class SuSetDataset {
       this.updateSource.next(update);
   }
 
-  private deltaMessage(tail: SuSetJournalEntry, time: TreeClock, delta: MeldDelta) {
+  private operationMessage(tail: SuSetJournalEntry, time: TreeClock, op: MeldOperation) {
     const prev = tail.gwc.getTicks(time);
-    // Construct the delta message with the previous visible clock tick
-    const deltaMsg = new DeltaMessage(prev, delta.encoded, time);
-    if (deltaMsg.size > this.maxDeltaSize)
+    // Construct the operation message with the previous visible clock tick
+    const operationMsg = new OperationMessage(prev, op.encoded, time);
+    if (operationMsg.size > this.maxOperationSize)
       throw new MeldError('Delta too big');
-    return deltaMsg;
+    return operationMsg;
   }
 
   private async txnTidPatch(tid: string, insert: Quad[], deletedTriplesTids: QuadMap<Quad[]>) {
@@ -241,12 +241,12 @@ export class SuSetDataset {
     return tidPatch;
   }
 
-  private txnDelta(tid: string, time: TreeClock, inserts: Quad[], deletedTriplesTids: [Triple, string[]][]) {
-    return this.encoding.newDelta({
+  private txnOperation(tid: string, time: TreeClock, inserts: Quad[], deletedTriplesTids: [Triple, string[]][]) {
+    return this.encoding.newOperation({
       from: time.ticks,
       time,
       inserts: inserts.map(quad => [quad, [tid]]),
-      // Delta has reifications of old quads, which we infer from found triple tids
+      // Operation has reifications of old quads, which we infer from found triple tids
       deletes: deletedTriplesTids
     });
   }
@@ -258,21 +258,21 @@ export class SuSetDataset {
     this.encoding.rdf.defaultGraph());
 
   @SuSetDataset.checkNotClosed.async
-  async apply(msg: DeltaMessage, localTime: TreeClock, cxnTime: TreeClock): Promise<DeltaMessage | null> {
-    return this.dataset.transact<DeltaMessage | null>({
+  async apply(msg: OperationMessage, localTime: TreeClock, cxnTime: TreeClock): Promise<OperationMessage | null> {
+    return this.dataset.transact<OperationMessage | null>({
       prepare: async txc => {
         // Check we haven't seen this transaction before
         txc.sw.next('find-tids');
-        const delta = await this.encoding.asDelta(msg.data);
-        this.log.debug(`Applying delta: ${delta.time} @ ${localTime}`);
+        const op = await this.encoding.asOperation(msg.data);
+        this.log.debug(`Applying operation: ${op.time} @ ${localTime}`);
 
         txc.sw.next('apply-txn');
         // First delete triples and entries from fused transactions
-        const patch = await this.spliceFusedTids(delta.from, delta.time);
+        const patch = await this.spliceFusedTids(op.from, op.time);
         // Process deletions and inserts
-        const insertTids = new TripleMap(delta.inserts);
-        const tidPatch = await this.processSuDeletions(delta.deletes, patch);
-        patch.append({ newQuads: delta.inserts.map(([triple]) => this.toUserQuad(triple)) });
+        const insertTids = new TripleMap(op.inserts);
+        const tidPatch = await this.processSuDeletions(op.deletes, patch);
+        patch.append({ newQuads: op.inserts.map(([triple]) => this.toUserQuad(triple)) });
         
         txc.sw.next('apply-cx'); // "cx" = constraint
         const interim = new InterimUpdatePatch(this.userGraph, cxnTime, patch);
@@ -283,12 +283,12 @@ export class SuSetDataset {
         tidPatch.append(await this.newTriplesTids(
           patch.newQuads.map(quad => [quad, array(insertTids.get(quad))])));
 
-        // Done determining the applied delta patch. At this point we could
+        // Done determining the applied operation patch. At this point we could
         // have an empty patch, but we still need to complete the journal
         // entry for it.
         txc.sw.next('journal');
         const journal = await this.journalData.journal(), tail = await journal.tail();
-        const journaling = tail.builder(journal, delta, localTime);
+        const journaling = tail.builder(journal, op, localTime);
 
         // If the constraint has done anything, we need to merge its work
         if (cxn != null) {
@@ -296,23 +296,23 @@ export class SuSetDataset {
           tidPatch.append(cxn.tidPatch);
           patch.append(assertions);
           // Also create a journal entry for the constraint "transaction"
-          journaling.next(cxn.delta, cxnTime);
+          journaling.next(cxn.operation, cxnTime);
         }
         return {
           patch: this.transactionPatch(patch, entailments, tidPatch),
           kvps: journaling.commit,
-          // FIXME: If this delta message exceeds max size, what to do?
-          return: cxn?.delta != null ? this.deltaMessage(tail, cxnTime, cxn.delta) : null,
+          // FIXME: If this operation message exceeds max size, what to do?
+          return: cxn?.operation != null ? this.operationMessage(tail, cxnTime, cxn.operation) : null,
           after: () => this.emitUpdate(update)
         };
       }
     });
   }
 
-  // The delta's delete contains reifications of deleted triples.
+  // The operation's delete contains reifications of deleted triples.
   // This method adds the resolved deletions to the given transaction patch.
-  private processSuDeletions(deltaDeletions: [Triple, string[]][], patch: PatchQuads) {
-    return deltaDeletions.reduce(async (tripleTidPatch, [triple, theirTids]) => {
+  private processSuDeletions(opDeletions: [Triple, string[]][], patch: PatchQuads) {
+    return opDeletions.reduce(async (tripleTidPatch, [triple, theirTids]) => {
       // For each unique deleted triple, subtract the claimed tids from the tids we have
       const ourTripleTids = await this.findTripleTids(tripleId(triple));
       const toRemove = ourTripleTids.filter(tripleTid => theirTids.includes(tripleTid.object.value));
@@ -333,7 +333,7 @@ export class SuSetDataset {
     if (!assertions.isEmpty) {
       // Triples that were inserted in the applied transaction may have been
       // deleted by the constraint - these need to be removed from the applied
-      // transaction patch but still published in the constraint delta
+      // transaction patch but still published in the constraint operation
       const deletedExistingTidQuads = await this.findTriplesTids(assertions.oldQuads);
       const deletedTriplesTids = new TripleMap(asTriplesTids(deletedExistingTidQuads));
       patch.remove('newQuads', assertions.oldQuads)
@@ -344,7 +344,7 @@ export class SuSetDataset {
       assertions.remove('oldQuads', quad => deletedExistingTidQuads.get(quad) == null);
       const cxnId = txnId(cxnTime);
       return {
-        delta: await this.txnDelta(cxnId, cxnTime, assertions.newQuads, [...deletedTriplesTids]),
+        operation: await this.txnOperation(cxnId, cxnTime, assertions.newQuads, [...deletedTriplesTids]),
         tidPatch: await this.txnTidPatch(cxnId, assertions.newQuads, deletedExistingTidQuads)
       };
     }

@@ -1,5 +1,5 @@
 import { toPrefixedId } from './SuSetGraph';
-import { MeldDelta, EncodedDelta } from '..';
+import { MeldOperation, EncodedOperation } from '..';
 import { TreeClock, TreeClockJson } from '../clocks';
 import { MsgPack } from '../util';
 import { Dataset, Kvps } from '.';
@@ -19,12 +19,12 @@ interface JournalJson {
 }
 
 type JournalEntryJson = [
-  /** Raw delta - may contain Buffers */
-  EncodedDelta,
+  /** Raw operation - may contain Buffers */
+  EncodedOperation,
   /**
    * JSON-encoded public clock time ('global wall clock' or 'Great Westminster
    * Clock'). This has latest public ticks seen for all processes (not internal
-   * ticks), unlike the delta time, which may be causally related to older
+   * ticks), unlike the operation time, which may be causally related to older
    * messages from third parties, and the journal time, which has internal ticks
    * for the local clone identity. This clock has no identity.
    */
@@ -39,8 +39,8 @@ export class SuSetJournalEntry {
     private readonly dataset: SuSetJournalDataset,
     private readonly json: JournalEntryJson,
     readonly key: EntryKey,
-    readonly delta = json[0],
-    readonly time = TreeClock.fromJson(delta[2]) as TreeClock,
+    readonly operation = json[0],
+    readonly time = TreeClock.fromJson(operation[2]) as TreeClock,
     readonly gwc = TreeClock.fromJson(json[1]) as TreeClock,
     readonly nextKey = json[2]) {
   }
@@ -52,14 +52,14 @@ export class SuSetJournalEntry {
 
   static head(localTime?: TreeClock, gwc?: TreeClock): [EntryKey, Partial<JournalEntryJson>] {
     return [entryKey(localTime?.ticks ?? -1), [
-      // Dummy delta for head
+      // Dummy operation for head
       [2, localTime?.ticks ?? -1, (localTime ?? TreeClock.GENESIS).toJson(), '{}', '{}'],
       gwc?.toJson()
     ]];
   }
 
-  builder(journal: SuSetJournal, delta: MeldDelta, localTime: TreeClock): {
-    next: (delta: MeldDelta, localTime: TreeClock) => void, commit: Kvps
+  builder(journal: SuSetJournal, op: MeldOperation, localTime: TreeClock): {
+    next: (op: MeldOperation, localTime: TreeClock) => void, commit: Kvps
   } {
     const dataset = this.dataset;
     class EntryBuild {
@@ -67,31 +67,31 @@ export class SuSetJournalEntry {
       gwc: TreeClock;
       next?: EntryBuild;
 
-      constructor(prevGwc: TreeClock, readonly delta: MeldDelta, readonly localTime: TreeClock) {
+      constructor(prevGwc: TreeClock, readonly op: MeldOperation, readonly localTime: TreeClock) {
         this.key = entryKey(localTime.ticks);
-        this.gwc = prevGwc.update(delta.time);
+        this.gwc = prevGwc.update(op.time);
       }
 
       *build(): Iterable<SuSetJournalEntry> {
         const nextKey = this.next != null ? this.next.key : undefined;
         const json: JournalEntryJson = [
-          this.delta.encoded,
+          this.op.encoded,
           this.gwc.toJson(),
           nextKey
         ];
         yield new SuSetJournalEntry(dataset, json, this.key,
-          this.delta.encoded, this.delta.time, this.gwc, nextKey);
+          this.op.encoded, this.op.time, this.gwc, nextKey);
         if (this.next)
           yield* this.next.build();
       }
     }
-    let head = new EntryBuild(this.gwc, delta, localTime), tail = head;
+    let head = new EntryBuild(this.gwc, op, localTime), tail = head;
     return {
       /**
        * Adds another journal entry to this builder
        */
-      next: (delta, localTime) => {
-        tail = tail.next = new EntryBuild(tail.gwc, delta, localTime);
+      next: (op, localTime) => {
+        tail = tail.next = new EntryBuild(tail.gwc, op, localTime);
       },
       /**
        * Commits the built journal entries to the journal

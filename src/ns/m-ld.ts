@@ -1,6 +1,6 @@
 export const $base = 'http://m-ld.org/';
 
-/** For serialisation of transaction IDs in delta messages */
+/** For serialisation of transaction IDs in operation messages */
 export const tid = `${$base}#tid`; // TID property
 
 export const rdflseq = `${$base}RdfLseq`;

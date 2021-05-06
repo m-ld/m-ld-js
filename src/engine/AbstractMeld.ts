@@ -1,4 +1,4 @@
-import { Meld, Snapshot, DeltaMessage, Revup } from '.';
+import { Meld, Snapshot, OperationMessage, Revup } from '.';
 import { LiveValue } from "./LiveValue";
 import { TreeClock } from './clocks';
 import { Observable, BehaviorSubject, asapScheduler, of } from 'rxjs';
@@ -14,10 +14,10 @@ export abstract class AbstractMeld implements Meld {
   protected static checkNotClosed =
     check((m: AbstractMeld) => !m.closed, () => new MeldError('Clone has closed'));
 
-  readonly updates: Observable<DeltaMessage>;
+  readonly updates: Observable<OperationMessage>;
   readonly live: LiveValue<boolean | null>;
 
-  private readonly updateSource = new PauseableSource<DeltaMessage>();
+  private readonly updateSource = new PauseableSource<OperationMessage>();
   private readonly liveSource: BehaviorSubject<boolean | null> = new BehaviorSubject(null);
   
   private closed = false;
@@ -46,7 +46,7 @@ export abstract class AbstractMeld implements Meld {
       live => this.log.debug('is', live == null ? 'gone' : live ? 'live' : 'dead'));
   }
 
-  protected nextUpdate = (update: DeltaMessage) => this.updateSource.next(update);
+  protected nextUpdate = (update: OperationMessage) => this.updateSource.next(update);
   protected pauseUpdates = (until: PromiseLike<unknown>) => this.updateSource.pause(until);
 
   protected warnError = (err: any) => this.log.warn(err);

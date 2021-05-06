@@ -110,8 +110,8 @@ export class AblyRemotes extends PubsubRemotes implements PeerSignaller {
       return this.operations.presence.leave();
   }
 
-  protected publishDelta(msg: Buffer): Promise<unknown> {
-    return this.traffic.publish(this.operations, '__delta', msg);
+  protected publishOperation(msg: Buffer): Promise<unknown> {
+    return this.traffic.publish(this.operations, '__op', msg);
   }
 
   protected present(): Observable<string> {

@@ -1,7 +1,7 @@
 import { MqttRemotes } from '../src/mqtt/MqttRemotes';
 import { MockProxy } from 'jest-mock-extended';
 import { AsyncMqttClient } from 'async-mqtt';
-import { DeltaMessage } from '../src/engine';
+import { OperationMessage } from '../src/engine';
 import { TreeClock } from '../src/engine/clocks';
 import { Subject as Source, of } from 'rxjs';
 import { mockLocal, MockMqtt, mockMqtt, MockProcess } from './testClones';
@@ -115,8 +115,8 @@ describe('New MQTT remotes', () => {
         '{"consumer2":"test.m-ld.org/control"}');
       await comesAlive(remotes);
 
-      const entry = new MockProcess(TreeClock.GENESIS.forked().left).sentDelta('{}', '{}');
-      const updates = new Source<DeltaMessage>();
+      const entry = new MockProcess(TreeClock.GENESIS.forked().left).sentOperation('{}', '{}');
+      const updates = new Source<OperationMessage>();
       remotes.setLocal(mockLocal({ updates }));
       // Setting retained presence on the channel
       expect(mqtt.publish).lastCalledWith(
@@ -135,12 +135,12 @@ describe('New MQTT remotes', () => {
         '{"consumer2":"test.m-ld.org/control"}');
       await comesAlive(remotes);
 
-      const updates = new Source<DeltaMessage>();
+      const updates = new Source<OperationMessage>();
       remotes.setLocal(mockLocal({ updates }));
 
       mqtt.publish.mockReturnValue(<any>Promise.reject('Delivery failed'));
 
-      updates.next(new MockProcess(TreeClock.GENESIS.forked().left).sentDelta('{}', '{}'));
+      updates.next(new MockProcess(TreeClock.GENESIS.forked().left).sentOperation('{}', '{}'));
 
       await expect(remotes.updates.toPromise()).rejects.toBe('Delivery failed');
     });
@@ -151,7 +151,7 @@ describe('New MQTT remotes', () => {
     });
 
     test('closes with local clone', async () => {
-      const updates = new Source<DeltaMessage>();
+      const updates = new Source<OperationMessage>();
       remotes.setLocal(mockLocal({ updates }));
       updates.complete();
       remotes.setLocal(null);
@@ -169,7 +169,7 @@ describe('New MQTT remotes', () => {
     test('can provide revup', async () => {
       // Local clone provides a rev-up on any request
       const { left: localTime, right: remoteTime } = TreeClock.GENESIS.forked();
-      const revupUpdate = new MockProcess(remoteTime).sentDelta('{}', '{}');
+      const revupUpdate = new MockProcess(remoteTime).sentOperation('{}', '{}');
       remotes.setLocal(mockLocal({
         revupFrom: () => Promise.resolve({ lastTime: remoteTime.ticked(), updates: of(revupUpdate) })
       }));

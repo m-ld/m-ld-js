@@ -4,7 +4,7 @@ import { NEVER, Subject as Source, asapScheduler, EMPTY, throwError, BehaviorSub
 import { comesAlive } from '../src/engine/AbstractMeld';
 import { first, take, toArray, map, observeOn, count } from 'rxjs/operators';
 import { TreeClock } from '../src/engine/clocks';
-import { DeltaMessage, MeldRemotes, Snapshot } from '../src/engine';
+import { OperationMessage, MeldRemotes, Snapshot } from '../src/engine';
 import { MeldConfig, Subject, Describe, Update } from '../src';
 import MemDown from 'memdown';
 import { AbstractLevelDOWN } from 'abstract-leveldown';
@@ -117,7 +117,7 @@ describe('Dataset engine', () => {
   describe('as genesis with remote clone', () => {
     let clone: DatasetEngine;
     let remote: MockProcess;
-    let remoteUpdates: Source<DeltaMessage> = new Source;
+    let remoteUpdates: Source<OperationMessage> = new Source;
 
     beforeEach(async () => {
       const remotesLive = hotLive([false]);
@@ -150,7 +150,7 @@ describe('Dataset engine', () => {
         '@id': 'http://test.m-ld.org/fred',
         'http://test.m-ld.org/#name': 'Fred'
       } as Subject);
-      remoteUpdates.next(remote.sentDelta(
+      remoteUpdates.next(remote.sentOperation(
         '{}', '{"@id":"http://test.m-ld.org/wilma","http://test.m-ld.org/#name":"Wilma"}'));
       // Note extra tick for constraint application in remote update
       const received = await updates;
@@ -163,7 +163,7 @@ describe('Dataset engine', () => {
     // 1. a remote transaction, because of the clock space made for a constraint
     test('answers rev-up from next new clone after apply', async () => {
       const updated = clone.dataUpdates.pipe(take(1)).toPromise();
-      remoteUpdates.next(remote.sentDelta(
+      remoteUpdates.next(remote.sentOperation(
         '{}', '{"@id":"http://test.m-ld.org/wilma","http://test.m-ld.org/#name":"Wilma"}'));
       await updated;
       const thirdTime = await clone.newClock();
@@ -181,7 +181,7 @@ describe('Dataset engine', () => {
 
   describe('as new clone', () => {
     let remotes: MeldRemotes;
-    let remoteUpdates: Source<DeltaMessage>;
+    let remoteUpdates: Source<OperationMessage>;
     let snapshot: jest.Mock<Promise<Snapshot>, void[]>;
     let collabClock: TreeClock;
     let remotesLive: BehaviorSubject<boolean | null>;
@@ -189,7 +189,7 @@ describe('Dataset engine', () => {
     beforeEach(async () => {
       const { left, right } = TreeClock.GENESIS.forked()
       collabClock = right;
-      remoteUpdates = new Source<DeltaMessage>();
+      remoteUpdates = new Source<OperationMessage>();
       remotesLive = hotLive([true]);
       remotes = mockRemotes(remoteUpdates, remotesLive, left);
       snapshot = jest.fn().mockReturnValueOnce(Promise.resolve<Snapshot>({
@@ -214,13 +214,13 @@ describe('Dataset engine', () => {
       await expect(clone.status.becomes({ silo: true })).resolves.toBeDefined();
     });
 
-    test('ignores delta from before snapshot', async () => {
+    test('ignores operation from before snapshot', async () => {
       const clone = new DatasetEngine({ dataset: await memStore(), remotes, config: testConfig({ genesis: false }) });
       await clone.initialise();
       const updates = clone.dataUpdates.pipe(count()).toPromise();
       const prev = collabClock.ticks;
       collabClock = collabClock.ticked();
-      remoteUpdates.next(new DeltaMessage(prev, [2, collabClock.ticks, collabClock.toJson(),
+      remoteUpdates.next(new OperationMessage(prev, [2, collabClock.ticks, collabClock.toJson(),
         '{}', '{"@id":"http://test.m-ld.org/wilma","http://test.m-ld.org/#name":"Wilma"}']));
       // Also enqueue a no-op write, which we can wait for - relying on queue ordering
       await clone.write({ '@insert': [] } as Update);
@@ -309,7 +309,7 @@ describe('Dataset engine', () => {
       await clone.close();
       // Need a remote with rev-ups to share
       const remotes = mockRemotes(NEVER, [true]);
-      const revUps = new Source<DeltaMessage>();
+      const revUps = new Source<OperationMessage>();
       remotes.revupFrom = async () => ({ lastTime: remote.time.ticked(), updates: revUps });
       // The clone will initialise into a revving-up state, waiting for a revUp
       clone = new DatasetEngine({ dataset: await memStore({ backend }), remotes, config: testConfig() });
@@ -321,34 +321,34 @@ describe('Dataset engine', () => {
         'http://test.m-ld.org/#name': 'Flintstone'
       });
       // Provide a rev-up that pre-dates the local siloed update
-      revUps.next(remote.sentDelta(
+      revUps.next(remote.sentOperation(
         '{}', '{"@id":"http://test.m-ld.org/wilma","http://test.m-ld.org/#name":"Wilma"}'));
       revUps.complete();
       // Check that the updates are not out of order
       await expect(observedTicks).resolves.toEqual([1, 2]);
     });
 
-    test('immediately re-connects after out of order delta', async () => {
+    test('immediately re-connects after out of order operation', async () => {
       // Re-start on the same data
-      const remoteUpdates = new Source<DeltaMessage>();
+      const remoteUpdates = new Source<OperationMessage>();
       const remotes = mockRemotes(remoteUpdates, [true]);
       remotes.revupFrom = async () => ({ lastTime: remote.time, updates: EMPTY });
       const clone = new DatasetEngine({ dataset: await memStore({ backend }), remotes, config: testConfig() });
       await clone.initialise();
       await clone.status.becomes({ outdated: false });
 
-      // Push a delta claiming a missed tick
+      // Push a operation claiming a missed tick
       remote.tick();
-      remoteUpdates.next(remote.sentDelta(
+      remoteUpdates.next(remote.sentOperation(
         '{}', '{"@id":"http://test.m-ld.org/wilma","http://test.m-ld.org/#name":"Wilma"}'));
 
       await expect(clone.status.becomes({ outdated: true })).resolves.toBeDefined();
       await expect(clone.status.becomes({ outdated: false })).resolves.toBeDefined();
     });
 
-    test('ignores outdated delta', async () => {
+    test('ignores outdated operation', async () => {
       // Re-start on the same data
-      const remoteUpdates = new Source<DeltaMessage>();
+      const remoteUpdates = new Source<OperationMessage>();
       const remotes = mockRemotes(remoteUpdates, [true]);
       remotes.revupFrom = async () => ({ lastTime: remote.time, updates: EMPTY });
       const clone = new DatasetEngine({ dataset: await memStore({ backend }), remotes, config: testConfig() });
@@ -356,12 +356,12 @@ describe('Dataset engine', () => {
       await clone.status.becomes({ outdated: false });
 
       const updates = clone.dataUpdates.pipe(toArray()).toPromise();
-      const delta = remote.sentDelta(
+      const op = remote.sentOperation(
         '{}', '{"@id":"http://test.m-ld.org/wilma","http://test.m-ld.org/#name":"Wilma"}');
-      // Push a delta
-      remoteUpdates.next(delta);
-      // Push the same delta again
-      remoteUpdates.next(delta);
+      // Push a operation
+      remoteUpdates.next(op);
+      // Push the same operation again
+      remoteUpdates.next(op);
       // Also enqueue a no-op write, which we can wait for - relying on queue ordering
       await clone.write({ '@insert': [] } as Update);
       await clone.close(); // Will complete the updates

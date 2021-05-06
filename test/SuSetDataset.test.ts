@@ -2,7 +2,7 @@ import { SuSetDataset } from '../src/engine/dataset/SuSetDataset';
 import { memStore, MockProcess } from './testClones';
 import { TreeClock } from '../src/engine/clocks';
 import { first, toArray, isEmpty, take } from 'rxjs/operators';
-import { DeltaMessage, EncodedDelta, txnId } from '../src/engine';
+import { OperationMessage, EncodedOperation, txnId } from '../src/engine';
 import { Dataset } from '../src/engine/dataset';
 import { from } from 'rxjs';
 import { Describe, MeldConstraint, Subject } from '../src';
@@ -109,11 +109,11 @@ describe('SU-Set Dataset', () => {
         expect(await MeldEncoding.jsonFromBuffer(del)).toEqual({});
       });
 
-      test('applies an insert delta', async () => {
+      test('applies an insert operation', async () => {
         const willUpdate = captureUpdate();
 
         await ssd.apply(
-          remote.sentDelta('{}', '{"@id":"fred","name":"Fred"}'),
+          remote.sentOperation('{}', '{"@id":"fred","name":"Fred"}'),
           local.join(remote).tick().time,
           local.tick().time);
         expect(willUpdate).resolves.toHaveProperty('@insert', [fred]);
@@ -123,10 +123,10 @@ describe('SU-Set Dataset', () => {
         }).pipe(toArray()).toPromise()).resolves.toEqual([fred]);
       });
 
-      test('applies a no-op delta', async () => {
+      test('applies a no-op operation', async () => {
         const willUpdate = captureUpdate();
 
-        const msg = await ssd.apply(remote.sentDelta('{}', '{}'),
+        const msg = await ssd.apply(remote.sentOperation('{}', '{}'),
           local.join(remote).tick().time,
           local.tick().time);
 
@@ -229,11 +229,11 @@ describe('SU-Set Dataset', () => {
           });
         });
 
-        test('applies a delete delta', async () => {
+        test('applies a delete operation', async () => {
           const willUpdate = captureUpdate();
 
           await ssd.apply(
-            remote.sentDelta(`{"tid":"${firstTid}","o":"Fred","p":"#name", "s":"fred"}`, '{}'),
+            remote.sentOperation(`{"tid":"${firstTid}","o":"Fred","p":"#name", "s":"fred"}`, '{}'),
             local.join(remote).tick().time,
             local.tick().time);
           expect(willUpdate).resolves.toHaveProperty('@delete', [fred]);
@@ -276,7 +276,7 @@ describe('SU-Set Dataset', () => {
           // Create a remote entry from a third clone that the remote doesn't know
           let thirdClock = local.fork();
           await ssd.apply(
-            thirdClock.sentDelta(`{"tid":"${firstTid}","o":"Fred","p":"#name","s":"fred"}`, '{}'),
+            thirdClock.sentOperation(`{"tid":"${firstTid}","o":"Fred","p":"#name","s":"fred"}`, '{}'),
             local.join(thirdClock).tick().time,
             local.tick().time);
 
@@ -296,7 +296,7 @@ describe('SU-Set Dataset', () => {
           ]) ?? fail();
           // Don't update remote time from local
           await ssd.apply(
-            remote.sentDelta('{}', JSON.stringify(wilma)),
+            remote.sentOperation('{}', JSON.stringify(wilma)),
             local.join(remote).tick().time,
             local.tick().time);
 
@@ -313,12 +313,12 @@ describe('SU-Set Dataset', () => {
           const third = remote.fork();
           const fourth = third.fork();
           // Remote doesn't see third party op
-          const thirdDelta = third.sentDelta('{}', JSON.stringify(wilma));
-          await ssd.apply(thirdDelta,
+          const thirdOp = third.sentOperation('{}', JSON.stringify(wilma));
+          await ssd.apply(thirdOp,
             local.join(third).tick().time,
             local.tick().time);
           // Remote does see fourth party op
-          await ssd.apply(fourth.sentDelta('{}', JSON.stringify(barney)),
+          await ssd.apply(fourth.sentOperation('{}', JSON.stringify(barney)),
             local.join(fourth).tick().time,
             local.tick().time);
           remote.join(fourth).tick();
@@ -328,12 +328,12 @@ describe('SU-Set Dataset', () => {
           const opArray = ops ? await ops.pipe(toArray()).toPromise() : [];
           // We expect only the missed remote op
           expect(opArray.length).toBe(1);
-          expect(opArray[0].data).toEqual(thirdDelta.data);
+          expect(opArray[0].data).toEqual(thirdOp.data);
         });
 
         // @see https://github.com/m-ld/m-ld-js/issues/29
         test('accepts own unpersisted update', async () => {
-          await ssd.apply(local.sentDelta(
+          await ssd.apply(local.sentOperation(
             '{}', '{"@id":"wilma","name":"Wilma"}'),
             local.time,
             local.tick().time);
@@ -350,7 +350,7 @@ describe('SU-Set Dataset', () => {
           const remoteTime = remote.time;
           // Create a remote entry that the remote fails to persist fully
           await ssd.apply(
-            remote.sentDelta(`{"tid":"${firstTid}","o":"Fred","p":"#name","s":"fred"}`, '{}'),
+            remote.sentOperation(`{"tid":"${firstTid}","o":"Fred","p":"#name","s":"fred"}`, '{}'),
             local.join(remote).tick().time,
             local.tick().time);
           // The remote asks for its previous time
@@ -428,7 +428,7 @@ describe('SU-Set Dataset', () => {
       const willUpdate = captureUpdate();
       remote.join(local);
       const msg = await ssd.apply(
-        remote.sentDelta('{}', '{"@id":"fred","name":"Fred"}'),
+        remote.sentOperation('{}', '{"@id":"fred","name":"Fred"}'),
         local.join(remote).tick().time,
         local.tick().time);
       expect(willUpdate).resolves.toEqual(
@@ -471,7 +471,7 @@ describe('SU-Set Dataset', () => {
 
       const willUpdate = captureUpdate();
       await ssd.apply(
-        remote.sentDelta('{}', '{"@id":"fred","name":"Fred"}'),
+        remote.sentOperation('{}', '{"@id":"fred","name":"Fred"}'),
         local.join(remote).tick().time,
         local.tick().time);
       expect(willUpdate).resolves.toEqual(
@@ -488,7 +488,7 @@ describe('SU-Set Dataset', () => {
 
       const willUpdate = captureUpdate();
       await ssd.apply(
-        remote.sentDelta('{}', '{"@id":"wilma","name":"Wilma"}'),
+        remote.sentOperation('{}', '{"@id":"wilma","name":"Wilma"}'),
         local.join(remote).tick().time,
         local.tick().time);
 
@@ -512,7 +512,7 @@ describe('SU-Set Dataset', () => {
 
       const willUpdate = captureUpdate();
       await ssd.apply(
-        remote.sentDelta(`{"tid":"${tid}","o":"Wilma","p":"#name", "s":"wilma"}`, '{}'),
+        remote.sentOperation(`{"tid":"${tid}","o":"Wilma","p":"#name", "s":"wilma"}`, '{}'),
         local.join(remote).tick().time,
         local.tick().time);
 
@@ -526,9 +526,9 @@ describe('SU-Set Dataset', () => {
     });
   });
 
-  test('enforces delta size limit', async () => {
+  test('enforces operation size limit', async () => {
     ssd = new SuSetDataset(await memStore(), {}, [],
-      { '@id': 'test', '@domain': 'test.m-ld.org', maxDeltaSize: 1 });
+      { '@id': 'test', '@domain': 'test.m-ld.org', maxOperationSize: 1 });
     await ssd.initialise();
     await ssd.saveClock(() => TreeClock.GENESIS, true);
     await expect(ssd.transact(async () => [

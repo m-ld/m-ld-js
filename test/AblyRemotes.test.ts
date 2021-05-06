@@ -2,7 +2,7 @@ import * as Ably from 'ably';
 import { mockDeep as mock, MockProxy } from 'jest-mock-extended';
 import { AblyRemotes, MeldAblyConfig } from '../src/ably';
 import { comesAlive } from '../src/engine/AbstractMeld';
-import { DeltaMessage } from '../src/engine';
+import { OperationMessage } from '../src/engine';
 import { mockLocal } from './testClones';
 import { Subject as Source, BehaviorSubject } from 'rxjs';
 import { Future, isArray } from '../src/engine/util';
@@ -137,18 +137,18 @@ describe('Ably remotes', () => {
     await expect(left).resolves.toBe(undefined);
   });
 
-  test('publishes a delta', async () => {
+  test('publishes an operation', async () => {
     const remotes = new AblyRemotes(config, connect);
     connCallbacks.connected?.(mock<Ably.Types.ConnectionStateChange>());
     otherPresent();
     await comesAlive(remotes);
     const prevTime = TreeClock.GENESIS.forked().left, time = prevTime.ticked();
-    const entry = new DeltaMessage(prevTime.ticks,
+    const entry = new OperationMessage(prevTime.ticks,
       [2, time.ticks, time.toJson(), '{}', '{}']);
-    const updates = new Source<DeltaMessage>();
+    const updates = new Source<OperationMessage>();
     remotes.setLocal(mockLocal({ updates }));
     updates.next(entry);
-    expect(operations.publish).toHaveBeenCalledWith('__delta', entry.encode());
+    expect(operations.publish).toHaveBeenCalledWith('__op', entry.encode());
   });
 
   test('sends a new clock request', async () => {

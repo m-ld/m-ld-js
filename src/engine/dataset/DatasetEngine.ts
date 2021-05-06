@@ -1,5 +1,5 @@
 import { LiveStatus, MeldStatus, MeldConstraint } from '../../api';
-import { Snapshot, DeltaMessage, MeldRemotes, MeldLocal, Revup, Recovery } from '..';
+import { Snapshot, OperationMessage, MeldRemotes, MeldLocal, Revup, Recovery } from '..';
 import { liveRollup } from "../LiveValue";
 import { Read, Write, Pattern, Context } from '../../jrql-support';
 import {
@@ -27,25 +27,25 @@ import { MeldError, MeldErrorStatus } from '../MeldError';
 enum ConnectStyle {
   SOFT, HARD
 }
-enum DeltaOutcome {
-  /** Delta was accepted (and may have precipitated un-buffering) */
+enum OperationOutcome {
+  /** Operation was accepted (and may have precipitated un-buffering) */
   ACCEPTED,
-  /** Delta was buffered in expectation of causal deltas */
+  /** Operation was buffered in expectation of causal operations */
   BUFFERED,
-  /** Delta was unacceptable due to missing prior deltas */
+  /** Operation was unacceptable due to missing prior operations */
   DISORDERED
 }
 
 export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLocal {
   private readonly dataset: SuSetDataset;
   private messageService: TreeClockMessageService;
-  private readonly orderingBuffer: DeltaMessage[] = [];
+  private readonly orderingBuffer: OperationMessage[] = [];
   private readonly remotes: Omit<MeldRemotes, 'updates'>;
   private readonly remoteUpdates: RemoteUpdates;
   private subs = new Subscription;
   readonly lock = new LockManager<'live' | 'state'>();
   // FIXME: New clone flag should be inferred from the journal (e.g. tail has no
-  // delta) in case of crash between new clock and first snapshot
+  // operation) in case of crash between new clock and first snapshot
   private newClone: boolean = false;
   private readonly latestTicks = new BehaviorSubject<number>(NaN);
   private readonly networkTimeout: number;
@@ -118,9 +118,9 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
       //    liveness, but we don't use it because the value might have changed
       //    by the time we get the lock.
       this.remotes.live,
-      // 2. Chronic buffering of deltas
-      // 3. Disordered deltas
-      this.deltaProblems
+      // 2. Chronic buffering of operations
+      // 3. Disordered operations
+      this.operationProblems
     ).pipe(
       // 4. Last attempt to connect can generate more attempts (delay if soft)
       expand(() => this.decideLive()
@@ -160,20 +160,20 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
 
   /**
    * Creates observables that emit if
-   * - deltas are being chronically buffered or
-   * - a delta is received out of order.
+   * - operations are being chronically buffered or
+   * - a operation is received out of order.
    *
    * The former emits if the buffer has been filling for longer than the network
    * timeout. This observables are subscribed in the initialise() method.
    */
-  private get deltaProblems(): Observable<DeltaOutcome> {
+  private get operationProblems(): Observable<OperationOutcome> {
     const [disordered, maybeBuffering] = partition(this.remoteUpdates.receiving.pipe(
-      mergeMap(delta => this.acceptRemoteDelta(delta)), share()),
-      outcome => outcome === DeltaOutcome.DISORDERED);
+      mergeMap(op => this.acceptRemoteOperation(op)), share()),
+      outcome => outcome === OperationOutcome.DISORDERED);
     // Disordered messages are an immediate problem, buffering only if chronic
     return merge(disordered, maybeBuffering.pipe(
       // Accepted messages need no action, we are only interested in buffered
-      filter(outcome => outcome === DeltaOutcome.BUFFERED),
+      filter(outcome => outcome === OperationOutcome.BUFFERED),
       // Wait for the network timeout in case the buffer clears
       debounceTime(this.networkTimeout),
       // After the debounce, check if still buffering
@@ -191,8 +191,8 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
       }))).pipe(tap(() => this.remoteUpdates.detach('outdated')));
   }
 
-  private async acceptRemoteDelta(delta: DeltaMessage): Promise<DeltaOutcome> {
-    const logBody = this.log.getLevel() < levels.DEBUG ? delta : `${delta.time}`;
+  private async acceptRemoteOperation(op: OperationMessage): Promise<OperationOutcome> {
+    const logBody = this.log.getLevel() < levels.DEBUG ? op : `${op.time}`;
     this.log.debug('Receiving', logBody);
     // Grab the state lock, per CloneEngine contract and to ensure that all
     // clock ticks are immediately followed by their respective transactions.
@@ -200,8 +200,8 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
       try {
         const startTime = this.localTime;
         // Synchronously gather ticks for transaction applications
-        const applys: [DeltaMessage, TreeClock, TreeClock][] = [];
-        const accepted = this.messageService.receive(delta, this.orderingBuffer, (msg, prevTime) => {
+        const applys: [OperationMessage, TreeClock, TreeClock][] = [];
+        const accepted = this.messageService.receive(op, this.orderingBuffer, (msg, prevTime) => {
           // Check that we have the previous message from this clock ID
           const ticksSeen = prevTime.getTicks(msg.time);
           if (msg.time.ticks <= ticksSeen) {
@@ -227,11 +227,11 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
             this.nextUpdate(cxUpdate);
           msg.delivered.resolve();
         }))
-        return accepted ? DeltaOutcome.ACCEPTED : DeltaOutcome.BUFFERED;
+        return accepted ? OperationOutcome.ACCEPTED : OperationOutcome.BUFFERED;
       } catch (err) {
         if (err instanceof MeldError && err.status === MeldErrorStatus['Update out of order']) {
           this.log.info(err.message);
-          return DeltaOutcome.DISORDERED;
+          return OperationOutcome.DISORDERED;
         } else {
           throw err;
         }
@@ -357,7 +357,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
   }
 
   private async emitOpsSince<T = never>(
-    recovery: Recovery, ret: OperatorFunction<DeltaMessage, T> = ignoreElements()): Promise<T> {
+    recovery: Recovery, ret: OperatorFunction<OperationMessage, T> = ignoreElements()): Promise<T> {
     if (this.newClone) {
       return EMPTY.pipe(ret).toPromise();
     } else {
@@ -371,7 +371,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
     }
   }
 
-  private acceptRecoveryUpdates(updates: Observable<DeltaMessage>, retry: Subscriber<ConnectStyle>) {
+  private acceptRecoveryUpdates(updates: Observable<OperationMessage>, retry: Subscriber<ConnectStyle>) {
     this.remoteUpdates.attach(updates).then(() => {
       // If we were a new clone, we're up-to-date now
       this.log.info('connected');
@@ -435,7 +435,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
     });
   }
 
-  private remoteUpdatesBeforeNow(until: PromiseLike<void>): Observable<DeltaMessage> {
+  private remoteUpdatesBeforeNow(until: PromiseLike<void>): Observable<OperationMessage> {
     if (this.orderingBuffer.length)
       this.log.info(`Emitting ${this.orderingBuffer.length} from ordering buffer`);
     const now = this.localTime;
@@ -472,7 +472,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
       const sendTime = this.messageService.event();
       const update = await this.dataset.transact(async () =>
         [sendTime, await this.dataset.write(request)]);
-      // Publish the delta
+      // Publish the operation
       if (update != null)
         this.nextUpdate(update);
     });

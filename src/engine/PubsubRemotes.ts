@@ -1,4 +1,4 @@
-import { Snapshot, DeltaMessage, MeldRemotes, MeldLocal, Revup } from '.';
+import { Snapshot, OperationMessage, MeldRemotes, MeldLocal, Revup } from '.';
 import {
   Observable, Subject as Source, BehaviorSubject, identity, defer,
   Observer, Subscription, from, of, EMPTY, onErrorResumeNext
@@ -91,16 +91,16 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
           // They will be replayed from the clone's journal on re-connection.
           if (this.connected.value) {
             try {
-              // Delta received from the local clone. Relay to the domain
-              await this.publishDelta(msg.encode());
+              // Operation received from the local clone. Relay to the domain
+              await this.publishOperation(msg.encode());
               // When done, mark the message as delivered
               msg.delivered.resolve();
             } catch (err) {
               // Failed to send an update while (probably) connected
               this.log.warn(err);
-              // Delta delivery is guaranteed at-least-once. So, if it fails,
-              // something catastrophic must have happened. Signal failure of
-              // this service and allow the clone to deal with it.
+              // Operation delivery is guaranteed at-least-once. So, if it
+              // fails, something catastrophic must have happened. Signal
+              // failure of this service and allow the clone to deal with it.
               this.closeSafely(err);
             }
           }
@@ -124,9 +124,9 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
   protected abstract setPresent(present: boolean): Promise<unknown>;
 
   /**
-   * Publishes a delta message with at-least-once guaranteed delivery.
+   * Publishes a operation message with at-least-once guaranteed delivery.
    */
-  protected abstract publishDelta(msg: Buffer): Promise<unknown>;
+  protected abstract publishOperation(msg: Buffer): Promise<unknown>;
 
   protected abstract present(): Observable<string>;
 
@@ -169,7 +169,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     // Subscribe in parallel (subscription can be slow)
     const [quads, updates] = await Promise.all([
       this.consume(fromId, res.quadsAddress, this.triplesFromBuffer, 'failIfSlow'),
-      this.consume(fromId, res.updatesAddress, DeltaMessage.decode)
+      this.consume(fromId, res.updatesAddress, OperationMessage.decode)
     ]);
     sw.stop();
     return {
@@ -194,7 +194,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     if (res.lastTime != null) {
       sw.next('consume');
       const updates = await this.consume(
-        from, res.updatesAddress, DeltaMessage.decode, 'failIfSlow');
+        from, res.updatesAddress, OperationMessage.decode, 'failIfSlow');
       sw.stop();
       return {
         lastTime: res.lastTime, updates: defer(() => {
@@ -229,7 +229,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
   }
 
   protected onRemoteUpdate(payload: Buffer) {
-    const update = DeltaMessage.decode(payload);
+    const update = OperationMessage.decode(payload);
     if (update)
       this.nextUpdate(update);
     else
