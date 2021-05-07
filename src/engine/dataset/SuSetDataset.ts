@@ -1,12 +1,12 @@
 import { MeldUpdate, MeldConstraint, MeldReadState } from '../../api';
-import { Snapshot, UUID, OperationMessage, MeldOperation, txnId } from '..';
+import { Snapshot, UUID, OperationMessage } from '..';
 import { Quad } from 'rdf-js';
 import { TreeClock } from '../clocks';
 import { Context, Subject, Write } from '../../jrql-support';
-import { Dataset, DefinitePatch, PatchQuads } from '.';
+import { Dataset, PatchQuads } from '.';
 import { Iri } from 'jsonld/jsonld-spec';
 import { JrqlGraph } from './JrqlGraph';
-import { MeldEncoding, unreify } from '../MeldEncoding';
+import { MeldEncoding, MeldOperation, TriplesTids, unreify } from '../MeldEncoding';
 import { Observable, from, Subject as Source, EMPTY } from 'rxjs';
 import {
   bufferCount, mergeMap, map, filter, takeWhile, expand, toArray
@@ -34,7 +34,7 @@ interface HashTid extends Subject {
 
 type DatasetSnapshot = Omit<Snapshot, 'updates'>;
 
-function asTriplesTids(quadTidQuads: QuadMap<Quad[]>): [Triple, string[]][] {
+function asTriplesTids(quadTidQuads: QuadMap<Quad[]>): TriplesTids {
   return [...quadTidQuads].map(([quad, tidQuads]) =>
     [quad, tidQuads.map(tidQuad => tidQuad.object.value)]);
 }
@@ -198,13 +198,13 @@ export class SuSetDataset {
         const { update, entailments } = await interim.finalise(this.userCtx);
 
         txc.sw.next('find-tids');
-        const deletedTriplesTids = await this.findTriplesTids(patch.oldQuads);
-        const tid = txnId(time);
-        const op = await this.txnOperation(tid, time, patch.newQuads, asTriplesTids(deletedTriplesTids));
+        const deletedTriplesTids = await this.findTriplesTids(patch.deletes);
+        const tid = time.hash();
+        const op = await this.txnOperation(tid, time, patch.inserts, asTriplesTids(deletedTriplesTids));
 
         // Include tid changes in final patch
         txc.sw.next('new-tids');
-        const tidPatch = await this.txnTidPatch(tid, patch.newQuads, deletedTriplesTids);
+        const tidPatch = await this.txnTidPatch(tid, patch.inserts, deletedTriplesTids);
 
         // Include journaling in final patch
         txc.sw.next('journal');
@@ -235,20 +235,17 @@ export class SuSetDataset {
     return operationMsg;
   }
 
-  private async txnTidPatch(tid: string, insert: Quad[], deletedTriplesTids: QuadMap<Quad[]>) {
-    const tidPatch = await this.newTriplesTids(insert.map(quad => [quad, [tid]]));
-    tidPatch.append({ oldQuads: flatten([...deletedTriplesTids].map(([_, tids]) => tids)) });
+  private async txnTidPatch(tid: string, insert: Iterable<Quad>, deletedTriplesTids: QuadMap<Quad[]>) {
+    const tidPatch = await this.newTriplesTids([...insert].map(quad => [quad, [tid]]));
+    tidPatch.append({ deletes: flatten([...deletedTriplesTids].map(([_, tids]) => tids)) });
     return tidPatch;
   }
 
-  private txnOperation(tid: string, time: TreeClock, inserts: Quad[], deletedTriplesTids: [Triple, string[]][]) {
-    return this.encoding.newOperation({
-      from: time.ticks,
-      time,
-      inserts: inserts.map(quad => [quad, [tid]]),
-      // Operation has reifications of old quads, which we infer from found triple tids
-      deletes: deletedTriplesTids
-    });
+  private txnOperation(tid: string, time: TreeClock,
+    inserts: Iterable<Quad>, deletedTriplesTids: TriplesTids) {
+    const insertedTriplesTids: TriplesTids = [...inserts].map(quad => [quad, [tid]]);
+    return MeldOperation.fromOperation(this.encoding, time.ticks, time,
+      deletedTriplesTids, insertedTriplesTids);
   }
 
   toUserQuad = (triple: Triple): Quad => this.encoding.rdf.quad(
@@ -263,7 +260,7 @@ export class SuSetDataset {
       prepare: async txc => {
         // Check we haven't seen this transaction before
         txc.sw.next('find-tids');
-        const op = await this.encoding.asOperation(msg.data);
+        const op = await MeldOperation.fromEncoded(this.encoding, msg.data);
         this.log.debug(`Applying operation: ${op.time} @ ${localTime}`);
 
         txc.sw.next('apply-txn');
@@ -272,7 +269,7 @@ export class SuSetDataset {
         // Process deletions and inserts
         const insertTids = new TripleMap(op.inserts);
         const tidPatch = await this.processSuDeletions(op.deletes, patch);
-        patch.append({ newQuads: op.inserts.map(([triple]) => this.toUserQuad(triple)) });
+        patch.append({ inserts: op.inserts.map(([triple]) => this.toUserQuad(triple)) });
         
         txc.sw.next('apply-cx'); // "cx" = constraint
         const interim = new InterimUpdatePatch(this.userGraph, cxnTime, patch);
@@ -281,7 +278,7 @@ export class SuSetDataset {
         const cxn = await this.constraintTxn(assertions, patch, insertTids, cxnTime);
         // After applying the constraint, some new quads might have been removed
         tidPatch.append(await this.newTriplesTids(
-          patch.newQuads.map(quad => [quad, array(insertTids.get(quad))])));
+          [...patch.inserts].map(quad => [quad, array(insertTids.get(quad))])));
 
         // Done determining the applied operation patch. At this point we could
         // have an empty patch, but we still need to complete the journal
@@ -311,15 +308,15 @@ export class SuSetDataset {
 
   // The operation's delete contains reifications of deleted triples.
   // This method adds the resolved deletions to the given transaction patch.
-  private processSuDeletions(opDeletions: [Triple, string[]][], patch: PatchQuads) {
+  private processSuDeletions(opDeletions: TriplesTids, patch: PatchQuads) {
     return opDeletions.reduce(async (tripleTidPatch, [triple, theirTids]) => {
       // For each unique deleted triple, subtract the claimed tids from the tids we have
       const ourTripleTids = await this.findTripleTids(tripleId(triple));
       const toRemove = ourTripleTids.filter(tripleTid => theirTids.includes(tripleTid.object.value));
       // If no tids are left, delete the triple in our graph
       if (toRemove.length > 0 && toRemove.length == ourTripleTids.length)
-        patch.append({ oldQuads: [this.toUserQuad(triple)] });
-      return (await tripleTidPatch).append({ oldQuads: toRemove });
+        patch.append({ deletes: [this.toUserQuad(triple)] });
+      return (await tripleTidPatch).append({ deletes: toRemove });
     }, Promise.resolve(new PatchQuads()));
   }
 
@@ -334,18 +331,18 @@ export class SuSetDataset {
       // Triples that were inserted in the applied transaction may have been
       // deleted by the constraint - these need to be removed from the applied
       // transaction patch but still published in the constraint operation
-      const deletedExistingTidQuads = await this.findTriplesTids(assertions.oldQuads);
+      const deletedExistingTidQuads = await this.findTriplesTids(assertions.deletes);
       const deletedTriplesTids = new TripleMap(asTriplesTids(deletedExistingTidQuads));
-      patch.remove('newQuads', assertions.oldQuads)
+      patch.remove('inserts', assertions.deletes)
         .forEach(delQuad => deletedTriplesTids.with(delQuad, () => [])
           .push(...array(insertTids.get(delQuad))));
       // Anything deleted by the constraint that did not exist before the
       // applied transaction can now be removed from the constraint patch
-      assertions.remove('oldQuads', quad => deletedExistingTidQuads.get(quad) == null);
-      const cxnId = txnId(cxnTime);
+      assertions.remove('deletes', quad => deletedExistingTidQuads.get(quad) == null);
+      const cxnId = cxnTime.hash();
       return {
-        operation: await this.txnOperation(cxnId, cxnTime, assertions.newQuads, [...deletedTriplesTids]),
-        tidPatch: await this.txnTidPatch(cxnId, assertions.newQuads, deletedExistingTidQuads)
+        operation: await this.txnOperation(cxnId, cxnTime, assertions.inserts, [...deletedTriplesTids]),
+        tidPatch: await this.txnTidPatch(cxnId, assertions.inserts, deletedExistingTidQuads)
       };
     }
   }
@@ -358,7 +355,7 @@ export class SuSetDataset {
    * @param tidPatch triple TID patch (inserts and deletes)
    */
   private transactionPatch(
-    assertions: DefinitePatch, entailments: DefinitePatch, tidPatch: DefinitePatch): PatchQuads {
+    assertions: PatchQuads, entailments: PatchQuads, tidPatch: PatchQuads): PatchQuads {
     return new PatchQuads(assertions).append(entailments).append(tidPatch);
   }
 
@@ -371,9 +368,9 @@ export class SuSetDataset {
     });
   }
 
-  private async findTriplesTids(quads: Quad[], includeEmpty?: 'includeEmpty'): Promise<QuadMap<Quad[]>> {
+  private async findTriplesTids(quads: Iterable<Quad>, includeEmpty?: 'includeEmpty'): Promise<QuadMap<Quad[]>> {
     const quadTriplesTids = new QuadMap<Quad[]>();
-    await Promise.all(quads.map(async quad => {
+    await Promise.all([...quads].map(async quad => {
       const tripleTids = await this.findTripleTids(tripleId(quad));
       if (tripleTids.length || includeEmpty)
         quadTriplesTids.set(quad, tripleTids);
@@ -389,7 +386,7 @@ export class SuSetDataset {
   private async spliceFusedTids(start: number, endTime: TreeClock): Promise<PatchQuads> {
     const tids: string[] = [];
     for (let time = endTime.ticked(start); time.ticks < endTime.ticks; time = time.ticked())
-      tids.push(txnId(time));
+      tids.push(time.hash());
     // TODO
     return new PatchQuads();
   }
@@ -417,7 +414,7 @@ export class SuSetDataset {
           // For each triple in the batch, insert the TIDs into the tids graph
           const patch = await this.newTriplesTids(triplesTids);
           // And include the triples themselves
-          patch.append({ newQuads: triplesTids.map(([triple]) => this.toUserQuad(triple)) });
+          patch.append({ inserts: triplesTids.map(([triple]) => this.toUserQuad(triple)) });
           return { patch };
         }
       }))).toPromise();

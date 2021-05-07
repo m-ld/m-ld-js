@@ -1,7 +1,33 @@
+import { MsgPack, sha1Digest } from './util';
+
 const inspect = Symbol.for('nodejs.util.inspect.custom');
 
-export interface CausalClock<T> {
-  anyLt(other: T, includeIds?: 'includeIds'): boolean;
+export interface CausalClock {
+  /**
+   * Ticks for this clock. This includes only ticks for this clock's ID
+   */
+  readonly ticks: number;
+  /**
+   * Sets the clock to a causally contiguous time.
+   * @param ticks ticks to set. If omitted, `this.ticks + 1`.
+   * @returns a copy of the clock with the new time
+   */
+  ticked(ticks?: number): this;
+  /**
+   * Are any of this clock's ticks less than the other clock's ticks?
+   * @param other the clock to compare
+   * @param includeIds whether to include this and the other's process
+   * identities
+   */
+  anyLt(other: this, includeIds?: 'includeIds'): boolean;
+  /**
+   * @return A hash of the time, usable as a stable operation identifier
+   */
+  hash(): string;
+  /**
+   * @param that clock to compare
+   */
+  equals(that: this): boolean;
 }
 
 export class TreeClockFork {
@@ -49,7 +75,7 @@ export class TreeClockFork {
   }
 }
 
-export class TreeClock implements CausalClock<TreeClock> {
+export class TreeClock implements CausalClock {
   private constructor(
     readonly isId: boolean,
     private readonly _ticks: number = 0,
@@ -66,6 +92,15 @@ export class TreeClock implements CausalClock<TreeClock> {
   // have an identity (somewhere in it).
   private static HALLOWS = new TreeClock(false);
   private static HALLOWS_FORK = new TreeClockFork(TreeClock.HALLOWS, TreeClock.HALLOWS);
+
+  /**
+   * Formal mapping from a clock time to a transaction ID. Used in the creation of
+   * reified operation deletes and inserts.
+   * @param time the clock time
+   */
+  hash() {
+    return sha1Digest(MsgPack.encode(this.toJson()));
+  }
 
   /**
    * @returns the ticks for this clock. This includes only ticks for this clock's ID
@@ -127,8 +162,9 @@ export class TreeClock implements CausalClock<TreeClock> {
     }
   }
 
-  ticked(ticks?: number): TreeClock {
-    return this._ticked(ticks) as TreeClock;
+  ticked(ticks?: number): this {
+    // Note this class cannot be extended
+    return this._ticked(ticks) as this;
   }
 
   /**
@@ -230,7 +266,7 @@ export class TreeClock implements CausalClock<TreeClock> {
     }
   }
 
-  equals(that: TreeClock): boolean {
+  equals(that: this): boolean {
     return this.isId === that.isId &&
       this._ticks === that._ticks &&
       (this._fork === that._fork ||

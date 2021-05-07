@@ -69,7 +69,7 @@ export class InterimUpdatePatch implements InterimUpdate {
     this.mutate(() => {
       const toRemove = this.graph.graphQuads(pattern);
       const removed = this.assertions.remove(
-        key == '@delete' ? 'oldQuads' : 'newQuads', toRemove);
+        key == '@delete' ? 'deletes' : 'inserts', toRemove);
       return removed.length !== 0;
     });
 
@@ -86,13 +86,13 @@ export class InterimUpdatePatch implements InterimUpdate {
   private createUpdate(patch: PatchQuads, ctx?: ActiveContext): MeldUpdate {
     return {
       '@ticks': this.time.ticks,
-      '@delete': this.quadSubjects(patch.oldQuads, ctx),
-      '@insert': this.quadSubjects(patch.newQuads, ctx)
+      '@delete': this.quadSubjects(patch.deletes, ctx),
+      '@insert': this.quadSubjects(patch.inserts, ctx)
     };
   }
 
-  private quadSubjects(quads: Quad[], ctx?: ActiveContext) {
-    return SubjectGraph.fromRDF(quads, { aliases: this.aliases, ctx });
+  private quadSubjects(quads: Iterable<Quad>, ctx?: ActiveContext) {
+    return SubjectGraph.fromRDF([...quads], { aliases: this.aliases, ctx });
   }
 
   private mutate(fn: () => Promise<boolean> | boolean) {

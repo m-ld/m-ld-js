@@ -2,10 +2,9 @@ import { SuSetDataset } from '../src/engine/dataset/SuSetDataset';
 import { memStore, MockProcess } from './testClones';
 import { TreeClock } from '../src/engine/clocks';
 import { first, toArray, isEmpty, take } from 'rxjs/operators';
-import { OperationMessage, EncodedOperation, txnId } from '../src/engine';
 import { Dataset } from '../src/engine/dataset';
 import { from } from 'rxjs';
-import { Describe, MeldConstraint, Subject } from '../src';
+import { Describe, MeldConstraint } from '../src';
 import { jsonify } from './testUtil';
 import { SubjectGraph } from '../src/engine/SubjectGraph';
 import { MeldEncoding } from '../src/engine/MeldEncoding';
@@ -116,7 +115,7 @@ describe('SU-Set Dataset', () => {
           remote.sentOperation('{}', '{"@id":"fred","name":"Fred"}'),
           local.join(remote).tick().time,
           local.tick().time);
-        expect(willUpdate).resolves.toHaveProperty('@insert', [fred]);
+        await expect(willUpdate).resolves.toHaveProperty('@insert', [fred]);
 
         await expect(ssd.read<Describe>({
           '@describe': 'http://test.m-ld.org/fred'
@@ -139,10 +138,10 @@ describe('SU-Set Dataset', () => {
         let firstTid: string;
 
         beforeEach(async () => {
-          firstTid = txnId((await ssd.transact(async () => [
+          firstTid = (await ssd.transact(async () => [
             local.tick().time,
             await ssd.write({ '@insert': fred })
-          ]) ?? fail()).time);
+          ]) ?? fail()).time.hash();
         });
 
         test('answers the new time', async () => {

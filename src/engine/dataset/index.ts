@@ -9,7 +9,6 @@ import { generate as uuid } from 'short-uuid';
 import { check, observeAsyncIterator, Stopwatch } from '../util';
 import { LockManager } from '../locks';
 import { QuadSet, RdfFactory } from '../quads';
-import { Filter } from '../indices';
 import { BatchOpts, Binding, ResultType } from 'quadstore/dist/lib/types';
 import { Context, Iri } from 'jsonld/jsonld-spec';
 import { activeCtx, compactIri, expandTerm, ActiveContext } from '../jsonld';
@@ -18,57 +17,26 @@ import { newEngine } from 'quadstore-comunica';
 import { DataFactory as RdfDataFactory } from 'rdf-data-factory';
 import { M_LD, RDF, JRQL, XS, QS } from '../../ns';
 import { wrap, EmptyIterator } from 'asynciterator';
+import { MutableOperation } from '../ops';
 
 /**
  * Atomically-applied patch to a quad-store.
  */
 export interface Patch {
-  readonly oldQuads: Quad[] | Partial<Quad>;
-  readonly newQuads: Quad[];
+  readonly deletes: Iterable<Quad> | Partial<Quad>;
+  readonly inserts: Iterable<Quad>;
 }
 
-/**
- * Requires that the oldQuads are concrete Quads and not a MatchTerms.
- */
-export type DefinitePatch = { [key in keyof Patch]?: Iterable<Quad> };
+function isDeletePattern(deletes: Patch['deletes']): deletes is Partial<Quad> {
+  return !(Symbol.iterator in deletes);
+}
 
 /**
  * Specialised patch that allows concatenation.
  */
-export class PatchQuads implements Patch, DefinitePatch {
-  private readonly sets: { [key in keyof Patch]: QuadSet };
-
-  constructor({ oldQuads = [], newQuads = [] }: DefinitePatch = {}) {
-    this.sets = { oldQuads: new QuadSet(oldQuads), newQuads: new QuadSet(newQuads) };
-    // del(a), ins(a) == ins(a)
-    this.sets.oldQuads.deleteAll(this.sets.newQuads);
-  }
-
-  get oldQuads() {
-    return [...this.sets.oldQuads];
-  }
-
-  get newQuads() {
-    return [...this.sets.newQuads];
-  }
-
-  get isEmpty() {
-    return this.sets.newQuads.size === 0 && this.sets.oldQuads.size === 0;
-  }
-
-  append(patch: DefinitePatch) {
-    // ins(a), del(a) == del(a)
-    this.sets.newQuads.deleteAll(patch.oldQuads);
-
-    this.sets.oldQuads.addAll(patch.oldQuads);
-    this.sets.newQuads.addAll(patch.newQuads);
-    // del(a), ins(a) == ins(a)
-    this.sets.oldQuads.deleteAll(this.sets.newQuads);
-    return this;
-  }
-
-  remove(key: keyof Patch, quads: Iterable<Quad> | Filter<Quad>): Quad[] {
-    return [...this.sets[key].deleteAll(quads)];
+export class PatchQuads extends MutableOperation<Quad> implements Patch {
+  protected constructSet(quads?: Iterable<Quad>): QuadSet {
+    return new QuadSet(quads);
   }
 }
 
@@ -229,15 +197,15 @@ export class QuadStoreDataset implements Dataset {
   }
 
   private async applyQuads(patch: Patch, opts?: BatchOpts) {
-    if (Array.isArray(patch.oldQuads)) {
-      await this.store.multiPatch(patch.oldQuads, patch.newQuads, opts);
+    if (!isDeletePattern(patch.deletes)) {
+      await this.store.multiPatch([...patch.deletes], [...patch.inserts], opts);
     } else {
       // FIXME: Not atomic! – Rarely used
-      const { subject, predicate, object, graph } = patch.oldQuads;
+      const { subject, predicate, object, graph } = patch.deletes;
       await new Promise((resolve, reject) =>
         this.store.removeMatches(subject, predicate, object, graph)
           .on('end', resolve).on('error', reject));
-      await this.store.multiPut(patch.newQuads, opts);
+      await this.store.multiPut([...patch.inserts], opts);
     }
   }
 

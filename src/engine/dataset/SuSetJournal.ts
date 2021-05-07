@@ -1,8 +1,9 @@
 import { toPrefixedId } from './SuSetGraph';
-import { MeldOperation, EncodedOperation } from '..';
+import { EncodedOperation } from '..';
 import { TreeClock, TreeClockJson } from '../clocks';
 import { MsgPack } from '../util';
 import { Dataset, Kvps } from '.';
+import { MeldOperation } from '../MeldEncoding';
 
 /** There is only one journal with a fixed key. */
 const JOURNAL_KEY = '_qs:journal';

@@ -184,13 +184,13 @@ export class JrqlGraph {
         const matchingQuads = (template?: Quad[]) => template == null ? [] :
           this.fillTemplate(template, solution).filter(quad => !anyVarTerm(quad));
         patch.append(new PatchQuads({
-          oldQuads: matchingQuads(deleteQuads),
-          newQuads: matchingQuads(insertQuads)
+          deletes: matchingQuads(deleteQuads),
+          inserts: matchingQuads(insertQuads)
         }));
       });
     } else if (!insertQuads?.some(anyVarTerm)) {
       // Both @delete and @insert have fixed quads, just apply them
-      patch.append({ oldQuads: deleteQuads, newQuads: insertQuads });
+      patch.append({ deletes: deleteQuads ?? [], inserts: insertQuads ?? [] });
     }
     return patch;
   }

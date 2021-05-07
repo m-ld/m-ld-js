@@ -8,9 +8,9 @@ export interface Message<C, D> {
 /**
  * A process that accepts messages
  */
-export type Process<M, C extends CausalClock<C>> = (message: M, prev: C) => void;
+export type Process<M, C extends CausalClock> = (message: M, prev: C) => void;
 
-export abstract class MessageService<C extends CausalClock<C>> {
+export abstract class MessageService<C extends CausalClock> {
   /**
    * Call to process newly received message data from the wire.
    *

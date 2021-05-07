@@ -21,102 +21,102 @@ describe('Patch quads', () => {
 
   test('Construct empty', () => {
     const patch = new PatchQuads();
-    expect(patch.oldQuads).toEqual([]);
-    expect(patch.newQuads).toEqual([]);
+    expect([...patch.deletes]).toEqual([]);
+    expect([...patch.inserts]).toEqual([]);
     expect(patch.isEmpty).toBe(true);
   });
 
   test('Construct from quads', () => {
-    const patch = new PatchQuads({ oldQuads: [a], newQuads: [b] });
-    expect(patch.oldQuads.length).toBe(1);
-    expect(patch.newQuads.length).toBe(1);
-    expect(patch.oldQuads[0].equals(a)).toBe(true);
-    expect(patch.newQuads[0].equals(b)).toBe(true);
+    const patch = new PatchQuads({ deletes: [a], inserts: [b] });
+    expect([...patch.deletes].length).toBe(1);
+    expect([...patch.inserts].length).toBe(1);
+    expect([...patch.deletes][0].equals(a)).toBe(true);
+    expect([...patch.inserts][0].equals(b)).toBe(true);
     expect(patch.isEmpty).toBe(false);
   });
 
   test('Constructor allows for graph states', () => {
-    const patch = new PatchQuads({ oldQuads: [a], newQuads: [a] });
+    const patch = new PatchQuads({ deletes: [a], inserts: [a] });
     expect(patch.isEmpty).toBe(false);
   });
 
   test('Append mutates', () => {
     const patch = new PatchQuads();
-    patch.append({ oldQuads: [a], newQuads: [b] });
-    expect(patch.oldQuads.length).toBe(1);
-    expect(patch.newQuads.length).toBe(1);
-    expect(patch.oldQuads[0].equals(a)).toBe(true);
-    expect(patch.newQuads[0].equals(b)).toBe(true);
+    patch.append({ deletes: [a], inserts: [b] });
+    expect([...patch.deletes].length).toBe(1);
+    expect([...patch.inserts].length).toBe(1);
+    expect([...patch.deletes][0].equals(a)).toBe(true);
+    expect([...patch.inserts][0].equals(b)).toBe(true);
     expect(patch.isEmpty).toBe(false);
   });
 
   test('Construction removes delete then insert redundancy', () => {
     const patch = new PatchQuads(
-      { oldQuads: [a/* squash */], newQuads: [a] });
+      { deletes: [a/* squash */], inserts: [a] });
     expect(patch.isEmpty).toBe(false);
-    expect(patch.oldQuads.length).toBe(0);
-    expect(patch.newQuads.length).toBe(1);
+    expect([...patch.deletes].length).toBe(0);
+    expect([...patch.inserts].length).toBe(1);
   });
 
   test('Append to nothing removes delete then insert redundancy', () => {
     const patch = new PatchQuads();
-    patch.append({ oldQuads: [a/* squash */], newQuads: [a] });
+    patch.append({ deletes: [a/* squash */], inserts: [a] });
     expect(patch.isEmpty).toBe(false);
-    expect(patch.oldQuads.length).toBe(0);
-    expect(patch.newQuads.length).toBe(1);
+    expect([...patch.deletes].length).toBe(0);
+    expect([...patch.inserts].length).toBe(1);
   });
 
   test('Append removes transitive insert then delete redundancy', () => {
     const patch = new PatchQuads();
-    patch.append({ oldQuads: [a], newQuads: [b/* squash */] });
-    patch.append({ oldQuads: [b], newQuads: [c] });
+    patch.append({ deletes: [a], inserts: [b/* squash */] });
+    patch.append({ deletes: [b], inserts: [c] });
     expect(patch.isEmpty).toBe(false);
-    expect(patch.oldQuads.length).toBe(2);
-    expect(patch.newQuads.length).toBe(1);
-    expect(patch.oldQuads[0].equals(a) || patch.oldQuads[0].equals(b)).toBe(true);
-    expect(patch.oldQuads[1].equals(a) || patch.oldQuads[1].equals(b)).toBe(true);
-    expect(patch.newQuads[0].equals(c)).toBe(true);
+    expect([...patch.deletes].length).toBe(2);
+    expect([...patch.inserts].length).toBe(1);
+    expect([...patch.deletes][0].equals(a) || [...patch.deletes][0].equals(b)).toBe(true);
+    expect([...patch.deletes][1].equals(a) || [...patch.deletes][1].equals(b)).toBe(true);
+    expect([...patch.inserts][0].equals(c)).toBe(true);
   });
 
   test('Append removes transitive delete then insert redundancy', () => {
     const patch = new PatchQuads();
-    patch.append({ oldQuads: [a/* squash */], newQuads: [b/* squash */] });
-    patch.append({ oldQuads: [b], newQuads: [a] });
+    patch.append({ deletes: [a/* squash */], inserts: [b/* squash */] });
+    patch.append({ deletes: [b], inserts: [a] });
     expect(patch.isEmpty).toBe(false);
-    expect(patch.oldQuads.length).toBe(1);
-    expect(patch.newQuads.length).toBe(1);
-    expect(patch.oldQuads[0].equals(b)).toBe(true);
-    expect(patch.newQuads[0].equals(a)).toBe(true);
+    expect([...patch.deletes].length).toBe(1);
+    expect([...patch.inserts].length).toBe(1);
+    expect([...patch.deletes][0].equals(b)).toBe(true);
+    expect([...patch.inserts][0].equals(a)).toBe(true);
   });
 
   test('Append removes transitive delete then insert redundancy', () => {
     const patch = new PatchQuads();
-    patch.append({ oldQuads: [a], newQuads: [b/* squash */] });
-    patch.append({ oldQuads: [b/* squash */], newQuads: [b] });
+    patch.append({ deletes: [a], inserts: [b/* squash */] });
+    patch.append({ deletes: [b/* squash */], inserts: [b] });
     expect(patch.isEmpty).toBe(false);
-    expect(patch.oldQuads.length).toBe(1);
-    expect(patch.newQuads.length).toBe(1);
-    expect(patch.oldQuads[0].equals(a)).toBe(true);
-    expect(patch.newQuads[0].equals(b)).toBe(true);
+    expect([...patch.deletes].length).toBe(1);
+    expect([...patch.inserts].length).toBe(1);
+    expect([...patch.deletes][0].equals(a)).toBe(true);
+    expect([...patch.inserts][0].equals(b)).toBe(true);
   });
 
   test('Remove mutates', () => {
-    const patch = new PatchQuads({ oldQuads: [a], newQuads: [b] });
-    const removals = patch.remove('oldQuads', [a]);
+    const patch = new PatchQuads({ deletes: [a], inserts: [b] });
+    const removals = patch.remove('deletes', [a]);
     expect(removals.length).toBe(1);
     expect(removals[0].equals(a)).toBe(true);
-    expect(patch.oldQuads).toEqual([]);
-    expect(patch.newQuads.length).toBe(1);
+    expect([...patch.deletes]).toEqual([]);
+    expect([...patch.inserts].length).toBe(1);
     expect(patch.isEmpty).toBe(false);
   });
 
   test('Remove by filter', () => {
-    const patch = new PatchQuads({ oldQuads: [a], newQuads: [b] });
-    const removals = patch.remove('oldQuads', quad => quad.equals(a));
+    const patch = new PatchQuads({ deletes: [a], inserts: [b] });
+    const removals = patch.remove('deletes', quad => quad.equals(a));
     expect(removals.length).toBe(1);
     expect(removals[0].equals(a)).toBe(true);
-    expect(patch.oldQuads).toEqual([]);
-    expect(patch.newQuads.length).toBe(1);
+    expect([...patch.deletes]).toEqual([]);
+    expect([...patch.inserts].length).toBe(1);
     expect(patch.isEmpty).toBe(false);
   });
 });

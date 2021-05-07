@@ -74,46 +74,6 @@ export interface Meld {
   revupFrom(time: TreeClock): Promise<Revup | undefined>;
 }
 
-export interface MeldOperation extends Object {
-  /**
-   * First tick included in update (= time.ticks unless fused)
-   */
-  readonly from: number;
-  /**
-   * Update time at the operation source clone
-   */
-  readonly time: TreeClock;
-  /**
-   * Inserted triples, reified with transaction IDs iff the encoding is fused.
-   */
-  readonly inserts: [Triple, TID[]][];
-  /**
-   * Reified deleted triples, with transaction IDs.
-   */
-  readonly deletes: [Triple, TID[]][];
-  /**
-   * Serialisation of triples is not required to be normalised. For any m-ld
-   * operation, there are many possible serialisations. An operation carries its
-   * serialisation with it, for journaling and hashing.
-   */
-  readonly encoded: EncodedOperation;
-}
-
-/**
- * Transaction IDs are formally mapped to {@link TreeClock}s using the
- * {@link txnId} function.
- */
-export type TID = ReturnType<typeof txnId>;
-
-/**
- * Formal mapping from a clock time to a transaction ID. Used in the creation of
- * reified operation deletes and inserts.
- * @param time the clock time
- */
-export function txnId(time: TreeClock) {
-  return sha1Digest(MsgPack.encode(time.toJson()));
-}
-
 /**
  * A tuple containing encoding
  * - `0`: version,

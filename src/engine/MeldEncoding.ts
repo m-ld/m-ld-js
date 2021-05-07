@@ -1,4 +1,4 @@
-import { MeldOperation, EncodedOperation, UUID, txnId, TID } from '.';
+import { EncodedOperation, UUID } from '.';
 import { flatten, lazy } from './util';
 import { Context, ExpandedTermDef } from '../jrql-support';
 import { Iri } from 'jsonld/jsonld-spec';
@@ -10,6 +10,7 @@ import { ActiveContext } from 'jsonld/lib/context';
 import { SubjectQuads } from './SubjectQuads';
 import { TreeClock } from './clocks';
 import { gzip as gzipCb, gunzip as gunzipCb, InputType } from 'zlib';
+import { CausalOperation } from './ops';
 const gzip = (input: InputType) => new Promise<Buffer>((resolve, reject) =>
   gzipCb(input, (err, buf) => err ? reject(err) : resolve(buf)));
 const gunzip = (input: InputType) => new Promise<Buffer>((resolve, reject) =>
@@ -57,6 +58,68 @@ export function unreify(reifications: Triple[]): [Triple, UUID[]][] {
   }, {} as { [rid: string]: [Triple, UUID[]] }));
 }
 
+export type TriplesTids = [Triple, string[]][];
+
+export class MeldOperation extends CausalOperation<Triple, TreeClock> {
+  static fromOperation = async (enc: MeldEncoding, 
+    from: number, time: TreeClock,
+    deletes: TriplesTids, inserts: TriplesTids): Promise<MeldOperation> => {
+    const jsons = [deletes, inserts]
+      .map((triplesTids, i) => {
+        // Encoded inserts are only reified if fused
+        if (i === 1 && from === time.ticks)
+          return triplesTids.map(([triple]) => triple);
+        else
+          return enc.reifyTriplesTids(triplesTids);
+      })
+      .map(enc.jsonFromTriples);
+    const [delEnc, insEnc] = await Promise.all(
+      jsons.map(json => MeldEncoding.bufferFromJson(json)));
+    const encoded: EncodedOperation = [2, from, time.toJson(), delEnc, insEnc];
+    return new MeldOperation(from, time, deletes, inserts, encoded, jsons);
+  }
+
+  static fromEncoded = async (enc: MeldEncoding,
+    encoded: EncodedOperation): Promise<MeldOperation> => {
+    const [ver] = encoded;
+    if (ver < 2)
+      throw new Error(`Encoded operation version ${ver} not supported`);
+    let [, from, timeJson, delEnc, insEnc] = encoded;
+    const jsons = await Promise.all([delEnc, insEnc].map(MeldEncoding.jsonFromBuffer));
+    const [delTriples, insTriples] = jsons.map(enc.triplesFromJson);
+    const time = TreeClock.fromJson(timeJson) as TreeClock;
+    const deletes = unreify(delTriples);
+    let inserts: MeldOperation['inserts'];
+    if (from === time.ticks) {
+      const tid = time.hash();
+      inserts = insTriples.map(triple => [triple, [tid]]);
+    } else {
+      // No need to calculate transaction ID if the encoding is fused
+      inserts = unreify(insTriples);
+    }
+    return new MeldOperation(from, time, deletes, inserts, encoded, jsons);
+  }
+
+  private constructor(
+    from: number,
+    time: TreeClock,
+    deletes: TriplesTids,
+    inserts: TriplesTids,
+    /**
+     * Serialisation of triples is not required to be normalised. For any m-ld
+     * operation, there are many possible serialisations. An operation carries its
+     * serialisation with it, for journaling and hashing.
+     */
+    readonly encoded: EncodedOperation,
+    readonly jsons: any) {
+    super(from, time, deletes, inserts);
+  }
+
+  toString() {
+    return `${JSON.stringify(this.jsons)}`;
+  }
+}
+
 /**
  * TODO: re-sync with Java
  * @see m-ld/m-ld-core/src/main/java/org/m_ld/MeldResource.java
@@ -97,42 +160,6 @@ export class MeldEncoding {
       ].concat(tids.map(tid =>
         this.rdf.quad(rid, this.name(M_LD.tid), this.rdf.literal(tid))));
     }));
-  }
-
-  newOperation = async (op: Omit<MeldOperation, 'encoded'>): Promise<MeldOperation> => {
-    const [deletes, inserts] = await Promise.all([op.deletes, op.inserts]
-      .map((triplesTids, i) => {
-          // Encoded inserts are only reified if fused
-        if (i === 1 && op.from === op.time.ticks)
-          return triplesTids.map(([triple]) => triple);
-        else
-          return this.reifyTriplesTids(triplesTids);
-      })
-      .map(triples => MeldEncoding.bufferFromJson(this.jsonFromTriples(triples))));
-    return { ...op, encoded: [2, op.from, op.time.toJson(), deletes, inserts] };
-  }
-
-  asOperation = async (encoded: EncodedOperation): Promise<MeldOperation> => {
-    const [ver] = encoded;
-    if (ver < 2)
-      throw new Error(`Encoded operation version ${ver} not supported`);
-    let [, from, timeJson, delEnc, insEnc] = encoded;
-    const jsons = await Promise.all([delEnc, insEnc].map(MeldEncoding.jsonFromBuffer));
-    const [delTriples, insTriples] = jsons.map(this.triplesFromJson);
-    const time = TreeClock.fromJson(timeJson) as TreeClock;
-    const deletes = unreify(delTriples);
-    let inserts: MeldOperation['inserts'];
-    if (from === time.ticks) {
-      const tid = txnId(time);
-      inserts = insTriples.map(triple => [triple, [tid]]);
-    } else {
-      // No need to calculate transaction ID if the encoding is fused
-      inserts = unreify(insTriples);
-    }
-    return {
-      from, time, inserts, deletes, encoded,
-      toString: () => `${JSON.stringify(jsons)}`
-    };
   }
 
   jsonFromTriples = (triples: Triple[]): any => {
