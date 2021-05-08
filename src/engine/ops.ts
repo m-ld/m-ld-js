@@ -1,5 +1,5 @@
 import { CausalClock } from './clocks';
-import { Filter, IndexSet } from './indices';
+import { Filter, IndexMap, IndexSet } from './indices';
 
 export interface Operation<T> {
   readonly deletes: Iterable<T>;
@@ -39,6 +39,7 @@ export abstract class MutableOperation<T> implements Operation<T> {
   }
 }
 
+/** Immutable */
 export class CausalOperation<T, C extends CausalClock> implements Operation<[T, string[]]> {
   constructor(
     /**
@@ -52,8 +53,8 @@ export class CausalOperation<T, C extends CausalClock> implements Operation<[T, 
      */
     readonly time: C,
     /**
-     * Deleted items with time hashes. Hashes may represent any time prior to
-     * `time`.
+     * Deleted items with time hashes. Hashes may represent any time strictly
+     * prior to `from`.
      */
     readonly deletes: [T, string[]][],
     /**
@@ -68,12 +69,72 @@ export class CausalOperation<T, C extends CausalClock> implements Operation<[T, 
     return this.time.ticked(this.from);
   }
 
-  fuse(next: this): this | null {
+  fuse(next: CausalOperation<T, C>): CausalOperation<T, C> | null {
     // We can fuse iff we are causally contiguous with the next operation
     if (this.time.ticked().equals(next.fromTime)) {
-      // TODO
+      // Not using mutable append, our semantics are different!
+      const fused = this.mutable();
+      // 1. Fuse all deletes
+      fused.deletes.addAll(flatten(next.deletes));
+      // 2. Remove anything we insert that is deleted
+      const redundant = fused.inserts.deleteAll(flatten(next.deletes));
+      fused.deletes.deleteAll(redundant);
+      // 3. Fuse remaining inserts (we can't be deleting any of these)
+      fused.inserts.addAll(flatten(next.inserts));
+      const myGetIndex = this.getIndex;
+      return new class extends CausalOperation<T, C> {
+        getIndex(key: T): string {
+          return myGetIndex(key);
+        }
+      }(this.from, next.time, this.expand(fused.deletes), this.expand(fused.inserts));
     }
     return null;
   }
+
+  protected getIndex(_key: T): string {
+    throw undefined;
+  }
+
+  private expand(itemTids: Iterable<[T, string]>): [T, string[]][] {
+    const myGetIndex = this.getIndex.bind(this);
+    const expanded = new class extends IndexMap<T, string[]> {
+      protected getIndex(key: T): string {
+        return myGetIndex(key);
+      }
+    }();
+    for (let itemTid of itemTids) {
+      const [item, tid] = itemTid;
+      expanded.with(item, () => []).push(tid);
+    }
+    return [...expanded];
+  }
+
+  private mutable(): MutableOperation<[T, string]> {
+    const myGetIndex = this.getIndex.bind(this);
+    class WithTidsSet extends IndexSet<[T, string]> {
+      construct(ts?: Iterable<[T, string]>) {
+        return new WithTidsSet(ts);
+      };
+      getIndex(key: [T, string]) {
+        const [item, tid] = key;
+        return `${myGetIndex(item)}^${tid}`;
+      };
+    };
+    return new class extends MutableOperation<[T, string]> {
+      constructSet(items?: Iterable<[T, string]>) {
+        return new WithTidsSet(items);
+      }
+    }({
+      deletes: flatten(this.deletes),
+      inserts: flatten(this.inserts)
+    });
+  }
 }
 
+function* flatten<T>(itemsTids: Iterable<[T, string[]]>): Iterable<[T, string]> {
+  for (let itemTids of itemsTids) {
+    const [item, tids] = itemTids;
+    for (let tid of tids)
+      yield [item, tid];
+  }
+}

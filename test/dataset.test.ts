@@ -66,7 +66,7 @@ describe('Patch quads', () => {
     expect([...patch.inserts].length).toBe(1);
   });
 
-  test('Append removes transitive insert then delete redundancy', () => {
+  test('Append removes insert then delete redundancy', () => {
     const patch = new PatchQuads();
     patch.append({ deletes: [a], inserts: [b/* squash */] });
     patch.append({ deletes: [b], inserts: [c] });
@@ -78,7 +78,19 @@ describe('Patch quads', () => {
     expect([...patch.inserts][0].equals(c)).toBe(true);
   });
 
-  test('Append removes transitive delete then insert redundancy', () => {
+  test('Append removes delete then insert redundancy', () => {
+    const patch = new PatchQuads();
+    patch.append({ deletes: [a/* squash */], inserts: [b] });
+    patch.append({ deletes: [c], inserts: [a] });
+    expect(patch.isEmpty).toBe(false);
+    expect([...patch.deletes].length).toBe(1);
+    expect([...patch.inserts].length).toBe(2);
+    expect([...patch.deletes][0].equals(c)).toBe(true);
+    expect([...patch.inserts][0].equals(a) || [...patch.inserts][0].equals(b)).toBe(true);
+    expect([...patch.inserts][1].equals(a) || [...patch.inserts][1].equals(b)).toBe(true);
+  });
+
+  test('Append removes both delete and insert redundancy', () => {
     const patch = new PatchQuads();
     patch.append({ deletes: [a/* squash */], inserts: [b/* squash */] });
     patch.append({ deletes: [b], inserts: [a] });
