@@ -10,7 +10,7 @@ import { ActiveContext } from 'jsonld/lib/context';
 import { SubjectQuads } from './SubjectQuads';
 import { TreeClock } from './clocks';
 import { gzip as gzipCb, gunzip as gunzipCb, InputType } from 'zlib';
-import { CausalOperation } from './ops';
+import { CausalOperation, FusableCausalOperation } from './ops';
 const gzip = (input: InputType) => new Promise<Buffer>((resolve, reject) =>
   gzipCb(input, (err, buf) => err ? reject(err) : resolve(buf)));
 const gunzip = (input: InputType) => new Promise<Buffer>((resolve, reject) =>
@@ -60,8 +60,8 @@ export function unreify(reifications: Triple[]): [Triple, UUID[]][] {
 
 export type TriplesTids = [Triple, string[]][];
 
-export class MeldOperation extends CausalOperation<Triple, TreeClock> {
-  static fromOperation = async (enc: MeldEncoding, 
+export class MeldOperation extends FusableCausalOperation<Triple, TreeClock> {
+  static fromOperation = async (enc: MeldEncoding,
     from: number, time: TreeClock,
     deletes: TriplesTids, inserts: TriplesTids): Promise<MeldOperation> => {
     const jsons = [deletes, inserts]
@@ -76,7 +76,7 @@ export class MeldOperation extends CausalOperation<Triple, TreeClock> {
     const [delEnc, insEnc] = await Promise.all(
       jsons.map(json => MeldEncoding.bufferFromJson(json)));
     const encoded: EncodedOperation = [2, from, time.toJson(), delEnc, insEnc];
-    return new MeldOperation(from, time, deletes, inserts, encoded, jsons);
+    return new MeldOperation({ from, time, deletes, inserts }, encoded, jsons);
   }
 
   static fromEncoded = async (enc: MeldEncoding,
@@ -97,14 +97,11 @@ export class MeldOperation extends CausalOperation<Triple, TreeClock> {
       // No need to calculate transaction ID if the encoding is fused
       inserts = unreify(insTriples);
     }
-    return new MeldOperation(from, time, deletes, inserts, encoded, jsons);
+    return new MeldOperation({ from, time, deletes, inserts }, encoded, jsons);
   }
 
   private constructor(
-    from: number,
-    time: TreeClock,
-    deletes: TriplesTids,
-    inserts: TriplesTids,
+    op: CausalOperation<Triple, TreeClock>,
     /**
      * Serialisation of triples is not required to be normalised. For any m-ld
      * operation, there are many possible serialisations. An operation carries its
@@ -112,7 +109,7 @@ export class MeldOperation extends CausalOperation<Triple, TreeClock> {
      */
     readonly encoded: EncodedOperation,
     readonly jsons: any) {
-    super(from, time, deletes, inserts);
+    super(op);
   }
 
   toString() {

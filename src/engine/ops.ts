@@ -39,39 +39,49 @@ export abstract class MutableOperation<T> implements Operation<T> {
   }
 }
 
+export interface CausalOperation<T, C extends CausalClock> extends Operation<[T, string[]]> {
+  /**
+   * First tick included in operation, <= `time.ticks`. The first tick _must_
+   * be causally contiguous with the operation `time`. So, it's always
+   * legitimate to do `this.time.ticked(this.from)`.
+   */
+  readonly from: number;
+  /**
+   * Operation time at the operation source process
+   */
+  readonly time: C;
+  /**
+   * Deleted items with time hashes. Hashes may represent any time strictly
+   * prior to `from`.
+   */
+  readonly deletes: [T, string[]][];
+  /**
+   * Inserted items with time hashes. Hashes only represent times in this
+   * operation's time range. Therefore, they are redundant with the {@link time}
+   * if `this.from === this.time.ticks`.
+   */
+  readonly inserts: [T, string[]][];
+}
+
 /** Immutable */
-export class CausalOperation<T, C extends CausalClock> implements Operation<[T, string[]]> {
+export class FusableCausalOperation<T, C extends CausalClock> implements CausalOperation<T, C> {
+  readonly from: number;
+  readonly time: C;
+  readonly deletes: [T, string[]][];
+  readonly inserts: [T, string[]][];
+
   constructor(
-    /**
-     * First tick included in operation, <= `time.ticks`. The first tick _must_
-     * be causally contiguous with the operation `time`. So, it's always
-     * legitimate to do `this.time.ticked(this.from)`.
-     */
-    readonly from: number,
-    /**
-     * Operation time at the operation source process
-     */
-    readonly time: C,
-    /**
-     * Deleted items with time hashes. Hashes may represent any time strictly
-     * prior to `from`.
-     */
-    readonly deletes: [T, string[]][],
-    /**
-     * Inserted items with time hashes. Hashes only represent times in this
-     * operation's time range. Therefore, they are redundant with the {@link time}
-     * if `this.from === this.time.ticks`.
-     */
-    readonly inserts: [T, string[]][]) {
+    { from, time, deletes, inserts }: CausalOperation<T, C>,
+    readonly getIndex: (item: T) => string = item => `${item}`) {
+    this.from = from;
+    this.time = time;
+    this.deletes = deletes;
+    this.inserts = inserts;
   }
 
-  get fromTime() {
-    return this.time.ticked(this.from);
-  }
-
-  fuse(next: CausalOperation<T, C>): CausalOperation<T, C> | null {
+  fuse(next: CausalOperation<T, C>): CausalOperation<T, C> | undefined {
     // We can fuse iff we are causally contiguous with the next operation
-    if (this.time.ticked().equals(next.fromTime)) {
+    if (this.time.ticked().equals(next.time.ticked(next.from))) {
       // Not using mutable append, our semantics are different!
       const fused = this.mutable();
       // 1. Fuse all deletes
@@ -81,27 +91,16 @@ export class CausalOperation<T, C extends CausalClock> implements Operation<[T, 
       fused.deletes.deleteAll(redundant);
       // 3. Fuse remaining inserts (we can't be deleting any of these)
       fused.inserts.addAll(flatten(next.inserts));
-      const myGetIndex = this.getIndex;
-      return new class extends CausalOperation<T, C> {
-        getIndex(key: T): string {
-          return myGetIndex(key);
-        }
-      }(this.from, next.time, this.expand(fused.deletes), this.expand(fused.inserts));
+      return {
+        from: this.from, time: next.time,
+        deletes: this.expand(fused.deletes),
+        inserts: this.expand(fused.inserts)
+      };
     }
-    return null;
-  }
-
-  protected getIndex(_key: T): string {
-    throw undefined;
   }
 
   private expand(itemTids: Iterable<[T, string]>): [T, string[]][] {
-    const myGetIndex = this.getIndex.bind(this);
-    const expanded = new class extends IndexMap<T, string[]> {
-      protected getIndex(key: T): string {
-        return myGetIndex(key);
-      }
-    }();
+    const expanded = this.newIndexMap();
     for (let itemTid of itemTids) {
       const [item, tid] = itemTid;
       expanded.with(item, () => []).push(tid);
@@ -110,24 +109,37 @@ export class CausalOperation<T, C extends CausalClock> implements Operation<[T, 
   }
 
   private mutable(): MutableOperation<[T, string]> {
-    const myGetIndex = this.getIndex.bind(this);
-    class WithTidsSet extends IndexSet<[T, string]> {
-      construct(ts?: Iterable<[T, string]>) {
-        return new WithTidsSet(ts);
-      };
-      getIndex(key: [T, string]) {
-        const [item, tid] = key;
-        return `${myGetIndex(item)}^${tid}`;
-      };
-    };
+    const newFlatIndexSet = this.newFlatIndexSet;
     return new class extends MutableOperation<[T, string]> {
       constructSet(items?: Iterable<[T, string]>) {
-        return new WithTidsSet(items);
+        return newFlatIndexSet().addAll(items);
       }
     }({
       deletes: flatten(this.deletes),
       inserts: flatten(this.inserts)
     });
+  }
+
+  private newIndexMap = () => {
+    const getIndex = this.getIndex;
+    return new class extends IndexMap<T, string[]> {
+      getIndex(key: T): string {
+        return getIndex(key);
+      }
+    }();
+  }
+
+  private newFlatIndexSet = () => {
+    const getIndex = this.getIndex;
+    return new class WithTidsSet extends IndexSet<[T, string]> {
+      construct(ts?: Iterable<[T, string]>) {
+        return new WithTidsSet(ts);
+      };
+      getIndex(key: [T, string]) {
+        const [item, tid] = key;
+        return `${getIndex(item)}^${tid}`;
+      };
+    }();
   }
 }
 
