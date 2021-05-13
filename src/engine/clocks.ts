@@ -94,12 +94,15 @@ export class TreeClock implements CausalClock {
   private static HALLOWS_FORK = new TreeClockFork(TreeClock.HALLOWS, TreeClock.HALLOWS);
 
   /**
-   * Formal mapping from a clock time to a transaction ID. Used in the creation of
-   * reified operation deletes and inserts.
+   * Formal mapping from a clock time to a transaction ID. Used in the creation
+   * of reified operation deletes and inserts. Injective but not necessarily
+   * one-way (do not use for security).
    * @param time the clock time
    */
   hash() {
-    return sha1Digest(MsgPack.encode(this.toJson()));
+    const buf = MsgPack.encode(this.toJson());
+    // If shorter than sha1 (20 bytes), do not hash
+    return buf.length > 20 ? sha1Digest(buf) : buf.toString('base64');
   }
 
   /**

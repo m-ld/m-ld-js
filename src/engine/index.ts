@@ -4,7 +4,7 @@
 import { TreeClock, TreeClockJson } from './clocks';
 import { Observable } from 'rxjs';
 import { Message } from './messages';
-import { MsgPack, Future, sha1Digest } from './util';
+import { MsgPack, Future } from './util';
 import { LiveValue } from './LiveValue';
 import { MeldError } from './MeldError';
 import { Triple } from './quads';
