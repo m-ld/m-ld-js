@@ -390,6 +390,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
   async newClock(): Promise<TreeClock> {
     const newClock = new Future<TreeClock>();
     await this.dataset.saveClock(gwc => {
+      // TODO: This should really be encapsulated in the causal clock
       const lastPublicTick = gwc.getTicks(this.localTime);
       // Back-date the clock to the last public tick before forking
       const fork = this.localTime.ticked(lastPublicTick).forked();

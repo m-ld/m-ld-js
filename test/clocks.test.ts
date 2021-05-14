@@ -37,7 +37,17 @@ test('Fork tick tick', () => {
 
 test('Fork tick untick', () => {
   expect(TreeClock.GENESIS.ticked().forked().left.ticked(1).ticks).toBe(1);
-  expect(() => TreeClock.GENESIS.ticked().forked().left.ticked(0)).toThrowError();
+});
+
+test('Fork untick back past fork', () => {
+  const tickedFork = TreeClock.GENESIS.ticked().forked().left;
+  expect(tickedFork.ticked(0).equals(TreeClock.GENESIS)).toBe(true);
+});
+
+test('Untick to zero retains forked ID', () => {
+  const tickedFork = TreeClock.GENESIS.forked().left.ticked();
+  expect(tickedFork.ticked(0).equals(TreeClock.GENESIS)).toBe(false);
+  expect(tickedFork.ticked(0).hash()).toBe(TreeClock.GENESIS.hash());
 });
 
 test('Tick fork', () => {
@@ -291,4 +301,31 @@ test('update of scrubbed ID from scrubbed ID', () => {
     TreeClock.GENESIS.forked().left.ticked().scrubId()).toJson()).toEqual([1, 0]);
   expect(TreeClock.GENESIS.scrubId().update(
     TreeClock.GENESIS.ticked().forked().left.scrubId()).toJson()).toEqual([1, 0, 0]);
+});
+
+test('hash is stable', () => {
+  const one = TreeClock.GENESIS.ticked(), two = TreeClock.GENESIS.ticked();
+  expect(one.hash()).toEqual(two.hash());
+});
+
+test('hash is unique', () => {
+  let { left, right } = TreeClock.GENESIS.forked();
+  expect(left.ticked().hash()).not.toEqual(right.ticked().hash());
+  expect(left.ticked().hash()).not.toEqual(left.ticked().ticked().hash());
+});
+
+test('hash ignores unticked genesis fork', () => {
+  let { left, right } = TreeClock.GENESIS.forked();
+  expect(left.hash()).toEqual(right.hash());
+});
+
+test('hash ignores unticked fork of ticked', () => {
+  let { left, right } = TreeClock.GENESIS.ticked().forked();
+  expect(left.hash()).toEqual(right.hash());
+});
+
+test('hash ignores deeply unticked forks', () => {
+  let { left, right } = TreeClock.GENESIS.ticked().forked();
+  right = right.forked().right;
+  expect(left.hash()).toEqual(right.hash());
 });

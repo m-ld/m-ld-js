@@ -39,9 +39,9 @@ export abstract class MutableOperation<T> implements Operation<T> {
   }
 }
 
-export interface CausalOperation<T, C extends CausalClock> extends Operation<[T, string[]]> {
+export interface CausalTimeRange<C extends CausalClock> {
   /**
-   * First tick included in operation, <= `time.ticks`. The first tick _must_
+   * First tick included in range, <= `time.ticks`. The first tick _must_
    * be causally contiguous with the operation `time`. So, it's always
    * legitimate to do `this.time.ticked(this.from)`.
    */
@@ -50,17 +50,17 @@ export interface CausalOperation<T, C extends CausalClock> extends Operation<[T,
    * Operation time at the operation source process
    */
   readonly time: C;
-  /**
-   * Deleted items with time hashes. Hashes may represent any time strictly
-   * prior to `from`.
-   */
-  readonly deletes: [T, string[]][];
-  /**
-   * Inserted items with time hashes. Hashes only represent times in this
-   * operation's time range. Therefore, they are redundant with the {@link time}
-   * if `this.from === this.time.ticks`.
-   */
-  readonly inserts: [T, string[]][];
+}
+
+/**
+ * An operation on tuples of items and time hashes.
+ * - Delete hashes may represent any time strictly prior to `from`.
+ * - Insert hashes only represent times in this operation's time range.
+ *   Therefore, they are redundant with the `time` if `this.from ===
+ *   this.time.ticks`.
+ */
+export interface CausalOperation<T, C extends CausalClock>
+  extends CausalTimeRange<C>, Operation<[T, string[]]> {
 }
 
 /** Immutable */
@@ -75,13 +75,13 @@ export class FusableCausalOperation<T, C extends CausalClock> implements CausalO
     readonly getIndex: (item: T) => string = item => `${item}`) {
     this.from = from;
     this.time = time;
-    this.deletes = deletes;
-    this.inserts = inserts;
+    this.deletes = [...deletes];
+    this.inserts = [...inserts];
   }
 
   fuse(next: CausalOperation<T, C>): CausalOperation<T, C> | undefined {
-    // We can fuse iff we are causally contiguous with the next operation
-    if (this.time.ticked().equals(next.time.ticked(next.from))) {
+    // We can fuse iff we are causally contiguous with the next operation.
+    if (this.isContiguousWith(next)) {
       // Not using mutable append, our semantics are different!
       const fused = this.mutable();
       // 1. Fuse all deletes
@@ -92,11 +92,57 @@ export class FusableCausalOperation<T, C extends CausalClock> implements CausalO
       // 3. Fuse remaining inserts (we can't be deleting any of these)
       fused.inserts.addAll(flatten(next.inserts));
       return {
-        from: this.from, time: next.time,
+        from: this.from,
+        time: next.time,
         deletes: this.expand(fused.deletes),
         inserts: this.expand(fused.inserts)
       };
     }
+  }
+
+  private isContiguousWith(next: CausalTimeRange<C>) {
+    // Check ticks and ID.
+    return this.time.ticks + 1 === next.from &&
+      this.time.hash() === next.time.ticked(this.time.ticks).hash();
+  }
+
+  cutBy(prev: Omit<CausalOperation<T, C>, 'deletes'>): CausalOperation<T, C> | undefined {
+    // We can cut iff our from is within the previous range
+    if (this.overlapsTailOf(prev)) {
+      const cut = this.mutable(),
+        // Also do some indexing
+        prevFlatInserts = this.newFlatIndexSet(flatten(prev.inserts)),
+        thisDeletesByTid = this.byTid(this.deletes),
+        prevInsertsByTid = this.byTid(prev.inserts);
+      // Remove any deletes where tid in exclusive-prev, unless inserted in prev
+      for (let tick = prev.from; tick < this.from; tick++) {
+        // Can use a hash after creation for external ticks as in fusions
+        const tid = this.time.ticked(tick).hash();
+        for (let item of thisDeletesByTid[tid] ?? [])
+          if (!prevFlatInserts.has([item, tid]))
+            cut.deletes.delete([item, tid]);
+      }
+      // Add deletes for any inserts from prev where tid in intersection, unless
+      // still inserted in cut
+      for (let tick = this.from; tick <= prev.time.ticks; tick++) {
+        const tid = this.time.ticked(tick).hash();
+        for (let item of prevInsertsByTid[tid] ?? [])
+          if (!cut.inserts.has([item, tid]))
+            cut.deletes.add([item, tid]);
+      }
+      return {
+        from: prev.time.ticked().ticks,
+        time: this.time,
+        deletes: this.expand(cut.deletes),
+        inserts: this.expand(cut.inserts)
+      };
+    }
+  }
+
+  private overlapsTailOf(prev: CausalTimeRange<C>) {
+    return this.from >= prev.from && this.from <= prev.time.ticks &&
+      // Do both times rewound to our from-time have the same hash?
+      this.time.ticked(this.from).hash() === prev.time.ticked(this.from).hash();
   }
 
   private expand(itemTids: Iterable<[T, string]>): [T, string[]][] {
@@ -108,16 +154,23 @@ export class FusableCausalOperation<T, C extends CausalClock> implements CausalO
     return [...expanded];
   }
 
-  private mutable(): MutableOperation<[T, string]> {
+  private mutable(op: CausalOperation<T, C> = this): MutableOperation<[T, string]> {
     const newFlatIndexSet = this.newFlatIndexSet;
     return new class extends MutableOperation<[T, string]> {
       constructSet(items?: Iterable<[T, string]>) {
-        return newFlatIndexSet().addAll(items);
+        return newFlatIndexSet(items);
       }
     }({
-      deletes: flatten(this.deletes),
-      inserts: flatten(this.inserts)
+      deletes: flatten(op.deletes),
+      inserts: flatten(op.inserts)
     });
+  }
+
+  private byTid(part: Iterable<[T, string[]]>) {
+    const pbt: { [tid: string]: T[] } = {};
+    for (let [item, tid] of flatten(part))
+      (pbt[tid] ??= []).push(item);
+    return pbt;
   }
 
   private newIndexMap = () => {
@@ -129,7 +182,7 @@ export class FusableCausalOperation<T, C extends CausalClock> implements CausalO
     }();
   }
 
-  private newFlatIndexSet = () => {
+  private newFlatIndexSet = (items?: Iterable<[T, string]>) => {
     const getIndex = this.getIndex;
     return new class WithTidsSet extends IndexSet<[T, string]> {
       construct(ts?: Iterable<[T, string]>) {
@@ -139,7 +192,7 @@ export class FusableCausalOperation<T, C extends CausalClock> implements CausalO
         const [item, tid] = key;
         return `${getIndex(item)}^${tid}`;
       };
-    }();
+    }(items);
   }
 }
 

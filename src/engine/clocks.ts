@@ -21,13 +21,10 @@ export interface CausalClock {
    */
   anyLt(other: this, includeIds?: 'includeIds'): boolean;
   /**
-   * @return A hash of the time, usable as a stable operation identifier
+   * @return A hash of the time, usable as a stable operation or message
+   * identifier
    */
   hash(): string;
-  /**
-   * @param that clock to compare
-   */
-  equals(that: this): boolean;
 }
 
 export class TreeClockFork {
@@ -53,6 +50,15 @@ export class TreeClockFork {
     return left != null || right != null ? (left ?? 0) + (right ?? 0) : null;
   }
 
+  get hasId() {
+    return this.left.hasId || this.right.hasId;
+  }
+
+  scrubId(): TreeClockFork {
+    const left = this.left.scrubId(), right = this.right.scrubId();
+    return this.left === left && this.right === right ? this : new TreeClockFork(left, right);
+  }
+
   equals(that: TreeClockFork): boolean {
     return this.left.equals(that.left) && this.right.equals(that.right);
   }
@@ -61,8 +67,8 @@ export class TreeClockFork {
     return `{ ${this.left}, ${this.right} }`;
   }
 
-  toJson(): [TreeClockJson, TreeClockJson] {
-    return [this.left.toJson(), this.right.toJson()];
+  toJson(forHash?: 'forHash'): [TreeClockJson, TreeClockJson] {
+    return [this.left.toJson(forHash), this.right.toJson(forHash)];
   }
 
   static fromJson(json: [TreeClockJson, TreeClockJson]): TreeClockFork | null {
@@ -95,12 +101,12 @@ export class TreeClock implements CausalClock {
 
   /**
    * Formal mapping from a clock time to a transaction ID. Used in the creation
-   * of reified operation deletes and inserts. Injective but not necessarily
-   * one-way (do not use for security).
+   * of reified operation deletes and inserts. Injective but not safely one-way
+   * (do not use as a cryptographic hash).
    * @param time the clock time
    */
   hash() {
-    const buf = MsgPack.encode(this.toJson());
+    const buf = MsgPack.encode(this.toJson('forHash'));
     // If shorter than sha1 (20 bytes), do not hash
     return buf.length > 20 ? sha1Digest(buf) : buf.toString('base64');
   }
@@ -179,12 +185,16 @@ export class TreeClock implements CausalClock {
       throw new Error('Trying to set ticks < 0');
     } else if (this.isId) {
       return new TreeClock(true, ticks ?? this._ticks + 1, this._fork);
+    } else if (ticks != null && ticks < this._ticks) {
+      // If ticks < this._ticks, we drop any fork
+      return new TreeClock(this.hasId, ticks);
     } else if (this._fork) {
-      const leftResult = this._fork.left._ticked(ticks == null ? null : ticks - this._ticks);
+      const forkTicks = ticks == null ? null : ticks - this._ticks;
+      const leftResult = this._fork.left._ticked(forkTicks);
       if (leftResult)
         return new TreeClock(false, this._ticks, new TreeClockFork(leftResult, this._fork.right));
 
-      const rightResult = this._fork.right._ticked(ticks == null ? null : ticks - this._ticks);
+      const rightResult = this._fork.right._ticked(forkTicks);
       if (rightResult)
         return new TreeClock(false, this._ticks, new TreeClockFork(this._fork.left, rightResult));
     }
@@ -240,15 +250,19 @@ export class TreeClock implements CausalClock {
     }
   }
 
+  get hasId(): boolean {
+    return this.isId || this._fork?.hasId || false;
+  }
+
   scrubId(): TreeClock {
     if (this.isId) {
       return new TreeClock(false, this._ticks);
     } else if (this._fork != null) {
-      return new TreeClock(false, this._ticks, new TreeClockFork(
-        this._fork.left.scrubId(), this._fork.right.scrubId()));
-    } else {
-      return this;
+      const fork = this._fork.scrubId();
+      if (fork !== this._fork)
+        return new TreeClock(false, this._ticks, fork);
     }
+    return this;
   }
 
   anyLt(other: TreeClock, includeIds?: 'includeIds'): boolean {
@@ -283,15 +297,26 @@ export class TreeClock implements CausalClock {
   // v8(chrome/nodejs) console
   [inspect] = () => this.toString();
 
-  toJson(): TreeClockJson {
-    if (this.isId) // 0 or 1 element array for ID
+  toJson(forHash?: 'forHash'): TreeClockJson {
+    if (this.isId) {// 0 or 1 element array for ID
       return this._ticks > 0 ? [this._ticks] : [];
-    else if (this._fork == null) // Plain number for non-ID
+    } else if (this._fork == null) { // Plain number for non-ID
       return this._ticks;
-    else if (this._ticks == 0) // 2 element array for ticks and fork
-      return this._fork.toJson();
-    else // 3 element array for ticks and fork
-      return [this._ticks, ...this._fork.toJson()];
+    } else {
+      const forkJson = this._fork.toJson(forHash);
+      if (forHash) {
+        const zero = forkJson.map(isZeroId);
+        if (!zero.includes(null))
+          if (zero.includes(true))
+            return this._ticks > 0 ? [this._ticks] : [];
+          else
+            return this._ticks;
+      }
+      if (this._ticks == 0) // 2 element array for ticks and fork
+        return forkJson;
+      else // 3 element array for ticks and fork
+        return [this._ticks, ...forkJson];
+    }
   }
 
   static fromJson(json: TreeClockJson): TreeClock | null {
@@ -313,6 +338,15 @@ export class TreeClock implements CausalClock {
     }
     return null;
   }
+}
+
+function isZeroId(json: TreeClockJson) {
+  if (typeof json == 'number')
+    return json === 0 ? false : null;
+  else if (json.length === 0)
+    return true;
+  else
+    return null;
 }
 
 export type TreeClockJson =
