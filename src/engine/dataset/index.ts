@@ -60,7 +60,10 @@ export interface Dataset {
   transact(txn: TxnOptions<TxnResult>): Promise<void>;
   transact<T>(txn: TxnOptions<TxnValueResult<T>>): Promise<T>;
 
+  /** Exact match kvp retrieval */
   get(key: string): Promise<Buffer | undefined>;
+  /** Kvp retrieval by key greater-than-or-equal */
+  gte(key: string): Promise<[string, Buffer] | undefined>;
 
   clear(): Promise<void>;
 
@@ -222,6 +225,22 @@ export class QuadStoreDataset implements Dataset {
           resolve(buf);
         }
       }));
+  }
+
+  @notClosed.async
+  gte(key: string): Promise<[string, Buffer] | undefined> {
+    return new Promise<[string, Buffer] | undefined>((resolve, reject) => {
+      const it = this.store.db.iterator({ gte: key, limit: 1, keyAsBuffer: false });
+      it.next((err, key: string, value: Buffer) => {
+        if (err)
+          reject(err);
+        else if (key != null && value != null)
+          resolve([key, value]);
+        else
+          resolve(undefined);
+        it.end(err => err && console.warn(err));
+      });
+    });
   }
 
   @notClosed.async

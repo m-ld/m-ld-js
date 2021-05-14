@@ -371,7 +371,8 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
     }
   }
 
-  private acceptRecoveryUpdates(updates: Observable<OperationMessage>, retry: Subscriber<ConnectStyle>) {
+  private acceptRecoveryUpdates(
+    updates: Observable<OperationMessage>, retry: Subscriber<ConnectStyle>) {
     this.remoteUpdates.attach(updates).then(() => {
       // If we were a new clone, we're up-to-date now
       this.log.info('connected');

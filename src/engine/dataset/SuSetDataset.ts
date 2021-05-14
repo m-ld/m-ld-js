@@ -165,7 +165,7 @@ export class SuSetDataset {
         const tick = time.getTicks(journal.safeTime);
         if (lastTime != null)
           journal.tail().then(tail => tail.gwc).then(...lastTime.settle);
-        const found = tick != null ? await journal.entry(tick) : '';
+        const found = tick != null ? await this.journalData.entryFor(tick) : '';
         const nextEntry = async (entry: SuSetJournalEntry) => [entry, await entry.next()];
         return {
           return: !found ? undefined : from(nextEntry(found)).pipe(

@@ -8,18 +8,34 @@ import { MeldOperation } from '../MeldEncoding';
 /** There is only one journal with a fixed key. */
 const JOURNAL_KEY = '_qs:journal';
 
-/** Journal entries are indexed by tick as `_qs:entry:${tick}`. */
+/**
+ * Journal entries are indexed by end-tick as
+ * `_qs:entry:${zeroPad(tick.toString(36), 8)}`. This gives a maximum tick of
+ * 36^8, about 3 trillion, about 90 years in milliseconds.
+ */
 type EntryKey = ReturnType<typeof entryKey>;
+const ENTRY_KEY_PRE = '_qs:entry';
+const ENTRY_KEY_LEN = 8;
+const ENTRY_KEY_PAD = new Array(ENTRY_KEY_LEN).fill('0').join('');
 function entryKey(tick: number) {
-  return toPrefixedId('_qs:entry', tick.toString());
+  // Dummy head has tick -1
+  if (tick === -1)
+    return toPrefixedId(ENTRY_KEY_PRE, 'head');
+  else if (tick >= 0)
+    return toPrefixedId(ENTRY_KEY_PRE,
+      `${ENTRY_KEY_PAD}${tick.toString(36)}`.slice(-ENTRY_KEY_LEN));
+  else
+    throw 'Invalid entry tick ' + tick;
 }
 
 interface JournalJson {
   tail: EntryKey;
-  time: any; // JSON-encoded TreeClock (the local clock)
+  time: TreeClockJson; // the local clock time
 }
 
 type JournalEntryJson = [
+  /** Start of local tick range, inclusive. The entry key is the encoded end. */
+  number,
   /** Raw operation - may contain Buffers */
   EncodedOperation,
   /**
@@ -40,10 +56,12 @@ export class SuSetJournalEntry {
     private readonly dataset: SuSetJournalDataset,
     private readonly json: JournalEntryJson,
     readonly key: EntryKey,
-    readonly operation = json[0],
+    // Decompose some content for convenience, unless provided
+    readonly start = json[0],
+    readonly operation = json[1],
     readonly time = TreeClock.fromJson(operation[2]) as TreeClock,
-    readonly gwc = TreeClock.fromJson(json[1]) as TreeClock,
-    readonly nextKey = json[2]) {
+    readonly gwc = TreeClock.fromJson(json[2]) as TreeClock,
+    readonly nextKey = json[3]) {
   }
 
   async next(): Promise<SuSetJournalEntry | undefined> {
@@ -52,10 +70,10 @@ export class SuSetJournalEntry {
   }
 
   static head(localTime?: TreeClock, gwc?: TreeClock): [EntryKey, Partial<JournalEntryJson>] {
-    return [entryKey(localTime?.ticks ?? -1), [
+    const tick = localTime?.ticks ?? -1;
+    return [entryKey(tick), [
       // Dummy operation for head
-      [2, localTime?.ticks ?? -1, (localTime ?? TreeClock.GENESIS).toJson(), '{}', '{}'],
-      gwc?.toJson()
+      tick, [2, tick, (localTime ?? TreeClock.GENESIS).toJson(), '{}', '{}'], gwc?.toJson()
     ]];
   }
 
@@ -64,11 +82,13 @@ export class SuSetJournalEntry {
   } {
     const dataset = this.dataset;
     class EntryBuild {
+      start: number;
       key: EntryKey;
       gwc: TreeClock;
       next?: EntryBuild;
 
       constructor(prevGwc: TreeClock, readonly op: MeldOperation, readonly localTime: TreeClock) {
+        this.start = localTime.ticks;
         this.key = entryKey(localTime.ticks);
         this.gwc = prevGwc.update(op.time);
       }
@@ -76,12 +96,13 @@ export class SuSetJournalEntry {
       *build(): Iterable<SuSetJournalEntry> {
         const nextKey = this.next != null ? this.next.key : undefined;
         const json: JournalEntryJson = [
+          this.start,
           this.op.encoded,
           this.gwc.toJson(),
           nextKey
         ];
         yield new SuSetJournalEntry(dataset, json, this.key,
-          this.op.encoded, this.op.time, this.gwc, nextKey);
+          this.start, this.op.encoded, this.op.time, this.gwc, nextKey);
         if (this.next)
           yield* this.next.build();
       }
@@ -100,7 +121,7 @@ export class SuSetJournalEntry {
       commit: batch => {
         const entries = [...head.build()];
         const newJson: JournalEntryJson = [...this.json];
-        newJson[2] = entries[0].key; // Next key
+        newJson[3] = entries[0].key; // Next key
         batch.put(this.key, MsgPack.encode(newJson));
         entries.forEach(entry => batch.put(entry.key, MsgPack.encode(entry.json)));
         journal.commit(entries.slice(-1)[0], tail.localTime)(batch);
@@ -117,6 +138,7 @@ export class SuSetJournal {
   constructor(
     private readonly dataset: SuSetJournalDataset,
     json: JournalJson,
+    // Decompose some content for convenience, unless provided
     readonly tailKey = json.tail,
     readonly time = json.time != null ? TreeClock.fromJson(json.time) : null) {
   }
@@ -136,10 +158,6 @@ export class SuSetJournal {
         throw new Error('Journal tail is missing');
     }
     return this._tail;
-  }
-
-  entry(tick: number) {
-    return this.dataset.entry(entryKey(tick));
   }
 
   setLocalTime(localTime: TreeClock, newClone?: boolean): Kvps {
@@ -219,5 +237,18 @@ export class SuSetJournalDataset {
     const value = await this.ds.get(key);
     if (value != null)
       return new SuSetJournalEntry(this, MsgPack.decode(value), key);
+  }
+
+  async entryFor(tick: number) {
+    const kvp = await this.ds.gte(entryKey(tick));
+    if (kvp != null) {
+      const [key, value] = kvp;
+      if (key.startsWith(ENTRY_KEY_PRE)) {
+        const firstAfter = new SuSetJournalEntry(this, MsgPack.decode(value), key);
+        // Check that the entry's tick range covers the request
+        if (firstAfter.start <= tick)
+          return firstAfter;
+      }
+    }
   }
 }
