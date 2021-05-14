@@ -109,15 +109,11 @@ export class SuSetJournalEntry {
     }
     let head = new EntryBuild(this.gwc, op, localTime), tail = head;
     return {
-      /**
-       * Adds another journal entry to this builder
-       */
+      /** Adds another journal entry to this builder */
       next: (op, localTime) => {
         tail = tail.next = new EntryBuild(tail.gwc, op, localTime);
       },
-      /**
-       * Commits the built journal entries to the journal
-       */
+      /** Commits the built journal entries to the journal */
       commit: batch => {
         const entries = [...head.build()];
         const newJson: JournalEntryJson = [...this.json];
