@@ -1,4 +1,4 @@
-import { FusableCausalOperation } from '../src/engine/ops';
+import { CausalTimeRange, FusableCausalOperation } from '../src/engine/ops';
 import { TreeClock } from '../src/engine/clocks';
 
 // MutableOperations are tested (using quads) in dataset.test.ts
@@ -8,20 +8,20 @@ const time = (ticks: number) => TreeClock.GENESIS.ticked(ticks)
 const tid = (ticks: number) => time(ticks).hash();
 
 describe('Fusable Causal Operations', () => {
-  describe('fusing', () => {
-    test('do not fuse if not sequential', () => {
+  describe('preconditions', () => {
+    test('not contiguous', () => {
       const one = new CausalIntegerOp({ from: 0, time: time(0), deletes: [], inserts: [] });
       const two = new CausalIntegerOp({ from: 2, time: time(2), deletes: [], inserts: [] });
-      expect(one.fuse(two)).toBeUndefined();
+      expect(CausalTimeRange.contiguous(one, two)).toBe(false);
     });
 
-    test('do not fuse if reversed', () => {
+    test('reversed not contiguous', () => {
       const one = new CausalIntegerOp({ from: 1, time: time(1), deletes: [], inserts: [] });
       const two = new CausalIntegerOp({ from: 0, time: time(0), deletes: [], inserts: [] });
-      expect(one.fuse(two)).toBeUndefined();
+      expect(CausalTimeRange.contiguous(one, two)).toBe(false);
     });
 
-    test('do not fuse if different IDs', () => {
+    test('different IDs not contiguous', () => {
       const { left, right } = time(0).forked();
       const one = new CausalIntegerOp({
         from: 1, time: left.ticked(1), deletes: [], inserts: []
@@ -29,12 +29,27 @@ describe('Fusable Causal Operations', () => {
       const two = new CausalIntegerOp({
         from: 2, time: right.ticked(2), deletes: [], inserts: []
       });
-      expect(one.fuse(two)).toBeUndefined();
+      expect(CausalTimeRange.contiguous(one, two)).toBe(false);
     });
 
+    test('disjoint do not overlap', () => {
+      const one = new CausalIntegerOp({ from: 0, time: time(0), deletes: [], inserts: [] });
+      const two = new CausalIntegerOp({ from: 2, time: time(2), deletes: [], inserts: [] });
+      expect(CausalTimeRange.overlaps(one, two)).toBe(false);
+    });
+
+    test('sequential do not overlap', () => {
+      const one = new CausalIntegerOp({ from: 0, time: time(0), deletes: [], inserts: [] });
+      const two = new CausalIntegerOp({ from: 1, time: time(1), deletes: [], inserts: [] });
+      expect(CausalTimeRange.overlaps(one, two)).toBe(false);
+    });
+  });
+
+  describe('fusing', () => {
     test('fuses empty', () => {
       const one = new CausalIntegerOp({ from: 0, time: time(0), deletes: [], inserts: [] });
       const two = new CausalIntegerOp({ from: 1, time: time(1), deletes: [], inserts: [] });
+      expect(CausalTimeRange.contiguous(one, two)).toBe(true);
       const result = one.fuse(two);
       expect(result?.from).toBe(0);
       expect(result?.time.equals(two.time)).toBe(true);
@@ -46,6 +61,7 @@ describe('Fusable Causal Operations', () => {
       const { left } = time(0).forked();
       const one = new CausalIntegerOp({ from: 0, time: time(0), deletes: [], inserts: [] });
       const two = new CausalIntegerOp({ from: 1, time: left.ticked(), deletes: [], inserts: [] });
+      expect(CausalTimeRange.contiguous(one, two)).toBe(true);
       const result = one.fuse(two);
       expect(result?.from).toBe(0);
       expect(result?.time.equals(two.time)).toBe(true);
@@ -60,6 +76,7 @@ describe('Fusable Causal Operations', () => {
       const two = new CausalIntegerOp({
         from: 1, time: time(1), deletes: [], inserts: [[1, [tid(1)]]]
       });
+      expect(CausalTimeRange.contiguous(one, two)).toBe(true);
       const result = one.fuse(two);
       expect(result?.from).toBe(0);
       expect(result?.time.equals(two.time)).toBe(true);
@@ -75,6 +92,7 @@ describe('Fusable Causal Operations', () => {
       const two = new CausalIntegerOp({
         from: 1, time: time(1), deletes: [], inserts: [[0, [tid(1)]]]
       });
+      expect(CausalTimeRange.contiguous(one, two)).toBe(true);
       const result = one.fuse(two);
       expect(result?.from).toBe(0);
       expect(result?.time.equals(two.time)).toBe(true);
@@ -91,6 +109,7 @@ describe('Fusable Causal Operations', () => {
       const two = new CausalIntegerOp({
         from: 1, time: time(1), deletes: [[0, [tid(0)]]], inserts: []
       });
+      expect(CausalTimeRange.contiguous(one, two)).toBe(true);
       const result = one.fuse(two);
       expect(result?.from).toBe(0);
       expect(result?.time.equals(two.time)).toBe(true);
@@ -108,7 +127,9 @@ describe('Fusable Causal Operations', () => {
       const thr = new CausalIntegerOp({
         from: 2, time: time(2), deletes: [[0, [tid(0)]]], inserts: []
       });
-      const head = one.fuse(two) ?? one;
+      expect(CausalTimeRange.contiguous(one, two)).toBe(true);
+      const head = one.fuse(two);
+      expect(CausalTimeRange.contiguous(head, thr)).toBe(true);
       const result = new CausalIntegerOp(head).fuse(thr);
       expect(result?.from).toBe(0);
       expect(result?.time.equals(thr.time)).toBe(true);
@@ -127,7 +148,9 @@ describe('Fusable Causal Operations', () => {
         from: 2, time: time(2), deletes: [[0, [tid(0)]]], inserts: []
       });
       // Using redundant insert to show associativity
+      expect(CausalTimeRange.contiguous(two, thr)).toBe(true);
       const tail = two.fuse(thr);
+      expect(CausalTimeRange.contiguous(one, tail)).toBe(true);
       const result = tail ? one.fuse(tail) : undefined;
       expect(result?.from).toBe(0);
       expect(result?.time.equals(thr.time)).toBe(true);
@@ -137,22 +160,11 @@ describe('Fusable Causal Operations', () => {
   });
 
   describe('cutting', () => {
-    test('does not cut disjoint', () => {
-      const one = new CausalIntegerOp({ from: 0, time: time(0), deletes: [], inserts: [] });
-      const two = new CausalIntegerOp({ from: 2, time: time(2), deletes: [], inserts: [] });
-      expect(two.cutBy(one)).toBeUndefined();
-    });
-
-    test('does not cut sequential', () => {
-      const one = new CausalIntegerOp({ from: 0, time: time(0), deletes: [], inserts: [] });
-      const two = new CausalIntegerOp({ from: 1, time: time(1), deletes: [], inserts: [] });
-      expect(two.cutBy(one)).toBeUndefined();
-    });
-
     test('cuts empty', () => {
       const one = new CausalIntegerOp({ from: 0, time: time(0), deletes: [], inserts: [] });
       const two = new CausalIntegerOp({ from: 0, time: time(1), deletes: [], inserts: [] });
-      const cut = two.cutBy(one) ?? two;
+      expect(CausalTimeRange.overlaps(one, two)).toBe(true);
+      const cut = two.cutBy(one);
       expect(cut.from).toBe(1);
       expect(cut.time.equals(two.time)).toBe(true);
       expect(cut.deletes).toEqual([]);
@@ -164,7 +176,8 @@ describe('Fusable Causal Operations', () => {
       const two = new CausalIntegerOp({
         from: 0, time: time(1), deletes: [], inserts: [[1, [tid(1)]]]
       });
-      const cut = two.cutBy(one) ?? two;
+      expect(CausalTimeRange.overlaps(one, two)).toBe(true);
+      const cut = two.cutBy(one);
       expect(cut.from).toBe(1);
       expect(cut.time.equals(two.time)).toBe(true);
       expect(cut.deletes).toEqual([]);
@@ -178,7 +191,8 @@ describe('Fusable Causal Operations', () => {
       const two = new CausalIntegerOp({
         from: 0, time: time(1), deletes: [], inserts: []
       });
-      const cut = two.cutBy(one) ?? two;
+      expect(CausalTimeRange.overlaps(one, two)).toBe(true);
+      const cut = two.cutBy(one);
       expect(cut.from).toBe(1);
       expect(cut.time.equals(two.time)).toBe(true);
       expect(cut.deletes).toEqual([[0, [tid(0)]]]);
@@ -193,7 +207,8 @@ describe('Fusable Causal Operations', () => {
       const two = new CausalIntegerOp({
         from: 1, time: time(2), deletes: [[0, [tid(0)]]], inserts: []
       });
-      const cut = two.cutBy(one) ?? two;
+      expect(CausalTimeRange.overlaps(one, two)).toBe(true);
+      const cut = two.cutBy(one);
       expect(cut.from).toBe(2);
       expect(cut.time.equals(two.time)).toBe(true);
       expect(cut.deletes).toEqual([]);
@@ -208,7 +223,8 @@ describe('Fusable Causal Operations', () => {
       const two = new CausalIntegerOp({
         from: 1, time: time(2), deletes: [[0, [tid(0)]]], inserts: []
       });
-      const cut = two.cutBy(one) ?? two;
+      expect(CausalTimeRange.overlaps(one, two)).toBe(true);
+      const cut = two.cutBy(one);
       expect(cut.from).toBe(2);
       expect(cut.time.equals(two.time)).toBe(true);
       expect(cut.deletes).toEqual([[0, [tid(0)]]]);

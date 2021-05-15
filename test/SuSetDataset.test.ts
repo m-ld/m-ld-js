@@ -103,9 +103,9 @@ describe('SU-Set Dataset', () => {
 
         expect(from).toBe(local.time.ticks);
         expect(local.time.equals(TreeClock.fromJson(time) as TreeClock)).toBe(true);
-        expect(await MeldEncoding.jsonFromBuffer(ins))
+        expect(MeldEncoding.jsonFromBuffer(ins))
           .toEqual({ '@id': 'fred', 'name': 'Fred' });
-        expect(await MeldEncoding.jsonFromBuffer(del)).toEqual({});
+        expect(MeldEncoding.jsonFromBuffer(del)).toEqual({});
       });
 
       test('applies an insert operation', async () => {
@@ -219,8 +219,8 @@ describe('SU-Set Dataset', () => {
           expect(msg.time.equals(local.time)).toBe(true);
           const [, , , del, ins] = msg.data;
 
-          expect(await MeldEncoding.jsonFromBuffer(ins)).toEqual({});
-          expect(await MeldEncoding.jsonFromBuffer(del)).toMatchObject({
+          expect(MeldEncoding.jsonFromBuffer(ins)).toEqual({});
+          expect(MeldEncoding.jsonFromBuffer(del)).toMatchObject({
             'tid': firstTid,
             's': 'fred',
             'p': '#name',

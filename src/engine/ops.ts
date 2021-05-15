@@ -97,58 +97,54 @@ export class FusableCausalOperation<T, C extends CausalClock> implements CausalO
     this.inserts = [...inserts];
   }
 
-  fuse(next: CausalOperation<T, C>): CausalOperation<T, C> | undefined {
-    // We can fuse iff we are causally contiguous with the next operation.
-    if (CausalTimeRange.contiguous(this, next)) {
-      // Not using mutable append, our semantics are different!
-      const fused = this.mutable();
-      // 1. Fuse all deletes
-      fused.deletes.addAll(flatten(next.deletes));
-      // 2. Remove anything we insert that is deleted
-      const redundant = fused.inserts.deleteAll(flatten(next.deletes));
-      fused.deletes.deleteAll(redundant);
-      // 3. Fuse remaining inserts (we can't be deleting any of these)
-      fused.inserts.addAll(flatten(next.inserts));
-      return {
-        from: this.from,
-        time: next.time,
-        deletes: this.expand(fused.deletes),
-        inserts: this.expand(fused.inserts)
-      };
-    }
+  /** Pre: We can fuse iff we are causally contiguous with the next operation */
+  fuse(next: CausalOperation<T, C>): CausalOperation<T, C> {
+    // Not using mutable append, our semantics are different!
+    const fused = this.mutable();
+    // 1. Fuse all deletes
+    fused.deletes.addAll(flatten(next.deletes));
+    // 2. Remove anything we insert that is deleted
+    const redundant = fused.inserts.deleteAll(flatten(next.deletes));
+    fused.deletes.deleteAll(redundant);
+    // 3. Fuse remaining inserts (we can't be deleting any of these)
+    fused.inserts.addAll(flatten(next.inserts));
+    return {
+      from: this.from,
+      time: next.time,
+      deletes: this.expand(fused.deletes),
+      inserts: this.expand(fused.inserts)
+    };
   }
 
-  cutBy(prev: Omit<CausalOperation<T, C>, 'deletes'>): CausalOperation<T, C> | undefined {
-    // We can cut iff our from is within the previous range
-    if (CausalTimeRange.overlaps(prev, this)) {
-      const cut = this.mutable(),
-        // Also do some indexing
-        prevFlatInserts = this.newFlatIndexSet(flatten(prev.inserts)),
-        thisDeletesByTid = this.byTid(this.deletes),
-        prevInsertsByTid = this.byTid(prev.inserts);
-      // Remove any deletes where tid in exclusive-prev, unless inserted in prev
-      for (let tick = prev.from; tick < this.from; tick++) {
-        // Can use a hash after creation for external ticks as in fusions
-        const tid = this.time.ticked(tick).hash();
-        for (let item of thisDeletesByTid[tid] ?? [])
-          if (!prevFlatInserts.has([item, tid]))
-            cut.deletes.delete([item, tid]);
-      }
-      // Add deletes for any inserts from prev where tid in intersection, unless
-      // still inserted in cut
-      for (let tick = this.from; tick <= prev.time.ticks; tick++) {
-        const tid = this.time.ticked(tick).hash();
-        for (let item of prevInsertsByTid[tid] ?? [])
-          if (!cut.inserts.has([item, tid]))
-            cut.deletes.add([item, tid]);
-      }
-      return {
-        from: prev.time.ticked().ticks,
-        time: this.time,
-        deletes: this.expand(cut.deletes),
-        inserts: this.expand(cut.inserts)
-      };
+  /** Pre: We can cut iff our from is within the previous range */
+  cutBy(prev: Omit<CausalOperation<T, C>, 'deletes'>): CausalOperation<T, C> {
+    const cut = this.mutable(),
+      // Also do some indexing
+      prevFlatInserts = this.newFlatIndexSet(flatten(prev.inserts)),
+      thisDeletesByTid = this.byTid(this.deletes),
+      prevInsertsByTid = this.byTid(prev.inserts);
+    // Remove any deletes where tid in exclusive-prev, unless inserted in prev
+    for (let tick = prev.from; tick < this.from; tick++) {
+      // Can use a hash after creation for external ticks as in fusions
+      const tid = this.time.ticked(tick).hash();
+      for (let item of thisDeletesByTid[tid] ?? [])
+        if (!prevFlatInserts.has([item, tid]))
+          cut.deletes.delete([item, tid]);
     }
+    // Add deletes for any inserts from prev where tid in intersection, unless
+    // still inserted in cut
+    for (let tick = this.from; tick <= prev.time.ticks; tick++) {
+      const tid = this.time.ticked(tick).hash();
+      for (let item of prevInsertsByTid[tid] ?? [])
+        if (!cut.inserts.has([item, tid]))
+          cut.deletes.add([item, tid]);
+    }
+    return {
+      from: prev.time.ticked().ticks,
+      time: this.time,
+      deletes: this.expand(cut.deletes),
+      inserts: this.expand(cut.inserts)
+    };
   }
 
   private expand(itemTids: Iterable<[T, string]>): [T, string[]][] {

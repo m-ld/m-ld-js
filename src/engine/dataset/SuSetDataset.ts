@@ -67,7 +67,7 @@ export class SuSetDataset {
     constraints: MeldConstraint[],
     config: Pick<MeldConfig, '@id' | '@domain' | 'maxOperationSize' | 'logLevel'>) {
     this.encoding = new MeldEncoding(config['@domain'], dataset.dataFactory);
-    this.journalData = new SuSetJournalDataset(dataset);
+    this.journalData = new SuSetJournalDataset(dataset, this.encoding);
     // Update notifications are strictly ordered but don't hold up transactions
     this.datasetLock = new LocalLock(config['@id'], dataset.location);
     this.maxOperationSize = config.maxOperationSize ?? Infinity;
@@ -162,7 +162,7 @@ export class SuSetDataset {
       prepare: async () => {
         const journal = await this.journalData.journal();
         // How many ticks of mine has the requester seen?
-        const tick = time.getTicks(journal.safeTime);
+        const tick = time.getTicks(journal.time);
         if (lastTime != null)
           journal.tail().then(tail => tail.gwc).then(...lastTime.settle);
         const found = tick != null ? await this.journalData.entryFor(tick) : '';
@@ -200,7 +200,7 @@ export class SuSetDataset {
         txc.sw.next('find-tids');
         const deletedTriplesTids = await this.findTriplesTids(patch.deletes);
         const tid = time.hash();
-        const op = await this.txnOperation(tid, time, patch.inserts, asTriplesTids(deletedTriplesTids));
+        const op = this.txnOperation(tid, time, patch.inserts, asTriplesTids(deletedTriplesTids));
 
         // Include tid changes in final patch
         txc.sw.next('new-tids');
@@ -209,7 +209,7 @@ export class SuSetDataset {
         // Include journaling in final patch
         txc.sw.next('journal');
         const journal = await this.journalData.journal(), tail = await journal.tail();
-        const journaling = tail.builder(journal, op, time);
+        const journaling = tail.builder(journal).next(op, time);
 
         return {
           patch: this.transactionPatch(patch, entailments, tidPatch),
@@ -235,17 +235,18 @@ export class SuSetDataset {
     return operationMsg;
   }
 
-  private async txnTidPatch(tid: string, insert: Iterable<Quad>, deletedTriplesTids: QuadMap<Quad[]>) {
+  private async txnTidPatch(
+    tid: string, insert: Iterable<Quad>, deletedTriplesTids: QuadMap<Quad[]>) {
     const tidPatch = await this.newTriplesTids([...insert].map(quad => [quad, [tid]]));
     tidPatch.append({ deletes: flatten([...deletedTriplesTids].map(([_, tids]) => tids)) });
     return tidPatch;
   }
 
   private txnOperation(tid: string, time: TreeClock,
-    inserts: Iterable<Quad>, deletedTriplesTids: TriplesTids) {
-    const insertedTriplesTids: TriplesTids = [...inserts].map(quad => [quad, [tid]]);
-    return MeldOperation.fromOperation(this.encoding, time.ticks, time,
-      deletedTriplesTids, insertedTriplesTids);
+    inserts: Iterable<Quad>, deletes: TriplesTids) {
+    return MeldOperation.fromOperation(this.encoding, {
+      from: time.ticks, time, deletes, inserts: [...inserts].map(quad => [quad, [tid]])
+    });
   }
 
   toUserQuad = (triple: Triple): Quad => this.encoding.rdf.quad(
@@ -260,7 +261,7 @@ export class SuSetDataset {
       prepare: async txc => {
         // Check we haven't seen this transaction before
         txc.sw.next('find-tids');
-        const op = await MeldOperation.fromEncoded(this.encoding, msg.data);
+        const op = MeldOperation.fromEncoded(this.encoding, msg.data);
         this.log.debug(`Applying operation: ${op.time} @ ${localTime}`);
 
         txc.sw.next('apply-txn');
@@ -285,7 +286,7 @@ export class SuSetDataset {
         // entry for it.
         txc.sw.next('journal');
         const journal = await this.journalData.journal(), tail = await journal.tail();
-        const journaling = tail.builder(journal, op, localTime);
+        const journaling = tail.builder(journal).next(op, localTime);
 
         // If the constraint has done anything, we need to merge its work
         if (cxn != null) {
@@ -293,7 +294,7 @@ export class SuSetDataset {
           tidPatch.append(cxn.tidPatch);
           patch.append(assertions);
           // Also create a journal entry for the constraint "transaction"
-          journaling.cxn(cxn.operation, cxnTime);
+          journaling.next(cxn.operation, cxnTime);
         }
         return {
           patch: this.transactionPatch(patch, entailments, tidPatch),
@@ -341,7 +342,7 @@ export class SuSetDataset {
       assertions.remove('deletes', quad => deletedExistingTidQuads.get(quad) == null);
       const cxnId = cxnTime.hash();
       return {
-        operation: await this.txnOperation(cxnId, cxnTime, assertions.inserts, [...deletedTriplesTids]),
+        operation: this.txnOperation(cxnId, cxnTime, assertions.inserts, [...deletedTriplesTids]),
         tidPatch: await this.txnTidPatch(cxnId, assertions.inserts, deletedExistingTidQuads)
       };
     }

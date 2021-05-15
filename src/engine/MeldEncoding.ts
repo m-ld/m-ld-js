@@ -9,12 +9,8 @@ import { SubjectGraph } from './SubjectGraph';
 import { ActiveContext } from 'jsonld/lib/context';
 import { SubjectQuads } from './SubjectQuads';
 import { TreeClock } from './clocks';
-import { gzip as gzipCb, gunzip as gunzipCb, InputType } from 'zlib';
+import { gzipSync, gunzipSync } from 'zlib';
 import { CausalOperation, FusableCausalOperation } from './ops';
-const gzip = (input: InputType) => new Promise<Buffer>((resolve, reject) =>
-  gzipCb(input, (err, buf) => err ? reject(err) : resolve(buf)));
-const gunzip = (input: InputType) => new Promise<Buffer>((resolve, reject) =>
-  gunzipCb(input, (err, buf) => err ? reject(err) : resolve(buf)));
 const COMPRESS_THRESHOLD_BYTES = 1024;
 
 export class DomainContext implements Context {
@@ -61,32 +57,30 @@ export function unreify(reifications: Triple[]): [Triple, UUID[]][] {
 export type TriplesTids = [Triple, string[]][];
 
 export class MeldOperation extends FusableCausalOperation<Triple, TreeClock> {
-  static fromOperation = async (enc: MeldEncoding,
-    from: number, time: TreeClock,
-    deletes: TriplesTids, inserts: TriplesTids): Promise<MeldOperation> => {
-    const jsons = [deletes, inserts]
+  static fromOperation = (encoder: MeldEncoding,
+    op: CausalOperation<Triple, TreeClock>): MeldOperation => {
+    const jsons = [op.deletes, op.inserts]
       .map((triplesTids, i) => {
         // Encoded inserts are only reified if fused
-        if (i === 1 && from === time.ticks)
-          return triplesTids.map(([triple]) => triple);
+        if (i === 1 && op.from === op.time.ticks)
+          return [...triplesTids].map(([triple]) => triple);
         else
-          return enc.reifyTriplesTids(triplesTids);
+          return encoder.reifyTriplesTids([...triplesTids]);
       })
-      .map(enc.jsonFromTriples);
-    const [delEnc, insEnc] = await Promise.all(
-      jsons.map(json => MeldEncoding.bufferFromJson(json)));
-    const encoded: EncodedOperation = [2, from, time.toJson(), delEnc, insEnc];
-    return new MeldOperation({ from, time, deletes, inserts }, encoded, jsons);
+      .map(encoder.jsonFromTriples);
+    const [delEnc, insEnc] = jsons.map(json => MeldEncoding.bufferFromJson(json));
+    const encoded: EncodedOperation = [2, op.from, op.time.toJson(), delEnc, insEnc];
+    return new MeldOperation(op, encoded, jsons);
   }
 
-  static fromEncoded = async (enc: MeldEncoding,
-    encoded: EncodedOperation): Promise<MeldOperation> => {
+  static fromEncoded = (encoder: MeldEncoding,
+    encoded: EncodedOperation): MeldOperation => {
     const [ver] = encoded;
     if (ver < 2)
       throw new Error(`Encoded operation version ${ver} not supported`);
     let [, from, timeJson, delEnc, insEnc] = encoded;
-    const jsons = await Promise.all([delEnc, insEnc].map(MeldEncoding.jsonFromBuffer));
-    const [delTriples, insTriples] = jsons.map(enc.triplesFromJson);
+    const jsons = [delEnc, insEnc].map(MeldEncoding.jsonFromBuffer);
+    const [delTriples, insTriples] = jsons.map(encoder.triplesFromJson);
     const time = TreeClock.fromJson(timeJson) as TreeClock;
     const deletes = unreify(delTriples);
     let inserts: MeldOperation['inserts'];
@@ -168,15 +162,15 @@ export class MeldEncoding {
   triplesFromJson = (json: any): Triple[] =>
     [...new SubjectQuads('graph', this.ctx, this.rdf).quads(json)];
 
-  static async bufferFromJson(json: any): Promise<Buffer | string> {
+  static bufferFromJson(json: any): Buffer | string {
     const stringified = JSON.stringify(json);
     return stringified.length > COMPRESS_THRESHOLD_BYTES ?
-      gzip(stringified) : stringified;
+      gzipSync(stringified) : stringified;
   }
 
-  static async jsonFromBuffer(enc: string | Buffer): Promise<any> {
+  static jsonFromBuffer(enc: string | Buffer): any {
     if (typeof enc != 'string')
-      enc = (await gunzip(enc)).toString();
+      enc = gunzipSync(enc).toString();
     return JSON.parse(enc);
   }
 }

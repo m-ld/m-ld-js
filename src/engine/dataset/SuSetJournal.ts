@@ -3,7 +3,8 @@ import { EncodedOperation } from '..';
 import { TreeClock, TreeClockJson } from '../clocks';
 import { MsgPack } from '../util';
 import { Dataset, Kvps } from '.';
-import { MeldOperation } from '../MeldEncoding';
+import { MeldEncoding, MeldOperation } from '../MeldEncoding';
+import { CausalTimeRange } from '../ops';
 
 /** There is only one journal with a fixed key. */
 const JOURNAL_KEY = '_qs:journal';
@@ -50,10 +51,16 @@ type JournalEntryJson = [
   next: EntryKey | undefined
 ];
 
-type EntryBuildArgs = [op: MeldOperation, localTime: TreeClock];
+/** Utility interface for entry details; de-structures causal time range */
+interface JournalEntry extends CausalTimeRange<TreeClock> {
+  key: string,
+  start: number,
+  operation: EncodedOperation,
+  gwc: TreeClock
+}
 
 /** Immutable expansion of JournalEntryJson */
-export class SuSetJournalEntry {
+export class SuSetJournalEntry implements JournalEntry {
   constructor(
     private readonly dataset: SuSetJournalDataset,
     readonly key: EntryKey,
@@ -61,6 +68,7 @@ export class SuSetJournalEntry {
     // De-structure some content for convenience, unless provided
     readonly start = json[0],
     readonly operation = json[1],
+    readonly from = operation[1],
     readonly time = TreeClock.fromJson(operation[2]) as TreeClock,
     readonly gwc = TreeClock.fromJson(json[2]) as TreeClock,
     readonly nextKey = json[3]) {
@@ -75,45 +83,99 @@ export class SuSetJournalEntry {
     const tick = localTime?.ticks ?? -1;
     return [entryKey(tick), [
       // Dummy operation for head
-      tick, [2, tick, (localTime ?? TreeClock.GENESIS).toJson(), '{}', '{}'], gwc?.toJson()
+      tick, [2, tick, (localTime ?? TreeClock.GENESIS).toJson(), '[]', '[]'], gwc?.toJson()
     ]];
   }
 
-  builder(journal: SuSetJournal, ...args: EntryBuildArgs): {
-    cxn: (...args: EntryBuildArgs) => void, commit: Kvps
-  } {
-    let head = this.entryBuild(this.gwc, ...args), tail = head;
-    return {
-      /** Adds a constraint application entry to this builder */
-      cxn: (...args: EntryBuildArgs) => tail = tail.next(...args),
+  builder(journal: SuSetJournal) {
+    // The head represents this entry, made ready for appending new entries
+    let head = new EntryBuilder(this.dataset, this, journal.time), tail = head;
+    const builder = {
+      next: (operation: MeldOperation, localTime: TreeClock) => {
+        tail = tail.next(operation, localTime);
+        return builder;
+      },
       /** Commits the built journal entries to the journal */
-      commit: batch => {
-        const entries = head.build();
-        const newJson: JournalEntryJson = [...this.json];
-        newJson[3] = entries[0].key; // Next key
-        batch.put(this.key, MsgPack.encode(newJson));
-        entries.forEach(entry => batch.put(entry.key, MsgPack.encode(entry.json)));
-        journal.commit(entries.slice(-1)[0], tail.localTime)(batch);
-      }
+      commit: <Kvps>(batch => {
+        let entry: SuSetJournalEntry | null = null;
+        for (entry of head.build())
+          batch.put(entry.key, MsgPack.encode(entry.json));
+        if (entry == null)
+          throw new TypeError; // Head always defined
+        journal.commit(entry, tail.localTime)(batch);
+      })
     };
+    return builder;
+  }
+}
+
+class EntryBuilder {
+  private nextBuilder?: EntryBuilder
+
+  constructor(
+    private readonly dataset: SuSetJournalDataset,
+    private entry: JournalEntry,
+    public localTime: TreeClock) {
   }
 
-  private entryBuild(prevGwc: TreeClock, ...[op, localTime]: EntryBuildArgs) {
-    const start = localTime.ticks;
-    const key = entryKey(localTime.ticks);
-    const gwc = prevGwc.update(op.time);
-    let next: typeof entryBuild | undefined;
-    const entryBuild = {
-      key, localTime,
-      next: (...args: EntryBuildArgs) =>
-        next = this.entryBuild(gwc, ...args),
-      build: (): SuSetJournalEntry[] =>
-        [new SuSetJournalEntry(this.dataset, key,
-          [start, op.encoded, gwc.toJson(), next?.key],
-          start, op.encoded, op.time, gwc, next?.key)]
-          .concat(next != null ? next.build() : [])
-    }
-    return entryBuild;
+  next(operation: MeldOperation, localTime: TreeClock) {
+    // if (CausalTimeRange.contiguous(this.entry, operation))
+    //   return this.fuseNext(operation, localTime);
+    // else
+    return this.makeNext(operation, localTime);
+  }
+
+  *build(): Iterable<SuSetJournalEntry> {
+    yield new SuSetJournalEntry(this.dataset,
+      this.entry.key,
+      this.json,
+      this.entry.start,
+      this.entry.operation,
+      this.entry.from,
+      this.entry.time,
+      this.entry.gwc,
+      this.nextBuilder?.entry.key);
+    if (this.nextBuilder != null)
+      yield* this.nextBuilder.build();
+  }
+
+  private makeNext(operation: MeldOperation, localTime: TreeClock) {
+    return this.nextBuilder = new EntryBuilder(this.dataset, {
+      key: entryKey(localTime.ticks),
+      start: localTime.ticks,
+      operation: operation.encoded,
+      from: operation.from,
+      time: operation.time,
+      gwc: this.nextGwc(operation)
+    }, localTime);
+  }
+
+  private fuseNext(operation: MeldOperation, localTime: TreeClock) {
+    const thisOp = MeldOperation.fromEncoded(this.dataset.encoding, this.entry.operation);
+    const fused = MeldOperation.fromOperation(this.dataset.encoding, thisOp.fuse(operation));
+    this.entry = {
+      key: entryKey(localTime.ticks),
+      start: this.entry.start,
+      operation: fused.encoded,
+      from: fused.from,
+      time: fused.time,
+      gwc: this.nextGwc(operation)
+    };
+    this.localTime = localTime;
+    return this;
+  }
+
+  private nextGwc(operation: MeldOperation): TreeClock {
+    return this.entry.gwc.update(operation.time);
+  }
+
+  private get json(): JournalEntryJson {
+    return [
+      this.entry.start,
+      this.entry.operation,
+      this.entry.gwc.toJson(),
+      this.nextBuilder?.entry.key
+    ];
   }
 }
 
@@ -127,13 +189,7 @@ export class SuSetJournal {
     json: JournalJson,
     // De-structure some content for convenience, unless provided
     readonly tailKey = json.tail,
-    readonly time = json.time != null ? TreeClock.fromJson(json.time) : null) {
-  }
-
-  get safeTime() {
-    if (this.time == null)
-      throw new Error('Journal time not available');
-    return this.time;
+    readonly time = TreeClock.fromJson(json.time) as TreeClock) {
   }
 
   async tail(): Promise<SuSetJournalEntry> {
@@ -190,7 +246,8 @@ export class SuSetJournalDataset {
   _journal: SuSetJournal | null = null;
 
   constructor(
-    private ds: Dataset) {
+    private readonly ds: Dataset,
+    readonly encoding: MeldEncoding) {
   }
 
   async initialise(): Promise<Kvps | undefined> {
