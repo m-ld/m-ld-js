@@ -16,7 +16,7 @@ import { Logger } from 'loglevel';
 import { MeldError } from '../MeldError';
 import { LocalLock } from '../local';
 import { SUSET_CONTEXT, tripleId } from './SuSetGraph';
-import { SuSetJournalDataset, SuSetJournalEntry } from './SuSetJournal';
+import { SuSetJournal, SuSetJournalDataset, SuSetJournalEntry } from './SuSetJournal';
 import { array, GraphSubject, MeldConfig, Read } from '../..';
 import { QuadMap, TripleMap, Triple } from '../quads';
 import { CheckList } from '../../constraints/CheckList';
@@ -134,8 +134,7 @@ export class SuSetDataset {
       id: 'suset-save-clock',
       prepare: async () => {
         const journal = await this.journalData.journal(),
-          tail = await journal.tail(),
-          newClock = await prepare(tail.gwc);
+          newClock = await prepare(journal.gwc);
         return {
           kvps: journal.setLocalTime(newClock, newClone),
           return: newClock
@@ -164,21 +163,16 @@ export class SuSetDataset {
         // How many ticks of mine has the requester seen?
         const tick = time.getTicks(journal.time);
         if (lastTime != null)
-          journal.tail().then(tail => tail.gwc).then(...lastTime.settle);
+          lastTime.resolve(journal.gwc);
         const found = tick != null ? await this.journalData.entryFor(tick) : '';
-        const nextEntry = async (entry: SuSetJournalEntry) => [entry, await entry.next()];
         return {
-          return: !found ? undefined : from(nextEntry(found)).pipe(
-            expand(([_, entry]) => {
-              if (this.dataset.closed)
-                throw new MeldError('Clone has closed');
-              return entry != null ? nextEntry(entry) : EMPTY;
-            }),
-            takeWhile<[SuSetJournalEntry, SuSetJournalEntry]>(([_, entry]) => entry != null),
+          return: !found ? undefined : from(found.next()).pipe(
+            expand(entry => entry != null ? entry.next() : EMPTY),
+            takeWhile<SuSetJournalEntry>(entry => entry != null),
             // Don't emit an entry if it's all less than the requested time
-            filter(([_, entry]) => time.anyLt(entry.time, 'includeIds')),
-            map(([prev, entry]) => new OperationMessage(
-              prev.gwc.getTicks(entry.time), entry.operation, entry.time)))
+            filter(entry => time.anyLt(entry.time, 'includeIds')),
+            map(entry => new OperationMessage(
+              entry.prev, entry.operation, entry.time)))
         };
       }
     });
@@ -214,7 +208,7 @@ export class SuSetDataset {
         return {
           patch: this.transactionPatch(patch, entailments, tidPatch),
           kvps: journaling.commit,
-          return: this.operationMessage(tail, time, op),
+          return: this.operationMessage(journal, time, op),
           after: () => this.emitUpdate(update)
         };
       }
@@ -226,8 +220,8 @@ export class SuSetDataset {
       this.updateSource.next(update);
   }
 
-  private operationMessage(tail: SuSetJournalEntry, time: TreeClock, op: MeldOperation) {
-    const prev = tail.gwc.getTicks(time);
+  private operationMessage(journal: SuSetJournal, time: TreeClock, op: MeldOperation) {
+    const prev = journal.gwc.getTicks(time);
     // Construct the operation message with the previous visible clock tick
     const operationMsg = new OperationMessage(prev, op.encoded, time);
     if (operationMsg.size > this.maxOperationSize)
@@ -256,7 +250,8 @@ export class SuSetDataset {
     this.encoding.rdf.defaultGraph());
 
   @SuSetDataset.checkNotClosed.async
-  async apply(msg: OperationMessage, localTime: TreeClock, cxnTime: TreeClock): Promise<OperationMessage | null> {
+  async apply(msg: OperationMessage,
+    localTime: TreeClock, cxnTime: TreeClock): Promise<OperationMessage | null> {
     return this.dataset.transact<OperationMessage | null>({
       prepare: async txc => {
         // Check we haven't seen this transaction before
@@ -300,7 +295,8 @@ export class SuSetDataset {
           patch: this.transactionPatch(patch, entailments, tidPatch),
           kvps: journaling.commit,
           // FIXME: If this operation message exceeds max size, what to do?
-          return: cxn?.operation != null ? this.operationMessage(tail, cxnTime, cxn.operation) : null,
+          return: cxn?.operation != null ?
+            this.operationMessage(journal, cxnTime, cxn.operation) : null,
           after: () => this.emitUpdate(update)
         };
       }
@@ -404,7 +400,7 @@ export class SuSetDataset {
     await this.dataset.transact({
       id: 'suset-reset',
       prepare: async () =>
-        ({ kvps: this.journalData.reset(snapshot.lastTime, localTime) })
+        ({ kvps: this.journalData.reset(localTime, snapshot.lastTime) })
     });
     await snapshot.quads.pipe(
       // For each batch of reified quads with TIDs, first unreify
@@ -434,9 +430,8 @@ export class SuSetDataset {
         prepare: async () => {
           const dataEmitted = new Future;
           const journal = await this.journalData.journal();
-          const tail = await journal.tail();
           resolve({
-            lastTime: tail.gwc,
+            lastTime: journal.gwc,
             quads: this.userGraph.graph.match().pipe(
               bufferCount(10), // TODO batch size config
               mergeMap(async batch => this.encoding.reifyTriplesTids(

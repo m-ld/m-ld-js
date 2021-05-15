@@ -5,6 +5,7 @@ import { MsgPack } from '../util';
 import { Dataset, Kvps } from '.';
 import { MeldEncoding, MeldOperation } from '../MeldEncoding';
 import { CausalTimeRange } from '../ops';
+import { MeldError } from '../MeldError';
 
 /** There is only one journal with a fixed key. */
 const JOURNAL_KEY = '_qs:journal';
@@ -31,22 +32,25 @@ function entryKey(tick: number) {
 
 interface JournalJson {
   tail: EntryKey;
-  time: TreeClockJson; // the local clock time
-}
-
-type JournalEntryJson = [
-  /** Start of local tick range, inclusive. The entry key is the encoded end. */
-  start: number,
-  /** Raw operation - may contain Buffers */
-  operation: EncodedOperation,
+  /** local clock time, including internal ticks */
+  time: TreeClockJson;
   /**
    * JSON-encoded public clock time ('global wall clock' or 'Great Westminster
    * Clock'). This has latest public ticks seen for all processes (not internal
-   * ticks), unlike the operation time, which may be causally related to older
+   * ticks), unlike an entry time, which may be causally related to older
    * messages from third parties, and the journal time, which has internal ticks
    * for the local clone identity. This clock has no identity.
    */
-  gwc: TreeClockJson,
+  gwc: TreeClockJson;
+}
+
+type JournalEntryJson = [
+  /** Previous tick for this entry's clock (may be remote) */
+  prev: number,
+  /** Start of _local_ tick range, inclusive. The entry key is the encoded end. */
+  start: number,
+  /** Raw operation - may contain Buffers */
+  operation: EncodedOperation,
   /** Next entry key */
   next: EntryKey | undefined
 ];
@@ -54,9 +58,9 @@ type JournalEntryJson = [
 /** Utility interface for entry details; de-structures causal time range */
 interface JournalEntry extends CausalTimeRange<TreeClock> {
   key: string,
+  prev: number,
   start: number,
-  operation: EncodedOperation,
-  gwc: TreeClock
+  operation: EncodedOperation
 }
 
 /** Immutable expansion of JournalEntryJson */
@@ -66,11 +70,11 @@ export class SuSetJournalEntry implements JournalEntry {
     readonly key: EntryKey,
     private readonly json: JournalEntryJson,
     // De-structure some content for convenience, unless provided
-    readonly start = json[0],
-    readonly operation = json[1],
+    readonly prev = json[0],
+    readonly start = json[1],
+    readonly operation = json[2],
     readonly from = operation[1],
     readonly time = TreeClock.fromJson(operation[2]) as TreeClock,
-    readonly gwc = TreeClock.fromJson(json[2]) as TreeClock,
     readonly nextKey = json[3]) {
   }
 
@@ -79,17 +83,17 @@ export class SuSetJournalEntry implements JournalEntry {
       return this.dataset.entry(this.nextKey);
   }
 
-  static head(localTime?: TreeClock, gwc?: TreeClock): [EntryKey, Partial<JournalEntryJson>] {
+  static head(localTime?: TreeClock): [EntryKey, Partial<JournalEntryJson>] {
     const tick = localTime?.ticks ?? -1;
     return [entryKey(tick), [
       // Dummy operation for head
-      tick, [2, tick, (localTime ?? TreeClock.GENESIS).toJson(), '[]', '[]'], gwc?.toJson()
+      -1, tick, [2, tick, (localTime ?? TreeClock.GENESIS).toJson(), '[]', '[]']
     ]];
   }
 
   builder(journal: SuSetJournal) {
     // The head represents this entry, made ready for appending new entries
-    let head = new EntryBuilder(this.dataset, this, journal.time), tail = head;
+    let head = new EntryBuilder(this.dataset, this, journal.time, journal.gwc), tail = head;
     const builder = {
       next: (operation: MeldOperation, localTime: TreeClock) => {
         tail = tail.next(operation, localTime);
@@ -102,7 +106,7 @@ export class SuSetJournalEntry implements JournalEntry {
           batch.put(entry.key, MsgPack.encode(entry.json));
         if (entry == null)
           throw new TypeError; // Head always defined
-        journal.commit(entry, tail.localTime)(batch);
+        journal.commit(entry, tail.localTime, tail.gwc)(batch);
       })
     };
     return builder;
@@ -115,7 +119,8 @@ class EntryBuilder {
   constructor(
     private readonly dataset: SuSetJournalDataset,
     private entry: JournalEntry,
-    public localTime: TreeClock) {
+    public localTime: TreeClock,
+    public gwc: TreeClock) {
   }
 
   next(operation: MeldOperation, localTime: TreeClock) {
@@ -129,11 +134,11 @@ class EntryBuilder {
     yield new SuSetJournalEntry(this.dataset,
       this.entry.key,
       this.json,
+      this.entry.prev,
       this.entry.start,
       this.entry.operation,
       this.entry.from,
       this.entry.time,
-      this.entry.gwc,
       this.nextBuilder?.entry.key);
     if (this.nextBuilder != null)
       yield* this.nextBuilder.build();
@@ -142,12 +147,12 @@ class EntryBuilder {
   private makeNext(operation: MeldOperation, localTime: TreeClock) {
     return this.nextBuilder = new EntryBuilder(this.dataset, {
       key: entryKey(localTime.ticks),
+      prev: this.gwc.getTicks(operation.time),
       start: localTime.ticks,
       operation: operation.encoded,
       from: operation.from,
-      time: operation.time,
-      gwc: this.nextGwc(operation)
-    }, localTime);
+      time: operation.time
+    }, localTime, this.nextGwc(operation));
   }
 
   private fuseNext(operation: MeldOperation, localTime: TreeClock) {
@@ -155,25 +160,26 @@ class EntryBuilder {
     const fused = MeldOperation.fromOperation(this.dataset.encoding, thisOp.fuse(operation));
     this.entry = {
       key: entryKey(localTime.ticks),
+      prev: this.entry.prev,
       start: this.entry.start,
       operation: fused.encoded,
       from: fused.from,
-      time: fused.time,
-      gwc: this.nextGwc(operation)
+      time: fused.time
     };
     this.localTime = localTime;
+    this.gwc = this.nextGwc(operation);
     return this;
   }
 
   private nextGwc(operation: MeldOperation): TreeClock {
-    return this.entry.gwc.update(operation.time);
+    return this.gwc.update(operation.time);
   }
 
   private get json(): JournalEntryJson {
     return [
+      this.entry.prev,
       this.entry.start,
       this.entry.operation,
-      this.entry.gwc.toJson(),
       this.nextBuilder?.entry.key
     ];
   }
@@ -189,7 +195,8 @@ export class SuSetJournal {
     json: JournalJson,
     // De-structure some content for convenience, unless provided
     readonly tailKey = json.tail,
-    readonly time = TreeClock.fromJson(json.time) as TreeClock) {
+    readonly time = TreeClock.fromJson(json.time) as TreeClock,
+    readonly gwc = TreeClock.fromJson(json.gwc) as TreeClock) {
   }
 
   async tail(): Promise<SuSetJournalEntry> {
@@ -209,14 +216,15 @@ export class SuSetJournal {
       if (newClone) {
         // For a new clone, the journal's temp tail has a bogus timestamp
         batch.del(this.tailKey);
-        // The dummy head time will only ever be used for a genesis clone, as all
-        // other clones will have their journal reset with a snapshot. So, it's safe
-        // to use the local time as the gwc, which is needed for subsequent entries.
-        const [headKey, headJson] = SuSetJournalEntry.head(localTime, localTime.scrubId());
+        const [headKey, headJson] = SuSetJournalEntry.head(localTime);
         batch.put(headKey, MsgPack.encode(headJson));
         tailKey = headKey;
       }
-      const json: JournalJson = { tail: tailKey, time: localTime.toJson() };
+      // A genesis clone has an initial head without a GWC. Other clones will
+      // have their journal reset with a snapshot. So, it's safe to use the
+      // local time as the gwc, which is needed for subsequent entries.
+      const gwc = this.gwc ?? localTime.scrubId();
+      const json: JournalJson = { tail: tailKey, time: localTime.toJson(), gwc: gwc.toJson() };
       batch.put(JOURNAL_KEY, MsgPack.encode(json));
       // Not updating caches for rare time update
       this.dataset._journal = null;
@@ -224,18 +232,18 @@ export class SuSetJournal {
     };
   }
 
-  static initJson(headKey: EntryKey, localTime?: TreeClock): Partial<JournalJson> {
-    return { tail: headKey, time: localTime?.toJson() };
+  static initJson(headKey: EntryKey, localTime?: TreeClock, gwc?: TreeClock): Partial<JournalJson> {
+    return { tail: headKey, time: localTime?.toJson(), gwc: gwc?.toJson() };
   }
 
   /**
    * Commits a new tail and time, with updates to the journal and tail cache
    */
-  commit(tail: SuSetJournalEntry, localTime: TreeClock): Kvps {
+  commit(tail: SuSetJournalEntry, localTime: TreeClock, gwc: TreeClock): Kvps {
     return batch => {
-      const json: JournalJson = { tail: tail.key, time: localTime.toJson() };
+      const json: JournalJson = { tail: tail.key, time: localTime.toJson(), gwc: gwc.toJson() };
       batch.put(JOURNAL_KEY, MsgPack.encode(json));
-      this.dataset._journal = new SuSetJournal(this.dataset, json, tail.key, localTime);
+      this.dataset._journal = new SuSetJournal(this.dataset, json, tail.key, localTime, gwc);
       this.dataset._journal._tail = tail;
     }
   }
@@ -257,9 +265,9 @@ export class SuSetJournalDataset {
       return this.reset();
   }
 
-  reset(gwc?: TreeClock, localTime?: TreeClock): Kvps {
-    const [headKey, headJson] = SuSetJournalEntry.head(localTime, gwc);
-    const journalJson = SuSetJournal.initJson(headKey, localTime);
+  reset(localTime?: TreeClock, gwc?: TreeClock): Kvps {
+    const [headKey, headJson] = SuSetJournalEntry.head(localTime);
+    const journalJson = SuSetJournal.initJson(headKey, localTime, gwc);
     return batch => {
       batch.put(JOURNAL_KEY, MsgPack.encode(journalJson));
       batch.put(headKey, MsgPack.encode(headJson));
@@ -278,6 +286,8 @@ export class SuSetJournalDataset {
   }
 
   async entry(key: EntryKey) {
+    if (this.ds.closed)
+      throw new MeldError('Clone has closed');
     const value = await this.ds.get(key);
     if (value != null)
       return new SuSetJournalEntry(this, key, MsgPack.decode(value));
