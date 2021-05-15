@@ -445,7 +445,8 @@ describe('SU-Set Dataset', () => {
         '@describe': 'http://test.m-ld.org/wilma'
       }).pipe(toArray()).toPromise()).resolves.toEqual([wilma]);
 
-      expect((<TreeClock>await ssd.loadClock()).equals(local.time)).toBe(true);
+      const newLocalTime = (<TreeClock>await ssd.loadClock());
+      expect(newLocalTime.equals(local.time)).toBe(true);
 
       // Check that we have a valid journal
       const ops = await ssd.operationsSince(remote.time);

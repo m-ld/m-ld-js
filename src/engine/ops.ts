@@ -52,6 +52,24 @@ export interface CausalTimeRange<C extends CausalClock> {
   readonly time: C;
 }
 
+export namespace CausalTimeRange {
+  /** Does time range two continue immediately from time range one? */
+  export function contiguous<C extends CausalClock>(
+    one: CausalTimeRange<C>, two: CausalTimeRange<C>) {
+    // Check ticks and ID.
+    return one.time.ticks + 1 === two.from &&
+      one.time.hash() === two.time.ticked(one.time.ticks).hash();
+  }
+
+  /** Does time range one's tail overlap time range two's head? */
+  export function overlaps<C extends CausalClock>(
+    one: CausalTimeRange<C>, two: CausalTimeRange<C>) {
+    return two.from >= one.from && two.from <= one.time.ticks &&
+      // Do both times rewound to our from-time have the same hash?
+      two.time.ticked(two.from).hash() === one.time.ticked(two.from).hash();
+  }
+}
+
 /**
  * An operation on tuples of items and time hashes.
  * - Delete hashes may represent any time strictly prior to `from`.
@@ -81,7 +99,7 @@ export class FusableCausalOperation<T, C extends CausalClock> implements CausalO
 
   fuse(next: CausalOperation<T, C>): CausalOperation<T, C> | undefined {
     // We can fuse iff we are causally contiguous with the next operation.
-    if (this.isContiguousWith(next)) {
+    if (CausalTimeRange.contiguous(this, next)) {
       // Not using mutable append, our semantics are different!
       const fused = this.mutable();
       // 1. Fuse all deletes
@@ -100,15 +118,9 @@ export class FusableCausalOperation<T, C extends CausalClock> implements CausalO
     }
   }
 
-  private isContiguousWith(next: CausalTimeRange<C>) {
-    // Check ticks and ID.
-    return this.time.ticks + 1 === next.from &&
-      this.time.hash() === next.time.ticked(this.time.ticks).hash();
-  }
-
   cutBy(prev: Omit<CausalOperation<T, C>, 'deletes'>): CausalOperation<T, C> | undefined {
     // We can cut iff our from is within the previous range
-    if (this.overlapsTailOf(prev)) {
+    if (CausalTimeRange.overlaps(prev, this)) {
       const cut = this.mutable(),
         // Also do some indexing
         prevFlatInserts = this.newFlatIndexSet(flatten(prev.inserts)),
@@ -137,12 +149,6 @@ export class FusableCausalOperation<T, C extends CausalClock> implements CausalO
         inserts: this.expand(cut.inserts)
       };
     }
-  }
-
-  private overlapsTailOf(prev: CausalTimeRange<C>) {
-    return this.from >= prev.from && this.from <= prev.time.ticks &&
-      // Do both times rewound to our from-time have the same hash?
-      this.time.ticked(this.from).hash() === prev.time.ticked(this.from).hash();
   }
 
   private expand(itemTids: Iterable<[T, string]>): [T, string[]][] {

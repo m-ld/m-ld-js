@@ -75,18 +75,22 @@ export interface Meld {
 }
 
 /**
- * A tuple containing encoding
- * - `0`: version,
- * - `1`: from,
- * - `2`: time as JSON,
- * - `3`: delete as gzip Buffer or JSON string, and
- * - `4`: insert as gzip Buffer or JSON string
- *
- * components of a {@link MeldOperation}. The delete and insert components are UTF-8
- * encoded JSON-LD strings, which may be GZIP compressed into a Buffer if bigger
- * than a threshold. Intended to be efficiently serialised with MessagePack.
+ * A tuple containing encoding components of a {@link MeldOperation}. The delete
+ * and insert components are UTF-8 encoded JSON-LD strings, which may be GZIP
+ * compressed into a Buffer if bigger than a threshold. Intended to be
+ * efficiently serialised with MessagePack.
  */
-export type EncodedOperation = [2, number, TreeClockJson, string | Buffer, string | Buffer];
+export type EncodedOperation = [
+  version: 2,
+  /** first tick of causal time range */
+  from: number,
+  /** time as JSON */
+  time: TreeClockJson,
+  /** delete as gzip Buffer or JSON string */
+  deletes: string | Buffer,
+  /** insert as gzip Buffer or JSON string */
+  inserts: string | Buffer
+];
 
 export interface Recovery {
   readonly lastTime: TreeClock;

@@ -293,7 +293,7 @@ export class SuSetDataset {
           tidPatch.append(cxn.tidPatch);
           patch.append(assertions);
           // Also create a journal entry for the constraint "transaction"
-          journaling.next(cxn.operation, cxnTime);
+          journaling.cxn(cxn.operation, cxnTime);
         }
         return {
           patch: this.transactionPatch(patch, entailments, tidPatch),
