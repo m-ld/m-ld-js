@@ -101,12 +101,12 @@ export class SuSetJournalEntry implements JournalEntry {
       },
       /** Commits the built journal entries to the journal */
       commit: <Kvps>(batch => {
-        let entry: SuSetJournalEntry | null = null;
-        for (entry of head.build())
+        const entries = [...head.build()];
+        if (entries[0].key !== this.key)
+          batch.del(this.key);
+        for (let entry of entries)
           batch.put(entry.key, MsgPack.encode(entry.json));
-        if (entry == null)
-          throw new TypeError; // Head always defined
-        journal.commit(entry, tail.localTime, tail.gwc)(batch);
+        journal.commit(entries.slice(-1)[0], tail.localTime, tail.gwc)(batch);
       })
     };
     return builder;
@@ -124,10 +124,10 @@ class EntryBuilder {
   }
 
   next(operation: MeldOperation, localTime: TreeClock) {
-    // if (CausalTimeRange.contiguous(this.entry, operation))
-    //   return this.fuseNext(operation, localTime);
-    // else
-    return this.makeNext(operation, localTime);
+    if (CausalTimeRange.contiguous(this.entry, operation))
+      return this.fuseNext(operation, localTime);
+    else
+      return this.makeNext(operation, localTime);
   }
 
   *build(): Iterable<SuSetJournalEntry> {

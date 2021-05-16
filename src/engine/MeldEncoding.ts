@@ -2,7 +2,7 @@ import { EncodedOperation, UUID } from '.';
 import { flatten, lazy } from './util';
 import { Context, ExpandedTermDef } from '../jrql-support';
 import { Iri } from 'jsonld/jsonld-spec';
-import { RdfFactory, Triple } from './quads';
+import { RdfFactory, Triple, tripleIndexKey } from './quads';
 import { activeCtx } from "./jsonld";
 import { M_LD, RDF } from '../ns';
 import { SubjectGraph } from './SubjectGraph';
@@ -103,7 +103,7 @@ export class MeldOperation extends FusableCausalOperation<Triple, TreeClock> {
      */
     readonly encoded: EncodedOperation,
     readonly jsons: any) {
-    super(op);
+    super(op, tripleIndexKey);
   }
 
   toString() {

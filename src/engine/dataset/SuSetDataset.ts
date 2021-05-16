@@ -7,7 +7,7 @@ import { Dataset, PatchQuads } from '.';
 import { Iri } from 'jsonld/jsonld-spec';
 import { JrqlGraph } from './JrqlGraph';
 import { MeldEncoding, MeldOperation, TriplesTids, unreify } from '../MeldEncoding';
-import { Observable, from, Subject as Source, EMPTY } from 'rxjs';
+import { Observable, from, Subject as Source, EMPTY, of } from 'rxjs';
 import {
   bufferCount, mergeMap, map, filter, takeWhile, expand, toArray
 } from 'rxjs/operators';
@@ -160,19 +160,23 @@ export class SuSetDataset {
       id: 'suset-ops-since',
       prepare: async () => {
         const journal = await this.journalData.journal();
-        // How many ticks of mine has the requester seen?
-        const tick = time.getTicks(journal.time);
         if (lastTime != null)
           lastTime.resolve(journal.gwc);
-        const found = tick != null ? await this.journalData.entryFor(tick) : '';
+        // How many ticks of mine has the requester seen?
+        const tick = time.getTicks(journal.time);
+        let found = tick != null ? await this.journalData.entryFor(tick) : undefined;
         return {
-          return: !found ? undefined : from(found.next()).pipe(
-            expand(entry => entry != null ? entry.next() : EMPTY),
-            takeWhile<SuSetJournalEntry>(entry => entry != null),
-            // Don't emit an entry if it's all less than the requested time
-            filter(entry => time.anyLt(entry.time, 'includeIds')),
-            map(entry => new OperationMessage(
-              entry.prev, entry.operation, entry.time)))
+          // If nothing was found, return undefined
+          return: found == null ? undefined :
+            // A journal entry may be a fusion that spans the requested tick, so
+            // start with the found entry but filter out if singular on the tick
+            from(found.time.ticks > tick ? of(found) : found.next()).pipe(
+              expand(entry => entry != null ? entry.next() : EMPTY),
+              takeWhile<SuSetJournalEntry>(entry => entry != null),
+              // Don't emit an entry if it's all less than the requested time
+              filter(entry => time.anyLt(entry.time, 'includeIds')),
+              map(entry => new OperationMessage(
+                entry.prev, entry.operation, entry.time)))
         };
       }
     });
@@ -266,7 +270,7 @@ export class SuSetDataset {
         const insertTids = new TripleMap(op.inserts);
         const tidPatch = await this.processSuDeletions(op.deletes, patch);
         patch.append({ inserts: op.inserts.map(([triple]) => this.toUserQuad(triple)) });
-        
+
         txc.sw.next('apply-cx'); // "cx" = constraint
         const interim = new InterimUpdatePatch(this.userGraph, cxnTime, patch);
         await this.constraint.apply(this.state, interim);

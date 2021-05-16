@@ -302,9 +302,10 @@ describe('SU-Set Dataset', () => {
           const ops = await ssd.operationsSince(remote.time);
           expect(ops).not.toBeUndefined();
           const opArray = ops ? await ops.pipe(toArray()).toPromise() : [];
-          // We expect only the missed local op
+          // We expect the missed local op (barney) but not the remote op
+          // (wilma), because it should be filtered out
           expect(opArray.length).toBe(1);
-          expect(opArray[0].data[1]).toBe(localOp.data[1]);
+          expect(opArray[0].time.equals(localOp.time)).toBe(true);
         });
 
         test('answers missed third party op', async () => {
