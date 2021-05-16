@@ -65,17 +65,32 @@ interface JournalEntry extends CausalTimeRange<TreeClock> {
 
 /** Immutable expansion of JournalEntryJson */
 export class SuSetJournalEntry implements JournalEntry {
-  constructor(
+  static fromJson(dataset: SuSetJournalDataset, key: EntryKey, json: JournalEntryJson) {
+    // Destructuring fields for convenience
+    const [prev, start, operation, next] = json;
+    const [, from, timeJson] = operation;
+    const time = TreeClock.fromJson(timeJson) as TreeClock;
+    return new SuSetJournalEntry(dataset, key, prev, start, operation, from, time, next);
+  }
+
+  static fromEntry(dataset: SuSetJournalDataset, entry: JournalEntry, next: EntryKey | undefined) {
+    const { key, prev, start, operation, from, time } = entry;
+    return new SuSetJournalEntry(dataset, key, prev, start, operation, from, time, next);
+  }
+
+  private constructor(
     private readonly dataset: SuSetJournalDataset,
     readonly key: EntryKey,
-    private readonly json: JournalEntryJson,
-    // De-structure some content for convenience, unless provided
-    readonly prev = json[0],
-    readonly start = json[1],
-    readonly operation = json[2],
-    readonly from = operation[1],
-    readonly time = TreeClock.fromJson(operation[2]) as TreeClock,
-    readonly nextKey = json[3]) {
+    readonly prev: number,
+    readonly start: number,
+    readonly operation: EncodedOperation,
+    readonly from: number,
+    readonly time: TreeClock,
+    readonly nextKey: EntryKey | undefined) {
+  }
+
+  private get json(): JournalEntryJson {
+    return [this.prev, this.start, this.operation, this.nextKey];
   }
 
   async next(): Promise<SuSetJournalEntry | undefined> {
@@ -131,15 +146,8 @@ class EntryBuilder {
   }
 
   *build(): Iterable<SuSetJournalEntry> {
-    yield new SuSetJournalEntry(this.dataset,
-      this.entry.key,
-      this.json,
-      this.entry.prev,
-      this.entry.start,
-      this.entry.operation,
-      this.entry.from,
-      this.entry.time,
-      this.nextBuilder?.entry.key);
+    yield SuSetJournalEntry.fromEntry(
+      this.dataset, this.entry, this.nextBuilder?.entry.key);
     if (this.nextBuilder != null)
       yield* this.nextBuilder.build();
   }
@@ -174,15 +182,6 @@ class EntryBuilder {
   private nextGwc(operation: MeldOperation): TreeClock {
     return this.gwc.update(operation.time);
   }
-
-  private get json(): JournalEntryJson {
-    return [
-      this.entry.prev,
-      this.entry.start,
-      this.entry.operation,
-      this.nextBuilder?.entry.key
-    ];
-  }
 }
 
 /** Immutable expansion of JournalJson */
@@ -190,13 +189,17 @@ export class SuSetJournal {
   /** Tail state cache */
   _tail: SuSetJournalEntry | null = null;
 
-  constructor(
+  static fromJson(dataset: SuSetJournalDataset, json: JournalJson) {
+    const time = TreeClock.fromJson(json.time) as TreeClock;
+    const gwc = TreeClock.fromJson(json.gwc) as TreeClock;
+    return new SuSetJournal(dataset, json.tail, time, gwc);
+  }
+
+  private constructor(
     private readonly dataset: SuSetJournalDataset,
-    json: JournalJson,
-    // De-structure some content for convenience, unless provided
-    readonly tailKey = json.tail,
-    readonly time = TreeClock.fromJson(json.time) as TreeClock,
-    readonly gwc = TreeClock.fromJson(json.gwc) as TreeClock) {
+    readonly tailKey: EntryKey,
+    readonly time: TreeClock,
+    readonly gwc: TreeClock) {
   }
 
   async tail(): Promise<SuSetJournalEntry> {
@@ -243,7 +246,7 @@ export class SuSetJournal {
     return batch => {
       const json: JournalJson = { tail: tail.key, time: localTime.toJson(), gwc: gwc.toJson() };
       batch.put(JOURNAL_KEY, MsgPack.encode(json));
-      this.dataset._journal = new SuSetJournal(this.dataset, json, tail.key, localTime, gwc);
+      this.dataset._journal = new SuSetJournal(this.dataset, tail.key, localTime, gwc);
       this.dataset._journal._tail = tail;
     }
   }
@@ -280,7 +283,7 @@ export class SuSetJournalDataset {
       const value = await this.ds.get(JOURNAL_KEY);
       if (value == null)
         throw new Error('Missing journal');
-      this._journal = new SuSetJournal(this, MsgPack.decode(value));
+      this._journal = SuSetJournal.fromJson(this, MsgPack.decode(value));
     }
     return this._journal;
   }
@@ -290,7 +293,7 @@ export class SuSetJournalDataset {
       throw new MeldError('Clone has closed');
     const value = await this.ds.get(key);
     if (value != null)
-      return new SuSetJournalEntry(this, key, MsgPack.decode(value));
+      return SuSetJournalEntry.fromJson(this, key, MsgPack.decode(value));
   }
 
   async entryFor(tick: number) {
@@ -298,7 +301,7 @@ export class SuSetJournalDataset {
     if (kvp != null) {
       const [key, value] = kvp;
       if (key.startsWith(ENTRY_KEY_PRE)) {
-        const firstAfter = new SuSetJournalEntry(this, key, MsgPack.decode(value));
+        const firstAfter = SuSetJournalEntry.fromJson(this, key, MsgPack.decode(value));
         // Check that the entry's tick range covers the request
         if (firstAfter.start <= tick)
           return firstAfter;
