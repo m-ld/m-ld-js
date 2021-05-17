@@ -89,7 +89,7 @@ export class TreeClock implements CausalClock {
       throw new Error('Tree clock must have positive ticks');
   }
 
-  private get isId() {
+  get isId() {
     return this._part === true;
   }
 

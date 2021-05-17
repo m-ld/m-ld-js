@@ -132,12 +132,14 @@ export class FusableCausalOperation<T, C extends CausalClock> implements CausalO
           cut.deletes.delete([item, tid]);
     }
     // Add deletes for any inserts from prev where tid in intersection, unless
-    // still inserted in cut
+    // still inserted in cut, and remove all inserts from intersection
     for (let tick = this.from; tick <= prev.time.ticks; tick++) {
       const tid = this.time.ticked(tick).hash();
       for (let item of prevInsertsByTid[tid] ?? [])
         if (!cut.inserts.has([item, tid]))
           cut.deletes.add([item, tid]);
+        else
+          cut.inserts.delete([item, tid]);
     }
     return {
       from: prev.time.ticked().ticks,

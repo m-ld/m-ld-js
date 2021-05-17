@@ -54,10 +54,13 @@ export function mockLocal(
  */
 export class MockProcess {
   constructor(
-    public time: TreeClock) {
+    public time: TreeClock,
+    private prev: number = time.ticks) {
   }
 
-  tick() {
+  tick(internal = false) {
+    if (!internal)
+      this.prev = this.time.ticks;
     this.time = this.time.ticked();
     return this;
   }
@@ -74,9 +77,9 @@ export class MockProcess {
   }
 
   sentOperation(deletes: string, inserts: string) {
-    const prev = this.time.ticks;
     this.tick();
-    return new OperationMessage(prev, [2, this.time.ticks, this.time.toJson(), deletes, inserts]);
+    return new OperationMessage(this.prev,
+      [2, this.time.ticks, this.time.toJson(), deletes, inserts]);
   }
 }
 

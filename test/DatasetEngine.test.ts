@@ -337,7 +337,7 @@ describe('Dataset engine', () => {
       await clone.initialise();
       await clone.status.becomes({ outdated: false });
 
-      // Push a operation claiming a missed tick
+      // Push a operation claiming a missed public tick
       remote.tick();
       remoteUpdates.next(remote.sentOperation(
         '{}', '{"@id":"http://test.m-ld.org/wilma","http://test.m-ld.org/#name":"Wilma"}'));

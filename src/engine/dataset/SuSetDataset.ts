@@ -176,7 +176,7 @@ export class SuSetDataset {
               // Don't emit an entry if it's all less than the requested time
               filter(entry => time.anyLt(entry.time, 'includeIds')),
               map(entry => new OperationMessage(
-                entry.prev, entry.operation, entry.time)))
+                entry.prev, entry.encoded, entry.time)))
         };
       }
     });
@@ -258,14 +258,18 @@ export class SuSetDataset {
     localTime: TreeClock, cxnTime: TreeClock): Promise<OperationMessage | null> {
     return this.dataset.transact<OperationMessage | null>({
       prepare: async txc => {
-        // Check we haven't seen this transaction before
-        txc.sw.next('find-tids');
-        const op = MeldOperation.fromEncoded(this.encoding, msg.data);
+        txc.sw.next('decode-op');
+        let op = MeldOperation.fromEncoded(this.encoding, msg.data);
         this.log.debug(`Applying operation: ${op.time} @ ${localTime}`);
+        // Cut away stale parts of an incoming (fused) operation
+        const prev = await this.journalData.operation(msg.time.ticked(msg.prev).hash());
+        if (prev != null) {
+          op = MeldOperation.fromOperation(this.encoding,
+            op.cutBy(MeldOperation.fromEncoded(this.encoding, prev)));
+        }
 
         txc.sw.next('apply-txn');
-        // First delete triples and entries from fused transactions
-        const patch = await this.spliceFusedTids(op.from, op.time);
+        const patch = new PatchQuads();
         // Process deletions and inserts
         const insertTids = new TripleMap(op.inserts);
         const tidPatch = await this.processSuDeletions(op.deletes, patch);
@@ -382,14 +386,6 @@ export class SuSetDataset {
   private findTripleTids(tripleId: string): PromiseLike<Quad[]> {
     return this.tidsGraph.findQuads({ '@id': tripleId } as Partial<HashTid>)
       .pipe(toArray()).toPromise();
-  }
-
-  private async spliceFusedTids(start: number, endTime: TreeClock): Promise<PatchQuads> {
-    const tids: string[] = [];
-    for (let time = endTime.ticked(start); time.ticks < endTime.ticks; time = time.ticked())
-      tids.push(time.hash());
-    // TODO
-    return new PatchQuads();
   }
 
   /**

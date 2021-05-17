@@ -30,6 +30,12 @@ function entryKey(tick: number) {
     throw 'Invalid entry tick ' + tick;
 }
 
+/** Causally-fused operation from a clone, indexed by time hash (TID) */
+const OPERATION_KEY_PRE = '_qs:op';
+function operationKey(tid: string) {
+  return toPrefixedId(OPERATION_KEY_PRE, tid);
+}
+
 interface JournalJson {
   tail: EntryKey;
   /** local clock time, including internal ticks */
@@ -50,47 +56,66 @@ type JournalEntryJson = [
   /** Start of _local_ tick range, inclusive. The entry key is the encoded end. */
   start: number,
   /** Raw operation - may contain Buffers */
-  operation: EncodedOperation,
+  encoded: EncodedOperation,
   /** Next entry key */
   next: EntryKey | undefined
 ];
 
-/** Utility interface for entry details; de-structures causal time range */
-interface JournalEntry extends CausalTimeRange<TreeClock> {
+/**
+ * Utility class for key entry details
+ */
+interface JournalEntry {
   key: string,
   prev: number,
   start: number,
-  operation: EncodedOperation
+  operation: MeldOperation
 }
 
 /** Immutable expansion of JournalEntryJson */
 export class SuSetJournalEntry implements JournalEntry {
   static fromJson(dataset: SuSetJournalDataset, key: EntryKey, json: JournalEntryJson) {
     // Destructuring fields for convenience
-    const [prev, start, operation, next] = json;
-    const [, from, timeJson] = operation;
+    const [prev, start, encoded, next] = json;
+    const [, from, timeJson] = encoded;
     const time = TreeClock.fromJson(timeJson) as TreeClock;
-    return new SuSetJournalEntry(dataset, key, prev, start, operation, from, time, next);
+    return new SuSetJournalEntry(dataset, key, prev, start, encoded, from, time, next);
   }
 
   static fromEntry(dataset: SuSetJournalDataset, entry: JournalEntry, next: EntryKey | undefined) {
-    const { key, prev, start, operation, from, time } = entry;
+    const { key, prev, start, operation } = entry;
+    const { from, time } = operation;
     return new SuSetJournalEntry(dataset, key, prev, start, operation, from, time, next);
   }
+
+  /** Cache of operation if available */
+  private _operation?: MeldOperation;
+  encoded: EncodedOperation;
 
   private constructor(
     private readonly dataset: SuSetJournalDataset,
     readonly key: EntryKey,
     readonly prev: number,
     readonly start: number,
-    readonly operation: EncodedOperation,
+    op: EncodedOperation | MeldOperation,
     readonly from: number,
     readonly time: TreeClock,
     readonly nextKey: EntryKey | undefined) {
+    if (op instanceof MeldOperation) {
+      this._operation = op;
+      this.encoded = op.encoded;
+    } else {
+      this.encoded = op;
+    }
+  }
+
+  get operation() {
+    if (this._operation == null)
+      this._operation = MeldOperation.fromEncoded(this.dataset.encoding, this.encoded);
+    return this._operation;
   }
 
   private get json(): JournalEntryJson {
-    return [this.prev, this.start, this.operation, this.nextKey];
+    return [this.prev, this.start, this.encoded, this.nextKey];
   }
 
   async next(): Promise<SuSetJournalEntry | undefined> {
@@ -115,13 +140,16 @@ export class SuSetJournalEntry implements JournalEntry {
         return builder;
       },
       /** Commits the built journal entries to the journal */
-      commit: <Kvps>(batch => {
+      commit: <Kvps>(async batch => {
         const entries = [...head.build()];
         if (entries[0].key !== this.key)
           batch.del(this.key);
-        for (let entry of entries)
+        await Promise.all(entries.map(async entry => {
           batch.put(entry.key, MsgPack.encode(entry.json));
+          await this.dataset.updateLatestOperation(entry)(batch);
+        }));
         journal.commit(entries.slice(-1)[0], tail.localTime, tail.gwc)(batch);
+
       })
     };
     return builder;
@@ -139,7 +167,7 @@ class EntryBuilder {
   }
 
   next(operation: MeldOperation, localTime: TreeClock) {
-    if (CausalTimeRange.contiguous(this.entry, operation))
+    if (CausalTimeRange.contiguous(this.entry.operation, operation))
       return this.fuseNext(operation, localTime);
     else
       return this.makeNext(operation, localTime);
@@ -157,22 +185,18 @@ class EntryBuilder {
       key: entryKey(localTime.ticks),
       prev: this.gwc.getTicks(operation.time),
       start: localTime.ticks,
-      operation: operation.encoded,
-      from: operation.from,
-      time: operation.time
+      operation
     }, localTime, this.nextGwc(operation));
   }
 
   private fuseNext(operation: MeldOperation, localTime: TreeClock) {
-    const thisOp = MeldOperation.fromEncoded(this.dataset.encoding, this.entry.operation);
+    const thisOp = this.entry.operation;
     const fused = MeldOperation.fromOperation(this.dataset.encoding, thisOp.fuse(operation));
     this.entry = {
       key: entryKey(localTime.ticks),
       prev: this.entry.prev,
       start: this.entry.start,
-      operation: fused.encoded,
-      from: fused.from,
-      time: fused.time
+      operation: fused
     };
     this.localTime = localTime;
     this.gwc = this.nextGwc(operation);
@@ -305,6 +329,35 @@ export class SuSetJournalDataset {
         // Check that the entry's tick range covers the request
         if (firstAfter.start <= tick)
           return firstAfter;
+      }
+    }
+  }
+
+  async operation(tid: string): Promise<EncodedOperation | undefined> {
+    const value = await this.ds.get(operationKey(tid));
+    if (value != null)
+      return MsgPack.decode(value);
+  }
+
+  updateLatestOperation(entry: SuSetJournalEntry): Kvps {
+    return async batch => {
+      // Do we have an operation for the entry's prev tick?
+      if (entry.prev >= 0) {
+        const prevTime = entry.time.ticked(entry.prev);
+        const prevTid = prevTime.hash();
+        const prevOp = await this.operation(prevTid);
+        let newLatest = entry.encoded;
+        if (prevOp != null) {
+          const [, from] = prevOp;
+          if (CausalTimeRange.contiguous({ from, time: prevTime }, entry)) {
+            const fused = MeldOperation.fromEncoded(this.encoding, prevOp).fuse(entry.operation);
+            newLatest = MeldOperation.fromOperation(this.encoding, fused).encoded;
+          }
+        }
+        // Always delete the old latest
+        // TODO: This is not perfect garbage collection, see fused-updates spec
+        batch.del(operationKey(prevTid));
+        batch.put(operationKey(entry.time.hash()), MsgPack.encode(newLatest));
       }
     }
   }

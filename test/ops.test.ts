@@ -199,6 +199,21 @@ describe('Fusable Causal Operations', () => {
       expect(cut.inserts).toEqual([]);
     });
 
+    test('cut removes intersecting insert', () => {
+      const one = new CausalIntegerOp({
+        from: 0, time: time(0), deletes: [], inserts: [[0, [tid(0)]]]
+      });
+      const two = new CausalIntegerOp({
+        from: 0, time: time(1), deletes: [], inserts: [[0, [tid(0)]], [1, [tid(1)]]]
+      });
+      expect(CausalTimeRange.overlaps(one, two)).toBe(true);
+      const cut = two.cutBy(one);
+      expect(cut.from).toBe(1);
+      expect(cut.time.equals(two.time)).toBe(true);
+      expect(cut.deletes).toEqual([]);
+      expect(cut.inserts).toEqual([[1, [tid(1)]]]);
+    });
+
     test('cut removes redundant delete', () => {
       const one = new CausalIntegerOp({
         from: 0, time: time(1), deletes: [], inserts: []

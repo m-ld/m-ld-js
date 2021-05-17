@@ -8,6 +8,7 @@ import { Describe, MeldConstraint } from '../src';
 import { jsonify } from './testUtil';
 import { SubjectGraph } from '../src/engine/SubjectGraph';
 import { MeldEncoding } from '../src/engine/MeldEncoding';
+import { OperationMessage } from '../src/engine';
 
 const fred = {
   '@id': 'http://test.m-ld.org/fred',
@@ -359,6 +360,31 @@ describe('SU-Set Dataset', () => {
           const opArray = ops ? await ops.pipe(toArray()).toPromise() : [];
           expect(opArray.length).toBe(1);
           expect(remote.time.equals(opArray[0].time)).toBe(true);
+        });
+
+        test('cuts stale from incoming fusion', async () => {
+          const third = remote.fork();
+          // The remote will have two transactions, which fuse in its journal.
+          // The local sees the first, adding wilma...
+          const one = remote.sentOperation('{}', '{"@id":"wilma","name":"Wilma"}');
+          const oneTid = one.time.hash();
+          await ssd.apply(one, local.time, local.tick().time);
+          // ... and then get a third-party txn, deleting wilma
+          await ssd.apply(third.sentOperation(
+            `{"tid":"${oneTid}","o":"Wilma","p":"#name","s":"wilma"}`, '{}'),
+            local.time, local.tick().time);
+          // Finally the local gets the remote fusion (as a rev-up), which still
+          // includes the insert of wilma
+          remote.tick();
+          await ssd.apply(new OperationMessage(one.time.ticks, // Previous tick of remote
+            [2, one.time.ticks, remote.time.toJson(), '{}', `[
+              {"tid":"${oneTid}","o":"Wilma","p":"#name","s":"wilma"},
+              {"tid":"${remote.time.hash()}","o":"Barney","p":"#name","s":"barney"}]`]),
+            local.time, local.tick().time);
+          // Result should not include wilma
+          await expect(ssd.read<Describe>({
+            '@describe': 'http://test.m-ld.org/wilma'
+          }).pipe(toArray()).toPromise()).resolves.toEqual([]);
         });
       });
     });
