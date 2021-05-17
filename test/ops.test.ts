@@ -81,8 +81,7 @@ describe('Fusable Causal Operations', () => {
       expect(result?.from).toBe(0);
       expect(result?.time.equals(two.time)).toBe(true);
       expect(result?.deletes).toEqual([]);
-      expect(result?.inserts).toHaveLength(2);
-      expect(result?.inserts).toEqual(expect.arrayContaining([[0, [tid(0)]], [1, [tid(1)]]]));
+      expect(result?.inserts).toEqual([[0, [tid(0)]], [1, [tid(1)]]]);
     });
 
     test('fuses same value inserts', () => {
@@ -98,8 +97,7 @@ describe('Fusable Causal Operations', () => {
       expect(result?.time.equals(two.time)).toBe(true);
       expect(result?.deletes).toEqual([]);
       expect(result?.inserts).toHaveLength(1);
-      expect(result?.inserts).toEqual(
-        expect.arrayContaining([[0, expect.arrayContaining([tid(0), tid(1)])]]));
+      expect(result?.inserts).toEqual([[0, [tid(0), tid(1)]]]);
     });
 
     test('removes redundant insert', () => {
@@ -244,6 +242,50 @@ describe('Fusable Causal Operations', () => {
       expect(cut.time.equals(two.time)).toBe(true);
       expect(cut.deletes).toEqual([[0, [tid(0)]]]);
       expect(cut.inserts).toEqual([]);
+    });
+
+    test('cut does everything', () => {
+      const one = new CausalIntegerOp({
+        from: 1,
+        time: time(2),
+        deletes: [
+          [0.0, [tid(0)]], // Deleted at 1
+          [0.1, [tid(0)]]  // Deleted at 2
+        ],
+        inserts: [
+          [1.0, [tid(1)]],
+          [1.1, [tid(1)]],
+          [2.0, [tid(2)]],
+          [2.1, [tid(2)]]
+        ]
+      });
+      // Overlapping tick 2
+      const two = new CausalIntegerOp({
+        from: 2,
+        time: time(3),
+        deletes: [
+          [0.1, [tid(0)]], // Deleted at 2
+          [0.2, [tid(0)]], // Deleted at 3
+          [1.1, [tid(1)]]  // Deleted at 3
+          //[2.1, [tid(2)]]   Deleted at 3
+        ],
+        inserts: [
+          [2.0, [tid(2)]],
+          [3.0, [tid(3)]]
+        ]
+      });
+      expect(CausalTimeRange.overlaps(one, two)).toBe(true);
+      const cut = two.cutBy(one);
+      expect(cut.from).toBe(3);
+      expect(cut.time.equals(two.time)).toBe(true);
+      expect(cut.deletes).toEqual([
+        [0.2, [tid(0)]],
+        [1.1, [tid(1)]],
+        [2.1, [tid(2)]]
+      ]);
+      expect(cut.inserts).toEqual([
+        [3, [tid(3)]]
+      ]);
     });
   });
 });

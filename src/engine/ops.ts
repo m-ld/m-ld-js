@@ -78,15 +78,18 @@ export namespace CausalTimeRange {
  *   this.time.ticks`.
  */
 export interface CausalOperation<T, C extends CausalClock>
-  extends CausalTimeRange<C>, Operation<[T, string[]]> {
+  extends CausalTimeRange<C>, Operation<ItemTids<T>> {
 }
+type ItemTids<T> = [item: T, tids: string[]];
+type ItemTid<T> = [item: T, tid: string];
+namespace ItemTid { export const tid = (itemTid: ItemTid<unknown>) => itemTid[1]; }
 
 /** Immutable */
 export class FusableCausalOperation<T, C extends CausalClock> implements CausalOperation<T, C> {
   readonly from: number;
   readonly time: C;
-  readonly deletes: [T, string[]][];
-  readonly inserts: [T, string[]][];
+  readonly deletes: ItemTids<T>[];
+  readonly inserts: ItemTids<T>[];
 
   constructor(
     { from, time, deletes, inserts }: CausalOperation<T, C>,
@@ -117,29 +120,29 @@ export class FusableCausalOperation<T, C extends CausalClock> implements CausalO
   }
 
   /** Pre: We can cut iff our from is within the previous range */
-  cutBy(prev: Omit<CausalOperation<T, C>, 'deletes'>): CausalOperation<T, C> {
-    const cut = this.mutable(),
-      // Also do some indexing
-      prevFlatInserts = this.newFlatIndexSet(flatten(prev.inserts)),
-      thisDeletesByTid = this.byTid(this.deletes),
-      prevInsertsByTid = this.byTid(prev.inserts);
+  cutBy(prev: CausalOperation<T, C>): CausalOperation<T, C> {
+    const cut = this.mutable();
+    // Remove all overlapping deletes
+    cut.deletes.deleteAll(flatten(prev.deletes));
+    // Do some indexing for TID-based parts
+    const prevFlatInserts = this.newFlatIndexSet(flatten(prev.inserts));
     // Remove any deletes where tid in exclusive-prev, unless inserted in prev
     for (let tick = prev.from; tick < this.from; tick++) {
       // Can use a hash after creation for external ticks as in fusions
-      const tid = this.time.ticked(tick).hash();
-      for (let item of thisDeletesByTid[tid] ?? [])
-        if (!prevFlatInserts.has([item, tid]))
-          cut.deletes.delete([item, tid]);
+      const iTid = this.time.ticked(tick).hash();
+      cut.deletes.deleteAll(deleted =>
+        ItemTid.tid(deleted) === iTid && !prevFlatInserts.has(deleted));
     }
     // Add deletes for any inserts from prev where tid in intersection, unless
-    // still inserted in cut, and remove all inserts from intersection
+    // still inserted in cut, and remove all inserts from B where tid in i
     for (let tick = this.from; tick <= prev.time.ticks; tick++) {
-      const tid = this.time.ticked(tick).hash();
-      for (let item of prevInsertsByTid[tid] ?? [])
-        if (!cut.inserts.has([item, tid]))
-          cut.deletes.add([item, tid]);
-        else
-          cut.inserts.delete([item, tid]);
+      const aTid = this.time.ticked(tick).hash();
+      for (let inserted of prevFlatInserts)
+        if (ItemTid.tid(inserted) === aTid)
+          if (!cut.inserts.has(inserted))
+            cut.deletes.add(inserted);
+          else
+            cut.inserts.delete(inserted);
     }
     return {
       from: prev.time.ticked().ticks,
@@ -149,7 +152,7 @@ export class FusableCausalOperation<T, C extends CausalClock> implements CausalO
     };
   }
 
-  private expand(itemTids: Iterable<[T, string]>): [T, string[]][] {
+  private expand(itemTids: Iterable<ItemTid<T>>): ItemTids<T>[] {
     const expanded = this.newIndexMap();
     for (let itemTid of itemTids) {
       const [item, tid] = itemTid;
@@ -158,23 +161,16 @@ export class FusableCausalOperation<T, C extends CausalClock> implements CausalO
     return [...expanded];
   }
 
-  private mutable(op: CausalOperation<T, C> = this): MutableOperation<[T, string]> {
+  private mutable(op: CausalOperation<T, C> = this): MutableOperation<ItemTid<T>> {
     const newFlatIndexSet = this.newFlatIndexSet;
-    return new class extends MutableOperation<[T, string]> {
-      constructSet(items?: Iterable<[T, string]>) {
+    return new class extends MutableOperation<ItemTid<T>> {
+      constructSet(items?: Iterable<ItemTid<T>>) {
         return newFlatIndexSet(items);
       }
     }({
       deletes: flatten(op.deletes),
       inserts: flatten(op.inserts)
     });
-  }
-
-  private byTid(part: Iterable<[T, string[]]>) {
-    const pbt: { [tid: string]: T[] } = {};
-    for (let [item, tid] of flatten(part))
-      (pbt[tid] ??= []).push(item);
-    return pbt;
   }
 
   private newIndexMap = () => {
@@ -186,13 +182,13 @@ export class FusableCausalOperation<T, C extends CausalClock> implements CausalO
     }();
   }
 
-  private newFlatIndexSet = (items?: Iterable<[T, string]>) => {
+  private newFlatIndexSet = (items?: Iterable<ItemTid<T>>) => {
     const getIndex = this.getIndex;
-    return new class WithTidsSet extends IndexSet<[T, string]> {
-      construct(ts?: Iterable<[T, string]>) {
+    return new class WithTidsSet extends IndexSet<ItemTid<T>> {
+      construct(ts?: Iterable<ItemTid<T>>) {
         return new WithTidsSet(ts);
       };
-      getIndex(key: [T, string]) {
+      getIndex(key: ItemTid<T>) {
         const [item, tid] = key;
         return `${getIndex(item)}^${tid}`;
       };
@@ -200,7 +196,8 @@ export class FusableCausalOperation<T, C extends CausalClock> implements CausalO
   }
 }
 
-function* flatten<T>(itemsTids: Iterable<[T, string[]]>): Iterable<[T, string]> {
+function* flatten<T>(
+  itemsTids: Iterable<ItemTids<T>>): Iterable<[item: T, tid: string]> {
   for (let itemTids of itemsTids) {
     const [item, tids] = itemTids;
     for (let tid of tids)
