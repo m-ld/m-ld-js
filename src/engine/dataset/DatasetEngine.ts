@@ -72,8 +72,8 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
     this.subs.add(this.status.subscribe(status => this.log.debug(status)));
   }
 
-  get encoding() {
-    return this.dataset.encoding;
+  get encoder() {
+    return this.dataset;
   }
 
   /**

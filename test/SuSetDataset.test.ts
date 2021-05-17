@@ -7,7 +7,7 @@ import { from } from 'rxjs';
 import { Describe, MeldConstraint } from '../src';
 import { jsonify } from './testUtil';
 import { SubjectGraph } from '../src/engine/SubjectGraph';
-import { MeldEncoding } from '../src/engine/MeldEncoding';
+import { MeldEncoder } from '../src/engine/MeldEncoding';
 import { OperationMessage } from '../src/engine';
 
 const fred = {
@@ -104,9 +104,9 @@ describe('SU-Set Dataset', () => {
 
         expect(from).toBe(local.time.ticks);
         expect(local.time.equals(TreeClock.fromJson(time) as TreeClock)).toBe(true);
-        expect(MeldEncoding.jsonFromBuffer(ins))
+        expect(MeldEncoder.jsonFromBuffer(ins))
           .toEqual({ '@id': 'fred', 'name': 'Fred' });
-        expect(MeldEncoding.jsonFromBuffer(del)).toEqual({});
+        expect(MeldEncoder.jsonFromBuffer(del)).toEqual({});
       });
 
       test('applies an insert operation', async () => {
@@ -220,8 +220,8 @@ describe('SU-Set Dataset', () => {
           expect(msg.time.equals(local.time)).toBe(true);
           const [, , , del, ins] = msg.data;
 
-          expect(MeldEncoding.jsonFromBuffer(ins)).toEqual({});
-          expect(MeldEncoding.jsonFromBuffer(del)).toMatchObject({
+          expect(MeldEncoder.jsonFromBuffer(ins)).toEqual({});
+          expect(MeldEncoder.jsonFromBuffer(del)).toMatchObject({
             'tid': firstTid,
             's': 'fred',
             'p': '#name',

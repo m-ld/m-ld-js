@@ -6,7 +6,7 @@ import { Context, Subject, Write } from '../../jrql-support';
 import { Dataset, PatchQuads } from '.';
 import { Iri } from 'jsonld/jsonld-spec';
 import { JrqlGraph } from './JrqlGraph';
-import { MeldEncoding, MeldOperation, TriplesTids, unreify } from '../MeldEncoding';
+import { MeldEncoder, MeldOperation, TriplesTids, unreify } from '../MeldEncoding';
 import { Observable, from, Subject as Source, EMPTY, of } from 'rxjs';
 import {
   bufferCount, mergeMap, map, filter, takeWhile, expand, toArray
@@ -16,7 +16,7 @@ import { Logger } from 'loglevel';
 import { MeldError } from '../MeldError';
 import { LocalLock } from '../local';
 import { SUSET_CONTEXT, tripleId } from './SuSetGraph';
-import { SuSetJournal, SuSetJournalDataset, SuSetJournalEntry } from './SuSetJournal';
+import { SuSetJournal, SuSetJournalData, SuSetJournalEntry } from './SuSetJournal';
 import { array, GraphSubject, MeldConfig, Read } from '../..';
 import { QuadMap, TripleMap, Triple } from '../quads';
 import { CheckList } from '../../constraints/CheckList';
@@ -43,18 +43,17 @@ function asTriplesTids(quadTidQuads: QuadMap<Quad[]>): TriplesTids {
  * Writeable Graph, similar to a Dataset, but with a slightly different transaction API.
  * Journals every transaction and creates m-ld compliant operations.
  */
-export class SuSetDataset {
+export class SuSetDataset extends MeldEncoder {
   private static checkNotClosed =
     check((d: SuSetDataset) => !d.dataset.closed, () => new MeldError('Clone has closed'));
 
-  readonly encoding: MeldEncoding;
   /** External context used for reads, writes and updates, but not for constraints. */
   /*readonly*/ userCtx: ActiveContext;
 
   private /*readonly*/ userGraph: JrqlGraph;
   private /*readonly*/ tidsGraph: JrqlGraph;
   private /*readonly*/ state: MeldReadState;
-  private readonly journalData: SuSetJournalDataset;
+  private readonly journalData: SuSetJournalData;
   private readonly updateSource: Source<MeldUpdate> = new Source;
   private readonly datasetLock: LocalLock;
   private readonly maxOperationSize: number;
@@ -66,8 +65,8 @@ export class SuSetDataset {
     private readonly context: Context,
     constraints: MeldConstraint[],
     config: Pick<MeldConfig, '@id' | '@domain' | 'maxOperationSize' | 'logLevel'>) {
-    this.encoding = new MeldEncoding(config['@domain'], dataset.dataFactory);
-    this.journalData = new SuSetJournalDataset(dataset, this.encoding);
+    super(config['@domain'], dataset.dataFactory);
+    this.journalData = new SuSetJournalData(dataset, this);
     // Update notifications are strictly ordered but don't hold up transactions
     this.datasetLock = new LocalLock(config['@id'], dataset.location);
     this.maxOperationSize = config.maxOperationSize ?? Infinity;
@@ -77,12 +76,12 @@ export class SuSetDataset {
 
   @SuSetDataset.checkNotClosed.async
   async initialise() {
+    await super.initialise();
     this.userCtx = await activeCtx(this.context);
     this.userGraph = new JrqlGraph(this.dataset.graph());
     this.tidsGraph = new JrqlGraph(this.dataset.graph(
-      this.dataset.dataFactory.namedNode(QS.tids)), await activeCtx(SUSET_CONTEXT));
+      this.rdf.namedNode(QS.tids)), await activeCtx(SUSET_CONTEXT));
     this.state = new GraphState(this.userGraph);
-    await this.encoding.initialise();
     // Check for exclusive access to the dataset location
     try {
       await this.datasetLock.acquire();
@@ -242,16 +241,16 @@ export class SuSetDataset {
 
   private txnOperation(tid: string, time: TreeClock,
     inserts: Iterable<Quad>, deletes: TriplesTids) {
-    return MeldOperation.fromOperation(this.encoding, {
+    return MeldOperation.fromOperation(this, {
       from: time.ticks, time, deletes, inserts: [...inserts].map(quad => [quad, [tid]])
     });
   }
 
-  toUserQuad = (triple: Triple): Quad => this.encoding.rdf.quad(
+  toUserQuad = (triple: Triple): Quad => this.rdf.quad(
     triple.subject,
     triple.predicate,
     triple.object,
-    this.encoding.rdf.defaultGraph());
+    this.rdf.defaultGraph());
 
   @SuSetDataset.checkNotClosed.async
   async apply(msg: OperationMessage,
@@ -259,13 +258,13 @@ export class SuSetDataset {
     return this.dataset.transact<OperationMessage | null>({
       prepare: async txc => {
         txc.sw.next('decode-op');
-        let op = MeldOperation.fromEncoded(this.encoding, msg.data);
+        let op = MeldOperation.fromEncoded(this, msg.data);
         this.log.debug(`Applying operation: ${op.time} @ ${localTime}`);
         // Cut away stale parts of an incoming (fused) operation
         const prev = await this.journalData.operation(msg.time.ticked(msg.prev).hash());
         if (prev != null) {
-          op = MeldOperation.fromOperation(this.encoding,
-            op.cutBy(MeldOperation.fromEncoded(this.encoding, prev)));
+          op = MeldOperation.fromOperation(this,
+            op.cutBy(MeldOperation.fromEncoded(this, prev)));
         }
 
         txc.sw.next('apply-txn');
@@ -434,7 +433,7 @@ export class SuSetDataset {
             lastTime: journal.gwc,
             quads: this.userGraph.graph.match().pipe(
               bufferCount(10), // TODO batch size config
-              mergeMap(async batch => this.encoding.reifyTriplesTids(
+              mergeMap(async batch => this.reifyTriplesTids(
                 asTriplesTids(await this.findTriplesTids(batch, 'includeEmpty')))),
               tapComplete(dataEmitted))
           });

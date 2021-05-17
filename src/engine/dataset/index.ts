@@ -18,6 +18,7 @@ import { DataFactory as RdfDataFactory } from 'rdf-data-factory';
 import { M_LD, RDF, JRQL, XS, QS } from '../../ns';
 import { wrap, EmptyIterator } from 'asynciterator';
 import { MutableOperation } from '../ops';
+import { MeldError } from '../MeldError';
 
 /**
  * Atomically-applied patch to a quad-store.
@@ -42,12 +43,19 @@ export class PatchQuads extends MutableOperation<Quad> implements Patch {
 
 export type GraphName = DefaultGraph | NamedNode;
 
+export interface KvpStore {
+  /** Exact match kvp retrieval */
+  get(key: string): Promise<Buffer | undefined>;
+  /** Kvp retrieval by key greater-than-or-equal */
+  gte(key: string): Promise<[string, Buffer] | undefined>;
+}
+
 /**
  * Writeable dataset. Transactions are atomically and serially applied.
  * Note that the patch created by a transaction can span Graphs - each
  * Quad in the patch will have a graph property.
  */
-export interface Dataset {
+export interface Dataset extends KvpStore {
   readonly location: string;
   readonly dataFactory: Required<DataFactory>;
 
@@ -59,11 +67,6 @@ export interface Dataset {
    */
   transact(txn: TxnOptions<TxnResult>): Promise<void>;
   transact<T>(txn: TxnOptions<TxnValueResult<T>>): Promise<T>;
-
-  /** Exact match kvp retrieval */
-  get(key: string): Promise<Buffer | undefined>;
-  /** Kvp retrieval by key greater-than-or-equal */
-  gte(key: string): Promise<[string, Buffer] | undefined>;
 
   clear(): Promise<void>;
 
@@ -94,7 +97,9 @@ export interface TxnContext {
   sw: Stopwatch
 }
 
-const notClosed = check((d: Dataset) => !d.closed, () => new Error('Dataset closed'));
+const notClosed = check((d: Dataset) => !d.closed,
+  // m-ld-specific error used here to simplify exception handling
+  () => new MeldError('Clone has closed'));
 
 /**
  * Read-only utility interface for reading Quads from a Dataset.

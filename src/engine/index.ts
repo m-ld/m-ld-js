@@ -8,7 +8,7 @@ import { MsgPack, Future } from './util';
 import { LiveValue } from './LiveValue';
 import { MeldError } from './MeldError';
 import { Triple } from './quads';
-import { MeldEncoding } from './MeldEncoding';
+import { MeldEncoder } from './MeldEncoding';
 const inspect = Symbol.for('nodejs.util.inspect.custom');
 
 export class OperationMessage implements Message<TreeClock, EncodedOperation> {
@@ -114,5 +114,5 @@ export interface MeldRemotes extends Meld {
 
 export interface MeldLocal extends Meld {
   readonly id: string;
-  readonly encoding: MeldEncoding;
+  readonly encoder: MeldEncoder;
 }

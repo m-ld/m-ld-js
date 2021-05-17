@@ -57,7 +57,7 @@ export function unreify(reifications: Triple[]): [Triple, UUID[]][] {
 export type TriplesTids = [Triple, string[]][];
 
 export class MeldOperation extends FusableCausalOperation<Triple, TreeClock> {
-  static fromOperation = (encoder: MeldEncoding,
+  static fromOperation = (encoder: MeldEncoder,
     op: CausalOperation<Triple, TreeClock>): MeldOperation => {
     const jsons = [op.deletes, op.inserts]
       .map((triplesTids, i) => {
@@ -68,18 +68,18 @@ export class MeldOperation extends FusableCausalOperation<Triple, TreeClock> {
           return encoder.reifyTriplesTids([...triplesTids]);
       })
       .map(encoder.jsonFromTriples);
-    const [delEnc, insEnc] = jsons.map(json => MeldEncoding.bufferFromJson(json));
+    const [delEnc, insEnc] = jsons.map(json => MeldEncoder.bufferFromJson(json));
     const encoded: EncodedOperation = [2, op.from, op.time.toJson(), delEnc, insEnc];
     return new MeldOperation(op, encoded, jsons);
   }
 
-  static fromEncoded = (encoder: MeldEncoding,
+  static fromEncoded = (encoder: MeldEncoder,
     encoded: EncodedOperation): MeldOperation => {
     const [ver] = encoded;
     if (ver < 2)
       throw new Error(`Encoded operation version ${ver} not supported`);
     let [, from, timeJson, delEnc, insEnc] = encoded;
-    const jsons = [delEnc, insEnc].map(MeldEncoding.jsonFromBuffer);
+    const jsons = [delEnc, insEnc].map(MeldEncoder.jsonFromBuffer);
     const [delTriples, insTriples] = jsons.map(encoder.triplesFromJson);
     const time = TreeClock.fromJson(timeJson) as TreeClock;
     const deletes = unreify(delTriples);
@@ -124,7 +124,7 @@ const OPERATION_CONTEXT = {
   o: 'rdf:object'
 };
 
-export class MeldEncoding {
+export class MeldEncoder {
   private /*readonly*/ ctx: ActiveContext;
   private readonly ready: Promise<unknown>;
 
@@ -135,7 +135,9 @@ export class MeldEncoding {
       .then(ctx => this.ctx = ctx);
   }
 
-  initialise = () => this.ready;
+  async initialise() {
+    await this.ready;
+  }
 
   private name = lazy(name => this.rdf.namedNode(name));
 

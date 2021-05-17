@@ -2,10 +2,9 @@ import { toPrefixedId } from './SuSetGraph';
 import { EncodedOperation } from '..';
 import { TreeClock, TreeClockJson } from '../clocks';
 import { MsgPack } from '../util';
-import { Dataset, Kvps } from '.';
-import { MeldEncoding, MeldOperation } from '../MeldEncoding';
+import { Kvps, KvpStore } from '.';
+import { MeldEncoder, MeldOperation } from '../MeldEncoding';
 import { CausalTimeRange } from '../ops';
-import { MeldError } from '../MeldError';
 
 /** There is only one journal with a fixed key. */
 const JOURNAL_KEY = '_qs:journal';
@@ -73,18 +72,18 @@ interface JournalEntry {
 
 /** Immutable expansion of JournalEntryJson */
 export class SuSetJournalEntry implements JournalEntry {
-  static fromJson(dataset: SuSetJournalDataset, key: EntryKey, json: JournalEntryJson) {
+  static fromJson(data: SuSetJournalData, key: EntryKey, json: JournalEntryJson) {
     // Destructuring fields for convenience
     const [prev, start, encoded, next] = json;
     const [, from, timeJson] = encoded;
     const time = TreeClock.fromJson(timeJson) as TreeClock;
-    return new SuSetJournalEntry(dataset, key, prev, start, encoded, from, time, next);
+    return new SuSetJournalEntry(data, key, prev, start, encoded, from, time, next);
   }
 
-  static fromEntry(dataset: SuSetJournalDataset, entry: JournalEntry, next: EntryKey | undefined) {
+  static fromEntry(data: SuSetJournalData, entry: JournalEntry, next: EntryKey | undefined) {
     const { key, prev, start, operation } = entry;
     const { from, time } = operation;
-    return new SuSetJournalEntry(dataset, key, prev, start, operation, from, time, next);
+    return new SuSetJournalEntry(data, key, prev, start, operation, from, time, next);
   }
 
   /** Cache of operation if available */
@@ -92,7 +91,7 @@ export class SuSetJournalEntry implements JournalEntry {
   encoded: EncodedOperation;
 
   private constructor(
-    private readonly dataset: SuSetJournalDataset,
+    private readonly data: SuSetJournalData,
     readonly key: EntryKey,
     readonly prev: number,
     readonly start: number,
@@ -110,7 +109,7 @@ export class SuSetJournalEntry implements JournalEntry {
 
   get operation() {
     if (this._operation == null)
-      this._operation = MeldOperation.fromEncoded(this.dataset.encoding, this.encoded);
+      this._operation = MeldOperation.fromEncoded(this.data.encoder, this.encoded);
     return this._operation;
   }
 
@@ -120,7 +119,7 @@ export class SuSetJournalEntry implements JournalEntry {
 
   async next(): Promise<SuSetJournalEntry | undefined> {
     if (this.nextKey != null)
-      return this.dataset.entry(this.nextKey);
+      return this.data.entry(this.nextKey);
   }
 
   static head(localTime?: TreeClock): [EntryKey, Partial<JournalEntryJson>] {
@@ -133,7 +132,7 @@ export class SuSetJournalEntry implements JournalEntry {
 
   builder(journal: SuSetJournal) {
     // The head represents this entry, made ready for appending new entries
-    let head = new EntryBuilder(this.dataset, this, journal.time, journal.gwc), tail = head;
+    let head = new EntryBuilder(this.data, this, journal.time, journal.gwc), tail = head;
     const builder = {
       next: (operation: MeldOperation, localTime: TreeClock) => {
         tail = tail.next(operation, localTime);
@@ -146,7 +145,7 @@ export class SuSetJournalEntry implements JournalEntry {
           batch.del(this.key);
         await Promise.all(entries.map(async entry => {
           batch.put(entry.key, MsgPack.encode(entry.json));
-          await this.dataset.updateLatestOperation(entry)(batch);
+          await this.data.updateLatestOperation(entry)(batch);
         }));
         journal.commit(entries.slice(-1)[0], tail.localTime, tail.gwc)(batch);
 
@@ -160,7 +159,7 @@ class EntryBuilder {
   private nextBuilder?: EntryBuilder
 
   constructor(
-    private readonly dataset: SuSetJournalDataset,
+    private readonly data: SuSetJournalData,
     private entry: JournalEntry,
     public localTime: TreeClock,
     public gwc: TreeClock) {
@@ -175,13 +174,13 @@ class EntryBuilder {
 
   *build(): Iterable<SuSetJournalEntry> {
     yield SuSetJournalEntry.fromEntry(
-      this.dataset, this.entry, this.nextBuilder?.entry.key);
+      this.data, this.entry, this.nextBuilder?.entry.key);
     if (this.nextBuilder != null)
       yield* this.nextBuilder.build();
   }
 
   private makeNext(operation: MeldOperation, localTime: TreeClock) {
-    return this.nextBuilder = new EntryBuilder(this.dataset, {
+    return this.nextBuilder = new EntryBuilder(this.data, {
       key: entryKey(localTime.ticks),
       prev: this.gwc.getTicks(operation.time),
       start: localTime.ticks,
@@ -191,7 +190,7 @@ class EntryBuilder {
 
   private fuseNext(operation: MeldOperation, localTime: TreeClock) {
     const thisOp = this.entry.operation;
-    const fused = MeldOperation.fromOperation(this.dataset.encoding, thisOp.fuse(operation));
+    const fused = MeldOperation.fromOperation(this.data.encoder, thisOp.fuse(operation));
     this.entry = {
       key: entryKey(localTime.ticks),
       prev: this.entry.prev,
@@ -213,14 +212,14 @@ export class SuSetJournal {
   /** Tail state cache */
   _tail: SuSetJournalEntry | null = null;
 
-  static fromJson(dataset: SuSetJournalDataset, json: JournalJson) {
+  static fromJson(data: SuSetJournalData, json: JournalJson) {
     const time = TreeClock.fromJson(json.time) as TreeClock;
     const gwc = TreeClock.fromJson(json.gwc) as TreeClock;
-    return new SuSetJournal(dataset, json.tail, time, gwc);
+    return new SuSetJournal(data, json.tail, time, gwc);
   }
 
   private constructor(
-    private readonly dataset: SuSetJournalDataset,
+    private readonly data: SuSetJournalData,
     readonly tailKey: EntryKey,
     readonly time: TreeClock,
     readonly gwc: TreeClock) {
@@ -230,7 +229,7 @@ export class SuSetJournal {
     if (this._tail == null) {
       if (this.tailKey == null)
         throw new Error('Journal has no tail yet');
-      this._tail = await this.dataset.entry(this.tailKey) ?? null;
+      this._tail = await this.data.entry(this.tailKey) ?? null;
       if (this._tail == null)
         throw new Error('Journal tail is missing');
     }
@@ -254,7 +253,7 @@ export class SuSetJournal {
       const json: JournalJson = { tail: tailKey, time: localTime.toJson(), gwc: gwc.toJson() };
       batch.put(JOURNAL_KEY, MsgPack.encode(json));
       // Not updating caches for rare time update
-      this.dataset._journal = null;
+      this.data._journal = null;
       this._tail = null;
     };
   }
@@ -270,24 +269,24 @@ export class SuSetJournal {
     return batch => {
       const json: JournalJson = { tail: tail.key, time: localTime.toJson(), gwc: gwc.toJson() };
       batch.put(JOURNAL_KEY, MsgPack.encode(json));
-      this.dataset._journal = new SuSetJournal(this.dataset, tail.key, localTime, gwc);
-      this.dataset._journal._tail = tail;
+      this.data._journal = new SuSetJournal(this.data, tail.key, localTime, gwc);
+      this.data._journal._tail = tail;
     }
   }
 }
 
-export class SuSetJournalDataset {
+export class SuSetJournalData {
   /** Journal state cache */
   _journal: SuSetJournal | null = null;
 
   constructor(
-    private readonly ds: Dataset,
-    readonly encoding: MeldEncoding) {
+    private readonly kvps: KvpStore,
+    readonly encoder: MeldEncoder) {
   }
 
   async initialise(): Promise<Kvps | undefined> {
     // Create the Journal if not exists
-    const journal = await this.ds.get(JOURNAL_KEY);
+    const journal = await this.kvps.get(JOURNAL_KEY);
     if (journal == null)
       return this.reset();
   }
@@ -304,7 +303,7 @@ export class SuSetJournalDataset {
 
   async journal() {
     if (this._journal == null) {
-      const value = await this.ds.get(JOURNAL_KEY);
+      const value = await this.kvps.get(JOURNAL_KEY);
       if (value == null)
         throw new Error('Missing journal');
       this._journal = SuSetJournal.fromJson(this, MsgPack.decode(value));
@@ -313,15 +312,13 @@ export class SuSetJournalDataset {
   }
 
   async entry(key: EntryKey) {
-    if (this.ds.closed)
-      throw new MeldError('Clone has closed');
-    const value = await this.ds.get(key);
+    const value = await this.kvps.get(key);
     if (value != null)
       return SuSetJournalEntry.fromJson(this, key, MsgPack.decode(value));
   }
 
   async entryFor(tick: number) {
-    const kvp = await this.ds.gte(entryKey(tick));
+    const kvp = await this.kvps.gte(entryKey(tick));
     if (kvp != null) {
       const [key, value] = kvp;
       if (key.startsWith(ENTRY_KEY_PRE)) {
@@ -334,7 +331,7 @@ export class SuSetJournalDataset {
   }
 
   async operation(tid: string): Promise<EncodedOperation | undefined> {
-    const value = await this.ds.get(operationKey(tid));
+    const value = await this.kvps.get(operationKey(tid));
     if (value != null)
       return MsgPack.decode(value);
   }
@@ -350,8 +347,8 @@ export class SuSetJournalDataset {
         if (prevOp != null) {
           const [, from] = prevOp;
           if (CausalTimeRange.contiguous({ from, time: prevTime }, entry)) {
-            const fused = MeldOperation.fromEncoded(this.encoding, prevOp).fuse(entry.operation);
-            newLatest = MeldOperation.fromOperation(this.encoding, fused).encoded;
+            const fused = MeldOperation.fromEncoded(this.encoder, prevOp).fuse(entry.operation);
+            newLatest = MeldOperation.fromOperation(this.encoder, fused).encoded;
           }
         }
         // Always delete the old latest

@@ -182,7 +182,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
   }
 
   private triplesFromBuffer = (payload: Buffer) =>
-    this.requireClone().encoding.triplesFromJson(MsgPack.decode(payload))
+    this.requireClone().encoder.triplesFromJson(MsgPack.decode(payload))
 
   async revupFrom(time: TreeClock): Promise<Revup | undefined> {
     const readyToAck = new Future;
@@ -429,7 +429,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
   }
 
   private bufferFromTriples = (triples: Triple[]) =>
-    MsgPack.encode(this.requireClone().encoding.jsonFromTriples(triples));
+    MsgPack.encode(this.requireClone().encoder.jsonFromTriples(triples));
 
   private async replyRevup(sentParams: SendParams, revup: Revup | undefined) {
     if (revup) {
