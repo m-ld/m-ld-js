@@ -295,7 +295,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
   protected onNotify(channelId: string, payload: Buffer) {
     if (channelId in this.consuming) {
       const json = MsgPack.decode(payload);
-      this.log.debug(`Notified on channel ${channelId}:`, json);
+      this.log.debug(`Notified ${Object.keys(json)[0]} on channel ${channelId}`);
       if (json.next)
         this.consuming[channelId].next(json.next);
       else if (json.complete)

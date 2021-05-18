@@ -3,7 +3,7 @@ import {
   Quad_Predicate, Quad_Object, DataFactory
 } from 'rdf-js';
 import { Quadstore } from 'quadstore';
-import { AbstractChainedBatch, AbstractLevelDOWN } from 'abstract-leveldown';
+import { AbstractChainedBatch, AbstractIteratorOptions, AbstractLevelDOWN } from 'abstract-leveldown';
 import { Observable } from 'rxjs';
 import { generate as uuid } from 'short-uuid';
 import { check, observeAsyncIterator, Stopwatch } from '../util';
@@ -47,7 +47,7 @@ export interface KvpStore {
   /** Exact match kvp retrieval */
   get(key: string): Promise<Buffer | undefined>;
   /** Kvp retrieval by key greater-than-or-equal */
-  gte(key: string): Promise<[string, Buffer] | undefined>;
+  first(range: AbstractIteratorOptions<string>): Promise<[string, Buffer] | undefined>;
 }
 
 /**
@@ -233,9 +233,9 @@ export class QuadStoreDataset implements Dataset {
   }
 
   @notClosed.async
-  gte(key: string): Promise<[string, Buffer] | undefined> {
+  first(range: AbstractIteratorOptions<string>): Promise<[string, Buffer] | undefined> {
     return new Promise<[string, Buffer] | undefined>((resolve, reject) => {
-      const it = this.store.db.iterator({ gte: key, limit: 1, keyAsBuffer: false });
+      const it = this.store.db.iterator({ ...range, limit: 1, keyAsBuffer: false });
       it.next((err, key: string, value: Buffer) => {
         if (err)
           reject(err);

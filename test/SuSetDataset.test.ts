@@ -362,7 +362,7 @@ describe('SU-Set Dataset', () => {
           expect(remote.time.equals(opArray[0].time)).toBe(true);
         });
 
-        test('cuts stale from incoming fusion', async () => {
+        test('cuts stale message from incoming fusion', async () => {
           const third = remote.fork();
           // The remote will have two transactions, which fuse in its journal.
           // The local sees the first, adding wilma...
@@ -381,9 +381,33 @@ describe('SU-Set Dataset', () => {
               {"tid":"${oneTid}","o":"Wilma","p":"#name","s":"wilma"},
               {"tid":"${remote.time.hash()}","o":"Barney","p":"#name","s":"barney"}]`]),
             local.time, local.tick().time);
-          // Result should not include wilma
+          // Result should not include wilma because of the third-party delete
           await expect(ssd.read<Describe>({
             '@describe': 'http://test.m-ld.org/wilma'
+          }).pipe(toArray()).toPromise()).resolves.toEqual([]);
+        });
+
+        test('cuts stale fusion from incoming fusion', async () => {
+          const third = remote.fork();
+          // The remote will have two transactions, which fuse in its journal.
+          // The local sees the first, adding wilma...
+          const one = remote.sentOperation('{}', '{"@id":"wilma","name":"Wilma"}');
+          const oneTid = one.time.hash();
+          await ssd.apply(one, local.time, local.tick().time);
+          // ... and a second, adding betty (this will fuse with the first)
+          await ssd.apply(remote.sentOperation('{}', '{"@id":"betty","name":"Betty"}'),
+            local.time, local.tick().time);
+          // Finally the local gets the remote fusion (as a rev-up), which still
+          // includes the insert of wilma but not betty
+          remote.tick();
+          await ssd.apply(new OperationMessage(one.time.ticks, // Previous tick of remote
+            [2, one.time.ticks, remote.time.toJson(), '{}', `[
+              {"tid":"${oneTid}","o":"Wilma","p":"#name","s":"wilma"},
+              {"tid":"${remote.time.hash()}","o":"Barney","p":"#name","s":"barney"}]`]),
+            local.time, local.tick().time);
+          // Result should not include betty because the fusion omits it
+          await expect(ssd.read<Describe>({
+            '@describe': 'http://test.m-ld.org/betty'
           }).pipe(toArray()).toPromise()).resolves.toEqual([]);
         });
       });

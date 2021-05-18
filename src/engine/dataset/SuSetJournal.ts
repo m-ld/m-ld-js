@@ -17,16 +17,13 @@ const JOURNAL_KEY = '_qs:journal';
 type EntryKey = ReturnType<typeof entryKey>;
 const ENTRY_KEY_PRE = '_qs:entry';
 const ENTRY_KEY_LEN = 8;
+const ENTRY_KEY_RADIX = 36;
 const ENTRY_KEY_PAD = new Array(ENTRY_KEY_LEN).fill('0').join('');
+const ENTRY_KEY_MAX = toPrefixedId(ENTRY_KEY_PRE,
+  new Array(ENTRY_KEY_LEN).fill((ENTRY_KEY_RADIX - 1).toString(ENTRY_KEY_RADIX)).join(''));
 function entryKey(tick: number) {
-  // Dummy head has tick -1
-  if (tick === -1)
-    return toPrefixedId(ENTRY_KEY_PRE, 'head');
-  else if (tick >= 0)
-    return toPrefixedId(ENTRY_KEY_PRE,
-      `${ENTRY_KEY_PAD}${tick.toString(36)}`.slice(-ENTRY_KEY_LEN));
-  else
-    throw 'Invalid entry tick ' + tick;
+  return toPrefixedId(ENTRY_KEY_PRE,
+    `${ENTRY_KEY_PAD}${tick.toString(ENTRY_KEY_RADIX)}`.slice(-ENTRY_KEY_LEN));
 }
 
 /** Causally-fused operation from a clone, indexed by time hash (TID) */
@@ -123,10 +120,10 @@ export class SuSetJournalEntry implements JournalEntry {
   }
 
   static head(localTime?: TreeClock): [EntryKey, Partial<JournalEntryJson>] {
-    const tick = localTime?.ticks ?? -1;
+    const tick = localTime?.ticks ?? 0;
     return [entryKey(tick), [
       // Dummy operation for head
-      -1, tick, [2, tick, (localTime ?? TreeClock.GENESIS).toJson(), '[]', '[]']
+      0, tick, [2, tick, (localTime ?? TreeClock.GENESIS).toJson(), '[]', '[]']
     ]];
   }
 
@@ -312,22 +309,18 @@ export class SuSetJournalData {
   }
 
   async entry(key: EntryKey) {
-    const value = await this.kvps.get(key);
-    if (value != null)
+    const kvp = await this.kvps.first({ gte: key, lte: ENTRY_KEY_MAX });
+    if (kvp != null) {
+      const [key, value] = kvp;
       return SuSetJournalEntry.fromJson(this, key, MsgPack.decode(value));
+    }
   }
 
   async entryFor(tick: number) {
-    const kvp = await this.kvps.gte(entryKey(tick));
-    if (kvp != null) {
-      const [key, value] = kvp;
-      if (key.startsWith(ENTRY_KEY_PRE)) {
-        const firstAfter = SuSetJournalEntry.fromJson(this, key, MsgPack.decode(value));
-        // Check that the entry's tick range covers the request
-        if (firstAfter.start <= tick)
-          return firstAfter;
-      }
-    }
+    const firstAfter = await this.entry(entryKey(tick));
+    // Check that the entry's tick range covers the request
+    if (firstAfter != null && firstAfter.start <= tick)
+      return firstAfter;
   }
 
   async operation(tid: string): Promise<EncodedOperation | undefined> {
@@ -350,10 +343,10 @@ export class SuSetJournalData {
             const fused = MeldOperation.fromEncoded(this.encoder, prevOp).fuse(entry.operation);
             newLatest = MeldOperation.fromOperation(this.encoder, fused).encoded;
           }
+          // Always delete the old latest
+          // TODO: This is not perfect garbage collection, see fused-updates spec
+          batch.del(operationKey(prevTid));
         }
-        // Always delete the old latest
-        // TODO: This is not perfect garbage collection, see fused-updates spec
-        batch.del(operationKey(prevTid));
         batch.put(operationKey(entry.time.hash()), MsgPack.encode(newLatest));
       }
     }

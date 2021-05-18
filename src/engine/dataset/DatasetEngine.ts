@@ -211,8 +211,8 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
             // We're missing a message. Reset the clock and trigger a re-connect.
             this.messageService.push(startTime);
             throw new MeldError('Update out of order', `
-              Update claims prev is ${msg.prev} @ ${msg.time},
-              but local clock was ${ticksSeen} @ ${prevTime}`);
+              Update claims prev is ${msg.prev} (${msg.time}),
+              but local clock was ${ticksSeen} (${prevTime})`);
           } else {
             this.log.debug('Accepting', logBody);
             // Get the event time just before transacting the change, making an

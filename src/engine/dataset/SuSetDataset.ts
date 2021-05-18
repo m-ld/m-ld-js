@@ -258,14 +258,8 @@ export class SuSetDataset extends MeldEncoder {
     return this.dataset.transact<OperationMessage | null>({
       prepare: async txc => {
         txc.sw.next('decode-op');
-        let op = MeldOperation.fromEncoded(this, msg.data);
-        this.log.debug(`Applying operation: ${op.time} @ ${localTime}`);
-        // Cut away stale parts of an incoming (fused) operation
-        const prev = await this.journalData.operation(msg.time.ticked(msg.prev).hash());
-        if (prev != null) {
-          op = MeldOperation.fromOperation(this,
-            op.cutBy(MeldOperation.fromEncoded(this, prev)));
-        }
+        const journal = await this.journalData.journal();
+        const op = await this.applicableOperation(msg, localTime, journal);
 
         txc.sw.next('apply-txn');
         const patch = new PatchQuads();
@@ -287,7 +281,7 @@ export class SuSetDataset extends MeldEncoder {
         // have an empty patch, but we still need to complete the journal
         // entry for it.
         txc.sw.next('journal');
-        const journal = await this.journalData.journal(), tail = await journal.tail();
+        const tail = await journal.tail();
         const journaling = tail.builder(journal).next(op, localTime);
 
         // If the constraint has done anything, we need to merge its work
@@ -308,6 +302,23 @@ export class SuSetDataset extends MeldEncoder {
         };
       }
     });
+  }
+
+  private async applicableOperation(
+    msg: OperationMessage, localTime: TreeClock, journal: SuSetJournal) {
+    const op = MeldOperation.fromEncoded(this, msg.data);
+    this.log.debug(`Applying operation: ${op.time} @ ${localTime}`);
+    // Cut away stale parts of an incoming (fused) operation.
+    // Optimisation: no need to cut if incoming is not fused.
+    if (op.from < op.time.ticks) {
+      const seenTicks = journal.gwc.getTicks(msg.time);
+      const prevSeen = await this.journalData.operation(msg.time.ticked(seenTicks).hash());
+      if (prevSeen != null) {
+        return MeldOperation.fromOperation(this,
+          op.cutBy(MeldOperation.fromEncoded(this, prevSeen)));
+      }
+    }
+    return op;
   }
 
   // The operation's delete contains reifications of deleted triples.
