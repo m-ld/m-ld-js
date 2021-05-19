@@ -1,4 +1,4 @@
-import { EncodedOperation, UUID } from '.';
+import { EncodedOperation, JsonBuffer, UUID } from '.';
 import { flatten, lazy } from './util';
 import { Context, ExpandedTermDef } from '../jrql-support';
 import { Iri } from 'jsonld/jsonld-spec';
@@ -163,14 +163,20 @@ export class MeldEncoder {
 
   triplesFromJson = (json: any): Triple[] =>
     [...new SubjectQuads('graph', this.ctx, this.rdf).quads(json)];
+  
+  triplesFromBuffer = (enc: JsonBuffer): Triple[] =>
+    this.triplesFromJson(MeldEncoder.jsonFromBuffer(enc));
+  
+  bufferFromTriples = (triples: Triple[]): JsonBuffer =>
+    MeldEncoder.bufferFromJson(this.jsonFromTriples(triples));
 
-  static bufferFromJson(json: any): Buffer | string {
+  static bufferFromJson(json: any): JsonBuffer {
     const stringified = JSON.stringify(json);
     return stringified.length > COMPRESS_THRESHOLD_BYTES ?
       gzipSync(stringified) : stringified;
   }
 
-  static jsonFromBuffer(enc: string | Buffer): any {
+  static jsonFromBuffer(enc: JsonBuffer): any {
     if (typeof enc != 'string')
       enc = gunzipSync(enc).toString();
     return JSON.parse(enc);

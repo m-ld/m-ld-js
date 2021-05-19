@@ -399,7 +399,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
       // And re-apply the ticks to our local clock
       const localClock = fork.left.ticked(this.localTime.ticks);
       this.messageService.push(localClock);
-      return localClock
+      return localClock;
     });
     return newClock;
   }
@@ -413,8 +413,8 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
       const snapshot = await this.dataset.takeSnapshot();
       return {
         ...snapshot, updates,
-        // Snapshotting holds open a transaction, so buffer/replay triples
-        quads: snapshot.quads.pipe(publishReplay(), refCount(), tapComplete(sentSnapshot))
+        // Buffer/replay triples to not overload the messaging layer
+        data: snapshot.data.pipe(publishReplay(), refCount(), tapComplete(sentSnapshot))
       };
     });
   }

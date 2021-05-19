@@ -194,7 +194,7 @@ describe('Dataset engine', () => {
       remotes = mockRemotes(remoteUpdates, remotesLive, left);
       snapshot = jest.fn().mockReturnValueOnce(Promise.resolve<Snapshot>({
         lastTime: collabClock.ticked().scrubId(),
-        quads: EMPTY,
+        data: EMPTY,
         updates: EMPTY
       }));
       remotes.snapshot = snapshot;

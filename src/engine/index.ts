@@ -74,6 +74,9 @@ export interface Meld {
   revupFrom(time: TreeClock): Promise<Revup | undefined>;
 }
 
+/** A JSON string, which may be compressed into a buffer with gzip */
+export type JsonBuffer = string | Buffer;
+
 /**
  * A tuple containing encoding components of a {@link MeldOperation}. The delete
  * and insert components are UTF-8 encoded JSON-LD strings, which may be GZIP
@@ -86,10 +89,10 @@ export type EncodedOperation = [
   from: number,
   /** time as JSON */
   time: TreeClockJson,
-  /** delete as gzip Buffer or JSON string */
-  deletes: string | Buffer,
-  /** insert as gzip Buffer or JSON string */
-  inserts: string | Buffer
+  /** delete as gzip Buffer or JSON-LD string */
+  deletes: JsonBuffer,
+  /** insert as gzip Buffer or JSON-LD string */
+  inserts: JsonBuffer
 ];
 
 export interface Recovery {
@@ -102,10 +105,11 @@ export interface Revup extends Recovery {
 
 export interface Snapshot extends Recovery {
   /**
-   * An observable of reified quad arrays. Reified quads include their observed
-   * TIDs. Arrays for batching (sender decides array size).
+   * All data in the snapshot. Data is either reified triples with their
+   * observed TIDs (sender decides how many triples per emission) as JSON-LD, or
+   * a latest operation from remotes.
    */
-  readonly quads: Observable<Triple[]>;
+  readonly data: Observable<{ inserts: JsonBuffer } | { operation: EncodedOperation }>;
 }
 
 export interface MeldRemotes extends Meld {

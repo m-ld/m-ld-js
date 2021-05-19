@@ -19,6 +19,7 @@ import { M_LD, RDF, JRQL, XS, QS } from '../../ns';
 import { wrap, EmptyIterator } from 'asynciterator';
 import { MutableOperation } from '../ops';
 import { MeldError } from '../MeldError';
+import type EventEmitter = require('events');
 
 /**
  * Atomically-applied patch to a quad-store.
@@ -46,8 +47,8 @@ export type GraphName = DefaultGraph | NamedNode;
 export interface KvpStore {
   /** Exact match kvp retrieval */
   get(key: string): Promise<Buffer | undefined>;
-  /** Kvp retrieval by key greater-than-or-equal */
-  first(range: AbstractIteratorOptions<string>): Promise<[string, Buffer] | undefined>;
+  /** Kvp retrieval by range options */
+  read(range: AbstractIteratorOptions<string>): Observable<[string, Buffer]>;
 }
 
 /**
@@ -134,7 +135,10 @@ export class QuadStoreDataset implements Dataset {
   private isClosed: boolean = false;
   base: Iri | undefined;
 
-  constructor(private readonly backend: AbstractLevelDOWN, context?: Context) {
+  constructor(
+    private readonly backend: AbstractLevelDOWN,
+    context?: Context,
+    private readonly events?: EventEmitter) {
     // Internal of level-js and leveldown
     this.location = (<any>backend).location ?? uuid();
     this.activeCtx = activeCtx({ ...STORAGE_CONTEXT, ...context });
@@ -194,6 +198,12 @@ export class QuadStoreDataset implements Dataset {
       await result.after?.();
       sw.stop();
       return <T>result.return;
+    }).then(result => {
+      this.events?.emit('commit', txn.id);
+      return result;
+    }, err => {
+      this.events?.emit('error', err);
+      throw err;
     });
   }
 
@@ -222,36 +232,53 @@ export class QuadStoreDataset implements Dataset {
     return new Promise<Buffer | undefined>((resolve, reject) =>
       this.store.db.get(key, { asBuffer: true }, (err, buf) => {
         if (err) {
-          if (err.message.startsWith('NotFound'))
+          if (err.message.startsWith('NotFound')) {
             resolve(undefined);
-          else
+          } else {
             reject(err);
+            this.events?.emit('error', err);
+          }
         } else {
           resolve(buf);
         }
       }));
   }
 
-  @notClosed.async
-  first(range: AbstractIteratorOptions<string>): Promise<[string, Buffer] | undefined> {
-    return new Promise<[string, Buffer] | undefined>((resolve, reject) => {
-      const it = this.store.db.iterator({ ...range, limit: 1, keyAsBuffer: false });
-      it.next((err, key: string, value: Buffer) => {
-        if (err)
-          reject(err);
-        else if (key != null && value != null)
-          resolve([key, value]);
-        else
-          resolve(undefined);
-        it.end(err => err && console.warn(err));
-      });
+  @notClosed.rx
+  read(range: AbstractIteratorOptions<string>): Observable<[string, Buffer]> {
+    return new Observable(subs => {
+      const it = this.store.db.iterator({ ...range, keyAsBuffer: false });
+      const end = () => it.end(err => err && this.events?.emit('error', err));
+      (function pull() {
+        it.next((err, key: string, value: Buffer) => {
+          if (err) {
+            subs.error(err);
+            end();
+            this.events?.emit('error', err);
+          } else if (key != null && value != null) {
+            subs.next([key, value]);
+            pull();
+          } else {
+            subs.complete();
+            end();
+          }
+        });
+      })();
     });
   }
 
   @notClosed.async
   clear(): Promise<void> {
     return new Promise<void>((resolve, reject) =>
-      this.store.db.clear(err => err ? reject(err) : resolve()));
+      this.store.db.clear(err => {
+        if (err) {
+          reject(err);
+          this.events?.emit('error', err);
+        } else {
+          resolve();
+          this.events?.emit('clear');
+        }
+      }));
   }
 
   @notClosed.async

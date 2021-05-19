@@ -74,7 +74,7 @@ describe('SU-Set Dataset', () => {
       test('answers an empty snapshot', async () => {
         const snapshot = await ssd.takeSnapshot();
         expect(snapshot.lastTime.equals(local.time.scrubId())).toBe(true);
-        await expect(snapshot.quads.toPromise()).resolves.toBeUndefined();
+        await expect(snapshot.data.toPromise()).resolves.toBeUndefined();
       });
 
       test('transacts a no-op', async () => {
@@ -153,17 +153,14 @@ describe('SU-Set Dataset', () => {
         test('answers a snapshot', async () => {
           const snapshot = await ssd.takeSnapshot();
           expect(snapshot.lastTime.equals(local.time.scrubId())).toBe(true);
-          const data = await snapshot.quads.toPromise();
-          expect(SubjectGraph.fromRDF(data)).toMatchObject([{
-            'http://m-ld.org/#tid': firstTid,
-            'http://www.w3.org/1999/02/22-rdf-syntax-ns#subject': {
-              '@id': 'http://test.m-ld.org/fred'
-            },
-            'http://www.w3.org/1999/02/22-rdf-syntax-ns#predicate': {
-              '@id': 'http://test.m-ld.org/#name'
-            },
-            'http://www.w3.org/1999/02/22-rdf-syntax-ns#object': 'Fred'
-          }]);
+          const data = await snapshot.data.pipe(toArray()).toPromise();
+          expect(data.length).toBe(2);
+          const reifiedFredJson =
+            `(,?("s":"fred"|"p":"#name"|"o":"Fred"|"tid":"${local.time.hash()}")){4}`;
+          expect(data).toEqual(expect.arrayContaining([
+            { operation: [2, 1, local.time.toJson(), '{}', expect.stringMatching(reifiedFredJson)] },
+            { inserts: expect.stringMatching(reifiedFredJson) }
+          ]));
         });
 
         test('snapshot includes entailed triples', async () => {
@@ -181,27 +178,24 @@ describe('SU-Set Dataset', () => {
             })
           });
           const snapshot = await ssd.takeSnapshot();
-          const data = await snapshot.quads.toPromise();
-          expect(SubjectGraph.fromRDF(data)).toMatchObject(expect.arrayContaining([
-            expect.objectContaining({
-              // No tids here
-              'http://www.w3.org/1999/02/22-rdf-syntax-ns#subject': {
-                '@id': 'http://test.m-ld.org/fred'
-              },
-              'http://www.w3.org/1999/02/22-rdf-syntax-ns#predicate': {
-                '@id': 'http://test.m-ld.org/#sex'
-              },
-              'http://www.w3.org/1999/02/22-rdf-syntax-ns#object': 'male'
-            })
+          const data = await snapshot.data.pipe(toArray()).toPromise();
+          expect(data.length).toBe(2);
+          const reifiedFredJson =
+            `(,?("s":"fred"|"p":"#name"|"o":"Fred"|"tid":"${local.time.hash()}")){4}`;
+          const reifiedSexJson = // Not a perfect check but must have 7 properties
+            `(.+("s":"fred"|"p":("#name"|"#sex")|"o":("Fred"|"male")|"tid":"${local.time.hash()}")){7}`;
+          expect(data).toEqual(expect.arrayContaining([
+            { operation: [2, 1, local.time.toJson(), '{}', expect.stringMatching(reifiedFredJson)] },
+            { inserts: expect.stringMatching(reifiedSexJson) }
           ]));
         });
 
         test('applies a snapshot', async () => {
           const snapshot = await ssd.takeSnapshot();
-          const staticData = await snapshot.quads.pipe(toArray()).toPromise();
+          const staticData = await snapshot.data.pipe(toArray()).toPromise();
           await ssd.applySnapshot({
             lastTime: local.time,
-            quads: from(staticData)
+            data: from(staticData)
           }, local.tick().time);
           await expect(ssd.read<Describe>({
             '@describe': 'http://test.m-ld.org/fred'

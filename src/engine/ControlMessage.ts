@@ -74,14 +74,14 @@ export namespace Response {
   export class Snapshot implements Response {
     constructor(
       readonly lastTime: TreeClock,
-      readonly quadsAddress: string,
+      readonly dataAddress: string,
       readonly updatesAddress: string) {
     }
 
     readonly toJson = () => ({
       '@type': 'http://control.m-ld.org/response/snapshot',
       lastTime: this.lastTime.toJson(),
-      quadsAddress: this.quadsAddress,
+      dataAddress: this.dataAddress,
       updatesAddress: this.updatesAddress
     });
 
@@ -141,7 +141,7 @@ export namespace Response {
           lastTime = TreeClock.fromJson(json.lastTime);
           if (lastTime)
             return new Snapshot(
-              lastTime, json.quadsAddress,
+              lastTime, json.dataAddress,
               json.updatesAddress);
           break;
         case 'http://control.m-ld.org/response/revup':

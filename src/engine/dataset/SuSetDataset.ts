@@ -7,7 +7,7 @@ import { Dataset, PatchQuads } from '.';
 import { Iri } from 'jsonld/jsonld-spec';
 import { JrqlGraph } from './JrqlGraph';
 import { MeldEncoder, MeldOperation, TriplesTids, unreify } from '../MeldEncoding';
-import { Observable, from, Subject as Source, EMPTY, of } from 'rxjs';
+import { Observable, from, Subject as Source, EMPTY, of, merge } from 'rxjs';
 import {
   bufferCount, mergeMap, map, filter, takeWhile, expand, toArray
 } from 'rxjs/operators';
@@ -412,46 +412,44 @@ export class SuSetDataset extends MeldEncoder {
       prepare: async () =>
         ({ kvps: this.journalData.reset(localTime, snapshot.lastTime) })
     });
-    await snapshot.quads.pipe(
+    await snapshot.data.pipe(
       // For each batch of reified quads with TIDs, first unreify
       mergeMap(async batch => this.dataset.transact({
         id: 'snapshot-batch',
         prepare: async () => {
-          const triplesTids = unreify(batch);
-          // For each triple in the batch, insert the TIDs into the tids graph
-          const patch = await this.newTriplesTids(triplesTids);
-          // And include the triples themselves
-          patch.append({ inserts: triplesTids.map(([triple]) => this.toUserQuad(triple)) });
-          return { patch };
+          if ('inserts' in batch) {
+            const triplesTids = unreify(this.triplesFromBuffer(batch.inserts));
+            // For each triple in the batch, insert the TIDs into the tids graph
+            const patch = await this.newTriplesTids(triplesTids);
+            // And include the triples themselves
+            patch.append({ inserts: triplesTids.map(([triple]) => this.toUserQuad(triple)) });
+            return { patch };
+          } else {
+            return { kvps: this.journalData.insertLatestOperation(batch.operation) };
+          }
         }
       }))).toPromise();
   }
 
   /**
-   * Takes a snapshot of data, including transaction IDs. This requires a
-   * consistent view, so a transaction lock is taken until all data has been
-   * emitted. To avoid holding up the world, buffer the data.
+   * Takes a snapshot of data, including transaction IDs and latest operations.
+   * The data will be loaded from the same consistent snapshot per LevelDown.
    */
   @SuSetDataset.checkNotClosed.async
   async takeSnapshot(): Promise<DatasetSnapshot> {
-    return new Promise((resolve, reject) => {
-      this.dataset.transact({
-        id: 'snapshot',
-        prepare: async () => {
-          const dataEmitted = new Future;
-          const journal = await this.journalData.journal();
-          resolve({
-            lastTime: journal.gwc,
-            quads: this.userGraph.graph.match().pipe(
-              bufferCount(10), // TODO batch size config
-              mergeMap(async batch => this.reifyTriplesTids(
-                asTriplesTids(await this.findTriplesTids(batch, 'includeEmpty')))),
-              tapComplete(dataEmitted))
-          });
-          await dataEmitted; // If this rejects, data will error
-          return {}; // No patch to apply
-        }
-      }).catch(reject);
-    });
+    const journal = await this.journalData.journal();
+    return {
+      lastTime: journal.gwc,
+      data: merge(
+        this.userGraph.graph.match()
+          .pipe(bufferCount(10), // TODO batch size config
+            mergeMap(async batch => {
+              const tidQuads = await this.findTriplesTids(batch, 'includeEmpty');
+              const reified = this.reifyTriplesTids(asTriplesTids(tidQuads));
+              return { inserts: this.bufferFromTriples(reified) };
+            })),
+        this.journalData.latestOperations()
+          .pipe(map(operation => ({ operation }))))
+    };
   }
 }

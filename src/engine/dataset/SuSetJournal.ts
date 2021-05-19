@@ -5,6 +5,8 @@ import { MsgPack } from '../util';
 import { Kvps, KvpStore } from '.';
 import { MeldEncoder, MeldOperation } from '../MeldEncoding';
 import { CausalTimeRange } from '../ops';
+import { Observable } from 'rxjs';
+import { map } from 'rxjs/operators';
 
 /** There is only one journal with a fixed key. */
 const JOURNAL_KEY = '_qs:journal';
@@ -19,8 +21,7 @@ const ENTRY_KEY_PRE = '_qs:entry';
 const ENTRY_KEY_LEN = 8;
 const ENTRY_KEY_RADIX = 36;
 const ENTRY_KEY_PAD = new Array(ENTRY_KEY_LEN).fill('0').join('');
-const ENTRY_KEY_MAX = toPrefixedId(ENTRY_KEY_PRE,
-  new Array(ENTRY_KEY_LEN).fill((ENTRY_KEY_RADIX - 1).toString(ENTRY_KEY_RADIX)).join(''));
+const ENTRY_KEY_MAX = toPrefixedId(ENTRY_KEY_PRE, '~'); // > 'z'
 function entryKey(tick: number) {
   return toPrefixedId(ENTRY_KEY_PRE,
     `${ENTRY_KEY_PAD}${tick.toString(ENTRY_KEY_RADIX)}`.slice(-ENTRY_KEY_LEN));
@@ -28,6 +29,8 @@ function entryKey(tick: number) {
 
 /** Causally-fused operation from a clone, indexed by time hash (TID) */
 const OPERATION_KEY_PRE = '_qs:op';
+const OPERATION_KEY_MIN = toPrefixedId(OPERATION_KEY_PRE, '!'); // < '+'
+const OPERATION_KEY_MAX = toPrefixedId(OPERATION_KEY_PRE, '~'); // > 'z'
 function operationKey(tid: string) {
   return toPrefixedId(OPERATION_KEY_PRE, tid);
 }
@@ -309,7 +312,7 @@ export class SuSetJournalData {
   }
 
   async entry(key: EntryKey) {
-    const kvp = await this.kvps.first({ gte: key, lte: ENTRY_KEY_MAX });
+    const kvp = await this.kvps.read({ gte: key, lt: ENTRY_KEY_MAX, limit: 1 }).toPromise();
     if (kvp != null) {
       const [key, value] = kvp;
       return SuSetJournalEntry.fromJson(this, key, MsgPack.decode(value));
@@ -327,6 +330,14 @@ export class SuSetJournalData {
     const value = await this.kvps.get(operationKey(tid));
     if (value != null)
       return MsgPack.decode(value);
+  }
+
+  insertLatestOperation(latest: EncodedOperation): Kvps {
+    return async batch => {
+      const [, , timeJson] = latest;
+      const time = TreeClock.fromJson(timeJson) as TreeClock;
+      batch.put(operationKey(time.hash()), MsgPack.encode(latest));
+    };
   }
 
   updateLatestOperation(entry: SuSetJournalEntry): Kvps {
@@ -349,6 +360,11 @@ export class SuSetJournalData {
         }
         batch.put(operationKey(entry.time.hash()), MsgPack.encode(newLatest));
       }
-    }
+    };
+  }
+
+  latestOperations(): Observable<EncodedOperation> {
+    return this.kvps.read({ gt: OPERATION_KEY_MIN, lt: OPERATION_KEY_MAX })
+      .pipe(map(([, value]) => MsgPack.decode(value)));
   }
 }

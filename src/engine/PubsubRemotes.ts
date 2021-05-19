@@ -13,7 +13,6 @@ import {
 import { MeldError, MeldErrorStatus } from './MeldError';
 import { AbstractMeld } from './AbstractMeld';
 import { MeldConfig, shortId } from '..';
-import { Triple } from './quads';
 
 // @see org.m_ld.json.MeldJacksonModule.NotificationDeserializer
 export interface JsonNotification {
@@ -167,22 +166,19 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
       new Request.Snapshot, { readyToAck, sw });
     sw.next('consume');
     // Subscribe in parallel (subscription can be slow)
-    const [quads, updates] = await Promise.all([
-      this.consume(fromId, res.quadsAddress, this.triplesFromBuffer, 'failIfSlow'),
+    const [data, updates] = await Promise.all([
+      this.consume(fromId, res.dataAddress, MsgPack.decode, 'failIfSlow'),
       this.consume(fromId, res.updatesAddress, OperationMessage.decode)
     ]);
     sw.stop();
     return {
-      lastTime: res.lastTime, quads: defer(() => {
+      lastTime: res.lastTime, data: defer(() => {
         // Ack the response to start the streams
         readyToAck.resolve();
-        return quads;
+        return data;
       }), updates
     };
   }
-
-  private triplesFromBuffer = (payload: Buffer) =>
-    this.requireClone().encoder.triplesFromJson(MsgPack.decode(payload))
 
   async revupFrom(time: TreeClock): Promise<Revup | undefined> {
     const readyToAck = new Future;
@@ -305,13 +301,6 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     }
   }
 
-  private requireClone() {
-    const clone = this.clone;
-    if (clone == null)
-      throw new Error('No local clone');
-    return clone;
-  }
-
   private get clone() {
     return this.localClone.value;
   }
@@ -410,26 +399,23 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
   }
 
   private async replySnapshot(sentParams: SendParams, snapshot: Snapshot): Promise<void> {
-    const { lastTime, quads, updates } = snapshot;
-    const quadsAddress = uuid(), updatesAddress = uuid();
+    const { lastTime, data, updates } = snapshot;
+    const dataAddress = uuid(), updatesAddress = uuid();
     // Send the reply in parallel with establishing notifiers
     const replyId = uuid();
     const replied = this.reply(sentParams,
-      new Response.Snapshot(lastTime, quadsAddress, updatesAddress), replyId);
+      new Response.Snapshot(lastTime, dataAddress, updatesAddress), replyId);
     // Allow time for the notifiers to resolve while waiting for a reply
-    const [quadsNotifier, updatesNotifier] = await this.getAck(replied, replyId, Promise.all([
-      this.notifier({ toId: sentParams.fromId, fromId: this.id, channelId: quadsAddress }),
+    const [dataNotifier, updatesNotifier] = await this.getAck(replied, replyId, Promise.all([
+      this.notifier({ toId: sentParams.fromId, fromId: this.id, channelId: dataAddress }),
       this.notifier({ toId: sentParams.fromId, fromId: this.id, channelId: updatesAddress })
     ]));
     // Ack has been sent, start streaming the data and updates concurrently
     await Promise.all([
-      this.produce(quads, quadsNotifier, this.bufferFromTriples, 'snapshot'),
+      this.produce(data, dataNotifier, MsgPack.encode, 'snapshot'),
       this.produce(updates, updatesNotifier, msg => msg.encode(), 'updates')
     ]);
   }
-
-  private bufferFromTriples = (triples: Triple[]) =>
-    MsgPack.encode(this.requireClone().encoder.jsonFromTriples(triples));
 
   private async replyRevup(sentParams: SendParams, revup: Revup | undefined) {
     if (revup) {
