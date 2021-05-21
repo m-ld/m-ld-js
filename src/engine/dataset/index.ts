@@ -249,7 +249,7 @@ export class QuadStoreDataset implements Dataset {
     return new Observable(subs => {
       const it = this.store.db.iterator({ ...range, keyAsBuffer: false });
       const end = () => it.end(err => err && this.events?.emit('error', err));
-      (function pull() {
+      const pull = () => {
         it.next((err, key: string, value: Buffer) => {
           if (err) {
             subs.error(err);
@@ -263,7 +263,8 @@ export class QuadStoreDataset implements Dataset {
             end();
           }
         });
-      })();
+      };
+      pull();
     });
   }
 

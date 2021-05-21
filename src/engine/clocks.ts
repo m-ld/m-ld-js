@@ -248,8 +248,8 @@ export class TreeClock implements CausalClock {
     } else {
       return new TreeClock(
         other.fork === null ? this._part : new TreeClockFork(
-          (this.fork === null ? TreeClock.HALLOWS : this.fork.left).update(other.fork.left),
-          (this.fork === null ? TreeClock.HALLOWS : this.fork.right).update(other.fork.right)),
+          (this.fork?.left ?? TreeClock.HALLOWS).update(other.fork.left),
+          (this.fork?.right ?? TreeClock.HALLOWS).update(other.fork.right)),
         Math.max(this._ticks, other._ticks));
     }
   }

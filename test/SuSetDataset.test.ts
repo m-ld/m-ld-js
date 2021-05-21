@@ -6,7 +6,6 @@ import { Dataset } from '../src/engine/dataset';
 import { from } from 'rxjs';
 import { Describe, MeldConstraint } from '../src';
 import { jsonify } from './testUtil';
-import { SubjectGraph } from '../src/engine/SubjectGraph';
 import { MeldEncoder } from '../src/engine/MeldEncoding';
 import { OperationMessage } from '../src/engine';
 

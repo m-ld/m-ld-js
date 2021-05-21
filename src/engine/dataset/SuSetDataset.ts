@@ -128,7 +128,7 @@ export class SuSetDataset extends MeldEncoder {
   @SuSetDataset.checkNotClosed.async
   async saveClock(
     prepare: (gwc: TreeClock) => Promise<TreeClock> | TreeClock,
-    newClone?: boolean): Promise<TreeClock> {
+    newClone = false): Promise<TreeClock> {
     return this.dataset.transact<TreeClock>({
       id: 'suset-save-clock',
       prepare: async () => {
