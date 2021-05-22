@@ -43,7 +43,7 @@ describe('SU-Set Dataset', () => {
     });
 
     test('does not have a time', async () => {
-      expect(await ssd.loadClock()).toBeNull();
+      expect(await ssd.loadClock()).toBeUndefined();
     });
 
     describe('with an initial time', () => {
@@ -53,7 +53,7 @@ describe('SU-Set Dataset', () => {
         let { left, right } = TreeClock.GENESIS.forked();
         local = new MockProcess(left);
         remote = new MockProcess(right);
-        await ssd.saveClock(() => local.tick().time, true);
+        await ssd.resetClock(local.tick().time);
       });
 
       test('does not answer operations since before start', async () => {
@@ -72,7 +72,7 @@ describe('SU-Set Dataset', () => {
 
       test('answers an empty snapshot', async () => {
         const snapshot = await ssd.takeSnapshot();
-        expect(snapshot.lastTime.equals(local.time.scrubId())).toBe(true);
+        expect(snapshot.gwc.equals(local.gwc)).toBe(true);
         await expect(snapshot.data.toPromise()).resolves.toBeUndefined();
       });
 
@@ -151,7 +151,7 @@ describe('SU-Set Dataset', () => {
 
         test('answers a snapshot', async () => {
           const snapshot = await ssd.takeSnapshot();
-          expect(snapshot.lastTime.equals(local.time.scrubId())).toBe(true);
+          expect(snapshot.gwc.equals(local.gwc)).toBe(true);
           const data = await snapshot.data.pipe(toArray()).toPromise();
           expect(data.length).toBe(2);
           const reifiedFredJson =
@@ -192,10 +192,7 @@ describe('SU-Set Dataset', () => {
         test('applies a snapshot', async () => {
           const snapshot = await ssd.takeSnapshot();
           const staticData = await snapshot.data.pipe(toArray()).toPromise();
-          await ssd.applySnapshot({
-            lastTime: local.time,
-            data: from(staticData)
-          }, local.tick().time);
+          await ssd.applySnapshot({ gwc: local.gwc, data: from(staticData) }, local.tick().time);
           await expect(ssd.read<Describe>({
             '@describe': 'http://test.m-ld.org/fred'
           }).pipe(toArray()).toPromise()).resolves.toEqual([fred]);
@@ -422,7 +419,7 @@ describe('SU-Set Dataset', () => {
       ssd = new SuSetDataset(await memStore(), {}, [constraint],
         { '@id': 'test', '@domain': 'test.m-ld.org' });
       await ssd.initialise();
-      await ssd.saveClock(() => local.tick().time, true);
+      await ssd.resetClock(local.tick().time);
     });
 
     test('checks the constraint', async () => {
@@ -574,7 +571,7 @@ describe('SU-Set Dataset', () => {
     ssd = new SuSetDataset(await memStore(), {}, [],
       { '@id': 'test', '@domain': 'test.m-ld.org', maxOperationSize: 1 });
     await ssd.initialise();
-    await ssd.saveClock(() => TreeClock.GENESIS, true);
+    await ssd.resetClock(TreeClock.GENESIS);
     await expect(ssd.transact(async () => [
       TreeClock.GENESIS.ticked(),
       await ssd.write({ '@insert': fred })

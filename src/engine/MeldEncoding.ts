@@ -81,7 +81,7 @@ export class MeldOperation extends FusableCausalOperation<Triple, TreeClock> {
     let [, from, timeJson, delEnc, insEnc] = encoded;
     const jsons = [delEnc, insEnc].map(MeldEncoder.jsonFromBuffer);
     const [delTriples, insTriples] = jsons.map(encoder.triplesFromJson);
-    const time = TreeClock.fromJson(timeJson) as TreeClock;
+    const time = TreeClock.fromJson(timeJson);
     const deletes = unreify(delTriples);
     let inserts: MeldOperation['inserts'];
     if (from === time.ticks) {

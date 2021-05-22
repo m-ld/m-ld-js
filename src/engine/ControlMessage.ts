@@ -1,4 +1,4 @@
-import { TreeClock } from './clocks';
+import { GlobalClock, TreeClock } from './clocks';
 import { MeldError, MeldErrorStatus } from './MeldError';
 const inspect = Symbol.for('nodejs.util.inspect.custom');
 
@@ -43,9 +43,7 @@ export namespace Request {
         case 'http://control.m-ld.org/request/snapshot':
           return new Snapshot;
         case 'http://control.m-ld.org/request/revup':
-          const time = TreeClock.fromJson(json.time);
-          if (time)
-            return new Revup(time);
+          return new Revup(TreeClock.fromJson(json.time));
       }
     }
     throw new Error('Bad request JSON');
@@ -73,19 +71,19 @@ export namespace Response {
 
   export class Snapshot implements Response {
     constructor(
-      readonly lastTime: TreeClock,
+      readonly gwc: GlobalClock,
       readonly dataAddress: string,
       readonly updatesAddress: string) {
     }
 
     readonly toJson = () => ({
       '@type': 'http://control.m-ld.org/response/snapshot',
-      lastTime: this.lastTime.toJson(),
+      gwc: this.gwc.toJson(),
       dataAddress: this.dataAddress,
       updatesAddress: this.updatesAddress
     });
 
-    toString = () => `Snapshot at ${this.lastTime}`;
+    toString = () => `Snapshot at ${this.gwc}`;
     [inspect] = () => this.toString();
   }
 
@@ -94,9 +92,9 @@ export namespace Response {
       /**
        * `null` indicates this clone cannot collaborate on the rev-up request
        */
-      readonly lastTime: TreeClock | null,
+      readonly gwc: GlobalClock | null,
       /**
-       * If lastTime == null this should be a stable identifier of the answering
+       * If gwc == null this should be a stable identifier of the answering
        * clone, to allow detection of a re-send.
        */
       readonly updatesAddress: string) {
@@ -104,12 +102,12 @@ export namespace Response {
 
     readonly toJson = () => ({
       '@type': 'http://control.m-ld.org/response/revup',
-      lastTime: this.lastTime == null ? null : this.lastTime.toJson(),
+      gwc: this.gwc == null ? null : this.gwc.toJson(),
       updatesAddress: this.updatesAddress
     })
 
-    toString = () => this.lastTime != null ?
-      `Can revup from ${this.updatesAddress} @ ${this.lastTime}` :
+    toString = () => this.gwc != null ?
+      `Can revup from ${this.updatesAddress} @ ${this.gwc}` :
       `${this.updatesAddress} can't provide revup`;
     [inspect] = () => this.toString();
   }
@@ -130,23 +128,17 @@ export namespace Response {
 
   export function fromJson(json: any): Response {
     if (typeof json === 'object' && typeof json['@type'] === 'string') {
-      let lastTime: TreeClock | null;
       switch (json['@type']) {
         case 'http://control.m-ld.org/response/clock':
-          const clock = TreeClock.fromJson(json.clock);
-          if (clock)
-            return new NewClock(clock);
-          break;
+          return new NewClock(TreeClock.fromJson(json.clock));
         case 'http://control.m-ld.org/response/snapshot':
-          lastTime = TreeClock.fromJson(json.lastTime);
-          if (lastTime)
-            return new Snapshot(
-              lastTime, json.dataAddress,
-              json.updatesAddress);
-          break;
+          return new Snapshot(
+            GlobalClock.fromJson(json.gwc), json.dataAddress,
+            json.updatesAddress);
         case 'http://control.m-ld.org/response/revup':
-          lastTime = TreeClock.fromJson(json.lastTime);
-          return new Revup(lastTime, json.updatesAddress);
+          return new Revup(
+            json.gwc != null ? GlobalClock.fromJson(json.gwc) : null,
+            json.updatesAddress);
         case 'http://control.m-ld.org/response/rejected':
           return new Rejected(<MeldErrorStatus><number>json.status);
       }

@@ -172,7 +172,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     ]);
     sw.stop();
     return {
-      lastTime: res.lastTime, data: defer(() => {
+      gwc: res.gwc, data: defer(() => {
         // Ack the response to start the streams
         readyToAck.resolve();
         return data;
@@ -185,15 +185,15 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     const sw = new Stopwatch('revup', shortId(4));
     const { res, fromId: from } = await this.send<Response.Revup>(new Request.Revup(time), {
       // Try everyone until we find someone who can revup
-      readyToAck, check: res => res.lastTime != null, sw
+      readyToAck, check: res => res.gwc != null, sw
     });
-    if (res.lastTime != null) {
+    if (res.gwc != null) {
       sw.next('consume');
       const updates = await this.consume(
         from, res.updatesAddress, OperationMessage.decode, 'failIfSlow');
       sw.stop();
       return {
-        lastTime: res.lastTime, updates: defer(() => {
+        gwc: res.gwc, updates: defer(() => {
           // Ack the response to start the streams
           readyToAck.resolve();
           return updates;
@@ -399,12 +399,12 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
   }
 
   private async replySnapshot(sentParams: SendParams, snapshot: Snapshot): Promise<void> {
-    const { lastTime, data, updates } = snapshot;
+    const { gwc: gwc, data, updates } = snapshot;
     const dataAddress = uuid(), updatesAddress = uuid();
     // Send the reply in parallel with establishing notifiers
     const replyId = uuid();
     const replied = this.reply(sentParams,
-      new Response.Snapshot(lastTime, dataAddress, updatesAddress), replyId);
+      new Response.Snapshot(gwc, dataAddress, updatesAddress), replyId);
     // Allow time for the notifiers to resolve while waiting for a reply
     const [dataNotifier, updatesNotifier] = await this.getAck(replied, replyId, Promise.all([
       this.notifier({ toId: sentParams.fromId, fromId: this.id, channelId: dataAddress }),
@@ -422,7 +422,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
       const updatesAddress = uuid();
       const replyId = uuid();
       const replied = this.reply(sentParams,
-        new Response.Revup(revup.lastTime, updatesAddress), replyId);
+        new Response.Revup(revup.gwc, updatesAddress), replyId);
       const notifier = await this.getAck(replied, replyId, Promise.resolve(this.notifier({
         toId: sentParams.fromId, fromId: this.id, channelId: updatesAddress
       })));

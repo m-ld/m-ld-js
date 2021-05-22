@@ -1,7 +1,7 @@
 import { MeldUpdate, MeldConstraint, MeldReadState } from '../../api';
 import { Snapshot, UUID, OperationMessage } from '..';
 import { Quad } from 'rdf-js';
-import { TreeClock } from '../clocks';
+import { GlobalClock, TickTree, TreeClock } from '../clocks';
 import { Context, Subject, Write } from '../../jrql-support';
 import { Dataset, PatchQuads } from '.';
 import { Iri } from 'jsonld/jsonld-spec';
@@ -11,7 +11,7 @@ import { Observable, from, Subject as Source, EMPTY, of, merge } from 'rxjs';
 import {
   bufferCount, mergeMap, map, filter, takeWhile, expand, toArray
 } from 'rxjs/operators';
-import { flatten, Future, tapComplete, getIdLogger, check } from '../util';
+import { flatten, Future, getIdLogger, check } from '../util';
 import { Logger } from 'loglevel';
 import { MeldError } from '../MeldError';
 import { LocalLock } from '../local';
@@ -88,11 +88,6 @@ export class SuSetDataset extends MeldEncoder {
     } catch (err) {
       throw new MeldError('Clone data is locked', err);
     }
-    // Create the Journal if not exists
-    return this.dataset.transact({
-      id: 'suset-reset',
-      prepare: async () => ({ kvps: await this.journalData.initialise() })
-    });
   }
 
   get updates(): Observable<MeldUpdate> {
@@ -121,21 +116,34 @@ export class SuSetDataset extends MeldEncoder {
   }
 
   @SuSetDataset.checkNotClosed.async
-  async loadClock(): Promise<TreeClock | null> {
-    return (await this.journalData.journal()).time;
+  async loadClock(): Promise<TreeClock | undefined> {
+    if (await this.journalData.initialised())
+      return (await this.journalData.journal()).time;
+  }
+
+  @SuSetDataset.checkNotClosed.async
+  async resetClock(localTime: TreeClock): Promise<unknown> {
+    return this.dataset.transact({
+      id: 'suset-reset-clock',
+      prepare: async () => {
+        return {
+          kvps: this.journalData.reset(localTime,
+            GlobalClock.GENESIS.update(localTime))
+        };
+      }
+    });
   }
 
   @SuSetDataset.checkNotClosed.async
   async saveClock(
-    prepare: (gwc: TreeClock) => Promise<TreeClock> | TreeClock,
-    newClone = false): Promise<TreeClock> {
+    prepare: (gwc: GlobalClock) => Promise<TreeClock> | TreeClock): Promise<TreeClock> {
     return this.dataset.transact<TreeClock>({
       id: 'suset-save-clock',
       prepare: async () => {
         const journal = await this.journalData.journal(),
           newClock = await prepare(journal.gwc);
         return {
-          kvps: journal.setLocalTime(newClock, newClone),
+          kvps: journal.setLocalTime(newClock),
           return: newClock
         };
       }
@@ -153,14 +161,14 @@ export class SuSetDataset extends MeldEncoder {
    * `undefined` if the given time is not found in the journal
    */
   @SuSetDataset.checkNotClosed.async
-  async operationsSince(time: TreeClock, lastTime?: Future<TreeClock>):
+  async operationsSince(time: TickTree, gwc?: Future<GlobalClock>):
     Promise<Observable<OperationMessage> | undefined> {
     return this.dataset.transact<Observable<OperationMessage> | undefined>({
       id: 'suset-ops-since',
       prepare: async () => {
         const journal = await this.journalData.journal();
-        if (lastTime != null)
-          lastTime.resolve(journal.gwc);
+        if (gwc != null)
+          gwc.resolve(journal.gwc);
         // How many ticks of mine has the requester seen?
         const tick = time.getTicks(journal.time);
         let found = tick != null ? await this.journalData.entryFor(tick) : undefined;
@@ -173,7 +181,7 @@ export class SuSetDataset extends MeldEncoder {
               expand(entry => entry != null ? entry.next() : EMPTY),
               takeWhile<SuSetJournalEntry>(entry => entry != null),
               // Don't emit an entry if it's all less than the requested time
-              filter(entry => time.anyLt(entry.time, 'includeIds')),
+              filter(entry => time.anyLt(entry.time)),
               map(entry => new OperationMessage(
                 entry.prev, entry.encoded, entry.time)))
         };
@@ -410,7 +418,7 @@ export class SuSetDataset extends MeldEncoder {
     await this.dataset.transact({
       id: 'suset-reset',
       prepare: async () =>
-        ({ kvps: this.journalData.reset(localTime, snapshot.lastTime) })
+        ({ kvps: this.journalData.reset(localTime, snapshot.gwc) })
     });
     await snapshot.data.pipe(
       // For each batch of reified quads with TIDs, first unreify
@@ -439,7 +447,7 @@ export class SuSetDataset extends MeldEncoder {
   async takeSnapshot(): Promise<DatasetSnapshot> {
     const journal = await this.journalData.journal();
     return {
-      lastTime: journal.gwc,
+      gwc: journal.gwc,
       data: merge(
         this.userGraph.graph.match()
           .pipe(bufferCount(10), // TODO batch size config

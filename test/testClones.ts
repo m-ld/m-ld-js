@@ -3,7 +3,7 @@ import { mock, MockProxy } from 'jest-mock-extended';
 import { Observable, NEVER, BehaviorSubject, from, asapScheduler } from 'rxjs';
 import { Dataset, QuadStoreDataset } from '../src/engine/dataset';
 import MemDown from 'memdown';
-import { TreeClock } from '../src/engine/clocks';
+import { GlobalClock, TreeClock } from '../src/engine/clocks';
 import { AsyncMqttClient, IPublishPacket } from 'async-mqtt';
 import { EventEmitter } from 'events';
 import { observeOn } from 'rxjs/operators';
@@ -53,20 +53,25 @@ export function mockLocal(
  * Wraps a clock and provides mock MessageService-like test mutations
  */
 export class MockProcess {
+  gwc: GlobalClock;
+
   constructor(
     public time: TreeClock,
     private prev: number = time.ticks) {
+    this.gwc = GlobalClock.GENESIS.update(time);
   }
 
   tick(internal = false) {
     if (!internal)
       this.prev = this.time.ticks;
     this.time = this.time.ticked();
+    this.gwc = this.gwc.update(this.time);
     return this;
   }
 
   join(clock: MockProcess) {
     this.time = this.time.update(clock.time);
+    this.gwc = this.gwc.update(this.time);
     return this;
   }
 

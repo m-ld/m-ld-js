@@ -1,6 +1,6 @@
 import { toPrefixedId } from './SuSetGraph';
 import { EncodedOperation } from '..';
-import { TreeClock, TreeClockJson } from '../clocks';
+import { GlobalClock, GlobalClockJson, TreeClock, TreeClockJson } from '../clocks';
 import { MsgPack } from '../util';
 import { Kvps, KvpStore } from '.';
 import { MeldEncoder, MeldOperation } from '../MeldEncoding';
@@ -48,9 +48,9 @@ interface JournalJson {
    * Clock'). This has latest public ticks seen for all processes (not internal
    * ticks), unlike an entry time, which may be causally related to older
    * messages from third parties, and the journal time, which has internal ticks
-   * for the local clone identity. This clock has no identity.
+   * for the local clone identity.
    */
-  gwc: TreeClockJson;
+  gwc: GlobalClockJson;
 }
 
 type JournalEntryJson = [
@@ -78,7 +78,7 @@ export class SuSetJournalEntry implements JournalEntry {
     // Destructuring fields for convenience
     const [prev, start, encoded] = json;
     const [, from, timeJson] = encoded;
-    const time = TreeClock.fromJson(timeJson) as TreeClock;
+    const time = TreeClock.fromJson(timeJson);
     return new SuSetJournalEntry(data, key, prev, start, encoded, from, time);
   }
 
@@ -159,7 +159,7 @@ class EntryBuilder {
     private readonly data: SuSetJournalData,
     private entry: JournalEntry,
     public localTime: TreeClock,
-    public gwc: TreeClock) {
+    public gwc: GlobalClock) {
   }
 
   next(operation: MeldOperation, localTime: TreeClock) {
@@ -198,7 +198,7 @@ class EntryBuilder {
     return this;
   }
 
-  private nextGwc(operation: MeldOperation): TreeClock {
+  private nextGwc(operation: MeldOperation): GlobalClock {
     return this.gwc.update(operation.time);
   }
 }
@@ -209,8 +209,8 @@ export class SuSetJournal {
   _tail: SuSetJournalEntry | null = null;
 
   static fromJson(data: SuSetJournalData, json: JournalJson) {
-    const time = TreeClock.fromJson(json.time) as TreeClock;
-    const gwc = TreeClock.fromJson(json.gwc) as TreeClock;
+    const time = TreeClock.fromJson(json.time);
+    const gwc = GlobalClock.fromJson(json.gwc);
     return new SuSetJournal(data, json.tailTick, time, gwc);
   }
 
@@ -218,7 +218,7 @@ export class SuSetJournal {
     private readonly data: SuSetJournalData,
     readonly tailTick: number,
     readonly time: TreeClock,
-    readonly gwc: TreeClock) {
+    readonly gwc: GlobalClock) {
   }
 
   async tail(): Promise<SuSetJournalEntry> {
@@ -230,34 +230,22 @@ export class SuSetJournal {
     return this._tail;
   }
 
-  setLocalTime(localTime: TreeClock, newClone = false): Kvps {
+  setLocalTime(localTime: TreeClock): Kvps {
     return async batch => {
-      let tailTick = this.tailTick;
-      if (newClone) {
-        // For a new clone, the journal's temp tail is bogus
-        batch.del(entryKey(tailTick));
-        const [headTick, headJson] = SuSetJournalEntry.head(localTime);
-        batch.put(entryKey(headTick), MsgPack.encode(headJson));
-        tailTick = headTick;
-      }
-      // A genesis clone has an initial head without a GWC. Other clones will
-      // have their journal reset with a snapshot. So, it's safe to use the
-      // local time as the gwc, which is needed for subsequent entries.
-      const gwc = this.gwc ?? localTime.scrubId();
       // Not updating tail cache for rare time update
-      this.commit(tailTick, localTime, gwc)(batch);
+      this.commit(this.tailTick, localTime, this.gwc)(batch);
     };
   }
 
   /** Optional parameters are for temporary head only */
-  static json(tailTick: number, localTime?: TreeClock, gwc?: TreeClock): Partial<JournalJson> {
-    return { tailTick, time: localTime?.toJson(), gwc: gwc?.toJson() };
+  static json(tailTick: number, localTime: TreeClock, gwc: GlobalClock): Partial<JournalJson> {
+    return { tailTick, time: localTime.toJson(), gwc: gwc.toJson() };
   }
 
   /**
    * Commits a new tail and time, with updates to the journal and tail cache
    */
-  commit(tailTick: number, localTime: TreeClock, gwc: TreeClock, tail?: SuSetJournalEntry): Kvps {
+  commit(tailTick: number, localTime: TreeClock, gwc: GlobalClock, tail?: SuSetJournalEntry): Kvps {
     return batch => {
       const json = SuSetJournal.json(tailTick, localTime, gwc);
       batch.put(JOURNAL_KEY, MsgPack.encode(json));
@@ -276,14 +264,12 @@ export class SuSetJournalData {
     readonly encoder: MeldEncoder) {
   }
 
-  async initialise(): Promise<Kvps | undefined> {
+  async initialised() {
     // Create the Journal if not exists
-    const journal = await this.kvps.get(JOURNAL_KEY);
-    if (journal == null)
-      return this.reset();
+    return (await this.kvps.get(JOURNAL_KEY)) != null;
   }
 
-  reset(localTime?: TreeClock, gwc?: TreeClock): Kvps {
+  reset(localTime: TreeClock, gwc: GlobalClock): Kvps {
     const [headTick, headJson] = SuSetJournalEntry.head(localTime);
     const journalJson = SuSetJournal.json(headTick, localTime, gwc);
     return batch => {
@@ -327,7 +313,7 @@ export class SuSetJournalData {
   insertLatestOperation(latest: EncodedOperation): Kvps {
     return async batch => {
       const [, , timeJson] = latest;
-      const time = TreeClock.fromJson(timeJson) as TreeClock;
+      const time = TreeClock.fromJson(timeJson);
       batch.put(operationKey(time.hash()), MsgPack.encode(latest));
     };
   }

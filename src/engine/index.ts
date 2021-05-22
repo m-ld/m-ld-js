@@ -1,13 +1,12 @@
 /**
  * Primary interfaces involved in a m-ld engine
  */
-import { TreeClock, TreeClockJson } from './clocks';
+import { GlobalClock, TreeClock, TreeClockJson } from './clocks';
 import { Observable } from 'rxjs';
 import { Message } from './messages';
 import { MsgPack, Future } from './util';
 import { LiveValue } from './LiveValue';
 import { MeldError } from './MeldError';
-import { Triple } from './quads';
 import { MeldEncoder } from './MeldEncoding';
 const inspect = Symbol.for('nodejs.util.inspect.custom');
 
@@ -20,7 +19,7 @@ export class OperationMessage implements Message<TreeClock, EncodedOperation> {
     /** Encoded update operation */
     readonly data: EncodedOperation,
     /** Message time if you happen to have it, otherwise read from data */
-    readonly time = TreeClock.fromJson(data[2]) as TreeClock) {
+    readonly time = TreeClock.fromJson(data[2])) {
   }
 
   encode(): Buffer {
@@ -96,7 +95,7 @@ export type EncodedOperation = [
 ];
 
 export interface Recovery {
-  readonly lastTime: TreeClock;
+  readonly gwc: GlobalClock;
   readonly updates: Observable<OperationMessage>;
 }
 

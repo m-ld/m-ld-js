@@ -12,8 +12,11 @@ import { jsonify } from './testUtil';
 
 describe('Dataset engine', () => {
   describe('as genesis', () => {
-    async function genesis(remotes: MeldRemotes, config?: Partial<MeldConfig>): Promise<DatasetEngine> {
-      let clone = new DatasetEngine({ dataset: await memStore(), remotes, config: testConfig(config) });
+    async function genesis(
+      remotes: MeldRemotes, config?: Partial<MeldConfig>): Promise<DatasetEngine> {
+      let clone = new DatasetEngine({
+        dataset: await memStore(), remotes, config: testConfig(config)
+      });
       await clone.initialise();
       return clone;
     }
@@ -46,7 +49,9 @@ describe('Dataset engine', () => {
     let silo: DatasetEngine;
 
     beforeEach(async () => {
-      silo = new DatasetEngine({ dataset: await memStore(), remotes: mockRemotes(), config: testConfig() });
+      silo = new DatasetEngine({
+        dataset: await memStore(), remotes: mockRemotes(), config: testConfig()
+      });
       await silo.initialise();
     });
 
@@ -127,7 +132,7 @@ describe('Dataset engine', () => {
       await clone.initialise();
       await comesAlive(clone); // genesis is alive
       remote = new MockProcess(await clone.newClock()); // no longer genesis
-      remotes.revupFrom = async () => ({ lastTime: remote.time, updates: EMPTY });
+      remotes.revupFrom = async () => ({ gwc: remote.gwc, updates: EMPTY });
       remotesLive.next(true); // remotes come alive
       await clone.status.becomes({ outdated: false });
     });
@@ -145,7 +150,8 @@ describe('Dataset engine', () => {
     test('ticks increase monotonically', async () => {
       // Edge case from compliance tests: a local transaction racing a remote
       // transaction could cause a clock reversal.
-      const updates = clone.dataUpdates.pipe(map(next => next['@ticks']), take(2), toArray()).toPromise();
+      const updates = clone.dataUpdates.pipe(map(next => next['@ticks']),
+        take(2), toArray()).toPromise();
       clone.write({
         '@id': 'http://test.m-ld.org/fred',
         'http://test.m-ld.org/#name': 'Fred'
@@ -183,45 +189,51 @@ describe('Dataset engine', () => {
     let remotes: MeldRemotes;
     let remoteUpdates: Source<OperationMessage>;
     let snapshot: jest.Mock<Promise<Snapshot>, void[]>;
-    let collabClock: TreeClock;
+    let collaborator: MockProcess;
+    let collabPrevOp: OperationMessage;
     let remotesLive: BehaviorSubject<boolean | null>;
 
     beforeEach(async () => {
       const { left, right } = TreeClock.GENESIS.forked()
-      collabClock = right;
+      collaborator = new MockProcess(right);
+      collabPrevOp = collaborator.sentOperation(
+        '{}', '{"@id":"http://test.m-ld.org/wilma","http://test.m-ld.org/#name":"Wilma"}');
       remoteUpdates = new Source<OperationMessage>();
       remotesLive = hotLive([true]);
       remotes = mockRemotes(remoteUpdates, remotesLive, left);
       snapshot = jest.fn().mockReturnValueOnce(Promise.resolve<Snapshot>({
-        lastTime: collabClock.ticked().scrubId(),
-        data: EMPTY,
+        gwc: collaborator.gwc,
+        data: EMPTY, // Cheating, should really contain Wilma (see op above)
         updates: EMPTY
       }));
       remotes.snapshot = snapshot;
     });
 
     test('initialises from snapshot', async () => {
-      const clone = new DatasetEngine({ dataset: await memStore(), remotes, config: testConfig({ genesis: false }) });
+      const clone = new DatasetEngine({
+        dataset: await memStore(), remotes, config: testConfig({ genesis: false })
+      });
       await clone.initialise();
       await expect(clone.status.becomes({ outdated: false })).resolves.toBeDefined();
       expect(snapshot.mock.calls.length).toBe(1);
     });
 
     test('can become a silo', async () => {
-      const clone = new DatasetEngine({ dataset: await memStore(), remotes, config: testConfig({ genesis: false }) });
+      const clone = new DatasetEngine({
+        dataset: await memStore(), remotes, config: testConfig({ genesis: false })
+      });
       await clone.initialise();
       remotesLive.next(false);
       await expect(clone.status.becomes({ silo: true })).resolves.toBeDefined();
     });
 
     test('ignores operation from before snapshot', async () => {
-      const clone = new DatasetEngine({ dataset: await memStore(), remotes, config: testConfig({ genesis: false }) });
+      const clone = new DatasetEngine({
+        dataset: await memStore(), remotes, config: testConfig({ genesis: false })
+      });
       await clone.initialise();
       const updates = clone.dataUpdates.pipe(count()).toPromise();
-      const prev = collabClock.ticks;
-      collabClock = collabClock.ticked();
-      remoteUpdates.next(new OperationMessage(prev, [2, collabClock.ticks, collabClock.toJson(),
-        '{}', '{"@id":"http://test.m-ld.org/wilma","http://test.m-ld.org/#name":"Wilma"}']));
+      remoteUpdates.next(collabPrevOp);
       // Also enqueue a no-op write, which we can wait for - relying on queue ordering
       await clone.write({ '@insert': [] } as Update);
       await clone.close(); // Will complete the updates
@@ -238,7 +250,9 @@ describe('Dataset engine', () => {
       backend = new MemDown();
       config = testConfig();
       // Start a temporary genesis clone to initialise the store
-      let clone = new DatasetEngine({ dataset: await memStore({ backend }), remotes: mockRemotes(), config });
+      let clone = new DatasetEngine({
+        dataset: await memStore({ backend }), remotes: mockRemotes(), config
+      });
       await clone.initialise();
       remote = new MockProcess(await clone.newClock()); // Forks the clock so no longer genesis
       await clone.close();
@@ -248,8 +262,10 @@ describe('Dataset engine', () => {
     test('is outdated while revving-up', async () => {
       // Re-start on the same data, with a rev-up that never completes
       const remotes = mockRemotes(NEVER, [true]);
-      remotes.revupFrom = async () => ({ lastTime: remote.time, updates: NEVER });
-      const clone = new DatasetEngine({ dataset: await memStore({ backend }), remotes, config: testConfig() });
+      remotes.revupFrom = async () => ({ gwc: remote.gwc, updates: NEVER });
+      const clone = new DatasetEngine({
+        dataset: await memStore({ backend }), remotes, config: testConfig()
+      });
 
       // Check that we are never not outdated
       const everNotOutdated = clone.status.becomes({ outdated: false });
@@ -263,8 +279,10 @@ describe('Dataset engine', () => {
     test('is not outdated when revved-up', async () => {
       // Re-start on the same data, with a rev-up that completes with no updates
       const remotes = mockRemotes(NEVER, [true]);
-      remotes.revupFrom = async () => ({ lastTime: remote.time, updates: EMPTY });
-      const clone = new DatasetEngine({ dataset: await memStore({ backend }), remotes, config: testConfig() });
+      remotes.revupFrom = async () => ({ gwc: remote.gwc, updates: EMPTY });
+      const clone = new DatasetEngine({
+        dataset: await memStore({ backend }), remotes, config: testConfig()
+      });
 
       // Check that we do transition through an outdated state
       const wasOutdated = clone.status.becomes({ outdated: true });
@@ -278,7 +296,9 @@ describe('Dataset engine', () => {
 
     test('is not outdated if immediately siloed', async () => {
       const remotes = mockRemotes(NEVER, [null, false]);
-      const clone = new DatasetEngine({ dataset: await memStore({ backend }), remotes, config: testConfig() });
+      const clone = new DatasetEngine({
+        dataset: await memStore({ backend }), remotes, config: testConfig()
+      });
 
       await clone.initialise();
 
@@ -289,10 +309,12 @@ describe('Dataset engine', () => {
     test('immediately re-connects if rev-up fails', async () => {
       const remotes = mockRemotes(NEVER, [true]);
       const revupFrom = jest.fn()
-        .mockReturnValueOnce(Promise.resolve({ lastTime: remote.time, updates: throwError('boom') }))
-        .mockReturnValueOnce(Promise.resolve({ lastTime: remote.time, updates: EMPTY }));
+        .mockReturnValueOnce(Promise.resolve({ gwc: remote.gwc, updates: throwError('boom') }))
+        .mockReturnValueOnce(Promise.resolve({ gwc: remote.gwc, updates: EMPTY }));
       remotes.revupFrom = revupFrom;
-      const clone = new DatasetEngine({ dataset: await memStore({ backend }), remotes, config: testConfig() });
+      const clone = new DatasetEngine({
+        dataset: await memStore({ backend }), remotes, config: testConfig()
+      });
       await clone.initialise();
       await expect(clone.status.becomes({ outdated: false })).resolves.toBeDefined();
       expect(revupFrom.mock.calls.length).toBe(2);
@@ -300,7 +322,9 @@ describe('Dataset engine', () => {
 
     test('maintains fifo during rev-up', async () => {
       // We need local siloed update
-      let clone = new DatasetEngine({ dataset: await memStore({ backend }), remotes: mockRemotes(), config });
+      let clone = new DatasetEngine({
+        dataset: await memStore({ backend }), remotes: mockRemotes(), config
+      });
       await clone.initialise();
       await clone.write({
         '@id': 'http://test.m-ld.org/fred',
@@ -310,10 +334,15 @@ describe('Dataset engine', () => {
       // Need a remote with rev-ups to share
       const remotes = mockRemotes(NEVER, [true]);
       const revUps = new Source<OperationMessage>();
-      remotes.revupFrom = async () => ({ lastTime: remote.time.ticked(), updates: revUps });
+      remotes.revupFrom = async () => ({
+        gwc: remote.gwc.update(remote.time.ticked()), updates: revUps
+      });
       // The clone will initialise into a revving-up state, waiting for a revUp
-      clone = new DatasetEngine({ dataset: await memStore({ backend }), remotes, config: testConfig() });
-      const observedTicks = clone.updates.pipe(map(next => next.time.ticks), take(2), toArray()).toPromise();
+      clone = new DatasetEngine({
+        dataset: await memStore({ backend }), remotes, config: testConfig()
+      });
+      const observedTicks = clone.updates.pipe(map(next => next.time.ticks),
+        take(2), toArray()).toPromise();
       await clone.initialise();
       // Do a new update during rev-up, this will immediately produce an update
       await clone.write({
@@ -332,8 +361,10 @@ describe('Dataset engine', () => {
       // Re-start on the same data
       const remoteUpdates = new Source<OperationMessage>();
       const remotes = mockRemotes(remoteUpdates, [true]);
-      remotes.revupFrom = async () => ({ lastTime: remote.time, updates: EMPTY });
-      const clone = new DatasetEngine({ dataset: await memStore({ backend }), remotes, config: testConfig() });
+      remotes.revupFrom = async () => ({ gwc: remote.gwc, updates: EMPTY });
+      const clone = new DatasetEngine({
+        dataset: await memStore({ backend }), remotes, config: testConfig()
+      });
       await clone.initialise();
       await clone.status.becomes({ outdated: false });
 
@@ -350,8 +381,10 @@ describe('Dataset engine', () => {
       // Re-start on the same data
       const remoteUpdates = new Source<OperationMessage>();
       const remotes = mockRemotes(remoteUpdates, [true]);
-      remotes.revupFrom = async () => ({ lastTime: remote.time, updates: EMPTY });
-      const clone = new DatasetEngine({ dataset: await memStore({ backend }), remotes, config: testConfig() });
+      remotes.revupFrom = async () => ({ gwc: remote.gwc, updates: EMPTY });
+      const clone = new DatasetEngine({
+        dataset: await memStore({ backend }), remotes, config: testConfig()
+      });
       await clone.initialise();
       await clone.status.becomes({ outdated: false });
 

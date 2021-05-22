@@ -6,7 +6,7 @@ import {
   Observable, merge, from, EMPTY,
   concat, BehaviorSubject, Subscription, interval, of, Subscriber, OperatorFunction, partition
 } from 'rxjs';
-import { TreeClock } from '../clocks';
+import { GlobalClock, TreeClock } from '../clocks';
 import { SuSetDataset } from './SuSetDataset';
 import { TreeClockMessageService } from '../messages';
 import { Dataset } from '.';
@@ -95,8 +95,8 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
     let time = await this.dataset.loadClock();
     if (!time) {
       this.newClone = !this.genesisClaim; // New clone means non-genesis
-      time = await this.dataset.saveClock(async () =>
-        this.genesisClaim ? TreeClock.GENESIS : await this.remotes.newClock(), true);
+      time = this.genesisClaim ? TreeClock.GENESIS : await this.remotes.newClock();
+      await this.dataset.resetClock(time);
     }
     this.log.info('has time', time);
     this.messageService = new TreeClockMessageService(time);
@@ -336,7 +336,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
    */
   private async requestSnapshot(retry: Subscriber<ConnectStyle>): Promise<unknown> {
     const snapshot = await this.remotes.snapshot();
-    this.messageService.join(snapshot.lastTime);
+    this.messageService.join(snapshot.gwc);
     // If we have any operations since the snapshot: re-emit them now and
     // re-apply them to our own dataset when the snapshot is applied.
     /*
@@ -361,11 +361,11 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
     if (this.newClone) {
       return EMPTY.pipe(ret).toPromise();
     } else {
-      const recent = await this.dataset.operationsSince(recovery.lastTime);
+      const recent = await this.dataset.operationsSince(recovery.gwc);
       // If we don't have journal from our ticks on the collaborator's clock, this
       // will lose data! – Close and let the app decide what to do.
       if (recent == null)
-        throw new MeldError('Clone outdated', `Missing local ticks since ${recovery.lastTime}`);
+        throw new MeldError('Clone outdated', `Missing local ticks since ${recovery.gwc}`);
       else
         return recent.pipe(tap(this.nextUpdate), ret).toPromise();
     }
@@ -424,11 +424,11 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
     return this.lock.exclusive('live', async () => {
       const operationsSent = new Future;
       const maybeMissed = this.remoteUpdatesBeforeNow(operationsSent);
-      const lastTime = new Future<TreeClock>();
-      const operations = await this.dataset.operationsSince(time, lastTime);
+      const gwc = new Future<GlobalClock>();
+      const operations = await this.dataset.operationsSince(time, gwc);
       if (operations)
         return {
-          lastTime: await lastTime,
+          gwc: await gwc,
           updates: merge(
             operations.pipe(tapComplete(operationsSent), tap(msg =>
               this.log.debug('Sending rev-up', msg))),
@@ -446,7 +446,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
       from(this.orderingBuffer),
       // #2 Anything that arrives stamped prior to now
       this.remoteUpdates.receiving.pipe(
-        filter(message => message.time.anyLt(now, 'includeIds')),
+        filter(message => message.time.anyLt(now)),
         takeUntil(from(until)))).pipe(tap(msg =>
           this.log.debug('Sending update', msg)));
   }
