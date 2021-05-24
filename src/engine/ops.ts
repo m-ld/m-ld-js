@@ -84,6 +84,11 @@ type ItemTids<T> = [item: T, tids: string[]];
 type ItemTid<T> = [item: T, tid: string];
 namespace ItemTid { export const tid = (itemTid: ItemTid<unknown>) => itemTid[1]; }
 
+export interface CausalOperator<T, C extends CausalClock> {
+  next(op: CausalOperation<T, C>): CausalOperator<T, C>;
+  commit(): CausalOperation<T, C>;
+}
+
 /** Immutable */
 export class FusableCausalOperation<T, C extends CausalClock> implements CausalOperation<T, C> {
   readonly from: number;
@@ -100,56 +105,94 @@ export class FusableCausalOperation<T, C extends CausalClock> implements CausalO
     this.inserts = [...inserts];
   }
 
+  fusion(): CausalOperator<T, C> {
+    // Not using mutable append, our semantics are different!
+    const original = this;
+    return new class {
+      private fused = original.mutable();
+      private time: C | undefined;
+
+      next(next: CausalOperation<T, C>): CausalOperator<T, C> {
+        // 1. Fuse all deletes
+        this.fused.deletes.addAll(flatten(next.deletes));
+        // 2. Remove anything we insert that is deleted
+        const redundant = this.fused.inserts.deleteAll(flatten(next.deletes));
+        this.fused.deletes.deleteAll(redundant);
+        // 3. Fuse remaining inserts (we can't be deleting any of these)
+        this.fused.inserts.addAll(flatten(next.inserts));
+        this.time = next.time;
+        return this;
+      }
+
+      commit(): CausalOperation<T, C> {
+        if (this.time != null)
+          return {
+            from: original.from,
+            time: this.time,
+            deletes: original.expand(this.fused.deletes),
+            inserts: original.expand(this.fused.inserts)
+          };
+        else
+          return original;
+      }
+    };
+  }
+
   /** Pre: We can fuse iff we are causally contiguous with the next operation */
   fuse(next: CausalOperation<T, C>): CausalOperation<T, C> {
-    // Not using mutable append, our semantics are different!
-    const fused = this.mutable();
-    // 1. Fuse all deletes
-    fused.deletes.addAll(flatten(next.deletes));
-    // 2. Remove anything we insert that is deleted
-    const redundant = fused.inserts.deleteAll(flatten(next.deletes));
-    fused.deletes.deleteAll(redundant);
-    // 3. Fuse remaining inserts (we can't be deleting any of these)
-    fused.inserts.addAll(flatten(next.inserts));
-    return {
-      from: this.from,
-      time: next.time,
-      deletes: this.expand(fused.deletes),
-      inserts: this.expand(fused.inserts)
+    return this.fusion().next(next).commit();
+  }
+
+  cutting(): CausalOperator<T, C> {
+    const original = this;
+    return new class {
+      private cut = original.mutable();
+      private from = original.from;
+
+      next(prev: CausalOperation<T, C>): CausalOperator<T, C> {
+        // Remove all overlapping deletes
+        this.cut.deletes.deleteAll(flatten(prev.deletes));
+        // Do some indexing for TID-based parts
+        const prevFlatInserts = original.newFlatIndexSet(flatten(prev.inserts));
+        // Remove any deletes where tid in exclusive-prev, unless inserted in prev
+        for (let tick = prev.from; tick < this.from; tick++) {
+          // Can use a hash after creation for external ticks as in fusions
+          const iTid = original.time.ticked(tick).hash();
+          this.cut.deletes.deleteAll(deleted =>
+            ItemTid.tid(deleted) === iTid && !prevFlatInserts.has(deleted));
+        }
+        // Add deletes for any inserts from prev where tid in intersection, unless
+        // still inserted in cut, and remove all inserts from B where tid in i
+        for (let tick = this.from; tick <= prev.time.ticks; tick++) {
+          const aTid = original.time.ticked(tick).hash();
+          for (let inserted of prevFlatInserts)
+            if (ItemTid.tid(inserted) === aTid)
+              if (!this.cut.inserts.has(inserted))
+                this.cut.deletes.add(inserted);
+              else
+                this.cut.inserts.delete(inserted);
+        }
+        this.from = prev.time.ticked().ticks;
+        return this;
+      }
+
+      commit(): CausalOperation<T, C> {
+        if (this.from != original.from)
+          return {
+            from: this.from,
+            time: original.time,
+            deletes: original.expand(this.cut.deletes),
+            inserts: original.expand(this.cut.inserts)
+          };
+        else
+          return original;
+      }
     };
   }
 
   /** Pre: We can cut iff our from is within the previous range */
   cutBy(prev: CausalOperation<T, C>): CausalOperation<T, C> {
-    const cut = this.mutable();
-    // Remove all overlapping deletes
-    cut.deletes.deleteAll(flatten(prev.deletes));
-    // Do some indexing for TID-based parts
-    const prevFlatInserts = this.newFlatIndexSet(flatten(prev.inserts));
-    // Remove any deletes where tid in exclusive-prev, unless inserted in prev
-    for (let tick = prev.from; tick < this.from; tick++) {
-      // Can use a hash after creation for external ticks as in fusions
-      const iTid = this.time.ticked(tick).hash();
-      cut.deletes.deleteAll(deleted =>
-        ItemTid.tid(deleted) === iTid && !prevFlatInserts.has(deleted));
-    }
-    // Add deletes for any inserts from prev where tid in intersection, unless
-    // still inserted in cut, and remove all inserts from B where tid in i
-    for (let tick = this.from; tick <= prev.time.ticks; tick++) {
-      const aTid = this.time.ticked(tick).hash();
-      for (let inserted of prevFlatInserts)
-        if (ItemTid.tid(inserted) === aTid)
-          if (!cut.inserts.has(inserted))
-            cut.deletes.add(inserted);
-          else
-            cut.inserts.delete(inserted);
-    }
-    return {
-      from: prev.time.ticked().ticks,
-      time: this.time,
-      deletes: this.expand(cut.deletes),
-      inserts: this.expand(cut.inserts)
-    };
+    return this.cutting().next(prev).commit();
   }
 
   private expand(itemTids: Iterable<ItemTid<T>>): ItemTids<T>[] {

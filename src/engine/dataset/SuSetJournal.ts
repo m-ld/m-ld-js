@@ -4,9 +4,10 @@ import { GlobalClock, GlobalClockJson, TreeClock, TreeClockJson } from '../clock
 import { MsgPack } from '../util';
 import { Kvps, KvpStore } from '.';
 import { MeldEncoder, MeldOperation } from '../MeldEncoding';
-import { CausalTimeRange } from '../ops';
-import { Observable } from 'rxjs';
-import { map } from 'rxjs/operators';
+import { CausalOperation } from '../ops';
+import { EMPTY, from, Observable, of } from 'rxjs';
+import { expand, mergeMap, takeWhile, toArray } from 'rxjs/operators';
+import { Triple } from '../quads';
 
 /** There is only one journal with a fixed key. */
 const JOURNAL_KEY = '_qs:journal';
@@ -27,21 +28,16 @@ function entryKey(tick: number) {
     `${ENTRY_KEY_PAD}${tick.toString(ENTRY_KEY_RADIX)}`.slice(-ENTRY_KEY_LEN));
 }
 
-/** Causally-fused operation from a clone, indexed by time hash (TID) */
+/** Operations indexed by time hash (TID) */
 const OPERATION_KEY_PRE = '_qs:op';
-const OPERATION_KEY_MIN = toPrefixedId(OPERATION_KEY_PRE, '!'); // < '+'
-const OPERATION_KEY_MAX = toPrefixedId(OPERATION_KEY_PRE, '~'); // > 'z'
 function operationKey(tid: string) {
   return toPrefixedId(OPERATION_KEY_PRE, tid);
 }
 
 interface JournalJson {
-  /**
-   * The last tick for which a journal entry exists. This may not be
-   * `time.ticks` if the local clock has ticked without an entry.
-   */
-  tailTick: number;
-  /** local clock time, including internal ticks */
+  /** First known tick of the local clock – for which an entry may not exist */
+  start: number;
+  /** Current local clock time, including internal ticks */
   time: TreeClockJson;
   /**
    * JSON-encoded public clock time ('global wall clock' or 'Great Westminster
@@ -56,202 +52,145 @@ interface JournalJson {
 type JournalEntryJson = [
   /** Previous tick for this entry's clock (may be remote) */
   prev: number,
-  /** Start of _local_ tick range, inclusive. The entry key is the encoded end. */
-  start: number,
-  /** Raw operation - may contain Buffers */
-  encoded: EncodedOperation
+  /** Operation transaction ID */
+  tid: string
 ];
 
-/**
- * Utility class for key entry details
- */
-interface JournalEntry {
-  key: string,
-  prev: number,
-  start: number,
-  operation: MeldOperation
+export interface EntryBuilder {
+  next(operation: MeldOperation, localTime: TreeClock): EntryBuilder;
+  commit: Kvps;
 }
 
 /** Immutable expansion of JournalEntryJson */
-export class SuSetJournalEntry implements JournalEntry {
-  static fromJson(data: SuSetJournalData, key: EntryKey, json: JournalEntryJson) {
+export class SuSetJournalEntry {
+  static async fromJson(data: SuSetJournalData, key: EntryKey, json: JournalEntryJson) {
     // Destructuring fields for convenience
-    const [prev, start, encoded] = json;
-    const [, from, timeJson] = encoded;
-    const time = TreeClock.fromJson(timeJson);
-    return new SuSetJournalEntry(data, key, prev, start, encoded, from, time);
+    const [prev, tid] = json;
+    const operation = await data.operation(tid);
+    if (operation != null) {
+      const [, from, timeJson] = operation;
+      const time = TreeClock.fromJson(timeJson);
+      return new SuSetJournalEntry(data, key, prev, tid, operation, from, time);
+    } else {
+      throw new Error(`Journal corrupted: operation ${tid} is missing`);
+    }
   }
 
-  static fromEntry(data: SuSetJournalData, entry: JournalEntry) {
-    const { key, prev, start, operation } = entry;
-    const { from, time } = operation;
-    return new SuSetJournalEntry(data, key, prev, start, operation, from, time);
+  static fromOperation(data: SuSetJournalData,
+    operation: MeldOperation, localTime: TreeClock, gwc: GlobalClock) {
+    return new SuSetJournalEntry(data,
+      entryKey(localTime.ticks),
+      gwc.getTicks(operation.time),
+      operation.time.hash(),
+      operation.encoded,
+      operation.from,
+      operation.time)
   }
-
-  /** Cache of operation if available */
-  private _operation?: MeldOperation;
-  encoded: EncodedOperation;
 
   private constructor(
     private readonly data: SuSetJournalData,
     readonly key: EntryKey,
     readonly prev: number,
-    readonly start: number,
-    op: EncodedOperation | MeldOperation,
+    readonly tid: string,
+    readonly operation: EncodedOperation,
     readonly from: number,
     readonly time: TreeClock) {
-    if (op instanceof MeldOperation) {
-      this._operation = op;
-      this.encoded = op.encoded;
-    } else {
-      this.encoded = op;
-    }
   }
 
-  get operation() {
-    if (this._operation == null)
-      this._operation = MeldOperation.fromEncoded(this.data.encoder, this.encoded);
-    return this._operation;
-  }
-
-  private get json(): JournalEntryJson {
-    return [this.prev, this.start, this.encoded];
+  get json(): JournalEntryJson {
+    return [this.prev, this.tid];
   }
 
   async next(): Promise<SuSetJournalEntry | undefined> {
-    return this.data.entry({ gt: this.key });
+    return this.data.entryAfter(this.key);
   }
 
-  static head(localTime = TreeClock.GENESIS): [number, JournalEntryJson] {
-    const tick = localTime.ticks;
-    // Dummy operation for head
-    return [tick, [0, tick, [2, tick, localTime.toJson(), '[]', '[]']]];
-  }
-
-  builder(journal: SuSetJournal) {
-    // The head represents this entry, made ready for appending new entries
-    let head = new EntryBuilder(this.data, this, journal.time, journal.gwc), tail = head;
-    const builder = {
-      next: (operation: MeldOperation, localTime: TreeClock) => {
-        tail = tail.next(operation, localTime);
-        return builder;
-      },
-      /** Commits the built journal entries to the journal */
-      commit: <Kvps>(async batch => {
-        const entries = [...head.build()];
-        if (entries[0].key !== this.key)
-          batch.del(this.key);
-        await Promise.all(entries.map(async entry => {
-          batch.put(entry.key, MsgPack.encode(entry.json));
-          await this.data.updateLatestOperation(entry)(batch);
-        }));
-        journal.commit(tail.localTime.ticks, tail.localTime, tail.gwc, entries.slice(-1)[0])(batch);
-      })
-    };
-    return builder;
-  }
-}
-
-class EntryBuilder {
-  private nextBuilder?: EntryBuilder
-
-  constructor(
-    private readonly data: SuSetJournalData,
-    private entry: JournalEntry,
-    public localTime: TreeClock,
-    public gwc: GlobalClock) {
-  }
-
-  next(operation: MeldOperation, localTime: TreeClock) {
-    if (CausalTimeRange.contiguous(this.entry.operation, operation))
-      return this.fuseNext(operation, localTime);
-    else
-      return this.makeNext(operation, localTime);
-  }
-
-  *build(): Iterable<SuSetJournalEntry> {
-    yield SuSetJournalEntry.fromEntry(this.data, this.entry);
-    if (this.nextBuilder != null)
-      yield* this.nextBuilder.build();
-  }
-
-  private makeNext(operation: MeldOperation, localTime: TreeClock) {
-    return this.nextBuilder = new EntryBuilder(this.data, {
-      key: entryKey(localTime.ticks),
-      prev: this.gwc.getTicks(operation.time),
-      start: localTime.ticks,
-      operation
-    }, localTime, this.nextGwc(operation));
-  }
-
-  private fuseNext(operation: MeldOperation, localTime: TreeClock) {
-    const thisOp = this.entry.operation;
-    const fused = MeldOperation.fromOperation(this.data.encoder, thisOp.fuse(operation));
-    this.entry = {
-      key: entryKey(localTime.ticks),
-      prev: this.entry.prev,
-      start: this.entry.start,
-      operation: fused
-    };
-    this.localTime = localTime;
-    this.gwc = this.nextGwc(operation);
-    return this;
-  }
-
-  private nextGwc(operation: MeldOperation): GlobalClock {
-    return this.gwc.update(operation.time);
-  }
+  commit: Kvps = batch => {
+    batch.put(this.key, MsgPack.encode(this.json));
+    batch.put(operationKey(this.tid), MsgPack.encode(this.operation));
+  };
 }
 
 /** Immutable expansion of JournalJson */
 export class SuSetJournal {
-  /** Tail state cache */
-  _tail: SuSetJournalEntry | null = null;
-
   static fromJson(data: SuSetJournalData, json: JournalJson) {
     const time = TreeClock.fromJson(json.time);
     const gwc = GlobalClock.fromJson(json.gwc);
-    return new SuSetJournal(data, json.tailTick, time, gwc);
+    return new SuSetJournal(data, json.start, time, gwc);
   }
 
-  private constructor(
+  constructor(
     private readonly data: SuSetJournalData,
-    readonly tailTick: number,
+    readonly start: number,
     readonly time: TreeClock,
     readonly gwc: GlobalClock) {
   }
 
-  async tail(): Promise<SuSetJournalEntry> {
-    if (this._tail == null) {
-      this._tail = await this.data.entryFor(this.tailTick) ?? null;
-      if (this._tail == null)
-        throw new Error(`Journal tail tick ${this.tailTick} is missing at ${this.time}`);
-    }
-    return this._tail;
+  withTime(localTime: TreeClock, gwc?: GlobalClock): SuSetJournal {
+    return new SuSetJournal(this.data, this.start, localTime, gwc ?? this.gwc);
   }
 
-  setLocalTime(localTime: TreeClock): Kvps {
-    return async batch => {
-      // Not updating tail cache for rare time update
-      this.commit(this.tailTick, localTime, this.gwc)(batch);
+  get json(): JournalJson {
+    return { start: this.start, time: this.time.toJson(), gwc: this.gwc.toJson() };
+  }
+
+  commit: Kvps = batch => {
+    batch.put(JOURNAL_KEY, MsgPack.encode(this.json));
+    this.data._journal = this;
+  };
+
+  builder(): EntryBuilder {
+    const journal = this;
+    return new class {
+      private localTime = journal.time;
+      private gwc = journal.gwc;
+      private entries: SuSetJournalEntry[] = [];
+
+      next(operation: MeldOperation, localTime: TreeClock) {
+        const entry = SuSetJournalEntry.fromOperation(journal.data,
+          operation, localTime, this.gwc);
+        this.entries.push(entry);
+        this.gwc = this.gwc.update(operation.time);
+        this.localTime = localTime;
+        return this;
+      }
+
+      /** Commits the built journal entries to the journal */
+      commit: Kvps = async batch => {
+        for (let entry of this.entries)
+          entry.commit(batch);
+
+        journal.withTime(this.localTime, this.gwc).commit(batch);
+      };
     };
   }
 
-  /** Optional parameters are for temporary head only */
-  static json(tailTick: number, localTime: TreeClock, gwc: GlobalClock): Partial<JournalJson> {
-    return { tailTick, time: localTime.toJson(), gwc: gwc.toJson() };
-  }
-
-  /**
-   * Commits a new tail and time, with updates to the journal and tail cache
-   */
-  commit(tailTick: number, localTime: TreeClock, gwc: GlobalClock, tail?: SuSetJournalEntry): Kvps {
-    return batch => {
-      const json = SuSetJournal.json(tailTick, localTime, gwc);
-      batch.put(JOURNAL_KEY, MsgPack.encode(json));
-      this.data._journal = new SuSetJournal(this.data, tailTick, localTime, gwc);
-      this.data._journal._tail = tail ?? null;
-    };
+  latestOperations(): Observable<EncodedOperation> {
+    return from(this.gwc.tids()).pipe(
+      mergeMap(tid => {
+        // From each op, expand backwards with causal ticks
+        return from(this.data.operation(tid)).pipe(
+          expand(op => {
+            if (op == null)
+              return EMPTY;
+            const [, from, timeJson] = op, time = TreeClock.fromJson(timeJson);
+            return this.data.operation(time.ticked(from - 1).hash());
+          }),
+          takeWhile<EncodedOperation>(op => op != null),
+          // TODO: Make fusions work in reverse, so don't have to load all
+          toArray(),
+          mergeMap(ops => {
+            if (ops.length <= 1) {
+              return from(ops);
+            } else {
+              ops.reverse();
+              const fused = ops.slice(1).reduce(
+                (fusion, op) => fusion.next(this.data.decode(op)),
+                this.data.decode(ops[0]).fusion()).commit();
+              return of(this.data.encode(fused));
+            }
+          }));
+      }));
   }
 }
 
@@ -269,14 +208,16 @@ export class SuSetJournalData {
     return (await this.kvps.get(JOURNAL_KEY)) != null;
   }
 
+  decode(op: EncodedOperation) {
+    return MeldOperation.fromEncoded(this.encoder, op);
+  }
+
+  encode(op: CausalOperation<Triple, TreeClock>) {
+    return MeldOperation.fromOperation(this.encoder, op).encoded;
+  }
+
   reset(localTime: TreeClock, gwc: GlobalClock): Kvps {
-    const [headTick, headJson] = SuSetJournalEntry.head(localTime);
-    const journalJson = SuSetJournal.json(headTick, localTime, gwc);
-    return batch => {
-      batch.put(JOURNAL_KEY, MsgPack.encode(journalJson));
-      batch.put(entryKey(headTick), MsgPack.encode(headJson));
-      this._journal = null; // Not caching one-time change
-    };
+    return new SuSetJournal(this, localTime.ticks, localTime, gwc).commit;
   }
 
   async journal() {
@@ -289,60 +230,28 @@ export class SuSetJournalData {
     return this._journal;
   }
 
-  async entry(key: { gt: EntryKey } | { gte: EntryKey }) {
-    const kvp = await this.kvps.read({ ...key, lt: ENTRY_KEY_MAX, limit: 1 }).toPromise();
+  async entryAfter(key: number | EntryKey) {
+    if (typeof key == 'number')
+      key = entryKey(key);
+    const kvp = await this.kvps.read({ gt: key, lt: ENTRY_KEY_MAX, limit: 1 }).toPromise();
     if (kvp != null) {
       const [key, value] = kvp;
       return SuSetJournalEntry.fromJson(this, key, MsgPack.decode(value));
     }
   }
 
-  async entryFor(tick: number) {
-    const firstAfter = await this.entry({ gte: entryKey(tick) });
-    // Check that the entry's tick range covers the request
-    if (firstAfter != null && firstAfter.start <= tick)
-      return firstAfter;
-  }
-
   async operation(tid: string): Promise<EncodedOperation | undefined> {
-    const value = await this.kvps.get(operationKey(tid));
+    const key = operationKey(tid);
+    const value = await this.kvps.get(key);
     if (value != null)
       return MsgPack.decode(value);
   }
 
-  insertLatestOperation(latest: EncodedOperation): Kvps {
+  insertOperation(operation: EncodedOperation): Kvps {
     return async batch => {
-      const [, , timeJson] = latest;
+      const [, , timeJson] = operation;
       const time = TreeClock.fromJson(timeJson);
-      batch.put(operationKey(time.hash()), MsgPack.encode(latest));
+      batch.put(operationKey(time.hash()), MsgPack.encode(operation));
     };
-  }
-
-  updateLatestOperation(entry: SuSetJournalEntry): Kvps {
-    return async batch => {
-      // Do we have an operation for the entry's prev tick?
-      if (entry.prev >= 0) {
-        const prevTime = entry.time.ticked(entry.prev);
-        const prevTid = prevTime.hash();
-        const prevOp = await this.operation(prevTid);
-        let newLatest = entry.encoded;
-        if (prevOp != null) {
-          const [, from] = prevOp;
-          if (CausalTimeRange.contiguous({ from, time: prevTime }, entry)) {
-            const fused = MeldOperation.fromEncoded(this.encoder, prevOp).fuse(entry.operation);
-            newLatest = MeldOperation.fromOperation(this.encoder, fused).encoded;
-          }
-          // Always delete the old latest
-          // TODO: This is not perfect garbage collection, see fused-updates spec
-          batch.del(operationKey(prevTid));
-        }
-        batch.put(operationKey(entry.time.hash()), MsgPack.encode(newLatest));
-      }
-    };
-  }
-
-  latestOperations(): Observable<EncodedOperation> {
-    return this.kvps.read({ gt: OPERATION_KEY_MIN, lt: OPERATION_KEY_MAX })
-      .pipe(map(([, value]) => MsgPack.decode(value)));
   }
 }

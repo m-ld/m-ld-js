@@ -155,10 +155,28 @@ describe('SU-Set Dataset', () => {
           const data = await snapshot.data.pipe(toArray()).toPromise();
           expect(data.length).toBe(2);
           const reifiedFredJson =
-            `(,?("s":"fred"|"p":"#name"|"o":"Fred"|"tid":"${local.time.hash()}")){4}`;
+            `(,?("s":"fred"|"p":"#name"|"o":"Fred"|"tid":"${firstTid}")){4}`;
           expect(data).toEqual(expect.arrayContaining([
-            { operation: [2, 1, local.time.toJson(), '{}', expect.stringMatching(reifiedFredJson)] },
+            { operation: [2, local.time.ticks, local.time.toJson(), '{}', '{"@id":"fred","name":"Fred"}'] },
             { inserts: expect.stringMatching(reifiedFredJson) }
+          ]));
+        });
+
+        test('answers a snapshot with fused operations', async () => {
+          const firstTick = local.time.ticks;
+          await ssd.transact(async () => [
+            local.tick().time,
+            await ssd.write({ '@insert': wilma })
+          ]);
+          const snapshot = await ssd.takeSnapshot();
+          expect(snapshot.gwc.equals(local.gwc)).toBe(true);
+          const data = await snapshot.data.pipe(toArray()).toPromise();
+          expect(data.length).toBe(2);
+          const reifiedFlintstoneJson = // Not a great check but must have all properties
+            `(.+("s":"fred"|"s":"wilma"|"p":"#name"|"o":"Fred"|"o":"Wilma"|"tid":"${firstTid}|"tid":"${local.time.hash()}")){8}`;
+          expect(data).toEqual(expect.arrayContaining([
+            { operation: [2, firstTick, local.time.toJson(), '{}', expect.stringMatching(reifiedFlintstoneJson)] },
+            { inserts: expect.stringMatching(reifiedFlintstoneJson) }
           ]));
         });
 
@@ -179,12 +197,10 @@ describe('SU-Set Dataset', () => {
           const snapshot = await ssd.takeSnapshot();
           const data = await snapshot.data.pipe(toArray()).toPromise();
           expect(data.length).toBe(2);
-          const reifiedFredJson =
-            `(,?("s":"fred"|"p":"#name"|"o":"Fred"|"tid":"${local.time.hash()}")){4}`;
-          const reifiedSexJson = // Not a perfect check but must have 7 properties
-            `(.+("s":"fred"|"p":("#name"|"#sex")|"o":("Fred"|"male")|"tid":"${local.time.hash()}")){7}`;
+          const reifiedSexJson = // Not a great check but must have all properties
+            `(.+("s":"fred"|"p":("#name"|"#sex")|"o":("Fred"|"male")|"tid":"${firstTid}")){7}`;
           expect(data).toEqual(expect.arrayContaining([
-            { operation: [2, 1, local.time.toJson(), '{}', expect.stringMatching(reifiedFredJson)] },
+            { operation: [2, local.time.ticks, local.time.toJson(), '{}', '{"@id":"fred","name":"Fred"}'] },
             { inserts: expect.stringMatching(reifiedSexJson) }
           ]));
         });

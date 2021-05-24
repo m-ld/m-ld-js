@@ -143,7 +143,7 @@ export class SuSetDataset extends MeldEncoder {
         const journal = await this.journalData.journal(),
           newClock = await prepare(journal.gwc);
         return {
-          kvps: journal.setLocalTime(newClock),
+          kvps: journal.withTime(newClock).commit,
           return: newClock
         };
       }
@@ -171,20 +171,18 @@ export class SuSetDataset extends MeldEncoder {
           gwc.resolve(journal.gwc);
         // How many ticks of mine has the requester seen?
         const tick = time.getTicks(journal.time);
-        let found = tick != null ? await this.journalData.entryFor(tick) : undefined;
-        return {
-          // If nothing was found, return undefined
-          return: found == null ? undefined :
-            // A journal entry may be a fusion that spans the requested tick, so
-            // start with the found entry but filter out if singular on the tick
-            from(found.time.ticks > tick ? of(found) : found.next()).pipe(
+        // If we don't have that tick any more, return undefined
+        if (tick < journal.start)
+          return { return: undefined };
+        else
+          return {
+            return: of(await this.journalData.entryAfter(tick)).pipe(
               expand(entry => entry != null ? entry.next() : EMPTY),
               takeWhile<SuSetJournalEntry>(entry => entry != null),
               // Don't emit an entry if it's all less than the requested time
               filter(entry => time.anyLt(entry.time)),
-              map(entry => new OperationMessage(
-                entry.prev, entry.encoded, entry.time)))
-        };
+              map(entry => new OperationMessage(entry.prev, entry.operation, entry.time)))
+          };
       }
     });
   }
@@ -213,8 +211,8 @@ export class SuSetDataset extends MeldEncoder {
 
         // Include journaling in final patch
         txc.sw.next('journal');
-        const journal = await this.journalData.journal(), tail = await journal.tail();
-        const journaling = tail.builder(journal).next(op, time);
+        const journal = await this.journalData.journal();
+        const journaling = journal.builder().next(op, time);
 
         return {
           patch: this.transactionPatch(patch, entailments, tidPatch),
@@ -289,8 +287,7 @@ export class SuSetDataset extends MeldEncoder {
         // have an empty patch, but we still need to complete the journal
         // entry for it.
         txc.sw.next('journal');
-        const tail = await journal.tail();
-        const journaling = tail.builder(journal).next(op, localTime);
+        const journaling = journal.builder().next(op, localTime);
 
         // If the constraint has done anything, we need to merge its work
         if (cxn != null) {
@@ -433,7 +430,7 @@ export class SuSetDataset extends MeldEncoder {
             patch.append({ inserts: triplesTids.map(([triple]) => this.toUserQuad(triple)) });
             return { patch };
           } else {
-            return { kvps: this.journalData.insertLatestOperation(batch.operation) };
+            return { kvps: this.journalData.insertOperation(batch.operation) };
           }
         }
       }))).toPromise();
@@ -456,8 +453,7 @@ export class SuSetDataset extends MeldEncoder {
               const reified = this.reifyTriplesTids(asTriplesTids(tidQuads));
               return { inserts: this.bufferFromTriples(reified) };
             })),
-        this.journalData.latestOperations()
-          .pipe(map(operation => ({ operation }))))
+        journal.latestOperations().pipe(map(operation => ({ operation }))))
     };
   }
 }
