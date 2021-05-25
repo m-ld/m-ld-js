@@ -16,7 +16,6 @@ export interface CausalClock {
   /**
    * Are any of this clock's ticks less than the other clock's ticks?
    * @param other the clock to compare
-   * @param includeIds whether to include this and the other's process
    * identities
    */
   anyNonIdLt(other: this): boolean;
@@ -158,7 +157,6 @@ export class TreeClock extends TickTree<boolean> implements CausalClock {
    * Formal mapping from a clock time to a transaction ID. Used in the creation
    * of reified operation deletes and inserts. Injective but not safely one-way
    * (do not use as a cryptographic hash).
-   * @param time the clock time
    */
   hash() {
     const buf = MsgPack.encode(this.toJson('forHash'));
@@ -205,7 +203,10 @@ export class TreeClock extends TickTree<boolean> implements CausalClock {
     if (ticks != null && ticks < 0) {
       throw new Error('Trying to set ticks < 0');
     } else if (this.isId) {
-      return new TreeClock(true, ticks ?? this.localTicks + 1);
+      if (ticks === this.localTicks)
+        return this;
+      else
+        return new TreeClock(true, ticks ?? this.localTicks + 1);
     } else if (ticks != null && ticks < this.localTicks) {
       // If ticks < this._ticks, we drop any fork
       return new TreeClock(this.hasId, ticks);
@@ -213,11 +214,13 @@ export class TreeClock extends TickTree<boolean> implements CausalClock {
       const forkTicks = ticks == null ? null : ticks - this.localTicks;
       const leftResult = this.fork.left._ticked(forkTicks);
       if (leftResult)
-        return new TreeClock(new Fork(leftResult, this.fork.right), this.localTicks);
+        return leftResult === this.fork.left ? this :
+          new TreeClock(new Fork(leftResult, this.fork.right), this.localTicks);
 
       const rightResult = this.fork.right._ticked(forkTicks);
       if (rightResult)
-        return new TreeClock(new Fork(this.fork.left, rightResult), this.localTicks);
+        return rightResult === this.fork.right ? this :
+          new TreeClock(new Fork(this.fork.left, rightResult), this.localTicks);
     }
   }
 

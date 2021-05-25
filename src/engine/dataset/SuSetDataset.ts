@@ -1,5 +1,5 @@
-import { MeldUpdate, MeldConstraint, MeldReadState } from '../../api';
-import { Snapshot, UUID, OperationMessage } from '..';
+import { MeldConstraint, MeldReadState, MeldUpdate } from '../../api';
+import { OperationMessage, Snapshot, UUID } from '..';
 import { Quad } from 'rdf-js';
 import { GlobalClock, TickTree, TreeClock } from '../clocks';
 import { Context, Subject, Write } from '../../jrql-support';
@@ -7,18 +7,16 @@ import { Dataset, PatchQuads } from '.';
 import { Iri } from 'jsonld/jsonld-spec';
 import { JrqlGraph } from './JrqlGraph';
 import { MeldEncoder, MeldOperation, TriplesTids, unreify } from '../MeldEncoding';
-import { Observable, from, Subject as Source, EMPTY, of, merge } from 'rxjs';
-import {
-  bufferCount, mergeMap, map, filter, takeWhile, expand, toArray
-} from 'rxjs/operators';
-import { flatten, Future, getIdLogger, check } from '../util';
+import { EMPTY, merge, Observable, of, Subject as Source } from 'rxjs';
+import { bufferCount, expand, filter, map, mergeMap, takeWhile, toArray } from 'rxjs/operators';
+import { check, flatten, Future, getIdLogger } from '../util';
 import { Logger } from 'loglevel';
 import { MeldError } from '../MeldError';
 import { LocalLock } from '../local';
 import { SUSET_CONTEXT, tripleId } from './SuSetGraph';
 import { SuSetJournal, SuSetJournalData, SuSetJournalEntry } from './SuSetJournal';
 import { array, GraphSubject, MeldConfig, Read } from '../..';
-import { QuadMap, TripleMap, Triple } from '../quads';
+import { QuadMap, Triple, TripleMap } from '../quads';
 import { CheckList } from '../../constraints/CheckList';
 import { DefaultList } from '../../constraints/DefaultList';
 import { QS } from '../../ns';
@@ -171,18 +169,16 @@ export class SuSetDataset extends MeldEncoder {
           gwc.resolve(journal.gwc);
         // How many ticks of mine has the requester seen?
         const tick = time.getTicks(journal.time);
-        // If we don't have that tick any more, return undefined
-        if (tick < journal.start)
-          return { return: undefined };
-        else
-          return {
-            return: of(await this.journalData.entryAfter(tick)).pipe(
+        return {
+          // If we don't have that tick any more, return undefined
+          return: tick < journal.start ? undefined :
+            of(await this.journalData.entryAfter(tick)).pipe(
               expand(entry => entry != null ? entry.next() : EMPTY),
               takeWhile<SuSetJournalEntry>(entry => entry != null),
               // Don't emit an entry if it's all less than the requested time
-              filter(entry => time.anyLt(entry.time)),
-              map(entry => new OperationMessage(entry.prev, entry.operation, entry.time)))
-          };
+              filter(entry => time.anyLt(entry.operation.time)),
+              map(entry => entry.asMessage()))
+        };
       }
     });
   }
@@ -215,7 +211,7 @@ export class SuSetDataset extends MeldEncoder {
         const journaling = journal.builder().next(op, time);
 
         return {
-          patch: this.transactionPatch(patch, entailments, tidPatch),
+          patch: SuSetDataset.transactionPatch(patch, entailments, tidPatch),
           kvps: journaling.commit,
           return: this.operationMessage(journal, time, op),
           after: () => this.emitUpdate(update)
@@ -298,10 +294,10 @@ export class SuSetDataset extends MeldEncoder {
           journaling.next(cxn.operation, cxnTime);
         }
         return {
-          patch: this.transactionPatch(patch, entailments, tidPatch),
+          patch: SuSetDataset.transactionPatch(patch, entailments, tidPatch),
           kvps: journaling.commit,
           // FIXME: If this operation message exceeds max size, what to do?
-          return: cxn?.operation != null ?
+          return: cxn != null && cxn.operation != null ?
             this.operationMessage(journal, cxnTime, cxn.operation) : null,
           after: () => this.emitUpdate(update)
         };
@@ -313,15 +309,15 @@ export class SuSetDataset extends MeldEncoder {
     msg: OperationMessage, localTime: TreeClock, journal: SuSetJournal) {
     const op = MeldOperation.fromEncoded(this, msg.data);
     this.log.debug(`Applying operation: ${op.time} @ ${localTime}`);
-    // Cut away stale parts of an incoming (fused) operation.
+    // Cut away stale parts of an incoming fused operation.
     // Optimisation: no need to cut if incoming is not fused.
     if (op.from < op.time.ticks) {
       const seenTicks = journal.gwc.getTicks(msg.time);
-      const prevSeen = await this.journalData.operation(msg.time.ticked(seenTicks).hash());
-      if (prevSeen != null) {
-        return MeldOperation.fromOperation(this,
-          op.cutBy(MeldOperation.fromEncoded(this, prevSeen)));
-      }
+      // Seen ticks >= op.from (otherwise we would not be here)
+      const seenTid = msg.time.ticked(seenTicks).hash();
+      const seenOp = await this.journalData.operation(seenTid);
+      if (seenOp != null)
+        return seenOp.cutSeen(op);
     }
     return op;
   }
@@ -341,9 +337,7 @@ export class SuSetDataset extends MeldEncoder {
   }
 
   /**
-   * Caution: mutates to.patch
-   * @param to transaction details to apply the patch to
-   * @param localTime local clock time
+   * Caution: mutates patch
    */
   private async constraintTxn(
     assertions: PatchQuads, patch: PatchQuads, insertTids: TripleMap<UUID[]>, cxnTime: TreeClock) {
@@ -372,9 +366,10 @@ export class SuSetDataset extends MeldEncoder {
    * just a type convenience for ensuring everything needed for a transaction is
    * present.
    * @param assertions the transaction data patch
+   * @param entailments
    * @param tidPatch triple TID patch (inserts and deletes)
    */
-  private transactionPatch(
+  private static transactionPatch(
     assertions: PatchQuads, entailments: PatchQuads, tidPatch: PatchQuads): PatchQuads {
     return new PatchQuads(assertions).append(entailments).append(tidPatch);
   }
@@ -388,7 +383,8 @@ export class SuSetDataset extends MeldEncoder {
     });
   }
 
-  private async findTriplesTids(quads: Iterable<Quad>, includeEmpty?: 'includeEmpty'): Promise<QuadMap<Quad[]>> {
+  private async findTriplesTids(
+    quads: Iterable<Quad>, includeEmpty?: 'includeEmpty'): Promise<QuadMap<Quad[]>> {
     const quadTriplesTids = new QuadMap<Quad[]>();
     await Promise.all([...quads].map(async quad => {
       const tripleTids = await this.findTripleTids(tripleId(quad));

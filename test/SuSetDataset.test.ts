@@ -1,7 +1,7 @@
 import { SuSetDataset } from '../src/engine/dataset/SuSetDataset';
 import { memStore, MockProcess } from './testClones';
 import { TreeClock } from '../src/engine/clocks';
-import { first, toArray, isEmpty, take } from 'rxjs/operators';
+import { first, isEmpty, take, toArray } from 'rxjs/operators';
 import { Dataset } from '../src/engine/dataset';
 import { from } from 'rxjs';
 import { Describe, MeldConstraint } from '../src';
@@ -53,11 +53,7 @@ describe('SU-Set Dataset', () => {
         let { left, right } = TreeClock.GENESIS.forked();
         local = new MockProcess(left);
         remote = new MockProcess(right);
-        await ssd.resetClock(local.tick().time);
-      });
-
-      test('does not answer operations since before start', async () => {
-        await expect(ssd.operationsSince(remote.time)).resolves.toBeUndefined();
+        await ssd.resetClock(local.time);
       });
 
       test('has no operations since first time', async () => {
@@ -212,6 +208,13 @@ describe('SU-Set Dataset', () => {
           await expect(ssd.read<Describe>({
             '@describe': 'http://test.m-ld.org/fred'
           }).pipe(toArray()).toPromise()).resolves.toEqual([fred]);
+        });
+
+        test('does not answer operations since before snapshot start', async () => {
+          const snapshot = await ssd.takeSnapshot();
+          const staticData = await snapshot.data.pipe(toArray()).toPromise();
+          await ssd.applySnapshot({ gwc: local.gwc, data: from(staticData) }, local.tick().time);
+          await expect(ssd.operationsSince(remote.time)).resolves.toBeUndefined();
         });
 
         test('transacts a delete', async () => {
@@ -394,7 +397,7 @@ describe('SU-Set Dataset', () => {
         });
 
         test('cuts stale fusion from incoming fusion', async () => {
-          const third = remote.fork();
+          remote.fork();
           // The remote will have two transactions, which fuse in its journal.
           // The local sees the first, adding wilma...
           const one = remote.sentOperation('{}', '{"@id":"wilma","name":"Wilma"}');
@@ -508,7 +511,7 @@ describe('SU-Set Dataset', () => {
       // Check that we have a valid journal
       const ops = await ssd.operationsSince(remote.time);
       if (ops == null)
-        fail();
+        return fail();
       const entries = await ops.pipe(toArray()).toPromise();
       expect(entries.length).toBe(1);
       expect(entries[0].time.equals(local.time)).toBe(true);

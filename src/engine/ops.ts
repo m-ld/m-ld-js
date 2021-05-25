@@ -109,10 +109,13 @@ export class FusableCausalOperation<T, C extends CausalClock> implements CausalO
     // Not using mutable append, our semantics are different!
     const original = this;
     return new class {
-      private fused = original.mutable();
+      /** Lazy, in case next() never called */
+      private fused: MutableOperation<ItemTid<T>> | undefined;
       private time: C | undefined;
 
       next(next: CausalOperation<T, C>): CausalOperator<T, C> {
+        // 0. Lazily create the fusion
+        this.fused ??= original.mutable();
         // 1. Fuse all deletes
         this.fused.deletes.addAll(flatten(next.deletes));
         // 2. Remove anything we insert that is deleted
@@ -125,7 +128,7 @@ export class FusableCausalOperation<T, C extends CausalClock> implements CausalO
       }
 
       commit(): CausalOperation<T, C> {
-        if (this.time != null)
+        if (this.fused != null && this.time != null)
           return {
             from: original.from,
             time: this.time,
@@ -146,10 +149,13 @@ export class FusableCausalOperation<T, C extends CausalClock> implements CausalO
   cutting(): CausalOperator<T, C> {
     const original = this;
     return new class {
-      private cut = original.mutable();
+      /** Lazy, in case next() never called */
+      private cut: MutableOperation<ItemTid<T>> | undefined;
       private from = original.from;
 
       next(prev: CausalOperation<T, C>): CausalOperator<T, C> {
+        // Lazily create the cutting
+        this.cut ??= original.mutable();
         // Remove all overlapping deletes
         this.cut.deletes.deleteAll(flatten(prev.deletes));
         // Do some indexing for TID-based parts
@@ -177,7 +183,7 @@ export class FusableCausalOperation<T, C extends CausalClock> implements CausalO
       }
 
       commit(): CausalOperation<T, C> {
-        if (this.from != original.from)
+        if (this.cut != null)
           return {
             from: this.from,
             time: original.time,

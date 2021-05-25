@@ -1,12 +1,12 @@
 import { toPrefixedId } from './SuSetGraph';
-import { EncodedOperation } from '..';
+import { EncodedOperation, OperationMessage } from '..';
 import { GlobalClock, GlobalClockJson, TreeClock, TreeClockJson } from '../clocks';
 import { MsgPack } from '../util';
 import { Kvps, KvpStore } from '.';
 import { MeldEncoder, MeldOperation } from '../MeldEncoding';
-import { CausalOperation } from '../ops';
-import { EMPTY, from, Observable, of } from 'rxjs';
-import { expand, mergeMap, takeWhile, toArray } from 'rxjs/operators';
+import { CausalOperation, CausalOperator } from '../ops';
+import { from, Observable } from 'rxjs';
+import { filter, mergeMap } from 'rxjs/operators';
 import { Triple } from '../quads';
 
 /** There is only one journal with a fixed key. */
@@ -14,30 +14,44 @@ const JOURNAL_KEY = '_qs:journal';
 
 /**
  * Journal entries are indexed by end-tick as
- * `_qs:entry:${zeroPad(tick.toString(36), 8)}`. This gives a maximum tick of
+ * `_qs:tick:${zeroPad(tick.toString(36), 8)}`. This gives a maximum tick of
  * 36^8, about 3 trillion, about 90 years in milliseconds.
  */
-type EntryKey = ReturnType<typeof entryKey>;
-const ENTRY_KEY_PRE = '_qs:entry';
-const ENTRY_KEY_LEN = 8;
-const ENTRY_KEY_RADIX = 36;
-const ENTRY_KEY_PAD = new Array(ENTRY_KEY_LEN).fill('0').join('');
-const ENTRY_KEY_MAX = toPrefixedId(ENTRY_KEY_PRE, '~'); // > 'z'
-function entryKey(tick: number) {
-  return toPrefixedId(ENTRY_KEY_PRE,
-    `${ENTRY_KEY_PAD}${tick.toString(ENTRY_KEY_RADIX)}`.slice(-ENTRY_KEY_LEN));
+type EntryKey = ReturnType<typeof tickKey>;
+const TICK_KEY_PRE = '_qs:tick';
+const TICK_KEY_LEN = 8;
+const TICK_KEY_RADIX = 36;
+const TICK_KEY_PAD = new Array(TICK_KEY_LEN).fill('0').join('');
+const TICK_KEY_MAX = toPrefixedId(TICK_KEY_PRE, '~'); // > 'z'
+function tickKey(tick: number) {
+  return toPrefixedId(TICK_KEY_PRE,
+    `${TICK_KEY_PAD}${tick.toString(TICK_KEY_RADIX)}`.slice(-TICK_KEY_LEN));
+}
+
+/** Entries are also indexed by time hash (TID) */
+const TID_KEY_PRE = '_qs:tid';
+
+function tidKey(tid: string) {
+  return toPrefixedId(TID_KEY_PRE, tid);
 }
 
 /** Operations indexed by time hash (TID) */
-const OPERATION_KEY_PRE = '_qs:op';
-function operationKey(tid: string) {
-  return toPrefixedId(OPERATION_KEY_PRE, tid);
+const TID_OP_KEY_PRE = '_qs:op';
+
+function tidOpKey(tid: string) {
+  return toPrefixedId(TID_OP_KEY_PRE, tid);
 }
 
 interface JournalJson {
-  /** First known tick of the local clock – for which an entry may not exist */
+  /**
+   * First known tick of the local clock. Journal entries will exist for
+   * subsequent ticks. Operations may be retained for transactions prior to
+   * this.
+   */
   start: number;
-  /** Current local clock time, including internal ticks */
+  /**
+   * Current local clock time, including internal ticks.
+   */
   time: TreeClockJson;
   /**
    * JSON-encoded public clock time ('global wall clock' or 'Great Westminster
@@ -61,58 +75,154 @@ export interface EntryBuilder {
   commit: Kvps;
 }
 
+/** Encapsulates pattern used for Journal contents */
+abstract class JournalObject<J> {
+  protected constructor(
+    /** KVP dataset */
+    protected readonly data: SuSetJournalData) {
+  }
+  /** Gets raw data encoded into KVP value */
+  abstract get json(): J;
+  /** Pushes current data into KVP dataset */
+  abstract commit: Kvps;
+}
+
+/** Immutable (partial) expansion of EncodedOperation */
+export class SuSetJournalOperation extends JournalObject<EncodedOperation> {
+  static fromJson(data: SuSetJournalData, json: EncodedOperation, tid?: string) {
+    // Destructuring fields for convenience
+    const [, from, timeJson] = json;
+    const time = TreeClock.fromJson(timeJson);
+    tid ??= time.hash();
+    return new SuSetJournalOperation(data, tid, from, time, json);
+  }
+
+  static fromOperation(data: SuSetJournalData, operation: MeldOperation) {
+    return new SuSetJournalOperation(data,
+      operation.time.hash(),
+      operation.from,
+      operation.time,
+      operation.encoded)
+  }
+
+  constructor(
+    data: SuSetJournalData,
+    readonly tid: string,
+    readonly from: number,
+    readonly time: TreeClock,
+    readonly operation: EncodedOperation) {
+    super(data);
+  }
+
+  get json() {
+    return this.operation;
+  }
+
+  commit: Kvps = batch => {
+    batch.put(tidOpKey(this.tid), MsgPack.encode(this.operation));
+  };
+
+  get tick() {
+    return this.time.ticks;
+  }
+
+  asMeldOperation() {
+    return this.data.decode(this.operation);
+  }
+
+  /**
+   * @param createOperator creates a causal reduction operator from the given first operation
+   * @param minFrom the least required value of the range of the operation with
+   * the returned identity
+   * @returns found operations, up to and including this one
+   */
+  async causalReduce(
+    createOperator: (first: MeldOperation) => CausalOperator<Triple, TreeClock>,
+    minFrom = 1): Promise<MeldOperation> {
+    // TODO: Lock the journal against garbage compaction while processing!
+    type OpId = { tick: number, tid: string };
+    const seekToFrom = async (start: OpId): Promise<OpId> => {
+      const prev = await this.data.entryPrev(start.tid);
+      if (prev < minFrom || prev < start.tick - 1)
+        return start; // This is as far back as we have
+      else
+        // Get previous tick for given tick (or our tick)
+        return seekToFrom({ tick: prev, tid: this.time.ticked(prev).hash() });
+    };
+    let { tid, tick } = await seekToFrom(this);
+    const operator = createOperator(await this.data.meldOperation(tid));
+    while (tid !== this.tid) {
+      tid = this.time.ticked(++tick).hash();
+      operator.next(tid === this.tid ?
+        this.asMeldOperation() : await this.data.meldOperation(tid));
+    }
+    return this.data.toMeldOperation(operator.commit());
+  }
+
+  /**
+   * Gets the causally-contiguous history of this operation, fused into a single
+   * operation.
+   * @see CausalTimeRange.contiguous
+   */
+  async fusedPast(): Promise<EncodedOperation> {
+    return (await this.causalReduce(first => first.fusion())).encoded;
+  }
+
+  async cutSeen(op: MeldOperation): Promise<MeldOperation> {
+    return this.causalReduce(prev => op.cutting().next(prev), op.from);
+  }
+}
+
 /** Immutable expansion of JournalEntryJson */
-export class SuSetJournalEntry {
+export class SuSetJournalEntry extends JournalObject<JournalEntryJson> {
   static async fromJson(data: SuSetJournalData, key: EntryKey, json: JournalEntryJson) {
     // Destructuring fields for convenience
     const [prev, tid] = json;
     const operation = await data.operation(tid);
-    if (operation != null) {
-      const [, from, timeJson] = operation;
-      const time = TreeClock.fromJson(timeJson);
-      return new SuSetJournalEntry(data, key, prev, tid, operation, from, time);
-    } else {
-      throw new Error(`Journal corrupted: operation ${tid} is missing`);
-    }
+    if (operation != null)
+      return new SuSetJournalEntry(data, key, prev, operation);
+    else
+      throw missingOperationError(tid);
   }
 
   static fromOperation(data: SuSetJournalData,
     operation: MeldOperation, localTime: TreeClock, gwc: GlobalClock) {
     return new SuSetJournalEntry(data,
-      entryKey(localTime.ticks),
+      tickKey(localTime.ticks),
       gwc.getTicks(operation.time),
-      operation.time.hash(),
-      operation.encoded,
-      operation.from,
-      operation.time)
+      SuSetJournalOperation.fromOperation(data, operation))
   }
 
   private constructor(
-    private readonly data: SuSetJournalData,
+    data: SuSetJournalData,
     readonly key: EntryKey,
     readonly prev: number,
-    readonly tid: string,
-    readonly operation: EncodedOperation,
-    readonly from: number,
-    readonly time: TreeClock) {
+    readonly operation: SuSetJournalOperation) {
+    super(data);
   }
 
   get json(): JournalEntryJson {
-    return [this.prev, this.tid];
+    return [this.prev, this.operation.tid];
   }
+
+  commit: Kvps = batch => {
+    const encoded = MsgPack.encode(this.json);
+    batch.put(this.key, encoded);
+    batch.put(tidKey(this.operation.tid), encoded);
+    this.operation.commit(batch);
+  };
 
   async next(): Promise<SuSetJournalEntry | undefined> {
     return this.data.entryAfter(this.key);
   }
 
-  commit: Kvps = batch => {
-    batch.put(this.key, MsgPack.encode(this.json));
-    batch.put(operationKey(this.tid), MsgPack.encode(this.operation));
-  };
+  asMessage(): OperationMessage {
+    return new OperationMessage(this.prev, this.operation.json, this.operation.time);
+  }
 }
 
 /** Immutable expansion of JournalJson */
-export class SuSetJournal {
+export class SuSetJournal extends JournalObject<JournalJson> {
   static fromJson(data: SuSetJournalData, json: JournalJson) {
     const time = TreeClock.fromJson(json.time);
     const gwc = GlobalClock.fromJson(json.gwc);
@@ -120,14 +230,11 @@ export class SuSetJournal {
   }
 
   constructor(
-    private readonly data: SuSetJournalData,
+    data: SuSetJournalData,
     readonly start: number,
     readonly time: TreeClock,
     readonly gwc: GlobalClock) {
-  }
-
-  withTime(localTime: TreeClock, gwc?: GlobalClock): SuSetJournal {
-    return new SuSetJournal(this.data, this.start, localTime, gwc ?? this.gwc);
+    super(data);
   }
 
   get json(): JournalJson {
@@ -138,6 +245,10 @@ export class SuSetJournal {
     batch.put(JOURNAL_KEY, MsgPack.encode(this.json));
     this.data._journal = this;
   };
+
+  withTime(localTime: TreeClock, gwc?: GlobalClock): SuSetJournal {
+    return new SuSetJournal(this.data, this.start, localTime, gwc ?? this.gwc);
+  }
 
   builder(): EntryBuilder {
     const journal = this;
@@ -167,30 +278,10 @@ export class SuSetJournal {
 
   latestOperations(): Observable<EncodedOperation> {
     return from(this.gwc.tids()).pipe(
-      mergeMap(tid => {
-        // From each op, expand backwards with causal ticks
-        return from(this.data.operation(tid)).pipe(
-          expand(op => {
-            if (op == null)
-              return EMPTY;
-            const [, from, timeJson] = op, time = TreeClock.fromJson(timeJson);
-            return this.data.operation(time.ticked(from - 1).hash());
-          }),
-          takeWhile<EncodedOperation>(op => op != null),
-          // TODO: Make fusions work in reverse, so don't have to load all
-          toArray(),
-          mergeMap(ops => {
-            if (ops.length <= 1) {
-              return from(ops);
-            } else {
-              ops.reverse();
-              const fused = ops.slice(1).reduce(
-                (fusion, op) => fusion.next(this.data.decode(op)),
-                this.data.decode(ops[0]).fusion()).commit();
-              return of(this.data.encode(fused));
-            }
-          }));
-      }));
+      // From each op, emit a fusion of all contiguous ops up to the op
+      mergeMap(tid => this.data.operation(tid)),
+      filter<SuSetJournalOperation>(op => op != null),
+      mergeMap(op => op.fusedPast()));
   }
 }
 
@@ -212,8 +303,8 @@ export class SuSetJournalData {
     return MeldOperation.fromEncoded(this.encoder, op);
   }
 
-  encode(op: CausalOperation<Triple, TreeClock>) {
-    return MeldOperation.fromOperation(this.encoder, op).encoded;
+  toMeldOperation(op: CausalOperation<Triple, TreeClock>) {
+    return MeldOperation.fromOperation(this.encoder, op);
   }
 
   reset(localTime: TreeClock, gwc: GlobalClock): Kvps {
@@ -230,28 +321,43 @@ export class SuSetJournalData {
     return this._journal;
   }
 
+  async entryPrev(tid: string) {
+    const value = await this.kvps.get(tidKey(tid));
+    if (value == null)
+      throw missingOperationError(tid);
+    const [prev] = MsgPack.decode(value) as JournalEntryJson;
+    return prev;
+  }
+
   async entryAfter(key: number | EntryKey) {
     if (typeof key == 'number')
-      key = entryKey(key);
-    const kvp = await this.kvps.read({ gt: key, lt: ENTRY_KEY_MAX, limit: 1 }).toPromise();
+      key = tickKey(key);
+    const kvp = await this.kvps.read({ gt: key, lt: TICK_KEY_MAX, limit: 1 }).toPromise();
     if (kvp != null) {
       const [key, value] = kvp;
       return SuSetJournalEntry.fromJson(this, key, MsgPack.decode(value));
     }
   }
 
-  async operation(tid: string): Promise<EncodedOperation | undefined> {
-    const key = operationKey(tid);
-    const value = await this.kvps.get(key);
+  async operation(tid: string): Promise<SuSetJournalOperation | undefined> {
+    const value = await this.kvps.get(tidOpKey(tid));
     if (value != null)
-      return MsgPack.decode(value);
+      return SuSetJournalOperation.fromJson(this, MsgPack.decode(value), tid);
+  }
+
+  async meldOperation(tid: string) {
+    const first = await this.operation(tid);
+    if (first == null)
+      throw missingOperationError(tid);
+    return this.decode(first.json);
   }
 
   insertOperation(operation: EncodedOperation): Kvps {
-    return async batch => {
-      const [, , timeJson] = operation;
-      const time = TreeClock.fromJson(timeJson);
-      batch.put(operationKey(time.hash()), MsgPack.encode(operation));
-    };
+    return SuSetJournalOperation.fromJson(this, operation).commit;
   }
 }
+
+function missingOperationError(tid: string) {
+  return new Error(`Journal corrupted: operation ${tid} is missing`);
+}
+
