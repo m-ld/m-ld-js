@@ -53,7 +53,10 @@ export interface CausalTimeRange<C extends CausalClock> {
 }
 
 export namespace CausalTimeRange {
-  /** Does time range two continue immediately from time range one? */
+  /**
+   * Does time range two continue immediately from time range one, with no intermediate causes from
+   * other processes?
+   */
   export function contiguous<C extends CausalClock>(
     one: CausalTimeRange<C>, two: CausalTimeRange<C>) {
     // Check ticks and ID.
@@ -61,7 +64,9 @@ export namespace CausalTimeRange {
       one.time.hash() === two.time.ticked(one.time.ticks).hash();
   }
 
-  /** Does time range one's tail overlap time range two's head? */
+  /**
+   * Does time range one's tail overlap time range two's head?
+   */
   export function overlaps<C extends CausalClock>(
     one: CausalTimeRange<C>, two: CausalTimeRange<C>) {
     return two.from >= one.from && two.from <= one.time.ticks &&
@@ -80,9 +85,12 @@ export namespace CausalTimeRange {
 export interface CausalOperation<T, C extends CausalClock>
   extends CausalTimeRange<C>, Operation<ItemTids<T>> {
 }
+
 type ItemTids<T> = [item: T, tids: string[]];
 type ItemTid<T> = [item: T, tid: string];
-namespace ItemTid { export const tid = (itemTid: ItemTid<unknown>) => itemTid[1]; }
+namespace ItemTid {
+  export const tid = (itemTid: ItemTid<unknown>) => itemTid[1];
+}
 
 export interface CausalOperator<T, C extends CausalClock> {
   next(op: CausalOperation<T, C>): CausalOperator<T, C>;

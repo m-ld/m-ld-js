@@ -4,14 +4,16 @@
 import { GlobalClock, TreeClock, TreeClockJson } from './clocks';
 import { Observable } from 'rxjs';
 import { Message } from './messages';
-import { MsgPack, Future } from './util';
+import { Future, MsgPack } from './util';
 import { LiveValue } from './LiveValue';
 import { MeldError } from './MeldError';
 import { MeldEncoder } from './MeldEncoding';
+
 const inspect = Symbol.for('nodejs.util.inspect.custom');
 
 export class OperationMessage implements Message<TreeClock, EncodedOperation> {
   readonly delivered = new Future;
+  private _buffer: Buffer;
 
   constructor(
     /** Previous public tick from the operation source */
@@ -23,8 +25,11 @@ export class OperationMessage implements Message<TreeClock, EncodedOperation> {
   }
 
   encode(): Buffer {
-    const { prev, data } = this;
-    return MsgPack.encode({ prev, data });
+    if (this._buffer == null) {
+      const { prev, data } = this;
+      this._buffer = MsgPack.encode({ prev, data });
+    }
+    return this._buffer;
   }
 
   static decode(enc: Buffer): OperationMessage {

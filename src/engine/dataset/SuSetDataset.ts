@@ -14,7 +14,6 @@ import { Logger } from 'loglevel';
 import { MeldError } from '../MeldError';
 import { LocalLock } from '../local';
 import { SUSET_CONTEXT, tripleId } from './SuSetGraph';
-import { SuSetJournal, SuSetJournalData, SuSetJournalEntry } from './SuSetJournal';
 import { array, GraphSubject, MeldConfig, Read } from '../..';
 import { QuadMap, Triple, TripleMap } from '../quads';
 import { CheckList } from '../../constraints/CheckList';
@@ -24,6 +23,7 @@ import { InterimUpdatePatch } from './InterimUpdatePatch';
 import { GraphState } from './GraphState';
 import { ActiveContext } from 'jsonld/lib/context';
 import { activeCtx } from '../jsonld';
+import { Journal, JournalEntry, JournalState } from '../journal';
 
 interface HashTid extends Subject {
   '@id': Iri; // hash:<hashed triple id>
@@ -51,7 +51,7 @@ export class SuSetDataset extends MeldEncoder {
   private /*readonly*/ userGraph: JrqlGraph;
   private /*readonly*/ tidsGraph: JrqlGraph;
   private /*readonly*/ state: MeldReadState;
-  private readonly journalData: SuSetJournalData;
+  private readonly journal: Journal;
   private readonly updateSource: Source<MeldUpdate> = new Source;
   private readonly datasetLock: LocalLock;
   private readonly maxOperationSize: number;
@@ -63,8 +63,8 @@ export class SuSetDataset extends MeldEncoder {
     private readonly context: Context,
     constraints: MeldConstraint[],
     config: Pick<MeldConfig, '@id' | '@domain' | 'maxOperationSize' | 'logLevel'>) {
-    super(config['@domain'], dataset.dataFactory);
-    this.journalData = new SuSetJournalData(dataset, this);
+    super(config['@domain'], dataset.rdf);
+    this.journal = new Journal(dataset, this);
     // Update notifications are strictly ordered but don't hold up transactions
     this.datasetLock = new LocalLock(config['@id'], dataset.location);
     this.maxOperationSize = config.maxOperationSize ?? Infinity;
@@ -115,8 +115,8 @@ export class SuSetDataset extends MeldEncoder {
 
   @SuSetDataset.checkNotClosed.async
   async loadClock(): Promise<TreeClock | undefined> {
-    if (await this.journalData.initialised())
-      return (await this.journalData.journal()).time;
+    if (await this.journal.initialised())
+      return (await this.journal.state()).time;
   }
 
   @SuSetDataset.checkNotClosed.async
@@ -125,7 +125,7 @@ export class SuSetDataset extends MeldEncoder {
       id: 'suset-reset-clock',
       prepare: async () => {
         return {
-          kvps: this.journalData.reset(localTime,
+          kvps: this.journal.reset(localTime,
             GlobalClock.GENESIS.update(localTime))
         };
       }
@@ -138,7 +138,7 @@ export class SuSetDataset extends MeldEncoder {
     return this.dataset.transact<TreeClock>({
       id: 'suset-save-clock',
       prepare: async () => {
-        const journal = await this.journalData.journal(),
+        const journal = await this.journal.state(),
           newClock = await prepare(journal.gwc);
         return {
           kvps: journal.withTime(newClock).commit,
@@ -164,7 +164,7 @@ export class SuSetDataset extends MeldEncoder {
     return this.dataset.transact<Observable<OperationMessage> | undefined>({
       id: 'suset-ops-since',
       prepare: async () => {
-        const journal = await this.journalData.journal();
+        const journal = await this.journal.state();
         if (gwc != null)
           gwc.resolve(journal.gwc);
         // How many ticks of mine has the requester seen?
@@ -172,9 +172,9 @@ export class SuSetDataset extends MeldEncoder {
         return {
           // If we don't have that tick any more, return undefined
           return: tick < journal.start ? undefined :
-            of(await this.journalData.entryAfter(tick)).pipe(
+            of(await this.journal.entryAfter(tick)).pipe(
               expand(entry => entry != null ? entry.next() : EMPTY),
-              takeWhile<SuSetJournalEntry>(entry => entry != null),
+              takeWhile<JournalEntry>(entry => entry != null),
               // Don't emit an entry if it's all less than the requested time
               filter(entry => time.anyLt(entry.operation.time)),
               map(entry => entry.asMessage()))
@@ -207,7 +207,7 @@ export class SuSetDataset extends MeldEncoder {
 
         // Include journaling in final patch
         txc.sw.next('journal');
-        const journal = await this.journalData.journal();
+        const journal = await this.journal.state();
         const journaling = journal.builder().next(op, time);
 
         return {
@@ -225,7 +225,7 @@ export class SuSetDataset extends MeldEncoder {
       this.updateSource.next(update);
   }
 
-  private operationMessage(journal: SuSetJournal, time: TreeClock, op: MeldOperation) {
+  private operationMessage(journal: JournalState, time: TreeClock, op: MeldOperation) {
     const prev = journal.gwc.getTicks(time);
     // Construct the operation message with the previous visible clock tick
     const operationMsg = new OperationMessage(prev, op.encoded, time);
@@ -260,7 +260,7 @@ export class SuSetDataset extends MeldEncoder {
     return this.dataset.transact<OperationMessage | null>({
       prepare: async txc => {
         txc.sw.next('decode-op');
-        const journal = await this.journalData.journal();
+        const journal = await this.journal.state();
         const op = await this.applicableOperation(msg, localTime, journal);
 
         txc.sw.next('apply-txn');
@@ -306,7 +306,7 @@ export class SuSetDataset extends MeldEncoder {
   }
 
   private async applicableOperation(
-    msg: OperationMessage, localTime: TreeClock, journal: SuSetJournal) {
+    msg: OperationMessage, localTime: TreeClock, journal: JournalState) {
     const op = MeldOperation.fromEncoded(this, msg.data);
     this.log.debug(`Applying operation: ${op.time} @ ${localTime}`);
     // Cut away stale parts of an incoming fused operation.
@@ -315,7 +315,7 @@ export class SuSetDataset extends MeldEncoder {
       const seenTicks = journal.gwc.getTicks(msg.time);
       // Seen ticks >= op.from (otherwise we would not be here)
       const seenTid = msg.time.ticked(seenTicks).hash();
-      const seenOp = await this.journalData.operation(seenTid);
+      const seenOp = await this.journal.operation(seenTid);
       if (seenOp != null)
         return seenOp.cutSeen(op);
     }
@@ -411,7 +411,7 @@ export class SuSetDataset extends MeldEncoder {
     await this.dataset.transact({
       id: 'suset-reset',
       prepare: async () =>
-        ({ kvps: this.journalData.reset(localTime, snapshot.gwc) })
+        ({ kvps: this.journal.reset(localTime, snapshot.gwc) })
     });
     await snapshot.data.pipe(
       // For each batch of reified quads with TIDs, first unreify
@@ -426,7 +426,7 @@ export class SuSetDataset extends MeldEncoder {
             patch.append({ inserts: triplesTids.map(([triple]) => this.toUserQuad(triple)) });
             return { patch };
           } else {
-            return { kvps: this.journalData.insertOperation(batch.operation) };
+            return { kvps: this.journal.insertOperation(batch.operation) };
           }
         }
       }))).toPromise();
@@ -438,7 +438,7 @@ export class SuSetDataset extends MeldEncoder {
    */
   @SuSetDataset.checkNotClosed.async
   async takeSnapshot(): Promise<DatasetSnapshot> {
-    const journal = await this.journalData.journal();
+    const journal = await this.journal.state();
     return {
       gwc: journal.gwc,
       data: merge(

@@ -49,5 +49,6 @@ tmp.d.ts
 # Mac
 .DS_Store
 
-# VSCode config
+# IDE config
 .vscode/
+.idea/

@@ -1,9 +1,18 @@
 import {
-  Quad, DefaultGraph, NamedNode, Quad_Subject,
-  Quad_Predicate, Quad_Object, DataFactory
+  DataFactory,
+  DefaultGraph,
+  NamedNode,
+  Quad,
+  Quad_Object,
+  Quad_Predicate,
+  Quad_Subject
 } from 'rdf-js';
 import { Quadstore } from 'quadstore';
-import { AbstractChainedBatch, AbstractIteratorOptions, AbstractLevelDOWN } from 'abstract-leveldown';
+import {
+  AbstractChainedBatch,
+  AbstractIteratorOptions,
+  AbstractLevelDOWN
+} from 'abstract-leveldown';
 import { Observable } from 'rxjs';
 import { generate as uuid } from 'short-uuid';
 import { check, observeAsyncIterator, Stopwatch } from '../util';
@@ -11,12 +20,12 @@ import { LockManager } from '../locks';
 import { QuadSet, RdfFactory } from '../quads';
 import { BatchOpts, Binding, ResultType } from 'quadstore/dist/lib/types';
 import { Context, Iri } from 'jsonld/jsonld-spec';
-import { activeCtx, compactIri, expandTerm, ActiveContext } from '../jsonld';
+import { ActiveContext, activeCtx, compactIri, expandTerm } from '../jsonld';
 import { Algebra } from 'sparqlalgebrajs';
 import { newEngine } from 'quadstore-comunica';
 import { DataFactory as RdfDataFactory } from 'rdf-data-factory';
-import { M_LD, RDF, JRQL, XS, QS } from '../../ns';
-import { wrap, EmptyIterator } from 'asynciterator';
+import { JRQL, M_LD, QS, RDF, XS } from '../../ns';
+import { EmptyIterator, wrap } from 'asynciterator';
 import { MutableOperation } from '../ops';
 import { MeldError } from '../MeldError';
 import type EventEmitter = require('events');
@@ -58,13 +67,13 @@ export interface KvpStore {
  */
 export interface Dataset extends KvpStore {
   readonly location: string;
-  readonly dataFactory: Required<DataFactory>;
+  readonly rdf: Required<DataFactory>;
 
   graph(name?: GraphName): Graph;
 
   /**
    * Ensures that write transactions are executed serially against the store.
-   * @param prepare prepares a write operation to be performed
+   * @param txn prepares a write operation to be performed
    */
   transact(txn: TxnOptions<TxnResult>): Promise<void>;
   transact<T>(txn: TxnOptions<TxnValueResult<T>>): Promise<T>;
@@ -76,7 +85,7 @@ export interface Dataset extends KvpStore {
 }
 
 export type Kvps = // NonNullable<BatchOpts['preWrite']> with strong kv types
-  (batch: AbstractChainedBatch<string, Buffer>) => Promise<unknown> | unknown;
+  (batch: Pick<AbstractChainedBatch<string, Buffer>, 'put' | 'del'>) => Promise<unknown> | unknown;
 
 export interface TxnResult {
   patch?: Patch;
@@ -165,12 +174,12 @@ export class QuadStoreDataset implements Dataset {
     return this;
   }
 
-  get dataFactory() {
+  get rdf() {
     return <Required<DataFactory>>this.store.dataFactory;
   };
 
   graph(name?: GraphName): Graph {
-    return new QuadStoreGraph(this, name || this.dataFactory.defaultGraph());
+    return new QuadStoreGraph(this, name || this.rdf.defaultGraph());
   }
 
   @notClosed.async
@@ -311,14 +320,13 @@ class QuadStoreGraph implements Graph {
         const stream = await this.dataset.store.sparqlStream(query);
         if (stream.type === ResultType.BINDINGS || stream.type === ResultType.QUADS)
           return stream.iterator;
-        else
-          throw new Error('Expected bindings or quads');
       } catch (err) {
         // TODO: Comunica bug? Cannot read property 'close' of undefined, if stream empty
         if (err instanceof TypeError)
           return new EmptyIterator();
         throw err;
       }
+      throw new Error('Expected bindings or quads');
     });
   }
 
@@ -327,15 +335,16 @@ class QuadStoreGraph implements Graph {
       wrap(this.dataset.store.match(subject, predicate, object, this.name)));
   }
 
-  skolem = () => this.dataset.dataFactory.namedNode(
+  skolem = () => this.dataset.rdf.namedNode(
     new URL(`/.well-known/genid/${uuid()}`, this.dataset.base).href)
 
-  namedNode = this.dataset.dataFactory.namedNode;
-  blankNode = this.dataset.dataFactory.blankNode;
-  literal = this.dataset.dataFactory.literal;
-  variable = this.dataset.dataFactory.variable;
-  defaultGraph = this.dataset.dataFactory.defaultGraph;
+  namedNode = this.dataset.rdf.namedNode;
+  // noinspection JSUnusedGlobalSymbols
+  blankNode = this.dataset.rdf.blankNode;
+  literal = this.dataset.rdf.literal;
+  variable = this.dataset.rdf.variable;
+  defaultGraph = this.dataset.rdf.defaultGraph;
 
   quad = (subject: Quad_Subject, predicate: Quad_Predicate, object: Quad_Object) =>
-    this.dataset.dataFactory.quad(subject, predicate, object, this.name);
+    this.dataset.rdf.quad(subject, predicate, object, this.name);
 }
