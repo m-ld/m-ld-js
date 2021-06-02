@@ -153,7 +153,7 @@ describe('SU-Set Dataset', () => {
           const reifiedFredJson =
             `(,?("s":"fred"|"p":"#name"|"o":"Fred"|"tid":"${firstTid}")){4}`;
           expect(data).toEqual(expect.arrayContaining([
-            { operation: [2, local.time.ticks, local.time.toJson(), '{}', '{"@id":"fred","name":"Fred"}'] },
+            { operation: [2, local.time.ticks, local.time.toJSON(), '{}', '{"@id":"fred","name":"Fred"}'] },
             { inserts: expect.stringMatching(reifiedFredJson) }
           ]));
         });
@@ -171,7 +171,7 @@ describe('SU-Set Dataset', () => {
           const reifiedFlintstoneJson = // Not a great check but must have all properties
             `(.+("s":"fred"|"s":"wilma"|"p":"#name"|"o":"Fred"|"o":"Wilma"|"tid":"${firstTid}|"tid":"${local.time.hash()}")){8}`;
           expect(data).toEqual(expect.arrayContaining([
-            { operation: [2, firstTick, local.time.toJson(), '{}', expect.stringMatching(reifiedFlintstoneJson)] },
+            { operation: [2, firstTick, local.time.toJSON(), '{}', expect.stringMatching(reifiedFlintstoneJson)] },
             { inserts: expect.stringMatching(reifiedFlintstoneJson) }
           ]));
         });
@@ -196,7 +196,7 @@ describe('SU-Set Dataset', () => {
           const reifiedSexJson = // Not a great check but must have all properties
             `(.+("s":"fred"|"p":("#name"|"#sex")|"o":("Fred"|"male")|"tid":"${firstTid}")){7}`;
           expect(data).toEqual(expect.arrayContaining([
-            { operation: [2, local.time.ticks, local.time.toJson(), '{}', '{"@id":"fred","name":"Fred"}'] },
+            { operation: [2, local.time.ticks, local.time.toJSON(), '{}', '{"@id":"fred","name":"Fred"}'] },
             { inserts: expect.stringMatching(reifiedSexJson) }
           ]));
         });
@@ -386,7 +386,7 @@ describe('SU-Set Dataset', () => {
           // includes the insert of wilma
           remote.tick();
           await ssd.apply(new OperationMessage(one.time.ticks, // Previous tick of remote
-            [2, one.time.ticks, remote.time.toJson(), '{}', `[
+            [2, one.time.ticks, remote.time.toJSON(), '{}', `[
               {"tid":"${oneTid}","o":"Wilma","p":"#name","s":"wilma"},
               {"tid":"${remote.time.hash()}","o":"Barney","p":"#name","s":"barney"}]`]),
             local.time, local.tick().time);
@@ -410,7 +410,7 @@ describe('SU-Set Dataset', () => {
           // includes the insert of wilma but not betty
           remote.tick();
           await ssd.apply(new OperationMessage(one.time.ticks, // Previous tick of remote
-            [2, one.time.ticks, remote.time.toJson(), '{}', `[
+            [2, one.time.ticks, remote.time.toJSON(), '{}', `[
               {"tid":"${oneTid}","o":"Wilma","p":"#name","s":"wilma"},
               {"tid":"${remote.time.hash()}","o":"Barney","p":"#name","s":"barney"}]`]),
             local.time, local.tick().time);

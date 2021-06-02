@@ -3,14 +3,15 @@ import { flatten, lazy } from './util';
 import { Context, ExpandedTermDef } from '../jrql-support';
 import { Iri } from 'jsonld/jsonld-spec';
 import { RdfFactory, Triple, tripleIndexKey } from './quads';
-import { activeCtx } from "./jsonld";
+import { activeCtx } from './jsonld';
 import { M_LD, RDF } from '../ns';
 import { SubjectGraph } from './SubjectGraph';
 import { ActiveContext } from 'jsonld/lib/context';
 import { SubjectQuads } from './SubjectQuads';
 import { TreeClock } from './clocks';
-import { gzipSync, gunzipSync } from 'zlib';
+import { gunzipSync, gzipSync } from 'zlib';
 import { CausalOperation, FusableCausalOperation } from './ops';
+
 const COMPRESS_THRESHOLD_BYTES = 1024;
 
 export class DomainContext implements Context {
@@ -69,7 +70,7 @@ export class MeldOperation extends FusableCausalOperation<Triple, TreeClock> {
       })
       .map(encoder.jsonFromTriples);
     const [delEnc, insEnc] = jsons.map(json => MeldEncoder.bufferFromJson(json));
-    const encoded: EncodedOperation = [2, op.from, op.time.toJson(), delEnc, insEnc];
+    const encoded: EncodedOperation = [2, op.from, op.time.toJSON(), delEnc, insEnc];
     return new MeldOperation(op, encoded, jsons);
   }
 

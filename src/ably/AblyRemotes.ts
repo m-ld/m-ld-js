@@ -6,12 +6,13 @@
 import * as Ably from 'ably';
 import { MeldConfig } from '..';
 import {
-  PubsubRemotes, SubPub, SendParams, ReplyParams, NotifyParams, PeerParams
+  NotifyParams, PeerParams, PubsubRemotes, ReplyParams, SendParams, SubPub
 } from '../engine/PubsubRemotes';
-import { Observable, from, identity } from 'rxjs';
-import { mergeMap, filter, map } from 'rxjs/operators';
+import { Observable } from 'rxjs';
+import { filter, map } from 'rxjs/operators';
 import { AblyTraffic, AblyTrafficConfig } from './AblyTraffic';
-import type { WrtcPeering, PeerSignaller, PeerSignal } from '../wrtc/WrtcPeering';
+import type { PeerSignal, PeerSignaller, WrtcPeering } from '../wrtc/WrtcPeering';
+import { inflateArray } from '../engine/util';
 
 export interface AblyMeldConfig extends
   Omit<Ably.Types.ClientOptions, 'echoMessages' | 'clientId'>,
@@ -115,8 +116,7 @@ export class AblyRemotes extends PubsubRemotes implements PeerSignaller {
   }
 
   protected present(): Observable<string> {
-    return from(this.operations.presence.get()).pipe(
-      mergeMap(identity), // flatten the array of presence messages
+    return inflateArray(this.operations.presence.get()).pipe(
       filter(present => present.data === '__live'),
       map(present => present.clientId));
   }

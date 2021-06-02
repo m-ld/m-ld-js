@@ -1,4 +1,4 @@
-import { TreeClock, GlobalClock } from '../src/engine/clocks'
+import { GlobalClock, TreeClock } from '../src/engine/clocks';
 
 describe('Tree clock', () => {
   test('Genesis has no ticks', () => {
@@ -231,10 +231,10 @@ describe('Tree clock', () => {
   });
 
   test('to JSON', () => {
-    expect(TreeClock.GENESIS.toJson()).toEqual([]);
-    expect(TreeClock.GENESIS.forked().left.toJson()).toEqual([[], 0]);
-    expect(TreeClock.GENESIS.forked().left.ticked().toJson()).toEqual([[1], 0]);
-    expect(TreeClock.GENESIS.ticked().forked().left.toJson()).toEqual([1, [], 0]);
+    expect(TreeClock.GENESIS.toJSON()).toEqual([]);
+    expect(TreeClock.GENESIS.forked().left.toJSON()).toEqual([[], 0]);
+    expect(TreeClock.GENESIS.forked().left.ticked().toJSON()).toEqual([[1], 0]);
+    expect(TreeClock.GENESIS.ticked().forked().left.toJSON()).toEqual([1, [], 0]);
   });
 
   test('from JSON', () => {
@@ -287,7 +287,7 @@ describe('Tree clock', () => {
   test('update from global clock', () => {
     const { left, right } = TreeClock.GENESIS.forked();
     expect(right.update(
-      GlobalClock.GENESIS.update(left.ticked())).toJson()).toEqual([1, []]);
+      GlobalClock.GENESIS.update(left.ticked())).toJSON()).toEqual([1, []]);
   });
 
   test('hash is stable', () => {
@@ -322,6 +322,7 @@ describe('Global clock', () => {
   test('Genesis has genesis TID', () => {
     const gwc = GlobalClock.GENESIS;
     expect(new Set(gwc.tids())).toEqual(new Set([TreeClock.GENESIS.hash()]));
+    expect(gwc.tid(TreeClock.GENESIS.ticked())).toBe(TreeClock.GENESIS.hash());
   });
 
   test('Update no-op does not change tids', () => {
@@ -333,12 +334,15 @@ describe('Global clock', () => {
     let time = TreeClock.GENESIS.ticked();
     const gwc = GlobalClock.GENESIS.update(time).update(time = time.ticked());
     expect(new Set(gwc.tids())).toEqual(new Set([time.hash()]));
+    expect(gwc.tid(TreeClock.GENESIS.ticked())).toBe(time.hash());
   });
 
   test('Just-forked have same hash', () => {
     const time = TreeClock.GENESIS;
     const gwc = GlobalClock.GENESIS.update(time.forked().left);
     expect(new Set(gwc.tids())).toEqual(new Set([time.hash()]));
+    expect(gwc.tid(time.forked().left.ticked())).toBe(time.hash());
+    expect(gwc.tid(time.forked().right.ticked())).toBe(time.hash());
   });
 
   test('Forked ticked has both hashes', () => {
@@ -346,6 +350,8 @@ describe('Global clock', () => {
     left = left.ticked();
     const gwc = GlobalClock.GENESIS.update(left).update(right);
     expect(new Set(gwc.tids())).toEqual(new Set([left.hash(), right.hash()]));
+    expect(gwc.tid(left.ticked())).toBe(left.hash());
+    expect(gwc.tid(right.ticked())).toBe(right.hash());
   });
 
   test('Forked both ticked has both hashes', () => {
@@ -354,5 +360,7 @@ describe('Global clock', () => {
     right = right.ticked(2);
     const gwc = GlobalClock.GENESIS.update(left).update(right);
     expect(new Set(gwc.tids())).toEqual(new Set([left.hash(), right.hash()]));
+    expect(gwc.tid(left.ticked())).toBe(left.hash());
+    expect(gwc.tid(right.ticked())).toBe(right.hash());
   });
 });

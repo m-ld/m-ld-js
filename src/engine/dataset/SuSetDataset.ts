@@ -9,7 +9,7 @@ import { JrqlGraph } from './JrqlGraph';
 import { MeldEncoder, MeldOperation, TriplesTids, unreify } from '../MeldEncoding';
 import { EMPTY, merge, Observable, of, Subject as Source } from 'rxjs';
 import { bufferCount, expand, filter, map, mergeMap, takeWhile, toArray } from 'rxjs/operators';
-import { check, flatten, Future, getIdLogger } from '../util';
+import { check, flatten, Future, getIdLogger, inflate } from '../util';
 import { Logger } from 'loglevel';
 import { MeldError } from '../MeldError';
 import { LocalLock } from '../local';
@@ -24,6 +24,7 @@ import { GraphState } from './GraphState';
 import { ActiveContext } from 'jsonld/lib/context';
 import { activeCtx } from '../jsonld';
 import { Journal, JournalEntry, JournalState } from '../journal';
+import { JournalClerk } from '../journal/JournalClerk';
 
 interface HashTid extends Subject {
   '@id': Iri; // hash:<hashed triple id>
@@ -46,12 +47,14 @@ export class SuSetDataset extends MeldEncoder {
     check((d: SuSetDataset) => !d.dataset.closed, () => new MeldError('Clone has closed'));
 
   /** External context used for reads, writes and updates, but not for constraints. */
-  /*readonly*/ userCtx: ActiveContext;
+  /*readonly*/
+  userCtx: ActiveContext;
 
   private /*readonly*/ userGraph: JrqlGraph;
   private /*readonly*/ tidsGraph: JrqlGraph;
   private /*readonly*/ state: MeldReadState;
   private readonly journal: Journal;
+  private readonly journalClerk: JournalClerk;
   private readonly updateSource: Source<MeldUpdate> = new Source;
   private readonly datasetLock: LocalLock;
   private readonly maxOperationSize: number;
@@ -64,11 +67,12 @@ export class SuSetDataset extends MeldEncoder {
     constraints: MeldConstraint[],
     config: Pick<MeldConfig, '@id' | '@domain' | 'maxOperationSize' | 'logLevel'>) {
     super(config['@domain'], dataset.rdf);
+    this.log = getIdLogger(this.constructor, config['@id'], config.logLevel);
     this.journal = new Journal(dataset, this);
+    this.journalClerk = new JournalClerk(this.journal, { log: this.log });
     // Update notifications are strictly ordered but don't hold up transactions
     this.datasetLock = new LocalLock(config['@id'], dataset.location);
     this.maxOperationSize = config.maxOperationSize ?? Infinity;
-    this.log = getIdLogger(this.constructor, config['@id'], config.logLevel);
     this.constraint = new CheckList(constraints.concat(new DefaultList(config['@id'])));
   }
 
@@ -109,6 +113,8 @@ export class SuSetDataset extends MeldEncoder {
       this.log.info('Shutting down normally');
       this.updateSource.complete();
     }
+    this.journal.close();
+    await this.journalClerk.close();
     this.datasetLock.release();
     return this.dataset.close();
   }
@@ -413,23 +419,21 @@ export class SuSetDataset extends MeldEncoder {
       prepare: async () =>
         ({ kvps: this.journal.reset(localTime, snapshot.gwc) })
     });
-    await snapshot.data.pipe(
-      // For each batch of reified quads with TIDs, first unreify
-      mergeMap(async batch => this.dataset.transact({
-        id: 'snapshot-batch',
-        prepare: async () => {
-          if ('inserts' in batch) {
-            const triplesTids = unreify(this.triplesFromBuffer(batch.inserts));
-            // For each triple in the batch, insert the TIDs into the tids graph
-            const patch = await this.newTriplesTids(triplesTids);
-            // And include the triples themselves
-            patch.append({ inserts: triplesTids.map(([triple]) => this.toUserQuad(triple)) });
-            return { patch };
-          } else {
-            return { kvps: this.journal.insertOperation(batch.operation) };
-          }
+    await inflate(snapshot.data, async batch => this.dataset.transact({
+      id: 'snapshot-batch',
+      prepare: async () => {
+        if ('inserts' in batch) {
+          const triplesTids = unreify(this.triplesFromBuffer(batch.inserts));
+          // For each triple in the batch, insert the TIDs into the tids graph
+          const patch = await this.newTriplesTids(triplesTids);
+          // And include the triples themselves
+          patch.append({ inserts: triplesTids.map(([triple]) => this.toUserQuad(triple)) });
+          return { patch };
+        } else {
+          return { kvps: this.journal.insertOperation(batch.operation) };
         }
-      }))).toPromise();
+      }
+    })).toPromise();
   }
 
   /**
@@ -442,13 +446,13 @@ export class SuSetDataset extends MeldEncoder {
     return {
       gwc: journal.gwc,
       data: merge(
-        this.userGraph.graph.match()
-          .pipe(bufferCount(10), // TODO batch size config
-            mergeMap(async batch => {
-              const tidQuads = await this.findTriplesTids(batch, 'includeEmpty');
-              const reified = this.reifyTriplesTids(asTriplesTids(tidQuads));
-              return { inserts: this.bufferFromTriples(reified) };
-            })),
+        this.userGraph.graph.match().pipe(
+          bufferCount(10), // TODO batch size config
+          mergeMap(async batch => {
+            const tidQuads = await this.findTriplesTids(batch, 'includeEmpty');
+            const reified = this.reifyTriplesTids(asTriplesTids(tidQuads));
+            return { inserts: this.bufferFromTriples(reified) };
+          })),
         journal.latestOperations().pipe(map(operation => ({ operation }))))
     };
   }

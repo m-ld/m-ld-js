@@ -1,6 +1,6 @@
-import { MeldRemotes, OperationMessage, MeldLocal } from '../src/engine';
+import { MeldLocal, MeldRemotes, OperationMessage } from '../src/engine';
 import { mock, MockProxy } from 'jest-mock-extended';
-import { Observable, NEVER, BehaviorSubject, from, asapScheduler } from 'rxjs';
+import { asapScheduler, BehaviorSubject, from, NEVER, Observable } from 'rxjs';
 import { Dataset, QuadStoreDataset } from '../src/engine/dataset';
 import MemDown from 'memdown';
 import { GlobalClock, TreeClock } from '../src/engine/clocks';
@@ -84,7 +84,7 @@ export class MockProcess {
   sentOperation(deletes: string, inserts: string) {
     this.tick();
     return new OperationMessage(this.prev,
-      [2, this.time.ticks, this.time.toJson(), deletes, inserts]);
+      [2, this.time.ticks, this.time.toJSON(), deletes, inserts]);
   }
 }
 

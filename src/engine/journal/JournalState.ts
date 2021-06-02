@@ -2,11 +2,12 @@ import { GlobalClock, GlobalClockJson, TreeClock, TreeClockJson } from '../clock
 import { Kvps } from '../dataset';
 import { JournalEntry } from './JournalEntry';
 import { MeldOperation } from '../MeldEncoding';
-import { from, Observable } from 'rxjs';
+import { Observable } from 'rxjs';
 import { EncodedOperation } from '../index';
 import { filter, mergeMap } from 'rxjs/operators';
 import { JournalOperation } from './JournalOperation';
-import { Journal } from '.';
+import { Journal, tickKey } from '.';
+import { inflate } from '../util';
 
 interface JournalStateJson {
   /**
@@ -38,7 +39,7 @@ interface EntryBuilder {
 export class JournalState {
   static fromJson(data: Journal, json: JournalStateJson) {
     const time = TreeClock.fromJson(json.time);
-    const gwc = GlobalClock.fromJson(json.gwc);
+    const gwc = GlobalClock.fromJSON(json.gwc);
     return new JournalState(data, json.start, time, gwc);
   }
 
@@ -50,7 +51,7 @@ export class JournalState {
   }
 
   get json(): JournalStateJson {
-    return { start: this.start, time: this.time.toJson(), gwc: this.gwc.toJson() };
+    return { start: this.start, time: this.time.toJSON(), gwc: this.gwc.toJSON() };
   }
 
   commit: Kvps = this.journal.saveState(this);
@@ -67,9 +68,10 @@ export class JournalState {
       private entries: JournalEntry[] = [];
 
       next(operation: MeldOperation, localTime: TreeClock) {
-        const entry = JournalEntry.fromOperation(
-          state.journal, operation, localTime, this.gwc);
-        this.entries.push(entry);
+        const prevTicks = this.gwc.getTicks(operation.time);
+        const prevTid = this.gwc.tid(operation.time);
+        this.entries.push(JournalEntry.fromOperation(state.journal,
+          tickKey(localTime.ticks), [prevTicks, prevTid], operation));
         this.gwc = this.gwc.update(operation.time);
         this.localTime = localTime;
         return this;
@@ -86,9 +88,8 @@ export class JournalState {
   }
 
   latestOperations(): Observable<EncodedOperation> {
-    return from(this.gwc.tids()).pipe(
-      // From each op, emit a fusion of all contiguous ops up to the op
-      mergeMap(tid => this.journal.operation(tid)),
+    // From each op, emit a fusion of all contiguous ops up to the op
+    return inflate(this.gwc.tids(), tid => this.journal.operation(tid)).pipe(
       filter<JournalOperation>(op => op != null),
       mergeMap(op => op.fusedPast()));
   }

@@ -1,22 +1,21 @@
 import { Iri } from 'jsonld/jsonld-spec';
 import {
-  Read, Subject, Update, isDescribe, isGroup, isSubject, isUpdate,
-  Group, isSelect, Result, Variable, Write, Constraint, Expression, operators,
-  isConstraint, VariableExpression, isConstruct
+  Constraint, Expression, Group, isConstraint, isConstruct, isDescribe, isGroup, isSelect,
+  isSubject, isUpdate, operators, Read, Result, Subject, Update, Variable, VariableExpression, Write
 } from '../../jrql-support';
 import { NamedNode, Quad, Term } from 'rdf-js';
 import { Graph, PatchQuads } from '.';
-import { toArray, mergeMap, groupBy, reduce, map } from 'rxjs/operators';
+import { groupBy, map, mergeMap, reduce, toArray } from 'rxjs/operators';
 import { EMPTY, merge, Observable, of, throwError } from 'rxjs';
 import { canPosition, inPosition, TriplePos } from '../quads';
-import { ActiveContext, expandTerm, initialCtx, nextCtx } from "../jsonld";
+import { ActiveContext, expandTerm, initialCtx, nextCtx } from '../jsonld';
 import { Binding } from 'quadstore';
 import { Algebra, Factory as SparqlFactory } from 'sparqlalgebrajs';
 import { JRQL } from '../../ns';
 import { JrqlQuads } from './JrqlQuads';
 import { MeldError } from '../MeldError';
 import { anyName, array, GraphSubject } from '../..';
-import { binaryFold, flatten, fromPromise, isArray } from '../util';
+import { binaryFold, flatten, inflate, isArray } from '../util';
 import { ConstructTemplate } from './ConstructTemplate';
 
 /**
@@ -30,7 +29,7 @@ export class JrqlGraph {
 
   /**
    * @param graph a quads graph to operate on
-   * @param defaultContext default context for interpreting JSON patterns
+   * @param defaultCtx
    */
   constructor(
     readonly graph: Graph,
@@ -40,7 +39,7 @@ export class JrqlGraph {
   }
 
   read(query: Read, ctx = this.defaultCtx): Observable<GraphSubject> {
-    return fromPromise(nextCtx(ctx, query['@context']), ctx => {
+    return inflate(nextCtx(ctx, query['@context']), ctx => {
       if (isDescribe(query))
         return this.describe(array(query['@describe']), query['@where'], ctx);
       else if (isSelect(query) && query['@where'] != null)

@@ -1,22 +1,21 @@
-import { LiveStatus, MeldStatus, MeldConstraint } from '../../api';
-import { Snapshot, OperationMessage, MeldRemotes, MeldLocal, Revup, Recovery } from '..';
-import { liveRollup } from "../LiveValue";
-import { Read, Write, Pattern, Context } from '../../jrql-support';
+import { LiveStatus, MeldConstraint, MeldStatus } from '../../api';
+import { MeldLocal, MeldRemotes, OperationMessage, Recovery, Revup, Snapshot } from '..';
+import { liveRollup } from '../LiveValue';
+import { Context, Pattern, Read, Write } from '../../jrql-support';
 import {
-  Observable, merge, from, EMPTY,
-  concat, BehaviorSubject, Subscription, interval, of, Subscriber, OperatorFunction, partition
+  BehaviorSubject, concat, EMPTY, from, interval, merge, Observable, of, OperatorFunction,
+  partition, Subscriber, Subscription
 } from 'rxjs';
 import { GlobalClock, TreeClock } from '../clocks';
 import { SuSetDataset } from './SuSetDataset';
 import { TreeClockMessageService } from '../messages';
 import { Dataset } from '.';
 import {
-  publishReplay, refCount, filter, takeUntil, tap,
-  finalize, toArray, map, debounceTime,
-  distinctUntilChanged, expand, delayWhen, take, skipWhile, ignoreElements, mergeMap, share
+  debounceTime, delayWhen, distinctUntilChanged, expand, filter, finalize, ignoreElements, map,
+  mergeMap, publishReplay, refCount, share, skipWhile, take, takeUntil, tap, toArray
 } from 'rxjs/operators';
-import { delayUntil, Future, tapComplete, fromArrayPromise, poisson } from '../util';
-import { LockManager } from "../locks";
+import { delayUntil, Future, inflateArray, poisson, tapComplete } from '../util';
+import { LockManager } from '../locks';
 import { levels } from 'loglevel';
 import { AbstractMeld, comesAlive } from '../AbstractMeld';
 import { GraphSubject, MeldConfig } from '../..';
@@ -281,7 +280,6 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
   /**
    * @param retry to be notified of collaboration completion
    * @see decideLive return value
-   * @param style `ConnectStyle.HARD` to force the connect even if already live
    */
   private async connect(retry: Subscriber<ConnectStyle>) {
     this.log.info(this.newClone ? 'new clone' :
@@ -351,7 +349,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
     // This is because a snapshot is applied in multiple transactions
     const updates = concat(
       snapshot.updates.pipe(delayUntil(snapshotApplied)),
-      fromArrayPromise(reEmits));
+      inflateArray(reEmits));
     this.acceptRecoveryUpdates(updates, retry);
     return snapshotApplied; // We can go live as soon as the snapshot is applied
   }
@@ -448,7 +446,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
       this.remoteUpdates.receiving.pipe(
         filter(message => message.time.anyLt(now)),
         takeUntil(from(until)))).pipe(tap(msg =>
-          this.log.debug('Sending update', msg)));
+          this.log.debug('Forwarding update', msg)));
   }
 
   @AbstractMeld.checkNotClosed.rx

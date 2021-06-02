@@ -4,11 +4,10 @@ import { AblyRemotes, MeldAblyConfig } from '../src/ably';
 import { comesAlive } from '../src/engine/AbstractMeld';
 import { OperationMessage } from '../src/engine';
 import { mockLocal } from './testClones';
-import { Subject as Source, BehaviorSubject } from 'rxjs';
-import { Future, isArray } from '../src/engine/util';
+import { BehaviorSubject, Subject as Source } from 'rxjs';
+import { Future, isArray, MsgPack } from '../src/engine/util';
 import { TreeClock } from '../src/engine/clocks';
 import { Request, Response } from '../src/engine/ControlMessage';
-import { MsgPack } from '../src/engine/util';
 
 /**
  * These tests use a fully mocked Ably to avoid incurring costs. The behaviour
@@ -144,7 +143,7 @@ describe('Ably remotes', () => {
     await comesAlive(remotes);
     const prevTime = TreeClock.GENESIS.forked().left, time = prevTime.ticked();
     const entry = new OperationMessage(prevTime.ticks,
-      [2, time.ticks, time.toJson(), '{}', '{}']);
+      [2, time.ticks, time.toJSON(), '{}', '{}']);
     const updates = new Source<OperationMessage>();
     remotes.setLocal(mockLocal({ updates }));
     updates.next(entry);
@@ -166,10 +165,10 @@ describe('Ably remotes', () => {
     other.publish.mockImplementation((name, data) => {
       const splitName = name.split(':');
       expect(splitName[0]).toBe('__send');
-      expect(MsgPack.decode(data)).toEqual(new Request.NewClock().toJson());
+      expect(MsgPack.decode(data)).toEqual(new Request.NewClock().toJSON());
       setImmediate(() => subscriber(mock<Ably.Types.Message>({
         clientId: 'other',
-        data: MsgPack.encode(new Response.NewClock(newClock).toJson()),
+        data: MsgPack.encode(new Response.NewClock(newClock).toJSON()),
         name: `__reply:reply1:${splitName[1]}`
       })));
       return Promise.resolve();

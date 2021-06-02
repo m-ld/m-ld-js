@@ -1,5 +1,6 @@
-import { Observable, from, defer } from 'rxjs';
-import { mergeMap, map } from 'rxjs/operators';
+import { defer, Observable } from 'rxjs';
+import { map } from 'rxjs/operators';
+import { inflate } from './util';
 
 export type LiveValue<T> = Observable<T> & { readonly value: T; };
 
@@ -13,7 +14,7 @@ export function liveRollup<R extends { [key: string]: unknown }>(
       partial[k] = k === key ? value : liveValues[k].value);
     return partial as R;
   }
-  const values = defer(() => from(Object.keys(liveValues)).pipe(mergeMap((key: keyof R) =>
-    liveValues[key].pipe(map(value => get(key, value))))));
+  const values = defer(() => inflate(Object.keys(liveValues), (key: keyof R) =>
+    liveValues[key].pipe(map(value => get(key, value)))));
   return Object.defineProperties(values, { value: { get } });
 }

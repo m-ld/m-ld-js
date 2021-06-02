@@ -1,14 +1,14 @@
-import { Snapshot, OperationMessage, MeldRemotes, MeldLocal, Revup } from '.';
+import { MeldLocal, MeldRemotes, OperationMessage, Revup, Snapshot } from '.';
 import {
-  Observable, Subject as Source, BehaviorSubject, identity, defer,
-  Observer, Subscription, from, of, EMPTY, onErrorResumeNext
+  BehaviorSubject, defer, EMPTY, from, identity, Observable, Observer, of, onErrorResumeNext,
+  Subject as Source, Subscription
 } from 'rxjs';
 import { TreeClock } from './clocks';
 import { generate as uuid } from 'short-uuid';
-import { Response, Request } from './ControlMessage';
-import { MsgPack, Future, toJson, Stopwatch } from './util';
+import { Request, Response } from './ControlMessage';
+import { Future, MsgPack, Stopwatch, toJSON } from './util';
 import {
-  finalize, reduce, toArray, first, concatMap, materialize, timeout, delay, map
+  concatMap, delay, finalize, first, map, materialize, reduce, timeout, toArray
 } from 'rxjs/operators';
 import { MeldError, MeldErrorStatus } from './MeldError';
 import { AbstractMeld } from './AbstractMeld';
@@ -336,7 +336,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     this.log.debug('Sending request', messageId, request, sender.id);
     sw.next('send');
     const sent = sender
-      .publish(MsgPack.encode(request.toJson()))
+      .publish(MsgPack.encode(request.toJSON()))
       .finally(() => sender.close());
     tried[sender.id] = this.getResponse<T>(sent, messageId, { readyToAck })
       .then(res => ({ res, fromId: sender.id }));
@@ -456,7 +456,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     datumToPayload: (datum: T) => Buffer, type: string) {
     const notifyError = (error: any) => {
       this.log.warn('Notifying error on', notifier.id, error);
-      return notify({ error: toJson(error) });
+      return notify({ error: toJSON(error) });
     }
     const notifyComplete = () => {
       this.log.debug(`Completed production of ${type} on ${notifier.id}`);
@@ -488,7 +488,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     const replier = await this.replier({ fromId: this.id, toId, messageId, sentMessageId });
     this.log.debug('Replying response', messageId, 'to', sentMessageId, res, replier.id);
     return replier
-      .publish(MsgPack.encode(res == null ? null : res.toJson()))
+      .publish(MsgPack.encode(res == null ? null : res.toJSON()))
       .finally(() => replier.close());
   }
 

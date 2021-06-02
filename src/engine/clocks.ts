@@ -27,11 +27,14 @@ export interface CausalClock {
 }
 
 export class Fork<T> {
-  constructor(readonly left: T, readonly right: T) { }
+  constructor(
+    readonly left: T,
+    readonly right: T) {
+  }
 }
 
 export abstract class TickTree<T = unknown> {
-  private readonly _part: Fork<this> | T
+  private readonly _part: Fork<this> | T;
 
   protected constructor(
     part: Fork<TickTree<T>> | T,
@@ -50,12 +53,12 @@ export abstract class TickTree<T = unknown> {
   }
 
   /** @returns a valid default branch even if this is not a fork */
-  get leftBud() {
+  get leftBud(): this {
     return (this.fork?.left ?? this.bud());
   }
 
   /** @returns a valid default branch even if this is not a fork */
-  get rightBud() {
+  get rightBud(): this {
     return (this.fork?.right ?? this.bud());
   }
 
@@ -74,7 +77,10 @@ export abstract class TickTree<T = unknown> {
    * @param filter another clock to be used as the ID
    */
   getTicks(filter: TickTree<boolean>): number {
-    return this._getTicks(filter) as number;
+    const ticks = this._getTicks(filter);
+    if (ticks == null)
+      throw new Error('Trying to get ticks from a clock with no ID');
+    return ticks;
   }
 
   /**
@@ -89,8 +95,8 @@ export abstract class TickTree<T = unknown> {
       // The ID tree has a fork
       // Post-order traversal to discover if there are any IDs in the fork
       // If we or ID tree don't have a matching fork, substitute hallows (no IDs)
-      const left = this.leftBud.getTicks(filter.leftBud),
-        right = this.rightBud.getTicks(filter.rightBud);
+      const left = this.leftBud._getTicks(filter.leftBud),
+        right = this.rightBud._getTicks(filter.rightBud);
       // Include our ticks if some matching ticks found in the fork
       if (left != null || right != null)
         return this.localTicks + (left ?? 0) + (right ?? 0);
@@ -125,13 +131,13 @@ export abstract class TickTree<T = unknown> {
   }
 
   toString(): string {
-    return JSON.stringify(this.toJson());
+    return JSON.stringify(this.toJSON());
   }
 
   // v8(chrome/nodejs) console
   [inspect] = () => this.toString();
 
-  abstract toJson(): any;
+  abstract toJSON(): any;
 }
 
 /**
@@ -159,7 +165,7 @@ export class TreeClock extends TickTree<boolean> implements CausalClock {
    * (do not use as a cryptographic hash).
    */
   hash() {
-    const buf = MsgPack.encode(this.toJson('forHash'));
+    const buf = MsgPack.encode(this.toJSON('forHash'));
     // If shorter than sha1 (20 bytes), do not hash
     return buf.length > 20 ? sha1Digest(buf) : buf.toString('base64');
   }
@@ -170,7 +176,7 @@ export class TreeClock extends TickTree<boolean> implements CausalClock {
    */
   get ticks(): number {
     // ticks for this clock's embedded ID (should never return null)
-    return this.getTicks(this) as number;
+    return this.getTicks(this);
   }
 
   /**
@@ -260,7 +266,7 @@ export class TreeClock extends TickTree<boolean> implements CausalClock {
   update(other: TickTree): TreeClock {
     if (this.isId) {
       if (other.fork != null)
-        throw new Error("Trying to update from overlapping forked clock");
+        throw new Error('Trying to update from overlapping forked clock');
       else if (other.localTicks > this.localTicks)
         return new TreeClock(true, other.localTicks);
       else
@@ -289,14 +295,14 @@ export class TreeClock extends TickTree<boolean> implements CausalClock {
     }
   }
 
-  toJson(forHash?: 'forHash'): TreeClockJson {
+  toJSON(forHash?: 'forHash'): TreeClockJson {
     if (this.isId) {
       return this.leafJson(true);
     } else if (this.fork == null) {
       return this.leafJson(false);
     } else { // We're a fork
       const forkJson: TreeClockJson =
-        [this.fork.left.toJson(forHash), this.fork.right.toJson(forHash)];
+        [this.fork.left.toJSON(forHash), this.fork.right.toJSON(forHash)];
       if (forHash) {
         const zero = forkJson.map(isZeroId);
         if (!zero.includes(null))
@@ -377,7 +383,7 @@ export class GlobalClock extends TickTree<string> {
     return this._update(time, time.hash());
   }
 
-  _update(time: TreeClock, tid: string): GlobalClock {
+  private _update(time: TreeClock, tid: string): GlobalClock {
     if (time.isId) {
       if (this.fork != null)
         throw new Error('Global clock is in the future');
@@ -388,33 +394,50 @@ export class GlobalClock extends TickTree<string> {
     }
   }
 
+  tid(time: TreeClock): string {
+    const tid = this._tid(time);
+    if (tid == null)
+      throw new Error('Global clock is in the future');
+    return tid;
+  }
+
+  private _tid(time: TreeClock): string | null {
+    if (time.isId) {
+      return this.value;
+    } else if (this.fork != null || time.fork != null) {
+      return this.leftBud._tid(time.leftBud) ??
+        this.rightBud._tid(time.rightBud);
+    }
+    return null;
+  }
+
   *tids(): IterableIterator<string> {
     if (this.value) { // Note '' is not yielded
       yield this.value;
     } else if (this.fork != null) {
-      yield* this.fork.left.tids();
-      yield* this.fork.right.tids();
+      yield *this.fork.left.tids();
+      yield *this.fork.right.tids();
     }
   }
 
-  toJson(): GlobalClockJson {
+  toJSON(): GlobalClockJson {
     if (this.value != null)
       return [this.localTicks, this.value];
     else if (this.fork != null)
-      return [this.localTicks, [this.fork.left.toJson(), this.fork.right.toJson()]]
+      return [this.localTicks, [this.fork.left.toJSON(), this.fork.right.toJSON()]];
     else
       throw new Error();
   }
 
-  static fromJson(json: GlobalClockJson): GlobalClock {
+  static fromJSON(json: GlobalClockJson): GlobalClock {
     const [ticks, parts] = json;
     if (typeof parts == 'string') {
       return new GlobalClock(parts, ticks);
     } else if (Array.isArray(json) && json.length == 2) {
       const [left, right] = parts;
       return new GlobalClock(new Fork(
-        GlobalClock.fromJson(left),
-        GlobalClock.fromJson(right)), ticks);
+        GlobalClock.fromJSON(left),
+        GlobalClock.fromJSON(right)), ticks);
     }
     throw new Error('Bad global clock JSON');
   }

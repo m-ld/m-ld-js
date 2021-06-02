@@ -1,17 +1,9 @@
 import {
-  DataFactory,
-  DefaultGraph,
-  NamedNode,
-  Quad,
-  Quad_Object,
-  Quad_Predicate,
-  Quad_Subject
+  DataFactory, DefaultGraph, NamedNode, Quad, Quad_Object, Quad_Predicate, Quad_Subject
 } from 'rdf-js';
 import { Quadstore } from 'quadstore';
 import {
-  AbstractChainedBatch,
-  AbstractIteratorOptions,
-  AbstractLevelDOWN
+  AbstractChainedBatch, AbstractIterator, AbstractIteratorOptions, AbstractLevelDOWN
 } from 'abstract-leveldown';
 import { Observable } from 'rxjs';
 import { generate as uuid } from 'short-uuid';
@@ -56,8 +48,15 @@ export type GraphName = DefaultGraph | NamedNode;
 export interface KvpStore {
   /** Exact match kvp retrieval */
   get(key: string): Promise<Buffer | undefined>;
+  /** Exact match kvp retrieval */
+  has(key: string): Promise<boolean>;
   /** Kvp retrieval by range options */
   read(range: AbstractIteratorOptions<string>): Observable<[string, Buffer]>;
+  /**
+   * Ensures that write transactions are executed serially against the store.
+   * @param txn prepares a write operation to be performed
+   */
+  transact<T = unknown>(txn: TxnOptions<KvpResult<T>>): Promise<T>;
 }
 
 /**
@@ -71,12 +70,7 @@ export interface Dataset extends KvpStore {
 
   graph(name?: GraphName): Graph;
 
-  /**
-   * Ensures that write transactions are executed serially against the store.
-   * @param txn prepares a write operation to be performed
-   */
-  transact(txn: TxnOptions<TxnResult>): Promise<void>;
-  transact<T>(txn: TxnOptions<TxnValueResult<T>>): Promise<T>;
+  transact<T = unknown>(txn: TxnOptions<PatchResult<T>>): Promise<T>;
 
   clear(): Promise<void>;
 
@@ -87,19 +81,19 @@ export interface Dataset extends KvpStore {
 export type Kvps = // NonNullable<BatchOpts['preWrite']> with strong kv types
   (batch: Pick<AbstractChainedBatch<string, Buffer>, 'put' | 'del'>) => Promise<unknown> | unknown;
 
-export interface TxnResult {
-  patch?: Patch;
+export interface KvpResult<T = unknown> {
   kvps?: Kvps;
   after?(): unknown | Promise<unknown>;
-  return?: unknown;
+  return?: T;
 }
 
-export interface TxnValueResult<T> extends TxnResult {
-  return: T
+export interface PatchResult<T = unknown> extends KvpResult<T> {
+  patch?: Patch;
 }
 
-export interface TxnOptions<T extends TxnResult> extends Partial<TxnContext> {
-  prepare(txc: TxnContext): Promise<T>;
+export interface TxnOptions<T extends KvpResult> extends Partial<TxnContext> {
+  prepare(txc: TxnContext): T | Promise<T>;
+  lock?: string;
 }
 
 export interface TxnContext {
@@ -134,11 +128,12 @@ export const STORAGE_CONTEXT: Context = {
   mld: M_LD.$base,
   xs: XS.$base,
   rdf: RDF.$base
-}
+};
 
 export class QuadStoreDataset implements Dataset {
   readonly location: string;
-  /* readonly */ store: Quadstore;
+  /* readonly */
+  store: Quadstore;
   private readonly activeCtx?: Promise<ActiveContext>;
   private readonly lock = new LockManager;
   private isClosed: boolean = false;
@@ -183,9 +178,10 @@ export class QuadStoreDataset implements Dataset {
   }
 
   @notClosed.async
-  transact<T, O extends TxnResult>(txn: TxnOptions<O>): Promise<T> {
+  transact<T, O extends PatchResult>(txn: TxnOptions<O>): Promise<T> {
+    const lockKey = txn.lock ?? 'txn';
     const id = txn.id ?? uuid();
-    const sw = txn.sw ?? new Stopwatch('txn', id);
+    const sw = txn.sw ?? new Stopwatch(lockKey, id);
     // The transaction lock ensures that read operations that are part of a
     // transaction (e.g. evaluating the @where clause) are not affected by
     // concurrent transactions (fully serialiseable consistency). This is
@@ -195,7 +191,7 @@ export class QuadStoreDataset implements Dataset {
     same event loop tick, see https://github.com/Level/leveldown/issues/486
     */
     sw.next('lock-wait');
-    return this.lock.exclusive('txn', async () => {
+    return this.lock.exclusive(lockKey, async () => {
       sw.next('prepare');
       const result = await txn.prepare({ id, sw: sw.lap });
       sw.next('apply');
@@ -253,23 +249,40 @@ export class QuadStoreDataset implements Dataset {
       }));
   }
 
+  @notClosed.async
+  has(key: string): Promise<boolean> {
+    return new Promise<boolean>((resolve, reject) => {
+      const it = this.store.db.iterator({
+        gte: key, limit: 1, values: false, keyAsBuffer: false
+      });
+      it.next((err, foundKey: string) => {
+        if (err) {
+          reject(err);
+          this.events?.emit('error', err);
+        } else if (foundKey != null) {
+          resolve(foundKey === key);
+        }
+        this.end(it);
+      });
+    });
+  }
+
   @notClosed.rx
   read(range: AbstractIteratorOptions<string>): Observable<[string, Buffer]> {
     return new Observable(subs => {
       const it = this.store.db.iterator({ ...range, keyAsBuffer: false });
-      const end = () => it.end(err => err && this.events?.emit('error', err));
       const pull = () => {
         it.next((err, key: string, value: Buffer) => {
           if (err) {
             subs.error(err);
-            end();
+            this.end(it);
             this.events?.emit('error', err);
           } else if (key != null && value != null) {
             subs.next([key, value]);
             pull();
           } else {
             subs.complete();
-            end();
+            this.end(it);
           }
         });
       };
@@ -302,6 +315,10 @@ export class QuadStoreDataset implements Dataset {
 
   get closed(): boolean {
     return this.isClosed;
+  }
+
+  private end(it: AbstractIterator<any, any>) {
+    it.end(err => err && this.events?.emit('error', err));
   }
 }
 
@@ -336,7 +353,7 @@ class QuadStoreGraph implements Graph {
   }
 
   skolem = () => this.dataset.rdf.namedNode(
-    new URL(`/.well-known/genid/${uuid()}`, this.dataset.base).href)
+    new URL(`/.well-known/genid/${uuid()}`, this.dataset.base).href);
 
   namedNode = this.dataset.rdf.namedNode;
   // noinspection JSUnusedGlobalSymbols

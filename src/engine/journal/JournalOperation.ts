@@ -2,16 +2,24 @@ import { EncodedOperation } from '../index';
 import { TreeClock } from '../clocks';
 import { MeldOperation } from '../MeldEncoding';
 import { Kvps } from '../dataset';
-import { CausalOperator } from '../ops';
-import { Triple } from '../quads';
-import { Journal } from '.';
+import { CausalTimeRange } from '../ops';
+import type { Journal } from '.';
+
+/**
+ * Identifies an entry or operation by both tick and TID.<br>
+ * CAUTION: the tick is that of the operation process clock, not necessarily the local clock.
+ */
+export type TickTid = [
+  tick: number,
+  tid: string
+];
 
 /**
  * Immutable _partial_ expansion of EncodedOperation. This does not interpret the data (triples)
  * content like a `MeldOperation`, just the `from` and `time` components, and the derived
  * transaction ID.
  */
-export class JournalOperation {
+export class JournalOperation implements CausalTimeRange<TreeClock> {
   static fromJson(journal: Journal, json: EncodedOperation, tid?: string) {
     // Destructuring fields for convenience
     const [, from, timeJson] = json;
@@ -22,7 +30,7 @@ export class JournalOperation {
 
   static fromOperation(journal: Journal, operation: MeldOperation) {
     const { from, time, encoded } = operation;
-    return new JournalOperation(journal, time.hash(), from, time, encoded);
+    return new JournalOperation(journal, time.hash(), from, time, encoded, operation);
   }
 
   constructor(
@@ -30,72 +38,39 @@ export class JournalOperation {
     readonly tid: string,
     readonly from: number,
     readonly time: TreeClock,
-    readonly operation: EncodedOperation) {
+    readonly operation: EncodedOperation,
+    private _meldOperation?: MeldOperation) {
   }
 
   get json() {
     return this.operation;
   }
 
-  commit: Kvps = this.journal.saveOperation(this);
+  commit: Kvps = this.journal.commitOperation(this);
 
   get tick() {
     return this.time.ticks;
   }
 
   asMeldOperation() {
-    return this.journal.decode(this.operation);
+    if (this._meldOperation == null)
+      this._meldOperation = this.journal.decode(this.operation);
+    return this._meldOperation;
   }
 
   /**
-   * @param createOperator creates a causal reduction operator from the given first operation
-   * @param minFrom the least required value of the range of the operation with
-   * the returned identity
-   * @returns found operations, up to and including this one
-   */
-  private async causalReduce(
-    createOperator: (first: MeldOperation) => CausalOperator<Triple, TreeClock>,
-    minFrom = 1): Promise<MeldOperation> {
-    // TODO: Lock the journal against garbage compaction while processing!
-    let { tid, tick } = await this.causalFrom(minFrom);
-    const operator = createOperator(await this.journal.meldOperation(tid));
-    while (tid !== this.tid) {
-      tid = this.time.ticked(++tick).hash();
-      operator.next(tid === this.tid ?
-        this.asMeldOperation() : await this.journal.meldOperation(tid));
-    }
-    return this.journal.toMeldOperation(operator.commit());
-  }
-
-  /**
-   * Works backward through the journal to find the first transaction ID (and associated tick) that
-   * is causally contiguous with this one.
-   * @param minFrom the least clock tick to go back to
-   * @see CausalTimeRange.contiguous
-   */
-  private async causalFrom(minFrom: number) {
-    type OpId = { tick: number, tid: string };
-    const seekToFrom = async (current: OpId): Promise<OpId> => {
-      const prev = await this.journal.entryPrev(current.tid);
-      if (prev < minFrom || prev < current.tick - 1)
-        return current; // This is as far back as we have
-      else
-        // Get previous tick for given tick (or our tick)
-        return seekToFrom({ tick: prev, tid: this.time.ticked(prev).hash() });
-    };
-    return seekToFrom(this);
-  }
-
-  /**
-   * Gets the causally-contiguous history of this operation, fused into a single
-   * operation.
+   * Gets the causally-contiguous history of this operation, fused into a single operation.
    * @see CausalTimeRange.contiguous
    */
   async fusedPast(): Promise<EncodedOperation> {
-    return (await this.causalReduce(first => first.fusion())).encoded;
+    return (await this.journal.causalReduce(this, first => first.fusion())).encoded;
   }
 
-  async cutSeen(op: MeldOperation): Promise<MeldOperation> {
-    return this.causalReduce(prev => op.cutting().next(prev), op.from);
+  /**
+   * Cuts this operation _and all its contiguous causal history_ from the given operation.
+   * @param op the operation to cut from
+   */
+  cutSeen(op: MeldOperation): Promise<MeldOperation> {
+    return this.journal.causalReduce(this, prev => op.cutting().next(prev), op.from);
   }
 }

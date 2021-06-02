@@ -37,6 +37,10 @@ export abstract class MutableOperation<T> implements Operation<T> {
   remove(key: keyof Operation<T>, quads: Iterable<T> | Filter<T>): T[] {
     return [...this[key].deleteAll(quads)];
   }
+
+  get footprint() {
+    return this.deletes.footprint + this.inserts.footprint;
+  }
 }
 
 export interface CausalTimeRange<C extends CausalClock> {
@@ -95,6 +99,7 @@ namespace ItemTid {
 export interface CausalOperator<T, C extends CausalClock> {
   next(op: CausalOperation<T, C>): CausalOperator<T, C>;
   commit(): CausalOperation<T, C>;
+  readonly footprint: number;
 }
 
 /** Immutable */
@@ -145,6 +150,10 @@ export class FusableCausalOperation<T, C extends CausalClock> implements CausalO
           };
         else
           return original;
+      }
+
+      get footprint() {
+        return this.fused?.footprint ?? 0;
       }
     };
   }
@@ -200,6 +209,10 @@ export class FusableCausalOperation<T, C extends CausalClock> implements CausalO
           };
         else
           return original;
+      }
+
+      get footprint() {
+        return this.cut?.footprint ?? 0;
       }
     };
   }

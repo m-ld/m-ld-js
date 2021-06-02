@@ -1,17 +1,16 @@
-import { MqttRemotes } from '../src/mqtt/MqttRemotes';
+import { MqttRemotes } from '../src/mqtt';
 import { MockProxy } from 'jest-mock-extended';
 import { AsyncMqttClient } from 'async-mqtt';
 import { OperationMessage } from '../src/engine';
 import { GlobalClock, TreeClock } from '../src/engine/clocks';
-import { Subject as Source, of } from 'rxjs';
+import { of, Subject as Source } from 'rxjs';
 import { mockLocal, MockMqtt, mockMqtt, MockProcess } from './testClones';
 import { take, toArray } from 'rxjs/operators';
 import { comesAlive } from '../src/engine/AbstractMeld';
-import { MeldErrorStatus } from '../src/engine/MeldError';
+import { MeldErrorStatus } from '@m-ld/m-ld-spec';
 import { Request, Response } from '../src/engine/ControlMessage';
-import { Future } from '../src/engine/util';
+import { Future, MsgPack } from '../src/engine/util';
 import { JsonNotification } from '../src/engine/PubsubRemotes';
-import { MsgPack } from '../src/engine/util';
 
 /**
  * These tests also test the abstract base class, PubsubRemotes
@@ -82,7 +81,7 @@ describe('New MQTT remotes', () => {
       const time = TreeClock.GENESIS.forked().left;
       mqtt.mockPublish('test.m-ld.org/operations/client2', MsgPack.encode({
         prev: time.ticks,
-        data: [2, time.ticked().ticks, time.ticked().toJson(), '{}', '{}']
+        data: [2, time.ticked().ticks, time.ticked().toJSON(), '{}', '{}']
       }));
       await expect(new Promise((resolve) => {
         remotes.updates.subscribe({ next: resolve });
@@ -176,7 +175,7 @@ describe('New MQTT remotes', () => {
 
       // Send a rev-up request from an imaginary client2
       mqtt.mockPublish('__send/client1/client2/send1/test.m-ld.org/control',
-        MsgPack.encode(new Request.Revup(localTime).toJson()));
+        MsgPack.encode(new Request.Revup(localTime).toJSON()));
 
       let updatesAddress: string, firstRevupBuffer: Buffer | null = null;
       const complete = new Future;
@@ -211,7 +210,7 @@ describe('New MQTT remotes', () => {
         fail();
       } catch (error) {
         expect(error.message).toMatch(/No-one present/);
-      };
+      }
     });
 
     test('can get clock', async () => {
@@ -227,7 +226,7 @@ describe('New MQTT remotes', () => {
           expect(domain).toBe('test.m-ld.org');
           mqtt.mockPublish('__reply/client1/consumer2/reply1/' + messageId, MsgPack.encode({
             '@type': 'http://control.m-ld.org/response/clock',
-            clock: newClock.toJson()
+            clock: newClock.toJSON()
           }));
         }
       });
@@ -253,7 +252,7 @@ describe('New MQTT remotes', () => {
           } else {
             mqtt.mockPublish(`__reply/client1/${toId}/reply1/` + messageId, MsgPack.encode({
               '@type': 'http://control.m-ld.org/response/clock',
-              clock: newClock.toJson()
+              clock: newClock.toJSON()
             }));
           }
         }
@@ -293,7 +292,7 @@ describe('New MQTT remotes', () => {
         if (type === '__send' && json['@type'] === 'http://control.m-ld.org/request/revup') {
           mqtt.mockPublish('__reply/client1/consumer2/reply1/' + messageId, MsgPack.encode({
             '@type': 'http://control.m-ld.org/response/revup',
-            gwc: GlobalClock.GENESIS.update(TreeClock.GENESIS.forked().right).toJson(),
+            gwc: GlobalClock.GENESIS.update(TreeClock.GENESIS.forked().right).toJSON(),
             updatesAddress: 'subChannel1'
           }));
         }
@@ -319,7 +318,7 @@ describe('New MQTT remotes', () => {
           } else {
             mqtt.mockPublish(`__reply/client1/${toId}/reply2/${messageId}`, MsgPack.encode({
               '@type': 'http://control.m-ld.org/response/revup',
-              gwc: GlobalClock.GENESIS.update(TreeClock.GENESIS.forked().right).toJson(),
+              gwc: GlobalClock.GENESIS.update(TreeClock.GENESIS.forked().right).toJSON(),
               updatesAddress: 'subChannel1'
             }));
           }

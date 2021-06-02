@@ -1,24 +1,25 @@
 import { GlobalClock, TreeClock } from './clocks';
 import { MeldError, MeldErrorStatus } from './MeldError';
+
 const inspect = Symbol.for('nodejs.util.inspect.custom');
 
 ////////////////////////////////////////////////////////////////////////////////
 // TODO: Protect all of this with json-schema
 
 export interface Request {
-  toJson(): object;
+  toJSON(): object;
 }
 
 export namespace Request {
   export class NewClock implements Request {
-    toJson = () => NewClock.JSON;
+    toJSON = () => NewClock.JSON;
     toString = () => 'New Clock';
     [inspect] = () => this.toString();
     static readonly JSON = { '@type': 'http://control.m-ld.org/request/clock' };
   }
 
   export class Snapshot implements Request {
-    toJson = () => Snapshot.JSON;
+    toJSON = () => Snapshot.JSON;
     toString = () => 'Snapshot';
     [inspect] = () => this.toString();
     static readonly JSON = { '@type': 'http://control.m-ld.org/request/snapshot' };
@@ -28,9 +29,9 @@ export namespace Request {
     constructor(readonly time: TreeClock) { };
     toString = () => `Revup from ${this.time}`;
     [inspect] = () => this.toString();
-    readonly toJson = () => ({
+    readonly toJSON = () => ({
       '@type': 'http://control.m-ld.org/request/revup',
-      time: this.time.toJson()
+      time: this.time.toJSON()
     });
   }
 
@@ -51,7 +52,7 @@ export namespace Request {
 }
 
 export interface Response {
-  toJson(): object;
+  toJSON(): object;
 };
 
 export namespace Response {
@@ -60,9 +61,9 @@ export namespace Response {
       readonly clock: TreeClock) {
     };
 
-    readonly toJson = () => ({
+    readonly toJSON = () => ({
       '@type': 'http://control.m-ld.org/response/clock',
-      clock: this.clock.toJson()
+      clock: this.clock.toJSON()
     });
 
     toString = () => `New Clock ${this.clock}`;
@@ -76,9 +77,9 @@ export namespace Response {
       readonly updatesAddress: string) {
     }
 
-    readonly toJson = () => ({
+    readonly toJSON = () => ({
       '@type': 'http://control.m-ld.org/response/snapshot',
-      gwc: this.gwc.toJson(),
+      gwc: this.gwc.toJSON(),
       dataAddress: this.dataAddress,
       updatesAddress: this.updatesAddress
     });
@@ -100,9 +101,9 @@ export namespace Response {
       readonly updatesAddress: string) {
     }
 
-    readonly toJson = () => ({
+    readonly toJSON = () => ({
       '@type': 'http://control.m-ld.org/response/revup',
-      gwc: this.gwc == null ? null : this.gwc.toJson(),
+      gwc: this.gwc == null ? null : this.gwc.toJSON(),
       updatesAddress: this.updatesAddress
     })
 
@@ -117,7 +118,7 @@ export namespace Response {
       readonly status: MeldErrorStatus) {
     }
 
-    readonly toJson = () => ({
+    readonly toJSON = () => ({
       '@type': 'http://control.m-ld.org/response/rejected',
       status: this.status
     })
@@ -133,11 +134,11 @@ export namespace Response {
           return new NewClock(TreeClock.fromJson(json.clock));
         case 'http://control.m-ld.org/response/snapshot':
           return new Snapshot(
-            GlobalClock.fromJson(json.gwc), json.dataAddress,
+            GlobalClock.fromJSON(json.gwc), json.dataAddress,
             json.updatesAddress);
         case 'http://control.m-ld.org/response/revup':
           return new Revup(
-            json.gwc != null ? GlobalClock.fromJson(json.gwc) : null,
+            json.gwc != null ? GlobalClock.fromJSON(json.gwc) : null,
             json.updatesAddress);
         case 'http://control.m-ld.org/response/rejected':
           return new Rejected(<MeldErrorStatus><number>json.status);

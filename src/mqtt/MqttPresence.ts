@@ -1,16 +1,18 @@
-import { TopicParams, matches } from 'mqtt-pattern';
+import { matches, TopicParams } from 'mqtt-pattern';
 import { MqttTopic } from './MqttTopic';
-import { AsyncMqttClient, IClientOptions, IClientPublishOptions, ISubscriptionMap } from 'async-mqtt';
-import { Future, getIdLogger } from '../engine/util';
+import {
+  AsyncMqttClient, IClientOptions, IClientPublishOptions, ISubscriptionMap
+} from 'async-mqtt';
+import { Future, getIdLogger, inflate } from '../engine/util';
 import { EventEmitter } from 'events';
-import { from, Observable } from 'rxjs';
-import { mergeMap } from 'rxjs/operators';
+import { Observable } from 'rxjs';
 import { Logger, LogLevelDesc } from 'loglevel';
 
 interface PresenceParams extends TopicParams {
   domain: string;
   client: string;
 }
+
 const PRESENCE_TOPIC = new MqttTopic<PresenceParams>(
   '__presence', { '+': 'domain' }, { '+': 'client' });
 const PRESENCE_OPTS: Required<Pick<IClientPublishOptions, 'qos' | 'retain'>> =
@@ -102,7 +104,7 @@ export class MqttPresence extends EventEmitter {
   }
 
   present(address: string): Observable<string> {
-    return from(this.ready).pipe(mergeMap(() =>
+    return inflate(this.ready, () =>
       new Observable<string>(subs => {
         for (let clientId in this.presence) {
           for (let consumerId in this.presence[clientId]) {
@@ -111,7 +113,7 @@ export class MqttPresence extends EventEmitter {
           }
         }
         subs.complete();
-      })));
+      }));
   }
 
   private left(clientId: string, consumerId?: string) {

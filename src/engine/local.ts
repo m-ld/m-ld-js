@@ -1,5 +1,6 @@
 import { EventEmitter } from 'events';
 import * as ls from 'local-storage';
+import { Observable } from 'rxjs';
 import isNode = require('detect-node');
 
 export interface LocalStorage {
@@ -56,7 +57,7 @@ export class LocalLock {
 
   private ping = () => {
     local.set(this.key + '__ping', this.id);
-  }
+  };
 
   private hasPing() {
     return local.get(this.key + '__ping') === this.id;
@@ -67,3 +68,31 @@ export class LocalLock {
     local.set(this.key, this.id);
   }
 }
+
+export namespace Idle {
+  type Handle = number | NodeJS.Immediate;
+  const DEFAULT_IDLE_TIME = 50.0;
+
+  const root: any = typeof window === 'undefined' ? global || {} : window;
+
+  export const requestCallback: (callback: IdleRequestCallback) => Handle =
+    root.requestIdleCallback?.bind(root) ?? ((callback: IdleRequestCallback) =>
+      setImmediate((startTime: number) => callback({
+        timeRemaining: () => Math.max(0, DEFAULT_IDLE_TIME - (Date.now() - startTime)),
+        didTimeout: false // Not supporting timeout parameter to callback request
+      }), Date.now()));
+
+  export const cancelCallback: (handle: Handle) => void =
+    root.cancelIdleCallback?.bind(root) ?? ((handle: Handle) => {
+      if (typeof handle != 'number')
+        clearImmediate(handle);
+    });
+}
+
+export const idling = new Observable<IdleDeadline>(subs => {
+  const handle = Idle.requestCallback(deadline => {
+    subs.next(deadline);
+    subs.complete();
+  });
+  return () => Idle.cancelCallback(handle);
+});
