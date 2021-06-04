@@ -75,11 +75,12 @@ export namespace Idle {
 
   const root: any = typeof window === 'undefined' ? global || {} : window;
 
-  export const requestCallback: (callback: IdleRequestCallback) => Handle =
-    root.requestIdleCallback?.bind(root) ?? ((callback: IdleRequestCallback) =>
-      setImmediate((startTime: number) => callback({
+  export const requestCallback: (cb: IdleRequestCallback, opts?: IdleRequestOptions) => Handle =
+    root.requestIdleCallback?.bind(root) ?? ((cb: IdleRequestCallback) =>
+      // Not supporting timeout parameter to callback request for immediate fallback
+      setImmediate((startTime: number) => cb({
         timeRemaining: () => Math.max(0, DEFAULT_IDLE_TIME - (Date.now() - startTime)),
-        didTimeout: false // Not supporting timeout parameter to callback request
+        didTimeout: false
       }), Date.now()));
 
   export const cancelCallback: (handle: Handle) => void =
@@ -89,10 +90,10 @@ export namespace Idle {
     });
 }
 
-export const idling = new Observable<IdleDeadline>(subs => {
+export const idling = (opts?: IdleRequestOptions) => new Observable<IdleDeadline>(subs => {
   const handle = Idle.requestCallback(deadline => {
     subs.next(deadline);
     subs.complete();
-  });
+  }, opts);
   return () => Idle.cancelCallback(handle);
 });

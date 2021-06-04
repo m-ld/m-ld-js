@@ -58,7 +58,10 @@ aedes.on('client', client => {
 });
 
 function reportError(client, err) {
-  LOG.getLogger('aedes').warn(client.id, 'Error', err);
+  // Don't report if the clone is dead or dying
+  const cloneProcess = clones[client.id]?.process;
+  if (cloneProcess != null && !cloneProcess.killed)
+    LOG.getLogger('aedes').warn(client.id, err);
 }
 aedes.on('clientError', reportError);
 aedes.on('connectionError', reportError);
@@ -145,7 +148,7 @@ function start(req, res, next) {
       error: message => {
         const { requestId, err } = message;
         const [res, next] = requests[requestId];
-        if (res.header('transfer-encoding') == 'chunked') {
+        if (res.header('transfer-encoding') === 'chunked') {
           // Restify tries to set content-length, which is bad for chunking
           res.status(500);
           res.write(err);

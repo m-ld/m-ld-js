@@ -38,6 +38,9 @@ function asTriplesTids(quadTidQuads: QuadMap<Quad[]>): TriplesTids {
     [quad, tidQuads.map(tidQuad => tidQuad.object.value)]);
 }
 
+type DatasetConfig = Pick<MeldConfig,
+  '@id' | '@domain' | 'maxOperationSize' | 'logLevel' | 'journal'>;
+
 /**
  * Writeable Graph, similar to a Dataset, but with a slightly different transaction API.
  * Journals every transaction and creates m-ld compliant operations.
@@ -65,11 +68,11 @@ export class SuSetDataset extends MeldEncoder {
     private readonly dataset: Dataset,
     private readonly context: Context,
     constraints: MeldConstraint[],
-    config: Pick<MeldConfig, '@id' | '@domain' | 'maxOperationSize' | 'logLevel'>) {
+    config: DatasetConfig) {
     super(config['@domain'], dataset.rdf);
     this.log = getIdLogger(this.constructor, config['@id'], config.logLevel);
     this.journal = new Journal(dataset, this);
-    this.journalClerk = new JournalClerk(this.journal, { log: this.log });
+    this.journalClerk = new JournalClerk(this.journal, config);
     // Update notifications are strictly ordered but don't hold up transactions
     this.datasetLock = new LocalLock(config['@id'], dataset.location);
     this.maxOperationSize = config.maxOperationSize ?? Infinity;

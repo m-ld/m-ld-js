@@ -1,12 +1,17 @@
 import { EntryIndex, Journal, JournalEntry } from './index';
-import { concatMap, endWith, filter, finalize, map, share, takeUntil } from 'rxjs/operators';
-import { EMPTY, from, merge, NEVER, Observable, of, Subject } from 'rxjs';
+import {
+  concatMap, debounceTime, defaultIfEmpty, endWith, map, share, take, takeUntil, tap
+} from 'rxjs/operators';
+import { EMPTY, merge, Observable, of, race, Subject, timer } from 'rxjs';
 import { idling } from '../local';
 import { CausalOperator, CausalTimeRange } from '../ops';
 import { Triple } from '../quads';
 import { TreeClock } from '../clocks';
-import { Logger } from 'loglevel';
-import { inflate } from '../util';
+import { getIdLogger, inflate } from '../util';
+import { array, MeldConfig } from '../../index';
+import { TickTid } from './JournalOperation';
+
+type JournalClerkConfig = Pick<MeldConfig, '@id' | 'logLevel' | 'journal'>;
 
 export interface ClerkAction {
   action: string;
@@ -14,11 +19,16 @@ export interface ClerkAction {
 }
 
 function clerkAction<T extends object>(action: string, body: T): T & ClerkAction {
-  return { action, ...body, toString: () => `Clerk ${action}: ${JSON.stringify(body)}` };
+  return { action, ...body, toString: () => `${action} ${JSON.stringify(body)}` };
 }
 
-const CHECKPOINT = null;
-export type CheckPoint = typeof CHECKPOINT;
+export enum CheckPoint {
+  /** General administration checkpoint */
+  ADMIN,
+  /** Required journal breakpoint – fusions must not cross */
+  SAVEPOINT
+  // TODO: TRUNCATE, entries before will be dropped
+}
 
 /**
  * The journal clerk processes journal entries in the background according to a provided strategy.
@@ -34,32 +44,42 @@ export class JournalClerk {
 
   constructor(
     private readonly journal: Journal,
-    { checkpoints, schedule, log }: {
-      /** A checkpoint commits any active fusion */
+    config: JournalClerkConfig,
+    { checkpoints, schedule }: {
+      /** @see CheckPoint */
       checkpoints?: Observable<CheckPoint>,
-      /** The schedule delays activity to some suitable time */
-      schedule?: Observable<unknown>,
-      /** For logging activity */
-      log?: Logger
+      /**
+       * The schedule delays activity to some suitable time. It should emit one value in response
+       * to a subscription.
+       */
+      schedule?: Observable<unknown>
     } = {}) {
-    this.activity = merge(journal.entries, checkpoints ?? NEVER).pipe(
+    const adminDebounce = config.journal?.adminDebounce ?? 1000;
+    // Default checkpoints are general admin debounced after last entry
+    checkpoints ??= journal.entries.pipe(
+      map(() => CheckPoint.ADMIN),
+      debounceTime(adminDebounce));
+    // Try to schedule everything (except save points) in idle time.
+    const awaitSchedule = schedule?.pipe(take(1)) ??
+      // Chrome sometimes never calls the idle callback, blocking activity, so time out
+      race(idling(), timer(adminDebounce).pipe(tap(() => log.warn('Idle request timed out'))));
+    this.activity = merge(journal.entries, checkpoints).pipe(
       // Redundant if the journal is closed first.
       takeUntil(this.closing),
-      // Ensure a final commit
-      endWith(CHECKPOINT),
+      // Ensure administration has been completed
+      endWith(CheckPoint.SAVEPOINT),
       // For every entry, ask the schedule for a slot to process
-      concatMap(entry => {
-        if (entry == CHECKPOINT)
-          return this.checkpoint(); // Process a checkpoint asap
-        else
-          return inflate(schedule ?? idling, () => this.process(entry));
-      }),
+      concatMap(entry => inflate(
+        // Process save points immediately
+        entry === CheckPoint.SAVEPOINT ? of(0) : awaitSchedule,
+        () => this.process(entry))),
       // Don't duplicate processing per subscriber
       share());
-    // Kick things off by subscribing, even if no logger is present
+    // Kick things off by subscribing the logger
+    const log = getIdLogger(this.constructor, config['@id'], config.logLevel);
     this.activity.subscribe(
-      action => log?.debug(`${action}`),
-      err => log?.error(err),
+      action => log.debug(`${action}`),
+      err => log.error(err),
       () => this.closing.complete());
   }
 
@@ -68,20 +88,29 @@ export class JournalClerk {
     await this.closing.toPromise();
   }
 
-  private checkpoint(): Observable<ClerkAction> {
-    return this.fusion == null ? EMPTY : from(this.fusion.commit()).pipe(
-      finalize(() => delete this.fusion),
-      filter<FusionAction>(action => action != null),
-      map(action => action.clerkAction));
+  private process(entry: JournalEntry | CheckPoint): Observable<ClerkAction> {
+    if (typeof entry === 'number')
+      return this.checkpoint(entry);
+    else
+      return this.processEntry(entry);
   }
 
-  private process(entry: JournalEntry): Observable<ClerkAction> {
+  private processEntry(entry: JournalEntry) {
     return merge(
-      this.disposeOperationIfIsolated(entry),
+      this.disposePrevOperationIfIsolated(entry),
       this.applyFusion(entry));
   }
 
-  private disposeOperationIfIsolated(entry: JournalEntry): Observable<ClerkAction> {
+  private checkpoint(entry: CheckPoint.ADMIN | CheckPoint.SAVEPOINT) {
+    return this.fusion == null ? EMPTY : this.fusion.commit().pipe(
+      map(action => {
+        if (entry === CheckPoint.SAVEPOINT)
+          delete this.fusion;
+        return action.clerkAction;
+      }));
+  }
+
+  private disposePrevOperationIfIsolated(entry: JournalEntry): Observable<ClerkAction> {
     // If the previous operation for the entry's time is not causally contiguous, AND does not
     // have a corresponding journal entry, it is safe to garbage collect.
     const [tick, tid] = entry.prev;
@@ -96,16 +125,13 @@ export class JournalClerk {
       this.fusion = new Fusion(this.journal, entry);
       return EMPTY;
     } else {
-      return inflate(this.fusion.next(entry), action => {
-        if (action?.entry === entry) {
-          // We appended the entry to the existing fusion.
-          return of(action.clerkAction);
-        } else {
-          // We're done with the fusion. Start a new one.
-          this.fusion = new Fusion(this.journal, entry);
-          return action == null ? EMPTY : of(action.clerkAction);
-        }
-      });
+      return inflate(this.fusion.next(entry).pipe(defaultIfEmpty<FusionAction | null>(null)),
+        action => {
+          // If no append happened, we must start a new fusion.
+          if (action?.action !== 'appended')
+            this.fusion = new Fusion(this.journal, entry);
+          return array(action?.clerkAction);
+        });
     }
   }
 }
@@ -117,15 +143,17 @@ interface FusionAction {
 }
 
 class Fusion {
+  private readonly prev: TickTid;
+  private readonly removals: EntryIndex[] = [];
+  private readonly operator: CausalOperator<Triple, TreeClock>;
   private last: JournalEntry;
-  private entries: EntryIndex[] = [];
-  private operator: CausalOperator<Triple, TreeClock>;
 
   constructor(
     private readonly journal: Journal,
-    private readonly first: JournalEntry) {
+    first: JournalEntry) {
+    this.prev = first.prev;
     this.operator = first.operation.asMeldOperation().fusion();
-    this.trackEntry(first);
+    this.reset(first);
   }
 
   private action = (action: FusionAction['action'], entry: JournalEntry) => ({
@@ -139,38 +167,48 @@ class Fusion {
    * @returns an action with `entry` if it was added to the fusion or a fused entry if the fusion
    *   was committed; or `null` if the fusion was discarded
    */
-  async next(entry: JournalEntry): Promise<FusionAction | null> {
-    if (CausalTimeRange.contiguous(this.last.operation, entry.operation)) {
-      this.append(entry);
-      return this.action('appended', entry);
-    } else {
+  next(entry: JournalEntry): Observable<FusionAction> {
+    if (CausalTimeRange.contiguous(this.last.operation, entry.operation))
+      return this.append(entry);
+    else
       return this.commit();
-    }
   }
 
   /**
-   * @returns a fused entry if the fusion was committed; or `null` if the fusion was discarded
+   * Commits the current fusion to the journal. After calling this method, more entries can still
+   * be appended, as fusions to the committed fusion.
+   * @returns a commit action if the fusion was committed; or empty if the fusion was discarded
    */
-  async commit(): Promise<FusionAction | null> {
+  commit(): Observable<FusionAction> {
     // Only do anything if the fusion is significant
-    if (this.entries.length > 1) {
+    if (this.removals.length > 1) {
+      // CAUTION: constructing an operation can be expensive
       const operation = this.journal.toMeldOperation(this.operator.commit());
       const fusedEntry = JournalEntry.fromOperation(
-        this.journal, this.last.key, this.first.prev, operation);
-      await this.journal.spliceEntries(this.entries, fusedEntry);
-      return this.action('committed', fusedEntry);
+        this.journal, this.last.key, this.prev, operation);
+      return inflate(this.journal.spliceEntries(this.removals, fusedEntry), () => {
+        // Start again with the fused entry
+        this.reset(fusedEntry);
+        return of(this.action('committed', fusedEntry));
+      });
     }
-    return null;
+    return EMPTY;
   }
 
   private append(entry: JournalEntry) {
     this.operator.next(entry.operation.asMeldOperation());
     this.trackEntry(entry);
+    return of(this.action('appended', entry));
   }
 
   private trackEntry(entry: JournalEntry) {
-    this.entries.push({ key: entry.key, tid: entry.operation.tid });
+    this.removals.push({ key: entry.key, tid: entry.operation.tid });
     this.last = entry;
+  }
+
+  private reset(first: JournalEntry) {
+    this.removals.length = 0;
+    this.trackEntry(first);
   }
 }
 

@@ -347,7 +347,7 @@ export function *deepValues(o: any,
   if (filter(o, path))
     yield [path, o];
   else if (typeof o == 'object')
-    for (let key in o)
+    for (let key of Object.keys(o))
       yield *deepValues(o[key], filter, path.concat(key));
 }
 

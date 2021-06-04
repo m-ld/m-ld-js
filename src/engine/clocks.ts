@@ -213,20 +213,23 @@ export class TreeClock extends TickTree<boolean> implements CausalClock {
         return this;
       else
         return new TreeClock(true, ticks ?? this.localTicks + 1);
-    } else if (ticks != null && ticks < this.localTicks) {
-      // If ticks < this._ticks, we drop any fork
-      return new TreeClock(this.hasId, ticks);
     } else if (this.fork) {
-      const forkTicks = ticks == null ? null : ticks - this.localTicks;
-      const leftResult = this.fork.left._ticked(forkTicks);
-      if (leftResult)
-        return leftResult === this.fork.left ? this :
-          new TreeClock(new Fork(leftResult, this.fork.right), this.localTicks);
+      if (ticks != null && ticks < this.localTicks) {
+        // If ticks < localTicks and we have a buried ID, we can drop the fork
+        if (this.hasId)
+          return new TreeClock(true, ticks);
+      } else {
+        const forkTicks = ticks == null ? null : ticks - this.localTicks;
+        const leftResult = this.fork.left._ticked(forkTicks);
+        if (leftResult)
+          return leftResult === this.fork.left ? this :
+            new TreeClock(new Fork(leftResult, this.fork.right), this.localTicks);
 
-      const rightResult = this.fork.right._ticked(forkTicks);
-      if (rightResult)
-        return rightResult === this.fork.right ? this :
-          new TreeClock(new Fork(this.fork.left, rightResult), this.localTicks);
+        const rightResult = this.fork.right._ticked(forkTicks);
+        if (rightResult)
+          return rightResult === this.fork.right ? this :
+            new TreeClock(new Fork(this.fork.left, rightResult), this.localTicks);
+      }
     }
   }
 

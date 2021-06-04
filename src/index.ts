@@ -1,12 +1,12 @@
 import { QuadStoreDataset } from './engine/dataset';
 import { DatasetEngine } from './engine/dataset/DatasetEngine';
-import { ApiStateMachine } from "./engine/MeldState";
+import { ApiStateMachine } from './engine/MeldState';
 import { LogLevelDesc } from 'loglevel';
 import { ConstraintConfig, constraintFromConfig } from './constraints';
 import { DomainContext } from './engine/MeldEncoding';
 import { Context } from './jrql-support';
 import { MeldClone, MeldConstraint } from './api';
-import { MeldStatus, LiveStatus } from '@m-ld/m-ld-spec';
+import { LiveStatus, MeldStatus } from '@m-ld/m-ld-spec';
 import { MeldRemotes } from './engine';
 import type { AbstractLevelDOWN } from 'abstract-leveldown';
 import type { Observable } from 'rxjs';
@@ -51,6 +51,10 @@ export interface MeldConfig {
    */
   constraints?: ConstraintConfig[];
   /**
+   * Journaling configuration
+   */
+  journal?: JournalConfig;
+  /**
    * Set to `true` to indicate that this clone will be 'genesis'; that is, the
    * first new clone on a new domain. This flag will be ignored if the clone is
    * not new. If `false`, and this clone is new, successful clone initialisation
@@ -79,6 +83,18 @@ export interface MeldConfig {
 }
 
 /**
+ * **m-ld** clone journal configuration.
+ */
+interface JournalConfig {
+  /**
+   * Time, in milliseconds, to delay expensive journal administration tasks such
+   * as truncation and compaction, while the clone is highly active. Default is
+   * one second.
+   */
+  adminDebounce?: number;
+}
+
+/**
  * Create or initialise a local clone, depending on whether the given LevelDB
  * database already exists. This function returns as soon as it is safe to begin
  * transactions against the clone; this may be before the clone has received all
@@ -90,6 +106,7 @@ export interface MeldConfig {
  * This can be a configured object (e.g. `new MqttRemotes(config)`) or just the
  * class (`MqttRemotes`).
  * @param config the clone configuration
+ * @param options runtime options
  * @param options.constraints constraints in addition to those in the
  * configuration. 🚧 Experimental: use with caution.
  * @param options.backendEvents an event emitter receiving low-level backend

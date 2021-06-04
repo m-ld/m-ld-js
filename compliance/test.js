@@ -4,10 +4,11 @@ const { join } = require('path');
 const inspector = require('inspector');
 const LOG = require('loglevel');
 const httpUrl = new URL('http://localhost:3000');
-const Jasmine = require('jasmine');
-const jasmine = new Jasmine();
 
 const COMPLIANCE_DIR = '../node_modules/@m-ld/m-ld-spec/compliance'.split('/');
+const COMPLIANCE_PATH = join(__dirname, ...COMPLIANCE_DIR);
+const Jasmine = require(require.resolve('jasmine', { paths: [COMPLIANCE_PATH] }));
+const jasmine = new Jasmine();
 
 // Expected spec glob, default "*/*" (everything)
 const [, , specs] = process.argv;
@@ -35,14 +36,15 @@ orchestrator.on('message', message => {
       try {
         process.env.MELD_ORCHESTRATOR_URL = httpUrl.toString();
         jasmine.loadConfig({
-          spec_files: [join(__dirname, ...COMPLIANCE_DIR, `${specs || '*/*'}.spec.js`)]
+          failFast: true,
+          spec_files: [join(COMPLIANCE_PATH, `${specs || '*/*'}.spec.js`)]
         });
         // Try to shut down normally when done
         jasmine.onComplete(() => orchestrator.kill());
         jasmine.execute();
       } catch (err) {
-        LOG.error(err)
-        orchestrator.kill()
+        LOG.error(err);
+        orchestrator.kill();
       }
   }
 });

@@ -51,6 +51,20 @@ describe('Tree clock', () => {
     expect(tickedFork.ticked(0).hash()).toBe(TreeClock.GENESIS.hash());
   });
 
+  test('Untick does not affect non-ID leaf', () => {
+    // This was a defect in which a left branch could be un-ticked without having an ID
+    let { left, right } = TreeClock.GENESIS.ticked().forked();
+    right = right.update(left.ticked(10));
+    expect(right.ticked(5).ticks).toBe(5);
+  });
+
+  test('Untick does not affect non-ID fork', () => {
+    let { left, right } = TreeClock.GENESIS.ticked().forked();
+    // This time the left is a fork with no ID in it
+    right = right.update(left.ticked(10).forked().left.ticked(2));
+    expect(right.ticked(5).ticks).toBe(5);
+  });
+
   test('Tick fork', () => {
     const ticked = TreeClock.GENESIS.ticked();
     const fork = ticked.forked();
@@ -238,10 +252,14 @@ describe('Tree clock', () => {
   });
 
   test('from JSON', () => {
-    expect(TreeClock.fromJson([]).equals(TreeClock.GENESIS)).toBe(true);
-    expect(TreeClock.fromJson([[], 0]).equals(TreeClock.GENESIS.forked().left)).toBe(true);
-    expect(TreeClock.fromJson([[1], 0]).equals(TreeClock.GENESIS.forked().left.ticked())).toBe(true);
-    expect(TreeClock.fromJson([1, [], 0]).equals(TreeClock.GENESIS.ticked().forked().left)).toBe(true);
+    expect(TreeClock.fromJson([])
+      .equals(TreeClock.GENESIS)).toBe(true);
+    expect(TreeClock.fromJson([[], 0])
+      .equals(TreeClock.GENESIS.forked().left)).toBe(true);
+    expect(TreeClock.fromJson([[1], 0])
+      .equals(TreeClock.GENESIS.forked().left.ticked())).toBe(true);
+    expect(TreeClock.fromJson([1, [], 0])
+      .equals(TreeClock.GENESIS.ticked().forked().left)).toBe(true);
   });
 
   test('non-ID in fork with zero ticks is still lt', () => {
