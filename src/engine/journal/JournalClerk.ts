@@ -13,13 +13,13 @@ import { TickTid } from './JournalOperation';
 
 type JournalClerkConfig = Pick<MeldConfig, '@id' | 'logLevel' | 'journal'>;
 
-export interface ClerkAction {
-  action: string;
-  [key: string]: any;
-}
+export class ClerkAction {
+  constructor(
+    readonly action: string,
+    readonly body: { [key: string]: any }) {
+  }
 
-function clerkAction<T extends object>(action: string, body: T): T & ClerkAction {
-  return { action, ...body, toString: () => `${action} ${JSON.stringify(body)}` };
+  toString = () => `${this.action} ${JSON.stringify(this.body)}`;
 }
 
 export enum CheckPoint {
@@ -116,7 +116,7 @@ export class JournalClerk {
     const [tick, tid] = entry.prev;
     if (tick > 0 && tick < entry.operation.tick - 1)
       return inflate(this.journal.disposeOperationIfUnreferenced(tid),
-        done => done ? of(clerkAction('garbage collected', { tid })) : EMPTY);
+        done => done ? of(new ClerkAction('garbage collected', { tid })) : EMPTY);
     return EMPTY;
   }
 
@@ -157,7 +157,7 @@ class Fusion {
   }
 
   private action = (action: FusionAction['action'], entry: JournalEntry) => ({
-    action, entry, clerkAction: clerkAction(action, {
+    action, entry, clerkAction: new ClerkAction(action, {
       time: entry.operation.time, footprint: this.operator.footprint
     })
   });

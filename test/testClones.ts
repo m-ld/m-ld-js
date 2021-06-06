@@ -69,8 +69,8 @@ export class MockProcess {
     return this;
   }
 
-  join(clock: MockProcess) {
-    this.time = this.time.update(clock.time);
+  join(clock: TreeClock) {
+    this.time = this.time.update(clock);
     this.gwc = this.gwc.update(this.time);
     return this;
   }
