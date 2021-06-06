@@ -261,6 +261,8 @@ export class QuadStoreDataset implements Dataset {
           this.events?.emit('error', err);
         } else if (foundKey != null) {
           resolve(foundKey === key);
+        } else {
+          resolve(false);
         }
         this.end(it);
       });

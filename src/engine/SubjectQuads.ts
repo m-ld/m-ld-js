@@ -1,16 +1,17 @@
 import { Quad, Quad_Object, Quad_Subject } from 'rdf-js';
-import { any, array, anyName, blank } from '..';
+import { any, anyName, blank } from '../api';
 import {
-  Subject, isValueObject, isReference,
-  isSet, SubjectPropertyObject, isPropertyObject, Atom, Reference
+  Atom, isPropertyObject, isReference, isSet, isValueObject, Reference, Subject,
+  SubjectPropertyObject
 } from '../jrql-support';
-import { expandTerm, canonicalDouble } from './jsonld';
+import { canonicalDouble, expandTerm } from './jsonld';
 import { RdfFactory } from './quads';
 import { JRQL, RDF, XS } from '../ns';
 import { JrqlMode, ListIndex, listItems, toIndexDataUrl } from './jrql-util';
 import { ActiveContext, getContextValue } from 'jsonld/lib/context';
-import { isString, isBoolean, isDouble, isNumber } from 'jsonld/lib/types';
+import { isBoolean, isDouble, isNumber, isString } from 'jsonld/lib/types';
 import { isArray, lazy } from './util';
+import { array } from '../util';
 
 export class SubjectQuads {
   constructor(

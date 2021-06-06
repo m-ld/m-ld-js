@@ -2,7 +2,7 @@ import { MeldOperation } from '../MeldEncoding';
 import { JournalOperation, TickTid } from './JournalOperation';
 import { OperationMessage } from '../index';
 import type { Journal, TickKey } from '.';
-import { missingOperationError } from '.';
+import { EntryIndex, missingOperationError } from '.';
 
 /**
  * Lightweight encoding of a transaction operation reference (TID) and the previous public tick
@@ -38,6 +38,10 @@ export class JournalEntry {
     readonly key: TickKey,
     readonly prev: TickTid,
     readonly operation: JournalOperation) {
+  }
+
+  get index(): EntryIndex {
+    return { key: this.key, tid: this.operation.tid };
   }
 
   get json(): JournalEntryJson {

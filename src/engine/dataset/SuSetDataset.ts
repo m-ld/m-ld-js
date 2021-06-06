@@ -433,7 +433,7 @@ export class SuSetDataset extends MeldEncoder {
           patch.append({ inserts: triplesTids.map(([triple]) => this.toUserQuad(triple)) });
           return { patch };
         } else {
-          return { kvps: this.journal.insertOperation(batch.operation) };
+          return { kvps: this.journal.insertPastOperation(batch.operation) };
         }
       }
     })).toPromise();

@@ -202,7 +202,7 @@ class Fusion {
   }
 
   private trackEntry(entry: JournalEntry) {
-    this.removals.push({ key: entry.key, tid: entry.operation.tid });
+    this.removals.push(entry.index);
     this.last = entry;
   }
 

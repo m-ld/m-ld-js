@@ -1,9 +1,9 @@
 import { Url } from 'jsonld/jsonld-spec';
-import { SubjectPropertyObject, Subject, SubjectProperty, Value } from '../jrql-support';
+import { Subject, SubjectProperty, SubjectPropertyObject, Value } from '../jrql-support';
 import { JRQL } from '../ns';
-import { setAtPath, trimTail, isNaturalNumber, isArray } from './util';
+import { isArray, isNaturalNumber, setAtPath, trimTail } from './util';
+import { includeValues } from '../updates';
 import validDataUrl = require('valid-data-url');
-import { includeValues } from '..';
 
 /**
  * - `match`: querying

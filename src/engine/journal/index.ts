@@ -1,4 +1,3 @@
-import { toPrefixedId } from '../dataset/SuSetGraph';
 import { EncodedOperation } from '../index';
 import { GlobalClock, TreeClock } from '../clocks';
 import { MsgPack } from '../util';
@@ -22,23 +21,22 @@ const JOURNAL_KEY = '_qs:journal';
  * 36^8, about 3 trillion, about 90 years in milliseconds.
  */
 export type TickKey = string;
-const TICK_KEY_PRE = '_qs:tick';
 const TICK_KEY_LEN = 8;
 const TICK_KEY_RADIX = 36;
 const TICK_KEY_PAD = '0'.repeat(TICK_KEY_LEN);
-const TICK_KEY_MIN = toPrefixedId(TICK_KEY_PRE, '!'); // < '0'
-const TICK_KEY_MAX = toPrefixedId(TICK_KEY_PRE, '~'); // > 'z'
-export const tickKey = (tick: number): TickKey => toPrefixedId(TICK_KEY_PRE,
-  TICK_KEY_PAD.concat(tick.toString(TICK_KEY_RADIX)).slice(-TICK_KEY_LEN));
+const TICK_KEY_MIN = '_qs:tick:!'; // < '0'
+const TICK_KEY_MAX = '_qs:tick:~'; // > 'z'
+export const tickKey = (tick: number): TickKey =>
+  `_qs:tick:${TICK_KEY_PAD.concat(tick.toString(TICK_KEY_RADIX)).slice(-TICK_KEY_LEN)}`;
 
 /** Entries are also indexed by time hash (TID) */
 function tidEntryKey(tid: string) {
-  return toPrefixedId('_qs:tid', tid);
+  return `_qs:tid:${tid}`;
 }
 
 /** Operations indexed by time hash (TID) */
 function tidOpKey(tid: string) {
-  return toPrefixedId('_qs:op', tid);
+  return `_qs:op:${tid}`;
 }
 
 /** Utility type to identify a journal entry in the indexes */
@@ -169,7 +167,7 @@ export class Journal {
     return this.decode(first.json);
   }
 
-  insertOperation(operation: EncodedOperation): Kvps {
+  insertPastOperation(operation: EncodedOperation): Kvps {
     return this.commitOperation(JournalOperation.fromJson(this, operation));
   }
 
@@ -222,7 +220,8 @@ export class Journal {
    * It's OK for history to be appended without this lock.
    * @param prepare the transaction procedure
    */
-  private withLockedHistory<T = unknown>(prepare: (txc: TxnContext) => KvpResult<T> | Promise<KvpResult<T>>) {
+  private withLockedHistory<T = unknown>(
+    prepare: (txc: TxnContext) => KvpResult<T> | Promise<KvpResult<T>>) {
     return this.store.transact({ lock: 'journal-body', prepare });
   }
 }
