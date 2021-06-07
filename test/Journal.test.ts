@@ -160,7 +160,7 @@ describe('Dataset Journal', () => {
 
       test('has prev details for entry', async () => {
         const op = await commitOp;
-        const [prevTick, prevTid] = await journal.entryPrev(op.time.hash());
+        const [prevTick, prevTid] = await journal.entryPrev(op.time.hash()) ?? [];
         expect(prevTick).toBe(local.prev);
         expect(prevTid).toBe(TreeClock.GENESIS.hash());
       });

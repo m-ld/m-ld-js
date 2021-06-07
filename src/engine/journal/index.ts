@@ -101,11 +101,10 @@ export class Journal {
     };
   }
 
-  async entryPrev(tid: string): Promise<TickTid> {
+  async entryPrev(tid: string): Promise<TickTid | undefined> {
     const value = await this.store.get(tidEntryKey(tid));
-    if (value == null)
-      throw missingOperationError(tid);
-    return JournalEntry.prev(MsgPack.decode(value));
+    if (value != null)
+      return JournalEntry.prev(MsgPack.decode(value));
   }
 
   /**
@@ -163,7 +162,7 @@ export class Journal {
   async meldOperation(tid: string): Promise<MeldOperation> {
     const first = await this.operation(tid);
     if (first == null)
-      throw missingOperationError(tid);
+      throw notFound('operation', tid);
     return this.decode(first.json);
   }
 
@@ -196,8 +195,8 @@ export class Journal {
       // Work backward through the journal to find the first transaction ID (and associated tick)
       // that is causally contiguous with this one.
       const seekToFrom = async (tick: number, tid: string): Promise<TickTid> => {
-        const [prevTick, prevTid] = await this.entryPrev(tid);
-        if (prevTick < minFrom || prevTick < tick - 1)
+        const [prevTick, prevTid] = await this.entryPrev(tid) ?? [];
+        if (prevTid == null || prevTick == null || prevTick < minFrom || prevTick < tick - 1)
           return [tick, tid]; // This is as far back as we have
         else
           // Get previous tick for given tick (or our tick)
@@ -226,6 +225,6 @@ export class Journal {
   }
 }
 
-export function missingOperationError(tid: string) {
-  return new Error(`Journal corrupted: operation ${tid} is missing`);
+export function notFound(type: 'entry' | 'operation', tid: string) {
+  return new Error(`Journal corrupted: ${type} ${tid} is missing`);
 }

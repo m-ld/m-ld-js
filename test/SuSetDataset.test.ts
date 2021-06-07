@@ -158,7 +158,7 @@ describe('SU-Set Dataset', () => {
           ]));
         });
 
-        test('answers a snapshot with fused operations', async () => {
+        test('answers a snapshot with fused last operations', async () => {
           const firstTick = local.time.ticks;
           await ssd.transact(async () => [
             local.tick().time,
@@ -417,6 +417,33 @@ describe('SU-Set Dataset', () => {
           // Result should not include betty because the fusion omits it
           await expect(ssd.read<Describe>({
             '@describe': 'http://test.m-ld.org/betty'
+          }).pipe(toArray()).toPromise()).resolves.toEqual([]);
+        });
+
+        test('cuts snapshot last-seen message from incoming fusion', async () => {
+          // Restart the clone with its own snapshot (unrealistic but benign)
+          const snapshot = await ssd.takeSnapshot();
+          const staticData = await snapshot.data.pipe(toArray()).toPromise();
+          // Get a new clock for the rejuvenated clone
+          const newLocal = remote.join(local.time).fork();
+          await ssd.applySnapshot({ gwc: remote.gwc, data: from(staticData) }, newLocal.time);
+          // SSD should now have the 'fred' operation as a 'last operation'
+          // The remote deletes fred...
+          await ssd.apply(remote.sentOperation(
+            `{"tid":"${firstTid}","o":"Fred","p":"#name","s":"fred"}`, '{}'),
+            newLocal.time, newLocal.tick().time);
+          // Finally the local gets its own data back in a rev-up, which still
+          // includes the insert of fred, plus barney who it forgot about
+          const firstTick = local.time.ticks;
+          local.tick();
+          await ssd.apply(new OperationMessage(0, // genesis, i.e. before Fred
+            [2, firstTick, local.time.toJSON(), '{}', `[
+              {"tid":"${firstTid}","o":"Fred","p":"#name","s":"fred"},
+              {"tid":"${local.time.hash()}","o":"Barney","p":"#name","s":"barney"}]`]),
+            newLocal.time, newLocal.tick().time);
+          // Result should not include fred because of the remote delete
+          await expect(ssd.read<Describe>({
+            '@describe': 'http://test.m-ld.org/fred'
           }).pipe(toArray()).toPromise()).resolves.toEqual([]);
         });
       });

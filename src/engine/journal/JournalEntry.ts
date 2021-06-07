@@ -2,7 +2,7 @@ import { MeldOperation } from '../MeldEncoding';
 import { JournalOperation, TickTid } from './JournalOperation';
 import { OperationMessage } from '../index';
 import type { Journal, TickKey } from '.';
-import { EntryIndex, missingOperationError } from '.';
+import { EntryIndex, notFound } from '.';
 
 /**
  * Lightweight encoding of a transaction operation reference (TID) and the previous public tick
@@ -24,7 +24,7 @@ export class JournalEntry {
     if (operation != null)
       return new JournalEntry(journal, key, prev, operation);
     else
-      throw missingOperationError(tid);
+      throw notFound('operation', tid);
   }
 
   static fromOperation(journal: Journal,
