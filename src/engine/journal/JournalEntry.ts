@@ -48,7 +48,7 @@ export class JournalEntry {
     return [this.prev, this.operation.tid];
   }
 
-  commit = this.journal.commitEntry(this);
+  commitTail = this.journal.commitEntry(this);
 
   static prev(json: JournalEntryJson) {
     const [prev] = json;

@@ -9,7 +9,7 @@ import { JrqlGraph } from './JrqlGraph';
 import { MeldEncoder, MeldOperation, TriplesTids, unreify } from '../MeldEncoding';
 import { EMPTY, merge, Observable, of, Subject as Source } from 'rxjs';
 import { bufferCount, expand, filter, map, mergeMap, takeWhile, toArray } from 'rxjs/operators';
-import { check, flatten, Future, getIdLogger, inflate } from '../util';
+import { check, flatten, Future, getIdLogger, inflate, inflateArray } from '../util';
 import { Logger } from 'loglevel';
 import { MeldError } from '../MeldError';
 import { LocalLock } from '../local';
@@ -270,7 +270,8 @@ export class SuSetDataset extends MeldEncoder {
       prepare: async txc => {
         txc.sw.next('decode-op');
         const journal = await this.journal.state();
-        const op = await this.applicableOperation(msg, localTime, journal);
+        this.log.debug(`Applying operation: ${msg.time} @ ${localTime}`);
+        const op = await journal.applicableOperation(MeldOperation.fromEncoded(this, msg.data));
 
         txc.sw.next('apply-txn');
         const patch = new PatchQuads();
@@ -312,23 +313,6 @@ export class SuSetDataset extends MeldEncoder {
         };
       }
     });
-  }
-
-  private async applicableOperation(
-    msg: OperationMessage, localTime: TreeClock, journal: JournalState) {
-    const op = MeldOperation.fromEncoded(this, msg.data);
-    this.log.debug(`Applying operation: ${op.time} @ ${localTime}`);
-    // Cut away stale parts of an incoming fused operation.
-    // Optimisation: no need to cut if incoming is not fused.
-    if (op.from < op.time.ticks) {
-      const seenTicks = journal.gwc.getTicks(msg.time);
-      // Seen ticks >= op.from (otherwise we would not be here)
-      const seenTid = msg.time.ticked(seenTicks).hash();
-      const seenOp = await this.journal.operation(seenTid);
-      if (seenOp != null)
-        return seenOp.cutSeen(op);
-    }
-    return op;
   }
 
   // The operation's delete contains reifications of deleted triples.
@@ -456,7 +440,8 @@ export class SuSetDataset extends MeldEncoder {
             const reified = this.reifyTriplesTids(asTriplesTids(tidQuads));
             return { inserts: this.bufferFromTriples(reified) };
           })),
-        journal.latestOperations().pipe(map(operation => ({ operation }))))
+        inflateArray(journal.latestOperations()).pipe(
+          map(operation => ({ operation }))))
     };
   }
 }

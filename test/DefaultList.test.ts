@@ -1,11 +1,10 @@
-import { MeldReadState, InterimUpdate, MeldUpdate } from '../src/api';
+import { InterimUpdate, MeldReadState, MeldUpdate, Update } from '../src';
 import { memStore } from './testClones';
 import { DefaultList } from '../src/constraints/DefaultList';
 import { JrqlGraph } from '../src/engine/dataset/JrqlGraph';
 import { GraphState } from '../src/engine/dataset/GraphState';
 import { Dataset } from '../src/engine/dataset';
 import { mock } from 'jest-mock-extended';
-import { Update } from '../src/jrql-support';
 import { SubjectGraph } from '../src/engine/SubjectGraph';
 
 // Note that DefaultList is quite heavily tested by MeldState.test.ts but not
@@ -229,7 +228,6 @@ describe('Default list constraint', () => {
         '@index': 0
       }
     });
-    //console.log(JSON.stringify(update.entail.mock.calls, null, ' '))
   });
 });
 

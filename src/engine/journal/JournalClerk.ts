@@ -56,14 +56,14 @@ export class JournalClerk {
     } = {}) {
     const adminDebounce = config.journal?.adminDebounce ?? 1000;
     // Default checkpoints are general admin debounced after last entry
-    checkpoints ??= journal.entries.pipe(
+    checkpoints ??= journal.tail.pipe(
       map(() => CheckPoint.ADMIN),
       debounceTime(adminDebounce));
     // Try to schedule everything (except save points) in idle time.
     const awaitSchedule = schedule?.pipe(take(1)) ??
       // Chrome sometimes never calls the idle callback, blocking activity, so time out
       race(idling(), timer(adminDebounce).pipe(tap(() => log.warn('Idle request timed out'))));
-    this.activity = merge(journal.entries, checkpoints).pipe(
+    this.activity = merge(journal.tail, checkpoints).pipe(
       // Redundant if the journal is closed first.
       takeUntil(this.closing),
       // Ensure administration has been completed
@@ -91,8 +91,9 @@ export class JournalClerk {
   private process(entry: JournalEntry | CheckPoint): Observable<ClerkAction> {
     if (typeof entry === 'number')
       return this.checkpoint(entry);
-    else
+    else {
       return this.processEntry(entry);
+    }
   }
 
   private processEntry(entry: JournalEntry) {

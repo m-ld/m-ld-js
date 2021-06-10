@@ -11,7 +11,9 @@ const Jasmine = require(require.resolve('jasmine', { paths: [COMPLIANCE_PATH] })
 const jasmine = new Jasmine();
 
 // Expected spec glob, default "*/*" (everything)
-const [, , specs] = process.argv;
+let [, , specs] = process.argv;
+specs = (specs || '*/*').replace(/(\d)(?=\/|$)/g, n => `${n}-*`);
+console.log('Running specs', specs);
 
 LOG.setLevel(process.env.LOG_LEVEL = process.env.LOG_LEVEL || LOG.levels.WARN);
 let orchestratorDebugPort, firstCloneDebugPort;

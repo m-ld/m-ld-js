@@ -3,7 +3,7 @@ import { memStore, MockProcess } from './testClones';
 import { MeldEncoder, MeldOperation } from '../src/engine/MeldEncoding';
 import { Dataset } from '../src/engine/dataset';
 import { TreeClock } from '../src/engine/clocks';
-import { take, toArray } from 'rxjs/operators';
+import { delay, take, toArray } from 'rxjs/operators';
 import { Observer, of, Subject } from 'rxjs';
 import { CheckPoint, JournalClerk } from '../src/engine/journal/JournalClerk';
 
@@ -27,13 +27,14 @@ describe('Dataset Journal', () => {
     return MeldOperation.fromEncoded(encoder, process.operated('{}', '{}'));
   }
 
-  function addEntry(local: MockProcess, op: MeldOperation) {
-    local.join(op.time);
+  function addEntry(local: MockProcess, remote?: MockProcess) {
+    const op = noopAt(remote ?? local);
+    const localTime = remote ? local.join(op.time).tick().time : local.time;
     return store.transact({
       prepare: () => ({
         async kvps(batch) {
           const state = await journal.state();
-          return state.builder().next(op, local.time).commit(batch);
+          return state.builder().next(op, localTime).commit(batch);
         },
         return: op
       })
@@ -48,8 +49,8 @@ describe('Dataset Journal', () => {
       const checkpoints = new Subject<CheckPoint>();
       super(journal, { '@id': 'test' }, {
         checkpoints,
-        // Respond immediately to entries and checkpoints
-        schedule: of(0)
+        // Respond immediately (async) to entries and checkpoints
+        schedule: of(0).pipe(delay(0))
       });
       this.checkpoints = checkpoints;
     }
@@ -90,7 +91,7 @@ describe('Dataset Journal', () => {
 
     test('clerk does not dispose contiguous op', async () => {
       const clerk = new TestClerk();
-      await addEntry(local, noopAt(remote));
+      await addEntry(local, remote);
       // Close is the only way to ensure activity is processed
       await clerk.close();
       const op = await journal.operation(pastOp.time.hash());
@@ -99,9 +100,9 @@ describe('Dataset Journal', () => {
 
     test('clerk disposes non-contiguous op', async () => {
       const clerk = new TestClerk();
-      await addEntry(local, noopAt(local));
+      await addEntry(local);
       remote.join(local.time).tick(true); // Breaks the causal chain at the remote
-      await addEntry(local, noopAt(remote));
+      await addEntry(local, remote);
       // Close is the only way to ensure clerk activity is fully processed
       await clerk.close();
       const op = await journal.operation(pastOp.time.hash());
@@ -136,14 +137,14 @@ describe('Dataset Journal', () => {
 
       beforeEach(() => {
         // Don't return the promise because Jest will wait for it
-        commitOp = addEntry(local, noopAt(local));
+        commitOp = addEntry(local);
       });
 
       test('emits observable entry', async () => {
-        const entry = await journal.entries.pipe(take(1)).toPromise();
+        const entry = await journal.tail.pipe(take(1)).toPromise();
         const op = await commitOp;
         expect(entry).toBeDefined();
-        expect(entry.prev).toEqual([local.prev, TreeClock.GENESIS.hash()]);
+        expect(entry.prev).toEqual([0, TreeClock.GENESIS.hash()]);
         expect(entry.operation.time.equals(local.time)).toBe(true);
         expect(entry.operation.operation).toEqual(op.encoded);
         expect(entry.operation.tid).toEqual(op.time.hash());
@@ -161,33 +162,30 @@ describe('Dataset Journal', () => {
       test('has prev details for entry', async () => {
         const op = await commitOp;
         const [prevTick, prevTid] = await journal.entryPrev(op.time.hash()) ?? [];
-        expect(prevTick).toBe(local.prev);
+        expect(prevTick).toBe(0);
         expect(prevTid).toBe(TreeClock.GENESIS.hash());
       });
 
       test('has saved the first entry', async () => {
         const entry = await commitOp.then(() => journal.entryAfter());
-        if (entry == null) return fail();
-        expect(entry.prev).toEqual([local.prev, TreeClock.GENESIS.hash()]);
+        expect(entry!.prev).toEqual([local.prev, TreeClock.GENESIS.hash()]);
       });
 
       test('has the operation', async () => {
         const op = await commitOp;
         const saved = await journal.operation(op.time.hash());
-        if (saved == null) return fail();
-        expect(saved.time.equals(local.time)).toBe(true);
-        expect(saved.operation).toEqual(op.encoded);
-        expect(saved.tid).toEqual(op.time.hash());
-        expect(saved.tick).toEqual(local.time.ticks);
-        expect(saved.from).toBe(local.time.ticks);
+        expect(saved!.time.equals(local.time)).toBe(true);
+        expect(saved!.operation).toEqual(op.encoded);
+        expect(saved!.tid).toEqual(op.time.hash());
+        expect(saved!.tick).toEqual(local.time.ticks);
+        expect(saved!.from).toBe(local.time.ticks);
       });
 
       test('can get operation past', async () => {
         const op = await commitOp;
         const saved = await journal.operation(op.time.hash());
-        if (saved == null) return fail();
         // Fused past of a single op is just the op
-        await expect(saved.fusedPast()).resolves.toEqual(op.encoded);
+        await expect(saved!.fusedPast()).resolves.toEqual(op.encoded);
       });
 
       test('reconstitutes the m-ld operation', async () => {
@@ -210,9 +208,9 @@ describe('Dataset Journal', () => {
 
       beforeEach(async () => {
         remote = local.fork();
-        const expectEntries = journal.entries.pipe(take(2), toArray()).toPromise();
-        localOp = await addEntry(local, noopAt(local));
-        remoteOp = await addEntry(local, noopAt(remote));
+        const expectEntries = journal.tail.pipe(take(2), toArray()).toPromise();
+        localOp = await addEntry(local);
+        remoteOp = await addEntry(local, remote);
         [localEntry, remoteEntry] = await expectEntries;
       });
 
@@ -224,22 +222,21 @@ describe('Dataset Journal', () => {
         const seenTicks = state.gwc.getTicks(fused.time);
         const seenTid = fused.time.ticked(seenTicks).hash();
         const seenOp = await journal.operation(seenTid);
-        if (seenOp == null) return fail();
-        const cut = await seenOp.cutSeen(fused);
+        const cut = await seenOp!.cutSeen(fused);
         expect(cut.encoded).toEqual(next.encoded);
       });
 
       test('can get fused operation past', async () => {
-        const next = await addEntry(local, noopAt(local));
+        await addEntry(local);
+        const next = await addEntry(local, remote);
         const saved = await journal.operation(next.time.hash());
-        if (saved == null) return fail();
-        const expectedFused = MeldOperation.fromOperation(encoder, localOp.fuse(next));
-        await expect(saved.fusedPast()).resolves.toEqual(expectedFused.encoded);
+        const expectedFused = MeldOperation.fromOperation(encoder, remoteOp.fuse(next));
+        await expect(saved!.fusedPast()).resolves.toEqual(expectedFused.encoded);
       });
 
       test('can splice in a fused operation', async () => {
-        const expectNext = journal.entries.pipe(take(1)).toPromise();
-        const nextOp = await addEntry(local, noopAt(remote));
+        const expectNext = journal.tail.pipe(take(1)).toPromise();
+        const nextOp = await addEntry(local, remote);
         const nextEntry = await expectNext;
         const fused = MeldOperation.fromOperation(encoder, remoteOp.fuse(nextOp));
 
@@ -248,8 +245,7 @@ describe('Dataset Journal', () => {
           JournalEntry.fromOperation(journal, nextEntry.key, remoteEntry.prev, fused));
 
         const read = await journal.operation(nextOp.time.hash());
-        if (read == null) return fail();
-        expect(read.operation).toEqual(fused.encoded);
+        expect(read!.operation).toEqual(fused.encoded);
       });
     });
 
@@ -262,7 +258,7 @@ describe('Dataset Journal', () => {
 
       test('does nothing on first local entry', async () => {
         const willBeActive = clerk.activity.pipe(toArray()).toPromise();
-        await addEntry(local, noopAt(local));
+        await addEntry(local);
         // Close is the only way to ensure activity is processed
         await clerk.close();
         await expect(willBeActive).resolves.toHaveLength(0);
@@ -270,9 +266,9 @@ describe('Dataset Journal', () => {
 
       test('appends local entries to fusion', async () => {
         const willBeActive = clerk.activity.pipe(toArray()).toPromise();
-        await addEntry(local, noopAt(local));
-        await addEntry(local, noopAt(local));
-        await addEntry(local, noopAt(local));
+        await addEntry(local);
+        await addEntry(local);
+        await addEntry(local);
         // Close incurs a savepoint, hence expecting a commit
         await clerk.close();
         const activity = await willBeActive;
@@ -282,18 +278,17 @@ describe('Dataset Journal', () => {
         expect(activity[2].action).toBe('committed');
 
         const entry = await journal.entryAfter(); // Gets first entry
-        if (entry == null) return fail();
         // Expect the entry to be a fusion of all three
-        expect(entry.operation.time.equals(local.time)).toBe(true);
-        expect(entry.prev).toEqual([0, TreeClock.GENESIS.hash()]);
+        expect(entry!.operation.time.equals(local.time)).toBe(true);
+        expect(entry!.prev).toEqual([0, TreeClock.GENESIS.hash()]);
       });
 
       test('appends remote entries to fusion', async () => {
         const remote = local.fork();
         const willBeActive = clerk.activity.pipe(toArray()).toPromise();
-        await addEntry(local, noopAt(local));
-        await addEntry(local, noopAt(remote));
-        await addEntry(local, noopAt(remote));
+        await addEntry(local);
+        await addEntry(local, remote);
+        await addEntry(local, remote);
         // Close incurs a savepoint, hence expecting a commit
         await clerk.close();
         const activity = await willBeActive;
@@ -301,16 +296,42 @@ describe('Dataset Journal', () => {
         expect(activity[0].action).toBe('appended');
 
         const entry = await journal.entryAfter(local.time.ticks - 1);
-        if (entry == null) return fail();
         // Expect the entry to be a fusion of the two remote entries
-        expect(entry.operation.time.equals(remote.time)).toBe(true);
-        expect(entry.prev).toEqual([0, TreeClock.GENESIS.hash()]);
+        expect(entry!.operation.time.equals(remote.time)).toBe(true);
+        expect(entry!.prev).toEqual([0, TreeClock.GENESIS.hash()]);
+      });
+
+      test('follows one fusion with another', async () => {
+        const second = local.fork();
+        const third = local.fork();
+        const willBeActive = clerk.activity.pipe(toArray()).toPromise();
+        await addEntry(local, second);
+        await addEntry(local, second);
+        await addEntry(local, third);
+        await addEntry(local, third);
+        // Close incurs a savepoint, hence expecting a commit
+        await clerk.close();
+        const activity = await willBeActive;
+        expect(activity).toHaveLength(4);
+        expect(activity[0].action).toBe('appended');
+        expect(activity[1].action).toBe('committed');
+        expect(activity[2].action).toBe('appended');
+        expect(activity[3].action).toBe('committed');
+
+        let entry = await journal.entryAfter();
+        // Expect the first entry to be a fusion of the two second entries
+        expect(entry!.operation.time.equals(second.time)).toBe(true);
+        expect(entry!.prev).toEqual([0, TreeClock.GENESIS.hash()]);
+        entry = await entry!.next();
+        // Expect the second entry to be a fusion of the two third entries
+        expect(entry!.operation.time.equals(third.time)).toBe(true);
+        expect(entry!.prev).toEqual([0, TreeClock.GENESIS.hash()]);
       });
 
       test('commits savepoint when instructed', async () => {
         const willBeActive = clerk.activity.pipe(take(2), toArray()).toPromise();
-        await addEntry(local, noopAt(local));
-        await addEntry(local, noopAt(local));
+        await addEntry(local);
+        await addEntry(local);
         clerk.checkpoints.next(CheckPoint.SAVEPOINT);
 
         const activity = await willBeActive;
@@ -318,10 +339,9 @@ describe('Dataset Journal', () => {
         expect(activity[1].action).toBe('committed');
 
         const entry = await journal.entryAfter(); // Gets first entry
-        if (entry == null) return fail();
         // Expect the entry to be a fusion of all three
-        expect(entry.operation.time.equals(local.time)).toBe(true);
-        expect(entry.prev).toEqual([0, TreeClock.GENESIS.hash()]);
+        expect(entry!.operation.time.equals(local.time)).toBe(true);
+        expect(entry!.prev).toEqual([0, TreeClock.GENESIS.hash()]);
       });
     });
   });

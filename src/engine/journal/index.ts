@@ -49,7 +49,7 @@ export class Journal {
   /** Journal state cache */
   private _state: JournalState | null = null;
   /** Entries being created */
-  private _entries = new Source<JournalEntry>();
+  private _tail = new Source<JournalEntry>();
 
   constructor(
     private readonly store: KvpStore,
@@ -63,13 +63,13 @@ export class Journal {
 
   close(err?: any) {
     if (err)
-      this._entries.error(err);
+      this._tail.error(err);
     else
-      this._entries.complete();
+      this._tail.complete();
   }
 
-  get entries(): Observable<JournalEntry> {
-    return this._entries;
+  get tail(): Observable<JournalEntry> {
+    return this._tail;
   }
 
   decode(op: EncodedOperation) {
@@ -125,13 +125,14 @@ export class Journal {
     });
   }
 
-  commitEntry(entry: JournalEntry): Kvps {
+  commitEntry(entry: JournalEntry, isTail = true): Kvps {
     return batch => {
       const encoded = MsgPack.encode(entry.json);
       batch.put(entry.key, encoded);
       batch.put(tidEntryKey(entry.operation.tid), encoded);
       entry.operation.commit(batch);
-      this._entries.next(entry);
+      if (isTail)
+        this._tail.next(entry);
     };
   }
 
@@ -144,7 +145,7 @@ export class Journal {
           batch.del(tidOpKey(tid));
         }
         if (insert != null)
-          insert.commit(batch);
+          this.commitEntry(insert, false)(batch);
       }
     }));
   }
@@ -182,6 +183,7 @@ export class Journal {
   }
 
   /**
+   * MUST be called `withLockedHistory`.
    * @param op the operation whose causal history to operate on
    * @param createOperator creates a causal reduction operator from the given first operation
    * @param minFrom the least required value of the range of the operation with
@@ -191,27 +193,25 @@ export class Journal {
   async causalReduce(op: JournalOperation,
     createOperator: (first: MeldOperation) => CausalOperator<Triple, TreeClock>,
     minFrom = 1): Promise<MeldOperation> {
-    return this.withLockedHistory(async () => {
-      // Work backward through the journal to find the first transaction ID (and associated tick)
-      // that is causally contiguous with this one.
-      const seekToFrom = async (tick: number, tid: string): Promise<TickTid> => {
-        const [prevTick, prevTid] = await this.entryPrev(tid) ?? [];
-        if (prevTid == null || prevTick == null || prevTick < minFrom || prevTick < tick - 1)
-          return [tick, tid]; // This is as far back as we have
-        else
-          // Get previous tick for given tick (or our tick)
-          return seekToFrom(prevTick, prevTid);
-      };
-      let [tick, tid] = await seekToFrom(op.tick, op.tid);
-      // Begin the operation and fast-forward
-      const operator = createOperator(await this.meldOperation(tid));
-      while (tid !== op.tid) {
-        tid = op.time.ticked(++tick).hash();
-        operator.next(tid === op.tid ?
-          op.asMeldOperation() : await this.meldOperation(tid));
-      }
-      return { return: this.toMeldOperation(operator.commit()) };
-    });
+    // Work backward through the journal to find the first transaction ID (and associated tick)
+    // that is causally contiguous with this one.
+    const seekToFrom = async (tick: number, tid: string): Promise<TickTid> => {
+      const [prevTick, prevTid] = await this.entryPrev(tid) ?? [];
+      if (prevTid == null || prevTick == null || prevTick < minFrom || prevTick < tick - 1)
+        return [tick, tid]; // This is as far back as we have
+      else
+        // Get previous tick for given tick (or our tick)
+        return seekToFrom(prevTick, prevTid);
+    };
+    let [tick, tid] = await seekToFrom(op.tick, op.tid);
+    // Begin the operation and fast-forward
+    const operator = createOperator(await this.meldOperation(tid));
+    while (tid !== op.tid) {
+      tid = op.time.ticked(++tick).hash();
+      operator.next(tid === op.tid ?
+        op.asMeldOperation() : await this.meldOperation(tid));
+    }
+    return this.toMeldOperation(operator.commit());
   }
 
   /**
@@ -219,7 +219,7 @@ export class Journal {
    * It's OK for history to be appended without this lock.
    * @param prepare the transaction procedure
    */
-  private withLockedHistory<T = unknown>(
+  withLockedHistory<T = unknown>(
     prepare: (txc: TxnContext) => KvpResult<T> | Promise<KvpResult<T>>) {
     return this.store.transact({ lock: 'journal-body', prepare });
   }

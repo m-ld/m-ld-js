@@ -2,12 +2,8 @@ import { GlobalClock, GlobalClockJson, TreeClock, TreeClockJson } from '../clock
 import { Kvps } from '../dataset';
 import { JournalEntry } from './JournalEntry';
 import { MeldOperation } from '../MeldEncoding';
-import { Observable } from 'rxjs';
 import { EncodedOperation } from '../index';
-import { filter, mergeMap } from 'rxjs/operators';
-import { JournalOperation } from './JournalOperation';
 import { Journal, tickKey } from '.';
-import { inflate } from '../util';
 
 interface JournalStateJson {
   /**
@@ -80,17 +76,35 @@ export class JournalState {
       /** Commits the built journal entries to the journal */
       commit: Kvps = async batch => {
         for (let entry of this.entries)
-          entry.commit(batch);
+          entry.commitTail(batch);
 
         state.withTime(this.localTime, this.gwc).commit(batch);
       };
     };
   }
 
-  latestOperations(): Observable<EncodedOperation> {
-    // From each op, emit a fusion of all contiguous ops up to the op
-    return inflate(this.gwc.tids(), tid => this.journal.operation(tid)).pipe(
-      filter<JournalOperation>(op => op != null),
-      mergeMap(op => op.fusedPast()));
+  applicableOperation(op: MeldOperation): Promise<MeldOperation> {
+    return this.journal.withLockedHistory(async () => {
+      // Cut away stale parts of an incoming fused operation.
+      // Optimisation: no need to cut if incoming is not fused.
+      if (op.from < op.time.ticks) {
+        const seenTicks = this.gwc.getTicks(op.time);
+        // Seen ticks >= op.from (otherwise we would not be here)
+        const seenTid = op.time.ticked(seenTicks).hash();
+        const seenOp = await this.journal.operation(seenTid);
+        if (seenOp != null)
+          return { return: await seenOp.cutSeen(op) };
+      }
+      return { return: op };
+    });
+  }
+
+  latestOperations(): Promise<EncodedOperation[]> {
+    return this.journal.withLockedHistory(async () => {
+      // For each latest op, emit a fusion of all contiguous ops up to it
+      const ops = await Promise.all([...this.gwc.tids()].map(
+        async tid => (await this.journal.operation(tid))?.fusedPast()));
+      return { return: ops.filter((op): op is EncodedOperation => op != null) };
+    });
   }
 }
