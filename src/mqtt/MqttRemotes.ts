@@ -1,22 +1,34 @@
 /**
  * [[include:mqtt-remotes.md]]
- * @packageDocumentation
+ * @module MqttRemotes
  */
 import { Observable } from 'rxjs';
-import { AsyncMqttClient, IClientOptions, ISubscriptionMap, connect as defaultConnect } from 'async-mqtt';
-import { MqttTopic, SEND_TOPIC, REPLY_TOPIC, SendAddressParams, } from './MqttTopic';
+import {
+  AsyncMqttClient, connect as defaultConnect, IClientOptions, ISubscriptionMap
+} from 'async-mqtt';
+import { MqttTopic, REPLY_TOPIC, SEND_TOPIC, SendAddressParams } from './MqttTopic';
 import { TopicParams } from 'mqtt-pattern';
 import { MqttPresence } from './MqttPresence';
 import { MeldConfig } from '..';
-import { ReplyParams, PubsubRemotes, SubPub, NotifyParams, SendParams } from '../engine/PubsubRemotes';
+import { NotifyParams, PubsubRemotes, ReplyParams, SendParams, SubPub } from '../engine/remotes';
 
 export interface MeldMqttConfig extends MeldConfig {
-  mqtt?: Omit<IClientOptions, 'will' | 'clientId'> & ({ hostname: string } | { host: string, port: number })
+  mqtt?: Omit<IClientOptions, 'will' | 'clientId'> &
+    ({ hostname: string } | { host: string, port: number })
 }
 
-interface DomainTopicParams extends TopicParams { domain: string; }
-interface NoEchoTopicParams extends DomainTopicParams { clientId: string; }
-interface NotifyTopicParams extends DomainTopicParams { channelId: string; }
+interface DomainTopicParams extends TopicParams {
+  domain: string;
+}
+
+interface NoEchoTopicParams extends DomainTopicParams {
+  clientId: string;
+}
+
+interface NotifyTopicParams extends DomainTopicParams {
+  channelId: string;
+}
+
 const OPERATIONS_TOPIC =
   new MqttTopic<NoEchoTopicParams>({ '+': 'domain' }, 'operations', { '+': 'clientId' });
 const CONTROL_TOPIC =
@@ -33,8 +45,7 @@ export class MqttRemotes extends PubsubRemotes {
   private readonly replyTopic: MqttTopic<ReplyParams & TopicParams>;
   private readonly presence: MqttPresence;
 
-  constructor(config: MeldMqttConfig,
-    connect: (opts: IClientOptions) => AsyncMqttClient = defaultConnect) {
+  constructor(config: MeldMqttConfig, connect = defaultConnect) {
     super(config);
 
     const { id, domain } = this;
@@ -83,14 +94,14 @@ export class MqttRemotes extends PubsubRemotes {
       };
       const grants = await this.mqtt.subscribe(subscriptions);
       if (!grants.every(grant => subscriptions[grant.topic].qos == grant.qos))
+        // noinspection ExceptionCaughtLocallyJS
         throw new Error('Requested QoS was not granted');
       // We don't have to wait for the presence to initialise
       this.presence.initialise().catch(this.warnError);
       await super.onConnect();
-    }
-    catch (err) {
+    } catch (err) {
       if (this.mqtt.connected)
-        this.close(err); // This is a catastrophe, can't bootstrap
+        this.close(err).catch(this.warnError); // This is a catastrophe, can't bootstrap
       else
         this.log.debug(err);
     }
@@ -130,8 +141,7 @@ export class MqttRemotes extends PubsubRemotes {
     }).address;
     return {
       id: address,
-      publish: request => this.mqtt.publish(address, request),
-      close: () => { }
+      publish: request => this.mqtt.publish(address, request)
     };
   }
 
@@ -139,8 +149,7 @@ export class MqttRemotes extends PubsubRemotes {
     const address = REPLY_TOPIC.with({ ...params }).address;
     return {
       id: address,
-      publish: res => this.mqtt.publish(address, res),
-      close: () => { }
+      publish: res => this.mqtt.publish(address, res)
     };
   }
 }

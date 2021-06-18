@@ -127,7 +127,7 @@ describe('WebRTC peering', () => {
       peerEvents.emit('connect');
       const notifier = await notifierPromise;
       peerEvents.on('close', done);
-      notifier.close();
+      notifier.close?.();
     });
   });
 });

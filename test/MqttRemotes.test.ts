@@ -10,7 +10,7 @@ import { comesAlive } from '../src/engine/AbstractMeld';
 import { MeldErrorStatus } from '@m-ld/m-ld-spec';
 import { Request, Response } from '../src/engine/ControlMessage';
 import { Future, MsgPack } from '../src/engine/util';
-import { JsonNotification } from '../src/engine/PubsubRemotes';
+import { JsonNotification } from '../src/engine/remotes';
 
 /**
  * These tests also test the abstract base class, PubsubRemotes

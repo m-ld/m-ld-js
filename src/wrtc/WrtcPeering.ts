@@ -1,10 +1,10 @@
 import { Logger } from 'loglevel';
+import type { Instance as Peer, Options as PeerOpts, SignalData } from 'simple-peer';
 import * as SimplePeer from 'simple-peer';
 import { getIdLogger } from '../engine/util';
-import type { Instance as Peer, Options as PeerOpts, SignalData } from 'simple-peer';
-import type { MeldConfig } from '..';
-import type { SubPub, NotifyParams } from '../engine/PubsubRemotes';
 import { timer } from 'rxjs';
+import type { MeldConfig } from '..';
+import type { NotifyParams, SubPub } from '../engine/remotes';
 
 export type CreatePeer = (opts?: PeerOpts) => Peer;
 
@@ -68,7 +68,7 @@ export class WrtcPeering {
       // Wait a bit before destroying so the socket flushes
       // https://github.com/feross/simple-peer/blob/9ea1805d992a8164a42b750160ed3425f2a494f1/index.js#L580
       close: () => timer(1000).subscribe(() => peer.destroy())
-    }
+    };
   }
 
   signal(fromId: string, channelId: string, data: PeerSignal) {

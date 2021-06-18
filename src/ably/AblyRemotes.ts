@@ -1,13 +1,13 @@
 /**
  * [[include:ably-remotes.md]]
- * @packageDocumentation
+ * @module AblyRemotes
  * @internal
  */
 import * as Ably from 'ably';
 import { MeldConfig } from '..';
 import {
   NotifyParams, PeerParams, PubsubRemotes, ReplyParams, SendParams, SubPub
-} from '../engine/PubsubRemotes';
+} from '../engine/remotes';
 import { Observable } from 'rxjs';
 import { filter, map } from 'rxjs/operators';
 import { AblyTraffic, AblyTrafficConfig } from './AblyTraffic';
@@ -151,7 +151,7 @@ export class AblyRemotes extends PubsubRemotes implements PeerSignaller {
     }
   }
 
-  private fromParams(params: PeerTypeParams): { msgName: string, subPubId: string } {
+  private static fromParams(params: PeerTypeParams): { msgName: string, subPubId: string } {
     switch (params.type) {
       case '__send':
         return { subPubId: params.toId, msgName: `__send:${params.messageId}` };
@@ -166,11 +166,10 @@ export class AblyRemotes extends PubsubRemotes implements PeerSignaller {
 
   private directSubPub(params: PeerTypeParams): SubPub {
     const channel = this.channel(params.toId);
-    const { subPubId, msgName } = this.fromParams(params);
+    const { subPubId, msgName } = AblyRemotes.fromParams(params);
     return {
       id: subPubId,
-      publish: msg => this.duplexPublish(channel, msgName, msg),
-      close: () => { }
+      publish: msg => this.duplexPublish(channel, msgName, msg)
     };
   }
 
@@ -205,7 +204,7 @@ export class AblyRemotes extends PubsubRemotes implements PeerSignaller {
 
   /** implements PeerSignaller.signal */
   signal(peerId: string, channelId: string, data: PeerSignal) {
-    const { msgName } = this.fromParams({
+    const { msgName } = AblyRemotes.fromParams({
       type: '__signal', channelId, fromId: this.id, toId: peerId
     });
     return this.duplexPublish(this.channel(peerId), msgName, data);

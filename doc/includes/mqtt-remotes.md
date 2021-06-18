@@ -5,7 +5,9 @@ the deployment environment has an MQTT broker available. See below for specific
 broker requirements.
 
 The `MqttRemotes` class and its companion configuration class `MeldMqttConfig`
-can be imported or required from `'@m-ld/m-ld/dist/mqtt'`.
+can be imported or required from `'@m-ld/m-ld/dist/mqtt'`. You must also 
+install the [`async-mqtt`](https://www.npmjs.com/package/async-mqtt) package 
+as a peer of `@m-ld/m-ld`.
 
 The configuration interface adds an `mqtt` key to the base
 [`MeldConfig`](interfaces/meldconfig.html). The content of this key is a client

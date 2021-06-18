@@ -1,51 +1,24 @@
-import { MeldLocal, MeldRemotes, OperationMessage, Revup, Snapshot } from '.';
+import { MeldLocal, MeldRemotes, OperationMessage, Revup, Snapshot } from '../index';
 import {
   BehaviorSubject, defer, EMPTY, from, identity, Observable, Observer, of, onErrorResumeNext,
   Subject as Source, Subscription
 } from 'rxjs';
-import { TreeClock } from './clocks';
+import { TreeClock } from '../clocks';
 import { generate as uuid } from 'short-uuid';
-import { Request, Response } from './ControlMessage';
-import { Future, MsgPack, Stopwatch, toJSON } from './util';
+import { Request, Response } from '../ControlMessage';
+import { Future, MsgPack, Stopwatch, toJSON } from '../util';
 import {
   concatMap, delay, finalize, first, map, materialize, reduce, timeout, toArray
 } from 'rxjs/operators';
-import { MeldError, MeldErrorStatus } from './MeldError';
-import { AbstractMeld } from './AbstractMeld';
-import { MeldConfig, shortId } from '..';
-
-// @see org.m_ld.json.MeldJacksonModule.NotificationDeserializer
-export interface JsonNotification {
-  next?: any;
-  complete?: true;
-  error?: any;
-}
-
-/** Parameters for sending, receiving and notifying a peer */
-export interface PeerParams {
-  toId: string;
-  fromId: string;
-}
-
-/** Parameters for sending a single message */
-export interface SendParams extends PeerParams {
-  messageId: string;
-}
-
-/** Parameters for replying to a message */
-export interface ReplyParams extends SendParams {
-  sentMessageId: string;
-}
-
-/** Parameters for multiple messages on some channel */
-export interface NotifyParams extends PeerParams {
-  channelId: string;
-}
+import { MeldError, MeldErrorStatus } from '../MeldError';
+import { AbstractMeld } from '../AbstractMeld';
+import { MeldConfig, shortId } from '../../index';
+import { JsonNotification, NotifyParams, ReplyParams, SendParams } from './PubsubParams';
 
 export interface SubPub {
   readonly id: string;
   publish(msg: Buffer): Promise<unknown>;
-  close(): void;
+  close?(): void;
 }
 
 /** A m-ld ack is a reply to a reply with a null body */
@@ -337,7 +310,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     sw.next('send');
     const sent = sender
       .publish(MsgPack.encode(request.toJSON()))
-      .finally(() => sender.close());
+      .finally(() => sender.close?.());
     tried[sender.id] = this.getResponse<T>(sent, messageId, { readyToAck })
       .then(res => ({ res, fromId: sender.id }));
     // If the publish fails, don't keep trying other addresses
@@ -440,7 +413,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     const src = this.consuming[channelId] = new Source;
     const complete = () => {
       // TODO unit test this
-      notifier.close();
+      notifier.close?.();
       delete this.consuming[channelId];
     };
     onErrorResumeNext(src, EMPTY).subscribe({ complete });
@@ -478,7 +451,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
           case 'C': return notifyComplete();
         }
       }),
-      finalize(() => notifier.close()))
+      finalize(() => notifier.close?.()))
       .toPromise();
   }
 
@@ -489,7 +462,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     this.log.debug('Replying response', messageId, 'to', sentMessageId, res, replier.id);
     return replier
       .publish(MsgPack.encode(res == null ? null : res.toJSON()))
-      .finally(() => replier.close());
+      .finally(() => replier.close?.());
   }
 
   private async getAck<T>(
