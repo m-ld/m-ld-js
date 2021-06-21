@@ -35,7 +35,8 @@ Plug-ins such as remotes implementations in this repository are structured as:
 - Entries in `package.json#exports` like `"./dist/socket.io": "./dist/socket.
   io/index.js"`
 - Dependencies in `package.json#peerDependencies` and marked `optional` in
-  `package.json#peerDependenciesMeta`
+  `package.json#peerDependenciesMeta`. Also in `package.json#devDependencies` 
+  for unit tests.
 
 ## scripts
 Scripts are run with `npm`.

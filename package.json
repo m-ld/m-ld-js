@@ -39,7 +39,9 @@
     "@types/memdown": "^3.0.0",
     "@types/n3": "^1.4.4",
     "@types/readable-stream": "^2.3.9",
+    "ably": "^1.2.10",
     "aedes": "^0.45.0",
+    "async-mqtt": "^2.6.1",
     "browser-sync": "^2.26.14",
     "concurrently": "^6.0.1",
     "jest": "^26.6.3",
@@ -49,6 +51,8 @@
     "n3": "^1.8.0",
     "onchange": "^7.1.0",
     "restify": "^8.5.1",
+    "simple-peer": "^9.11.0",
+    "socket.io": "^4.1.2",
     "tmp": "^0.2.1",
     "ts-jest": "^26.5.0",
     "typedoc": "^0.19.2",
@@ -67,6 +71,7 @@
     }
   },
   "dependencies": {
+    "@ably/msgpack-js": "^0.3.4",
     "@m-ld/m-ld-spec": "^0.6.3-0",
     "@types/abstract-leveldown": "^5.0.1",
     "@types/detect-node": "^2.0.0",
