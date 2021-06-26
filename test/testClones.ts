@@ -1,6 +1,6 @@
 import { EncodedOperation, MeldLocal, MeldRemotes, OperationMessage } from '../src/engine';
 import { mock, MockProxy } from 'jest-mock-extended';
-import { asapScheduler, BehaviorSubject, from, NEVER, Observable } from 'rxjs';
+import { asapScheduler, BehaviorSubject, from, NEVER, Observable, Observer } from 'rxjs';
 import { Dataset, QuadStoreDataset } from '../src/engine/dataset';
 import MemDown from 'memdown';
 import { GlobalClock, TreeClock } from '../src/engine/clocks';
@@ -23,7 +23,7 @@ export function mockRemotes(
   // This weirdness is due to jest-mock-extended trying to mock arrays
   return {
     ...mock<MeldRemotes>(),
-    setLocal: () => { },
+    setLocal: () => {},
     updates,
     live: Array.isArray(lives) ? hotLive(lives) : lives,
     newClock: () => Promise.resolve(newClock)
@@ -44,9 +44,11 @@ export async function memStore(opts?: {
 }
 
 export function mockLocal(
-  impl?: Partial<MeldLocal>, lives: Array<boolean | null> = [true]): MeldLocal {
+  impl?: Partial<MeldLocal>, lives: Array<boolean | null> = [true]):
+  MeldLocal & { liveSource: Observer<boolean | null> } {
+  const live = hotLive(lives);
   // This weirdness is due to jest-mock-extended trying to mock arrays
-  return { ...mock<MeldLocal>(), updates: NEVER, live: hotLive(lives), ...impl };
+  return { ...mock<MeldLocal>(), updates: NEVER, live, liveSource: live, ...impl };
 }
 
 /**

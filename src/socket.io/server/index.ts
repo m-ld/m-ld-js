@@ -27,11 +27,13 @@ export class IoRemotesService extends EventEmitter {
       // Pub-sub remotes requires an immediate notification of presence
       socket.emit('presence');
     });
-    ns.adapter.on('join-room', (room: string) => {
+    const roomChanged = (room: string) => {
       const [domain, path] = room.split('/', 2);
       if (path === 'present')
         ns.in(domain).emit('presence');
-    });
+    };
+    ns.adapter.on('join-room', roomChanged);
+    ns.adapter.on('leave-room', roomChanged);
   }
 
   private presentHandler(socket: Socket, domain: string) {
