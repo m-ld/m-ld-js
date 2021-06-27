@@ -1,3 +1,8 @@
+/**
+ * [[include:socketio-remotes.md]]
+ * @module IoRemotes
+ * @internal
+ */
 import type { NotifyParams, PeerParams, ReplyParams, SendParams } from '../engine/remotes';
 import { PubsubRemotes, SubPub } from '../engine/remotes';
 import { from, Observable } from 'rxjs';

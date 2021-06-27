@@ -1,4 +1,4 @@
-## Ably Remotes
+### Ably Remotes
 [Ably](https://www.ably.io/) provides infrastructure and APIs to power realtime
 experiences at scale. It is a managed service, and includes pay-as-you-go
 [developer pricing](https://www.ably.io/pricing). It is also convenient to use

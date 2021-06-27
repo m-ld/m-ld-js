@@ -1,4 +1,4 @@
-## MQTT Remotes
+### MQTT Remotes
 [MQTT](http://mqtt.org/) is a machine-to-machine (M2M)/"Internet of Things"
 connectivity protocol. It is convenient to use it for local development or if
 the deployment environment has an MQTT broker available. See below for specific

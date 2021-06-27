@@ -1,6 +1,7 @@
 /**
  * [[include:mqtt-remotes.md]]
  * @module MqttRemotes
+ * @internal
  */
 import { Observable } from 'rxjs';
 import {
