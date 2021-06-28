@@ -1,8 +1,9 @@
-import { any, MeldUpdate } from '../src/api';
+import {
+  any, Construct, Describe, Group, MeldUpdate, Reference, Select, Subject, Update
+} from '../src';
 import { ApiStateMachine } from '../src/engine/MeldState';
 import { memStore, mockRemotes, testConfig } from './testClones';
 import { DatasetEngine } from '../src/engine/dataset/DatasetEngine';
-import { Group, Subject, Select, Describe, Update, Reference, Construct } from '../src/jrql-support';
 import { DomainContext } from '../src/engine/MeldEncoding';
 import { Future } from '../src/engine/util';
 import { blankRegex, genIdRegex } from './testUtil';

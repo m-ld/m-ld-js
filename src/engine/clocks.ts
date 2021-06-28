@@ -121,7 +121,7 @@ export abstract class TickTree<T = unknown> {
           this.fork.right.equals(that.fork.right)));
   }
 
-  protected updateFromOther<O extends TickTree<unknown>>(other: O,
+  protected updateFromOther<O extends TickTree>(other: O,
     recurse: (tree: this, that: O) => this): [part: Fork<this> | T, localTicks: number] {
     return [
       other.fork === null ? this._part : new Fork(

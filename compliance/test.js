@@ -10,10 +10,39 @@ const COMPLIANCE_PATH = join(__dirname, ...COMPLIANCE_DIR);
 const Jasmine = require(require.resolve('jasmine', { paths: [COMPLIANCE_PATH] }));
 const jasmine = new Jasmine();
 
-// Expected spec glob, default "*/*" (everything)
-let [, , specs] = process.argv;
-specs = (specs || '*/*').replace(/(\d)(?=\/|$)/g, n => `${n}-*`);
-console.log('Running specs', specs);
+let [, , ...jasmineArgs] = process.argv;
+const jasmineConfig = {};
+let specs = [], filter = undefined;
+function specFile(spec) {
+  return join(COMPLIANCE_PATH, `${spec}.spec.js`);
+}
+for (let arg of jasmineArgs) {
+  const optionMatch = arg.match(/--([\w-]+)(?:="?([^"]+)"?)?/);
+  if (optionMatch != null) {
+    switch (optionMatch[1]) {
+      case 'reporter':
+        const Reporter = require(optionMatch[2]);
+        jasmine.addReporter(new Reporter());
+        break;
+      case 'filter':
+        filter = optionMatch[2];
+        console.log('Filter', filter);
+        break;
+      case 'stop-on-failure':
+        jasmineConfig.stopOnSpecFailure = (optionMatch[2] === 'true')
+        break;
+      case 'random':
+        jasmineConfig.random = (optionMatch[2] === 'true')
+        break;
+    }
+  } else {
+    const spec = arg.replace(/(\d)(?=\/|$)/g, n => `${n}-*`);
+    specs.push(specFile(spec));
+  }
+}
+if (!specs.length)
+  specs = [specFile('*/*')];
+console.log('Running specs', specs, 'with config', jasmineConfig);
 
 LOG.setLevel(process.env.LOG_LEVEL = process.env.LOG_LEVEL || LOG.levels.WARN);
 let orchestratorDebugPort, firstCloneDebugPort;
@@ -37,13 +66,10 @@ orchestrator.on('message', message => {
     case 'listening':
       try {
         process.env.MELD_ORCHESTRATOR_URL = httpUrl.toString();
-        jasmine.loadConfig({
-          failFast: true,
-          spec_files: [join(COMPLIANCE_PATH, `${specs || '*/*'}.spec.js`)]
-        });
+        jasmine.loadConfig(jasmineConfig);
         // Try to shut down normally when done
         jasmine.onComplete(() => orchestrator.kill());
-        jasmine.execute();
+        jasmine.execute(specs, filter);
       } catch (err) {
         LOG.error(err);
         orchestrator.kill();
