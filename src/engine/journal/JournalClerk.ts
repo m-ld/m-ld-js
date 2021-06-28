@@ -1,7 +1,5 @@
 import { EntryIndex, Journal, JournalEntry } from './index';
-import {
-  concatMap, debounceTime, defaultIfEmpty, endWith, map, share, take, takeUntil, tap
-} from 'rxjs/operators';
+import { concatMap, debounceTime, endWith, map, share, take, takeUntil, tap } from 'rxjs/operators';
 import { EMPTY, merge, Observable, of, race, Subject, timer } from 'rxjs';
 import { idling } from '../local';
 import { CausalOperator, CausalTimeRange } from '../ops';
@@ -11,7 +9,7 @@ import { getIdLogger, inflate } from '../util';
 import { array, MeldConfig } from '../../index';
 import { TickTid } from './JournalOperation';
 
-type JournalClerkConfig = Pick<MeldConfig, '@id' | 'logLevel' | 'journal'>;
+export type JournalClerkConfig = Pick<MeldConfig, '@id' | 'logLevel' | 'journal'>;
 
 export class ClerkAction {
   constructor(
@@ -40,10 +38,12 @@ export enum CheckPoint {
 export class JournalClerk {
   readonly activity: Observable<ClerkAction>;
   private fusion: Fusion | undefined;
-  private closing = new Subject;
+  private readonly closing = new Subject;
+  /** @see JournalConfig.maxEntryFootprint */
+  readonly maxEntryFootprint: number;
 
   constructor(
-    private readonly journal: Journal,
+    readonly journal: Journal,
     config: JournalClerkConfig,
     { checkpoints, schedule }: {
       /** @see CheckPoint */
@@ -54,8 +54,9 @@ export class JournalClerk {
        */
       schedule?: Observable<unknown>
     } = {}) {
-    const adminDebounce = config.journal?.adminDebounce ?? 1000;
+    this.maxEntryFootprint = config.journal?.maxEntryFootprint ?? 10000;
     // Default checkpoints are general admin debounced after last entry
+    const adminDebounce = config.journal?.adminDebounce ?? 1000;
     checkpoints ??= journal.tail.pipe(
       map(() => CheckPoint.ADMIN),
       debounceTime(adminDebounce));
@@ -103,12 +104,11 @@ export class JournalClerk {
   }
 
   private checkpoint(entry: CheckPoint.ADMIN | CheckPoint.SAVEPOINT) {
-    return this.fusion == null ? EMPTY : this.fusion.commit().pipe(
-      map(action => {
-        if (entry === CheckPoint.SAVEPOINT)
-          delete this.fusion;
-        return action.clerkAction;
-      }));
+    return this.fusion == null ? EMPTY : inflate(this.fusion.commit(), action => {
+      if (entry === CheckPoint.SAVEPOINT || !this.fusion!.appendable)
+        delete this.fusion;
+      return array(action);
+    });
   }
 
   private disposePrevOperationIfIsolated(entry: JournalEntry): Observable<ClerkAction> {
@@ -121,26 +121,25 @@ export class JournalClerk {
     return EMPTY;
   }
 
-  private applyFusion(entry: JournalEntry): Observable<ClerkAction> {
+  private applyFusion(entry: JournalEntry): Observable<FusionAction> {
     if (this.fusion == null) {
-      this.fusion = new Fusion(this.journal, entry);
+      this.fusion = new Fusion(this, entry);
       return EMPTY;
     } else {
-      return inflate(this.fusion.next(entry).pipe(defaultIfEmpty<FusionAction | null>(null)),
-        action => {
-          // If no append happened, we must start a new fusion.
-          if (action?.action !== 'appended')
-            this.fusion = new Fusion(this.journal, entry);
-          return array(action?.clerkAction);
-        });
+      return inflate(this.fusion.next(entry), action => {
+        // If no append happened, we must start a new fusion.
+        if (action?.action !== 'appended')
+          this.fusion = new Fusion(this, entry);
+        return array(action);
+      });
     }
   }
 }
 
-interface FusionAction {
-  action: 'appended' | 'committed';
-  entry: JournalEntry;
-  clerkAction: ClerkAction;
+class FusionAction extends ClerkAction {
+  constructor(action: 'appended' | 'committed', time: TreeClock, footprint: number) {
+    super(action, { time, footprint });
+  }
 }
 
 class Fusion {
@@ -150,26 +149,20 @@ class Fusion {
   private last: JournalEntry;
 
   constructor(
-    private readonly journal: Journal,
+    private readonly clerk: JournalClerk,
     first: JournalEntry) {
     this.prev = first.prev;
     this.operator = first.operation.asMeldOperation().fusion();
     this.reset(first);
   }
 
-  private action = (action: FusionAction['action'], entry: JournalEntry) => ({
-    action, entry, clerkAction: new ClerkAction(action, {
-      time: entry.operation.time, footprint: this.operator.footprint
-    })
-  });
-
   /**
    * @param entry the next entry to fuse, or start a new fusion with
    * @returns an action with `entry` if it was added to the fusion or a fused entry if the fusion
-   *   was committed; or `null` if the fusion was discarded
+   *   was committed; or undefined if the fusion was discarded
    */
-  next(entry: JournalEntry): Observable<FusionAction> {
-    if (CausalTimeRange.contiguous(this.last.operation, entry.operation))
+  async next(entry: JournalEntry): Promise<FusionAction | undefined> {
+    if (this.appendable && CausalTimeRange.contiguous(this.last.operation, entry.operation))
       return this.append(entry);
     else
       return this.commit();
@@ -178,28 +171,34 @@ class Fusion {
   /**
    * Commits the current fusion to the journal. After calling this method, more entries can still
    * be appended, as fusions to the committed fusion.
-   * @returns a commit action if the fusion was committed; or empty if the fusion was discarded
+   * @returns a commit action if the fusion was committed; or undefined if the fusion was discarded
    */
-  commit(): Observable<FusionAction> {
+  async commit(): Promise<FusionAction | undefined> {
     // Only do anything if the fusion is significant
     if (this.removals.length > 1) {
       // CAUTION: constructing an operation can be expensive
-      const operation = this.journal.toMeldOperation(this.operator.commit());
+      const operation = this.clerk.journal.toMeldOperation(this.operator.commit());
       const fusedEntry = JournalEntry.fromOperation(
-        this.journal, this.last.key, this.prev, operation);
-      return inflate(this.journal.spliceEntries(this.removals, fusedEntry), () => {
-        // Start again with the fused entry
-        this.reset(fusedEntry);
-        return of(this.action('committed', fusedEntry));
-      });
+        this.clerk.journal, this.last.key, this.prev, operation);
+      await this.clerk.journal.spliceEntries(this.removals, fusedEntry);
+      // Start again with the fused entry
+      this.reset(fusedEntry);
+      return this.action('committed', fusedEntry);
     }
-    return EMPTY;
+  }
+
+  get appendable() {
+    return this.operator.footprint <= this.clerk.maxEntryFootprint;
   }
 
   private append(entry: JournalEntry) {
     this.operator.next(entry.operation.asMeldOperation());
     this.trackEntry(entry);
-    return of(this.action('appended', entry));
+    return this.action('appended', entry);
+  }
+
+  private action(action: 'appended' | 'committed', entry: JournalEntry) {
+    return new FusionAction(action, entry.operation.time, this.operator.footprint);
   }
 
   private trackEntry(entry: JournalEntry) {

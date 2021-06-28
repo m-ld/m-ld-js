@@ -85,13 +85,22 @@ export interface MeldConfig {
 /**
  * **m-ld** clone journal configuration.
  */
-interface JournalConfig {
+export interface JournalConfig {
   /**
    * Time, in milliseconds, to delay expensive journal administration tasks such
    * as truncation and compaction, while the clone is highly active. Default is
    * one second.
+   * @default 1000
    */
   adminDebounce?: number;
+  /**
+   * A threshold of approximate entry size, in bytes, beyond which a fused entry will be
+   * committed rather than further extended. The entry storage size may be less than this if it
+   * compresses well, and can also be greater if the last (or only) individual transaction was
+   * itself large. Default is 10K.
+   * @default 10000
+   */
+  maxEntryFootprint?: number;
 }
 
 /**

@@ -110,6 +110,10 @@ export class MeldOperation extends FusableCausalOperation<Triple, TreeClock> {
   toString() {
     return `${JSON.stringify(this.jsons)}`;
   }
+
+  protected sizeof(item: Triple): number {
+    return tripleIndexKey(item).length;
+  }
 }
 
 /**

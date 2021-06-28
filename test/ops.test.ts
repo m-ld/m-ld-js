@@ -2,9 +2,16 @@ import { CausalTimeRange, FusableCausalOperation } from '../src/engine/ops';
 import { TreeClock } from '../src/engine/clocks';
 
 // MutableOperations are tested (using quads) in dataset.test.ts
-class CausalIntegerOp extends FusableCausalOperation<number, TreeClock> { }
+class CausalIntegerOp extends FusableCausalOperation<number, TreeClock> {
+  protected sizeof(item: number): number {
+    return 8;
+  }
+}
+
+function tuple<Args extends any[]>(...args: Args): Args { return args; }
+
 // Utilities for readability
-const time = (ticks: number) => TreeClock.GENESIS.ticked(ticks)
+const time = (ticks: number) => TreeClock.GENESIS.ticked(ticks);
 const tid = (ticks: number) => time(ticks).hash();
 
 describe('Fusable Causal Operations', () => {
@@ -71,25 +78,25 @@ describe('Fusable Causal Operations', () => {
 
     test('fuses disjoint inserts', () => {
       const one = new CausalIntegerOp({
-        from: 0, time: time(0), deletes: [], inserts: [[0, [tid(0)]]]
+        from: 0, time: time(0), deletes: [], inserts: [tuple(0, [tid(0)])]
       });
       const two = new CausalIntegerOp({
-        from: 1, time: time(1), deletes: [], inserts: [[1, [tid(1)]]]
+        from: 1, time: time(1), deletes: [], inserts: [tuple(1, [tid(1)])]
       });
       expect(CausalTimeRange.contiguous(one, two)).toBe(true);
       const result = one.fuse(two);
       expect(result?.from).toBe(0);
       expect(result?.time.equals(two.time)).toBe(true);
       expect(result?.deletes).toEqual([]);
-      expect(result?.inserts).toEqual([[0, [tid(0)]], [1, [tid(1)]]]);
+      expect(result?.inserts).toEqual([tuple(0, [tid(0)]), tuple(1, [tid(1)])]);
     });
 
     test('fuses same value inserts', () => {
       const one = new CausalIntegerOp({
-        from: 0, time: time(0), deletes: [], inserts: [[0, [tid(0)]]]
+        from: 0, time: time(0), deletes: [], inserts: [tuple(0, [tid(0)])]
       });
       const two = new CausalIntegerOp({
-        from: 1, time: time(1), deletes: [], inserts: [[0, [tid(1)]]]
+        from: 1, time: time(1), deletes: [], inserts: [tuple(0, [tid(1)])]
       });
       expect(CausalTimeRange.contiguous(one, two)).toBe(true);
       const result = one.fuse(two);
@@ -102,10 +109,10 @@ describe('Fusable Causal Operations', () => {
 
     test('removes redundant insert', () => {
       const one = new CausalIntegerOp({
-        from: 0, time: time(0), deletes: [], inserts: [[0, [tid(0)]]]
+        from: 0, time: time(0), deletes: [], inserts: [tuple(0, [tid(0)])]
       });
       const two = new CausalIntegerOp({
-        from: 1, time: time(1), deletes: [[0, [tid(0)]]], inserts: []
+        from: 1, time: time(1), deletes: [tuple(0, [tid(0)])], inserts: []
       });
       expect(CausalTimeRange.contiguous(one, two)).toBe(true);
       const result = one.fuse(two);
@@ -117,13 +124,13 @@ describe('Fusable Causal Operations', () => {
 
     test('removes transitively redundant insert', () => {
       const one = new CausalIntegerOp({
-        from: 0, time: time(0), deletes: [], inserts: [[0, [tid(0)]]]
+        from: 0, time: time(0), deletes: [], inserts: [tuple(0, [tid(0)])]
       });
       const two = new CausalIntegerOp({
-        from: 1, time: time(1), deletes: [], inserts: [[1, [tid(1)]]]
+        from: 1, time: time(1), deletes: [], inserts: [tuple(1, [tid(1)])]
       });
       const thr = new CausalIntegerOp({
-        from: 2, time: time(2), deletes: [[0, [tid(0)]]], inserts: []
+        from: 2, time: time(2), deletes: [tuple(0, [tid(0)])], inserts: []
       });
       expect(CausalTimeRange.contiguous(one, two)).toBe(true);
       const head = one.fuse(two);
@@ -132,18 +139,18 @@ describe('Fusable Causal Operations', () => {
       expect(result?.from).toBe(0);
       expect(result?.time.equals(thr.time)).toBe(true);
       expect(result?.deletes).toEqual([]);
-      expect(result?.inserts).toEqual([[1, [tid(1)]]]);
+      expect(result?.inserts).toEqual([tuple(1, [tid(1)])]);
     });
 
     test('is associative', () => {
       const one = new CausalIntegerOp({
-        from: 0, time: time(0), deletes: [], inserts: [[0, [tid(0)]]]
+        from: 0, time: time(0), deletes: [], inserts: [tuple(0, [tid(0)])]
       });
       const two = new CausalIntegerOp({
-        from: 1, time: time(1), deletes: [], inserts: [[1, [tid(1)]]]
+        from: 1, time: time(1), deletes: [], inserts: [tuple(1, [tid(1)])]
       });
       const thr = new CausalIntegerOp({
-        from: 2, time: time(2), deletes: [[0, [tid(0)]]], inserts: []
+        from: 2, time: time(2), deletes: [tuple(0, [tid(0)])], inserts: []
       });
       // Using redundant insert to show associativity
       expect(CausalTimeRange.contiguous(two, thr)).toBe(true);
@@ -153,7 +160,7 @@ describe('Fusable Causal Operations', () => {
       expect(result?.from).toBe(0);
       expect(result?.time.equals(thr.time)).toBe(true);
       expect(result?.deletes).toEqual([]);
-      expect(result?.inserts).toEqual([[1, [tid(1)]]]);
+      expect(result?.inserts).toEqual([tuple(1, [tid(1)])]);
     });
   });
 
@@ -172,19 +179,19 @@ describe('Fusable Causal Operations', () => {
     test('cuts empty from non-empty', () => {
       const one = new CausalIntegerOp({ from: 0, time: time(0), deletes: [], inserts: [] });
       const two = new CausalIntegerOp({
-        from: 0, time: time(1), deletes: [], inserts: [[1, [tid(1)]]]
+        from: 0, time: time(1), deletes: [], inserts: [tuple(1, [tid(1)])]
       });
       expect(CausalTimeRange.overlaps(one, two)).toBe(true);
       const cut = two.cutBy(one);
       expect(cut.from).toBe(1);
       expect(cut.time.equals(two.time)).toBe(true);
       expect(cut.deletes).toEqual([]);
-      expect(cut.inserts).toEqual([[1, [tid(1)]]]);
+      expect(cut.inserts).toEqual([tuple(1, [tid(1)])]);
     });
 
     test('cut deletes unaccounted insert', () => {
       const one = new CausalIntegerOp({
-        from: 0, time: time(0), deletes: [], inserts: [[0, [tid(0)]]]
+        from: 0, time: time(0), deletes: [], inserts: [tuple(0, [tid(0)])]
       });
       const two = new CausalIntegerOp({
         from: 0, time: time(1), deletes: [], inserts: []
@@ -193,23 +200,23 @@ describe('Fusable Causal Operations', () => {
       const cut = two.cutBy(one);
       expect(cut.from).toBe(1);
       expect(cut.time.equals(two.time)).toBe(true);
-      expect(cut.deletes).toEqual([[0, [tid(0)]]]);
+      expect(cut.deletes).toEqual([tuple(0, [tid(0)])]);
       expect(cut.inserts).toEqual([]);
     });
 
     test('cut removes intersecting insert', () => {
       const one = new CausalIntegerOp({
-        from: 0, time: time(0), deletes: [], inserts: [[0, [tid(0)]]]
+        from: 0, time: time(0), deletes: [], inserts: [tuple(0, [tid(0)])]
       });
       const two = new CausalIntegerOp({
-        from: 0, time: time(1), deletes: [], inserts: [[0, [tid(0)]], [1, [tid(1)]]]
+        from: 0, time: time(1), deletes: [], inserts: [tuple(0, [tid(0)]), tuple(1, [tid(1)])]
       });
       expect(CausalTimeRange.overlaps(one, two)).toBe(true);
       const cut = two.cutBy(one);
       expect(cut.from).toBe(1);
       expect(cut.time.equals(two.time)).toBe(true);
       expect(cut.deletes).toEqual([]);
-      expect(cut.inserts).toEqual([[1, [tid(1)]]]);
+      expect(cut.inserts).toEqual([tuple(1, [tid(1)])]);
     });
 
     test('cut removes redundant delete', () => {
@@ -218,7 +225,7 @@ describe('Fusable Causal Operations', () => {
       });
       // Overlapping tick 1
       const two = new CausalIntegerOp({
-        from: 1, time: time(2), deletes: [[0, [tid(0)]]], inserts: []
+        from: 1, time: time(2), deletes: [tuple(0, [tid(0)])], inserts: []
       });
       expect(CausalTimeRange.overlaps(one, two)).toBe(true);
       const cut = two.cutBy(one);
@@ -230,17 +237,17 @@ describe('Fusable Causal Operations', () => {
 
     test('cut does not remove significant delete', () => {
       const one = new CausalIntegerOp({
-        from: 0, time: time(1), deletes: [], inserts: [[0, [tid(0)]]]
+        from: 0, time: time(1), deletes: [], inserts: [tuple(0, [tid(0)])]
       });
       // Overlapping tick 1
       const two = new CausalIntegerOp({
-        from: 1, time: time(2), deletes: [[0, [tid(0)]]], inserts: []
+        from: 1, time: time(2), deletes: [tuple(0, [tid(0)])], inserts: []
       });
       expect(CausalTimeRange.overlaps(one, two)).toBe(true);
       const cut = two.cutBy(one);
       expect(cut.from).toBe(2);
       expect(cut.time.equals(two.time)).toBe(true);
-      expect(cut.deletes).toEqual([[0, [tid(0)]]]);
+      expect(cut.deletes).toEqual([tuple(0, [tid(0)])]);
       expect(cut.inserts).toEqual([]);
     });
 
@@ -249,14 +256,14 @@ describe('Fusable Causal Operations', () => {
         from: 1,
         time: time(2),
         deletes: [
-          [0.0, [tid(0)]], // Deleted at 1
-          [0.1, [tid(0)]]  // Deleted at 2
+          tuple(0.0, [tid(0)]), // Deleted at 1
+          tuple(0.1, [tid(0)])  // Deleted at 2
         ],
         inserts: [
-          [1.0, [tid(1)]],
-          [1.1, [tid(1)]],
-          [2.0, [tid(2)]],
-          [2.1, [tid(2)]]
+          tuple(1.0, [tid(1)]),
+          tuple(1.1, [tid(1)]),
+          tuple(2.0, [tid(2)]),
+          tuple(2.1, [tid(2)])
         ]
       });
       // Overlapping tick 2
@@ -264,14 +271,14 @@ describe('Fusable Causal Operations', () => {
         from: 2,
         time: time(3),
         deletes: [
-          [0.1, [tid(0)]], // Deleted at 2
-          [0.2, [tid(0)]], // Deleted at 3
-          [1.1, [tid(1)]]  // Deleted at 3
-          //[2.1, [tid(2)]]   Deleted at 3
+          tuple(0.1, [tid(0)]), // Deleted at 2
+          tuple(0.2, [tid(0)]), // Deleted at 3
+          tuple(1.1, [tid(1)])  // Deleted at 3
+          //tuple(2.1, [tid(2)])   Deleted at 3
         ],
         inserts: [
-          [2.0, [tid(2)]],
-          [3.0, [tid(3)]]
+          tuple(2.0, [tid(2)]),
+          tuple(3.0, [tid(3)])
         ]
       });
       expect(CausalTimeRange.overlaps(one, two)).toBe(true);
@@ -279,12 +286,12 @@ describe('Fusable Causal Operations', () => {
       expect(cut.from).toBe(3);
       expect(cut.time.equals(two.time)).toBe(true);
       expect(cut.deletes).toEqual([
-        [0.2, [tid(0)]],
-        [1.1, [tid(1)]],
-        [2.1, [tid(2)]]
+        tuple(0.2, [tid(0)]),
+        tuple(1.1, [tid(1)]),
+        tuple(2.1, [tid(2)])
       ]);
       expect(cut.inserts).toEqual([
-        [3, [tid(3)]]
+        tuple(3, [tid(3)])
       ]);
     });
   });

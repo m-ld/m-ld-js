@@ -6,6 +6,7 @@ import { TreeClock } from '../src/engine/clocks';
 import { delay, take, toArray } from 'rxjs/operators';
 import { Observer, of, Subject } from 'rxjs';
 import { CheckPoint, JournalClerk } from '../src/engine/journal/JournalClerk';
+import { JournalConfig } from '../src';
 
 describe('Dataset Journal', () => {
   let store: Dataset;
@@ -22,13 +23,15 @@ describe('Dataset Journal', () => {
    * Operation content doesn't matter to the journal, so in these tests we just commit no-ops.
    * Correct behaviour of e.g. fusions is covered in other tests.
    * @param process simulated operation source
+   * @param content tuple of deletes and inserts , defaults to no-op
    */
-  function noopAt(process: MockProcess) {
-    return MeldOperation.fromEncoded(encoder, process.operated('{}', '{}'));
+  function opAt(process: MockProcess, content: [any, any] = [{}, {}]) {
+    const [deletes, inserts] = content.map(c => JSON.stringify(c));
+    return MeldOperation.fromEncoded(encoder, process.operated(deletes, inserts));
   }
 
-  function addEntry(local: MockProcess, remote?: MockProcess) {
-    const op = noopAt(remote ?? local);
+  function addEntry(local: MockProcess, remote?: MockProcess, content: [any, any] = [{}, {}]) {
+    const op = opAt(remote ?? local, content);
     const localTime = remote ? local.join(op.time).tick().time : local.time;
     return store.transact({
       prepare: () => ({
@@ -45,9 +48,9 @@ describe('Dataset Journal', () => {
   class TestClerk extends JournalClerk {
     checkpoints: Observer<CheckPoint>;
 
-    constructor() {
+    constructor(config: JournalConfig = {}) {
       const checkpoints = new Subject<CheckPoint>();
-      super(journal, { '@id': 'test' }, {
+      super(journal, { '@id': 'test', logLevel: 'debug', journal: config }, {
         checkpoints,
         // Respond immediately (async) to entries and checkpoints
         schedule: of(0).pipe(delay(0))
@@ -66,7 +69,7 @@ describe('Dataset Journal', () => {
 
     beforeEach(async () => {
       remote = new MockProcess(TreeClock.GENESIS);
-      pastOp = noopAt(remote);
+      pastOp = opAt(remote);
       local = remote.fork();
       await store.transact({
         prepare: () => ({
@@ -215,7 +218,7 @@ describe('Dataset Journal', () => {
       });
 
       test('cuts from remote fused operation', async () => {
-        const next = noopAt(remote);
+        const next = opAt(remote);
         const fused = MeldOperation.fromOperation(encoder, remoteOp.fuse(next));
         const state = await journal.state();
         // Hmm, this duplicates the code in SuSetDataset
@@ -250,13 +253,8 @@ describe('Dataset Journal', () => {
     });
 
     describe('Clerk', () => {
-      let clerk: TestClerk;
-
-      beforeEach(() => {
-        clerk = new TestClerk();
-      });
-
       test('does nothing on first local entry', async () => {
+        const clerk = new TestClerk();
         const willBeActive = clerk.activity.pipe(toArray()).toPromise();
         await addEntry(local);
         // Close is the only way to ensure activity is processed
@@ -265,6 +263,7 @@ describe('Dataset Journal', () => {
       });
 
       test('appends local entries to fusion', async () => {
+        const clerk = new TestClerk();
         const willBeActive = clerk.activity.pipe(toArray()).toPromise();
         await addEntry(local);
         await addEntry(local);
@@ -284,6 +283,7 @@ describe('Dataset Journal', () => {
       });
 
       test('appends remote entries to fusion', async () => {
+        const clerk = new TestClerk();
         const remote = local.fork();
         const willBeActive = clerk.activity.pipe(toArray()).toPromise();
         await addEntry(local);
@@ -302,6 +302,7 @@ describe('Dataset Journal', () => {
       });
 
       test('follows one fusion with another', async () => {
+        const clerk = new TestClerk();
         const second = local.fork();
         const third = local.fork();
         const willBeActive = clerk.activity.pipe(toArray()).toPromise();
@@ -329,6 +330,7 @@ describe('Dataset Journal', () => {
       });
 
       test('commits savepoint when instructed', async () => {
+        const clerk = new TestClerk();
         const willBeActive = clerk.activity.pipe(take(2), toArray()).toPromise();
         await addEntry(local);
         await addEntry(local);
@@ -342,6 +344,48 @@ describe('Dataset Journal', () => {
         // Expect the entry to be a fusion of all three
         expect(entry!.operation.time.equals(local.time)).toBe(true);
         expect(entry!.prev).toEqual([0, TreeClock.GENESIS.hash()]);
+      });
+
+      test('starts new fusion if previous single entry above threshold', async () => {
+        const clerk = new TestClerk({ maxEntryFootprint: 1 });
+        const willBeActive = clerk.activity.toPromise();
+        // Create an entry that will exceed the tiny threshold
+        await addEntry(local, undefined, [{}, { '@id': 'fred', 'name': 'Fred' }]);
+        await addEntry(local);
+        await clerk.close();
+        // No clerk operations happened
+        await expect(willBeActive).resolves.toBeUndefined();
+        // Expect two entries
+        const entry = await journal.entryAfter(); // Gets first entry
+        expect(entry).toBeDefined();
+        await expect(entry!.next()).resolves.toBeDefined();
+      });
+
+      test('starts new fusion if previous fusion above threshold', async () => {
+        const clerk = new TestClerk({ maxEntryFootprint: 1 });
+        const willBeActive = clerk.activity.pipe(take(2), toArray()).toPromise();
+        // Create an entry that will exceed the tiny threshold
+        await addEntry(local);
+        await addEntry(local, undefined, [{}, { '@id': 'fred', 'name': 'Fred' }]);
+        await addEntry(local);
+        // Expect two entries
+        const activity = await willBeActive;
+        expect(activity[0].action).toBe('appended');
+        expect(activity[1].action).toBe('committed');
+      });
+
+      test('commits on admin if fusion above threshold', async () => {
+        const clerk = new TestClerk({ maxEntryFootprint: 1 });
+        const willBeActive = clerk.activity.pipe(take(2), toArray()).toPromise();
+        // Create an entry that will exceed the tiny threshold
+        const insertFred = { '@id': 'fred', 'name': 'Fred' };
+        await addEntry(local);
+        await addEntry(local, undefined, [{}, insertFred]);
+        clerk.checkpoints.next(CheckPoint.ADMIN);
+
+        const activity = await willBeActive;
+        expect(activity[0].action).toBe('appended');
+        expect(activity[1].action).toBe('committed');
       });
     });
   });

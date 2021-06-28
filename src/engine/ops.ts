@@ -34,7 +34,7 @@ export abstract class MutableOperation<T> implements Operation<T> {
     return this;
   }
 
-  remove(key: keyof Operation<T>, quads: Iterable<T> | Filter<T>): T[] {
+  remove(key: 'deletes' | 'inserts', quads: Iterable<T> | Filter<T>): T[] {
     return [...this[key].deleteAll(quads)];
   }
 
@@ -90,7 +90,7 @@ export interface CausalOperation<T, C extends CausalClock>
   extends CausalTimeRange<C>, Operation<ItemTids<T>> {
 }
 
-type ItemTids<T> = [item: T, tids: string[]];
+export type ItemTids<T> = [item: T, tids: string[]];
 type ItemTid<T> = [item: T, tid: string];
 namespace ItemTid {
   export const tid = (itemTid: ItemTid<unknown>) => itemTid[1];
@@ -103,7 +103,8 @@ export interface CausalOperator<T, C extends CausalClock> {
 }
 
 /** Immutable */
-export class FusableCausalOperation<T, C extends CausalClock> implements CausalOperation<T, C> {
+export abstract class FusableCausalOperation<T, C extends CausalClock>
+  implements CausalOperation<T, C> {
   readonly from: number;
   readonly time: C;
   readonly deletes: ItemTids<T>[];
@@ -117,6 +118,17 @@ export class FusableCausalOperation<T, C extends CausalClock> implements CausalO
     this.deletes = [...deletes];
     this.inserts = [...inserts];
   }
+
+  get footprint() {
+    let footprint = 0;
+    for (let [item] of this.deletes)
+      footprint += this.sizeof(item);
+    for (let [item] of this.inserts)
+      footprint += this.sizeof(item);
+    return footprint;
+  }
+
+  protected abstract sizeof(item: T): number;
 
   fusion(): CausalOperator<T, C> {
     // Not using mutable append, our semantics are different!
@@ -153,7 +165,7 @@ export class FusableCausalOperation<T, C extends CausalClock> implements CausalO
       }
 
       get footprint() {
-        return this.fused?.footprint ?? 0;
+        return this.fused?.footprint ?? original.footprint;
       }
     };
   }
@@ -212,7 +224,7 @@ export class FusableCausalOperation<T, C extends CausalClock> implements CausalO
       }
 
       get footprint() {
-        return this.cut?.footprint ?? 0;
+        return this.cut?.footprint ?? original.footprint;
       }
     };
   }
@@ -250,7 +262,7 @@ export class FusableCausalOperation<T, C extends CausalClock> implements CausalO
         return getIndex(key);
       }
     }();
-  }
+  };
 
   private newFlatIndexSet = (items?: Iterable<ItemTid<T>>) => {
     const getIndex = this.getIndex;
@@ -263,10 +275,10 @@ export class FusableCausalOperation<T, C extends CausalClock> implements CausalO
         return `${getIndex(item)}^${tid}`;
       };
     }(items);
-  }
+  };
 }
 
-function* flatten<T>(
+function *flatten<T>(
   itemsTids: Iterable<ItemTids<T>>): Iterable<[item: T, tid: string]> {
   for (let itemTids of itemsTids) {
     const [item, tids] = itemTids;
