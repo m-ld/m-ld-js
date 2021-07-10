@@ -1,12 +1,11 @@
 import { DatasetEngine } from '../src/engine/dataset/DatasetEngine';
-import { memStore, mockRemotes, hotLive, testConfig, MockProcess } from './testClones';
-import { NEVER, Subject as Source, asapScheduler, EMPTY, throwError, BehaviorSubject } from 'rxjs';
+import { hotLive, MemDown, memStore, MockProcess, mockRemotes, testConfig } from './testClones';
+import { asapScheduler, BehaviorSubject, EMPTY, NEVER, Subject as Source, throwError } from 'rxjs';
 import { comesAlive } from '../src/engine/AbstractMeld';
-import { first, take, toArray, map, observeOn, count } from 'rxjs/operators';
+import { count, first, map, observeOn, take, toArray } from 'rxjs/operators';
 import { TreeClock } from '../src/engine/clocks';
-import { OperationMessage, MeldRemotes, Snapshot } from '../src/engine';
-import { MeldConfig, Subject, Describe, Update } from '../src';
-import MemDown from 'memdown';
+import { MeldRemotes, OperationMessage, Snapshot } from '../src/engine';
+import { Describe, MeldConfig, Subject, Update } from '../src';
 import { AbstractLevelDOWN } from 'abstract-leveldown';
 import { jsonify } from './testUtil';
 

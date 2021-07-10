@@ -75,8 +75,8 @@ export namespace Idle {
 
   const root: any = typeof window === 'undefined' ? global || {} : window;
 
-  export const requestCallback: (cb: IdleRequestCallback, opts?: IdleRequestOptions) => Handle =
-    root.requestIdleCallback?.bind(root) ?? ((cb: IdleRequestCallback) =>
+  export const requestCallback: (cb: (deadline: IdleDeadline) => void, opts?: IdleRequestOptions) => Handle =
+    root.requestIdleCallback?.bind(root) ?? ((cb: (deadline: IdleDeadline) => void) =>
       // Not supporting timeout parameter to callback request for immediate fallback
       setImmediate((startTime: number) => cb({
         timeRemaining: () => Math.max(0, DEFAULT_IDLE_TIME - (Date.now() - startTime)),

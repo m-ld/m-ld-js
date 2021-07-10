@@ -1,10 +1,10 @@
-import { Meld, Snapshot, OperationMessage, Revup } from '.';
-import { LiveValue } from "./LiveValue";
+import { Meld, OperationMessage, Revup, Snapshot } from '.';
+import { LiveValue } from './LiveValue';
 import { TreeClock } from './clocks';
-import { Observable, BehaviorSubject, asapScheduler, of } from 'rxjs';
-import { observeOn, tap, distinctUntilChanged, first, skip, catchError } from 'rxjs/operators';
+import { asapScheduler, BehaviorSubject, Observable, of } from 'rxjs';
+import { catchError, distinctUntilChanged, first, observeOn, skip, tap } from 'rxjs/operators';
 import { Logger } from 'loglevel';
-import { getIdLogger, check, PauseableSource } from './util';
+import { check, getIdLogger, PauseableSource } from './util';
 import { MeldError } from './MeldError';
 import { MeldConfig } from '..';
 
@@ -39,7 +39,7 @@ export abstract class AbstractMeld implements Meld {
     // indicates a return to undecided liveness followed by completion.
     this.live = Object.defineProperties(
       this.liveSource.pipe(catchError(() => of(null)), distinctUntilChanged()),
-      { value: { get: () => this.liveSource.value } });
+      { value: { get: () => this.liveSource.value } }) as LiveValue<boolean | null>;
 
     // Log liveness
     this.live.pipe(skip(1)).subscribe(
@@ -75,4 +75,4 @@ export function comesAlive(meld: Pick<Meld, 'live'>, expected: boolean | null | 
   const filter: (live: boolean | null) => boolean =
     expected === 'notNull' ? (live => live != null) : (live => live === expected);
   return meld.live.pipe(first(filter)).toPromise();
-};
+}

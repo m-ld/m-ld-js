@@ -39,15 +39,16 @@
     "@types/memdown": "^3.0.0",
     "@types/n3": "^1.4.4",
     "@types/readable-stream": "^2.3.9",
+    "@types/ws": "^7.4.6",
     "ably": "^1.2.10",
-    "aedes": "^0.45.0",
+    "aedes": "^0.46.0",
     "async-mqtt": "^2.6.1",
     "browser-sync": "^2.26.14",
     "concurrently": "^6.0.1",
-    "jest": "^26.6.3",
+    "jest": "^27.0.6",
     "jest-mock-extended": "^1.0.11",
-    "leveldown": "^5.6.0",
-    "memdown": "^5.1.0",
+    "leveldown": "^6.0.0",
+    "memdown": "^6.0.0",
     "n3": "^1.8.0",
     "onchange": "^7.1.0",
     "restify": "^8.5.1",
@@ -55,7 +56,7 @@
     "socket.io": "^4.1.2",
     "socket.io-client": "^4.1.2",
     "tmp": "^0.2.1",
-    "ts-jest": "^26.5.0",
+    "ts-jest": "^27.0.3",
     "typedoc": "^0.19.2",
     "typescript": "^4.1.3"
   },
@@ -72,12 +73,11 @@
     }
   },
   "dependencies": {
-    "@ably/msgpack-js": "^0.3.4",
+    "@ably/msgpack-js": "^0.4.0",
     "@m-ld/m-ld-spec": "^0.6.3-0",
     "@types/abstract-leveldown": "^5.0.1",
     "@types/detect-node": "^2.0.0",
     "@types/jsonld": "^1.5.2",
-    "@types/rdf-js": "^4.0.1",
     "@types/requestidlecallback": "^0.3.1",
     "@types/simple-peer": "^9.6.2",
     "@types/valid-data-url": "^2.0.0",
@@ -93,7 +93,7 @@
     "rdf-data-factory": "^1.0.4",
     "rxjs": "^6.6.3",
     "short-uuid": "^4.1.0",
-    "valid-data-url": "^3.0.1"
+    "valid-data-url": "^4.0.0"
   },
   "peerDependencies": {
     "ably": "1",

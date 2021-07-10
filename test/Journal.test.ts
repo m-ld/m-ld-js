@@ -137,22 +137,24 @@ describe('Dataset Journal', () => {
     describe('with a local operation', () => {
       // Using a promise to allow listening to the entry being added
       let commitOp: Promise<MeldOperation>;
+      let entry: Promise<JournalEntry>;
 
       beforeEach(() => {
+        entry = journal.tail.pipe(take(1)).toPromise();
         // Don't return the promise because Jest will wait for it
         commitOp = addEntry(local);
       });
 
       test('emits observable entry', async () => {
-        const entry = await journal.tail.pipe(take(1)).toPromise();
+        const e = await entry;
         const op = await commitOp;
-        expect(entry).toBeDefined();
-        expect(entry.prev).toEqual([0, TreeClock.GENESIS.hash()]);
-        expect(entry.operation.time.equals(local.time)).toBe(true);
-        expect(entry.operation.operation).toEqual(op.encoded);
-        expect(entry.operation.tid).toEqual(op.time.hash());
-        expect(entry.operation.from).toBe(local.time.ticks);
-        await expect(entry.next()).resolves.toBeUndefined();
+        expect(e).toBeDefined();
+        expect(e.prev).toEqual([0, TreeClock.GENESIS.hash()]);
+        expect(e.operation.time.equals(local.time)).toBe(true);
+        expect(e.operation.operation).toEqual(op.encoded);
+        expect(e.operation.tid).toEqual(op.time.hash());
+        expect(e.operation.from).toBe(local.time.ticks);
+        await expect(e.next()).resolves.toBeUndefined();
       });
 
       test('has new state', async () => {

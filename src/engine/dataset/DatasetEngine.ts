@@ -516,7 +516,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
     return Object.defineProperties(values, {
       becomes: { value: becomes },
       value: { get: () => toStatus(stateRollup.value) }
-    });
+    }) as Observable<MeldStatus> & LiveStatus;
   }
 
   @AbstractMeld.checkNotClosed.async

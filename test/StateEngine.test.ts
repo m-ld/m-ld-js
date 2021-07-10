@@ -2,7 +2,7 @@ import { of, Subject as Source } from 'rxjs';
 import { MeldUpdate } from '../src/api';
 import { LockManager } from '../src/engine/locks';
 import { CloneEngine, StateEngine } from '../src/engine/StateEngine';
-import {SubjectGraph} from '../src/engine/SubjectGraph'
+import { SubjectGraph } from '../src/engine/SubjectGraph';
 
 describe('State Engine', () => {
   class MockCloneEngine implements CloneEngine {
@@ -55,12 +55,12 @@ describe('State Engine', () => {
   });
 
   test('can unsubscribe a follow handler', done => {
-    states.follow(fail).unsubscribe();
+    states.follow(() => done.fail()).unsubscribe();
     states.write(state => state.write({})).then(() => done());
   });
 
   test('can unsubscribe a read follow handler', done => {
-    states.read(() => { }, fail).unsubscribe();
+    states.read(() => { }, () => done.fail()).unsubscribe();
     states.write(state => state.write({})).then(() => done());
   });
 

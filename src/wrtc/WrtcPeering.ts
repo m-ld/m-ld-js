@@ -6,15 +6,15 @@ import { timer } from 'rxjs';
 import type { MeldConfig } from '..';
 import type { NotifyParams, SubPub } from '../engine/remotes';
 
-export type CreatePeer = (opts?: PeerOpts) => Peer;
-
 export interface MeldWrtcConfig extends MeldConfig {
   wrtc?: RTCConfiguration;
 }
 
-export interface PeerSignal extends SignalData {
+type Unavailable = {
   unavailable?: true;
-}
+};
+
+export type PeerSignal = SignalData | Unavailable;
 
 export interface PeerSignaller {
   notify: (channelId: string, payload: Buffer) => void;
@@ -73,15 +73,15 @@ export class WrtcPeering {
 
   signal(fromId: string, channelId: string, data: PeerSignal) {
     // Note that a signal can arrive before the peer has been set up.
-    if (!(channelId in this.peers) && (!this.available || data.unavailable)) {
+    if (!(channelId in this.peers) && (!this.available || isUnavailable(data))) {
       // Peering not possible. Remember this channel as unavailable.
-      this.dispose(fromId, channelId, !data.unavailable, 'marked unavailable');
+      this.dispose(fromId, channelId, !isUnavailable(data), 'marked unavailable');
     } else {
       // Get an existing peer or create a new one
       const { peer } = this.peer(fromId, channelId);
       if (peer == null)
         this.log.debug(`Disposed channel ${channelId} peer ${fromId} received signal`);
-      else if (data.unavailable)
+      else if (isUnavailable(data))
         peer.destroy(new UnavailableError(fromId));
       else
         peer.signal(data);
@@ -139,4 +139,8 @@ export class WrtcPeering {
   private timeout(cb: () => void) {
     return timer(this.networkTimeout).subscribe(cb);
   }
+}
+
+function isUnavailable(signal: PeerSignal): signal is Unavailable {
+  return 'unavailable' in signal;
 }

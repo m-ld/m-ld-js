@@ -16,5 +16,5 @@ export function liveRollup<R extends { [key: string]: unknown }>(
   }
   const values = defer(() => inflate(Object.keys(liveValues), (key: keyof R) =>
     liveValues[key].pipe(map(value => get(key, value)))));
-  return Object.defineProperties(values, { value: { get } });
+  return Object.defineProperties(values, { value: { get } }) as LiveValue<R>;
 }
