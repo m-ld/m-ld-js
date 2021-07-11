@@ -1,6 +1,6 @@
 {
   "name": "@m-ld/m-ld",
-  "version": "0.7.0-2",
+  "version": "0.7.0-3",
   "description": "m-ld native Javascript",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
