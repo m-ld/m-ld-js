@@ -85,6 +85,7 @@ describe('Socket.io Remotes', () => {
         updates: of(remote.sentOperation('{}', '{}'))
       })
     }));
+    await comesAlive(localRemotes); // Indicates that the remote is present
     const revup = await localRemotes.revupFrom(TreeClock.GENESIS.forked().right);
     const op = await lastValueFrom(revup!.updates);
     expect(op.time.equals(remote.time)).toBe(true);
