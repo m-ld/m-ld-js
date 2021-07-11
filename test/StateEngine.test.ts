@@ -1,5 +1,5 @@
-import { of, Subject as Source } from 'rxjs';
-import { MeldUpdate } from '../src/api';
+import { firstValueFrom, of, Subject as Source } from 'rxjs';
+import { MeldUpdate } from '../src';
 import { LockManager } from '../src/engine/locks';
 import { CloneEngine, StateEngine } from '../src/engine/StateEngine';
 import { SubjectGraph } from '../src/engine/SubjectGraph';
@@ -31,7 +31,7 @@ describe('State Engine', () => {
 
   test('can read initial state', done => {
     states.read(async state => {
-      await expect(state.read({}).toPromise()).resolves.toMatchObject({ tick: 0 });
+      await expect(firstValueFrom(state.read({}))).resolves.toMatchObject({ tick: 0 });
       done();
     });
   });
@@ -46,7 +46,7 @@ describe('State Engine', () => {
 
   test('can read initial state and follow', done => {
     states.read(async state => {
-      await expect(state.read({}).toPromise()).resolves.toMatchObject({ tick: 0 }).catch(fail);
+      await expect(firstValueFrom(state.read({}))).resolves.toMatchObject({ tick: 0 }).catch(fail);
     }, async update => {
       expect(update).toMatchObject({ '@ticks': 1 });
       done();

@@ -4,7 +4,7 @@ import { MeldEncoder, MeldOperation } from '../src/engine/MeldEncoding';
 import { Dataset } from '../src/engine/dataset';
 import { TreeClock } from '../src/engine/clocks';
 import { delay, take, toArray } from 'rxjs/operators';
-import { Observer, of, Subject } from 'rxjs';
+import { EmptyError, firstValueFrom, Observer, of, Subject } from 'rxjs';
 import { CheckPoint, JournalClerk } from '../src/engine/journal/JournalClerk';
 import { JournalConfig } from '../src';
 
@@ -140,7 +140,7 @@ describe('Dataset Journal', () => {
       let entry: Promise<JournalEntry>;
 
       beforeEach(() => {
-        entry = journal.tail.pipe(take(1)).toPromise();
+        entry = firstValueFrom(journal.tail);
         // Don't return the promise because Jest will wait for it
         commitOp = addEntry(local);
       });
@@ -213,7 +213,7 @@ describe('Dataset Journal', () => {
 
       beforeEach(async () => {
         remote = local.fork();
-        const expectEntries = journal.tail.pipe(take(2), toArray()).toPromise();
+        const expectEntries = firstValueFrom(journal.tail.pipe(take(2), toArray()));
         localOp = await addEntry(local);
         remoteOp = await addEntry(local, remote);
         [localEntry, remoteEntry] = await expectEntries;
@@ -240,7 +240,7 @@ describe('Dataset Journal', () => {
       });
 
       test('can splice in a fused operation', async () => {
-        const expectNext = journal.tail.pipe(take(1)).toPromise();
+        const expectNext = firstValueFrom(journal.tail);
         const nextOp = await addEntry(local, remote);
         const nextEntry = await expectNext;
         const fused = MeldOperation.fromOperation(encoder, remoteOp.fuse(nextOp));
@@ -257,7 +257,7 @@ describe('Dataset Journal', () => {
     describe('Clerk', () => {
       test('does nothing on first local entry', async () => {
         const clerk = new TestClerk();
-        const willBeActive = clerk.activity.pipe(toArray()).toPromise();
+        const willBeActive = firstValueFrom(clerk.activity.pipe(toArray()));
         await addEntry(local);
         // Close is the only way to ensure activity is processed
         await clerk.close();
@@ -266,7 +266,7 @@ describe('Dataset Journal', () => {
 
       test('appends local entries to fusion', async () => {
         const clerk = new TestClerk();
-        const willBeActive = clerk.activity.pipe(toArray()).toPromise();
+        const willBeActive = firstValueFrom(clerk.activity.pipe(toArray()));
         await addEntry(local);
         await addEntry(local);
         await addEntry(local);
@@ -287,7 +287,7 @@ describe('Dataset Journal', () => {
       test('appends remote entries to fusion', async () => {
         const clerk = new TestClerk();
         const remote = local.fork();
-        const willBeActive = clerk.activity.pipe(toArray()).toPromise();
+        const willBeActive = firstValueFrom(clerk.activity.pipe(toArray()));
         await addEntry(local);
         await addEntry(local, remote);
         await addEntry(local, remote);
@@ -307,7 +307,7 @@ describe('Dataset Journal', () => {
         const clerk = new TestClerk();
         const second = local.fork();
         const third = local.fork();
-        const willBeActive = clerk.activity.pipe(toArray()).toPromise();
+        const willBeActive = firstValueFrom(clerk.activity.pipe(toArray()));
         await addEntry(local, second);
         await addEntry(local, second);
         await addEntry(local, third);
@@ -333,7 +333,7 @@ describe('Dataset Journal', () => {
 
       test('commits savepoint when instructed', async () => {
         const clerk = new TestClerk();
-        const willBeActive = clerk.activity.pipe(take(2), toArray()).toPromise();
+        const willBeActive = firstValueFrom(clerk.activity.pipe(take(2), toArray()));
         await addEntry(local);
         await addEntry(local);
         clerk.checkpoints.next(CheckPoint.SAVEPOINT);
@@ -350,13 +350,13 @@ describe('Dataset Journal', () => {
 
       test('starts new fusion if previous single entry above threshold', async () => {
         const clerk = new TestClerk({ maxEntryFootprint: 1 });
-        const willBeActive = clerk.activity.toPromise();
+        const willBeActive = firstValueFrom(clerk.activity);
         // Create an entry that will exceed the tiny threshold
         await addEntry(local, undefined, [{}, { '@id': 'fred', 'name': 'Fred' }]);
         await addEntry(local);
         await clerk.close();
         // No clerk operations happened
-        await expect(willBeActive).resolves.toBeUndefined();
+        await expect(willBeActive).rejects.toBeInstanceOf(EmptyError);
         // Expect two entries
         const entry = await journal.entryAfter(); // Gets first entry
         expect(entry).toBeDefined();
@@ -365,7 +365,7 @@ describe('Dataset Journal', () => {
 
       test('starts new fusion if previous fusion above threshold', async () => {
         const clerk = new TestClerk({ maxEntryFootprint: 1 });
-        const willBeActive = clerk.activity.pipe(take(2), toArray()).toPromise();
+        const willBeActive = firstValueFrom(clerk.activity.pipe(take(2), toArray()));
         // Create an entry that will exceed the tiny threshold
         await addEntry(local);
         await addEntry(local, undefined, [{}, { '@id': 'fred', 'name': 'Fred' }]);
@@ -378,7 +378,7 @@ describe('Dataset Journal', () => {
 
       test('commits on admin if fusion above threshold', async () => {
         const clerk = new TestClerk({ maxEntryFootprint: 1 });
-        const willBeActive = clerk.activity.pipe(take(2), toArray()).toPromise();
+        const willBeActive = firstValueFrom(clerk.activity.pipe(take(2), toArray()));
         // Create an entry that will exceed the tiny threshold
         const insertFred = { '@id': 'fred', 'name': 'Fred' };
         await addEntry(local);

@@ -3,8 +3,8 @@ import { MeldLocal, MeldRemotes, OperationMessage, Recovery, Revup, Snapshot } f
 import { liveRollup } from '../LiveValue';
 import { Context, Pattern, Read, Write } from '../../jrql-support';
 import {
-  BehaviorSubject, concat, EMPTY, from, interval, merge, Observable, of, OperatorFunction,
-  partition, Subscriber, Subscription
+  BehaviorSubject, concat, defaultIfEmpty, EMPTY, firstValueFrom, from, interval, merge, Observable,
+  of, OperatorFunction, partition, Subscriber, Subscription
 } from 'rxjs';
 import { GlobalClock, TreeClock } from '../clocks';
 import { SuSetDataset } from './SuSetDataset';
@@ -12,7 +12,7 @@ import { TreeClockMessageService } from '../messages';
 import { Dataset } from '.';
 import {
   debounceTime, delayWhen, distinctUntilChanged, expand, filter, finalize, ignoreElements, map,
-  mergeMap, publishReplay, refCount, share, skipWhile, take, takeUntil, tap, toArray
+  mergeMap, publishReplay, refCount, share, skipWhile, takeUntil, tap, toArray
 } from 'rxjs/operators';
 import { delayUntil, Future, inflateArray, poisson, tapComplete } from '../util';
 import { LockManager } from '../locks';
@@ -354,10 +354,12 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
     return snapshotApplied; // We can go live as soon as the snapshot is applied
   }
 
-  private async emitOpsSince<T = never>(
-    recovery: Recovery, ret: OperatorFunction<OperationMessage, T> = ignoreElements()): Promise<T> {
+  private async emitOpsSince<T = never>(recovery: Recovery,
+    ret: OperatorFunction<OperationMessage, T[]> = ignoreElements()): Promise<T[]> {
+    const toReturn = (ops: Observable<OperationMessage>) =>
+      firstValueFrom(ops.pipe(ret, defaultIfEmpty([])));
     if (this.newClone) {
-      return EMPTY.pipe(ret).toPromise();
+      return toReturn(EMPTY);
     } else {
       const recent = await this.dataset.operationsSince(recovery.gwc);
       // If we don't have journal from our ticks on the collaborator's clock, this
@@ -365,7 +367,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
       if (recent == null)
         throw new MeldError('Clone outdated', `Missing local ticks since ${recovery.gwc}`);
       else
-        return recent.pipe(tap(this.nextUpdate), ret).toPromise();
+        return toReturn(recent.pipe(tap(this.nextUpdate)));
     }
   }
 
@@ -511,8 +513,8 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
       skipWhile(() => this.messageService == null),
       map(toStatus),
       distinctUntilChanged<MeldStatus>(matchStatus));
-    const becomes = async (match?: Partial<MeldStatus>) =>
-      values.pipe(filter(status => matchStatus(status, match)), take(1)).toPromise();
+    const becomes = async (match?: Partial<MeldStatus>) => firstValueFrom(
+      values.pipe(filter(status => matchStatus(status, match)), defaultIfEmpty(undefined)));
     return Object.defineProperties(values, {
       becomes: { value: becomes },
       value: { get: () => toStatus(stateRollup.value) }

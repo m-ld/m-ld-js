@@ -7,9 +7,9 @@ import { Dataset, PatchQuads } from '.';
 import { Iri } from 'jsonld/jsonld-spec';
 import { JrqlGraph } from './JrqlGraph';
 import { MeldEncoder, MeldOperation, TriplesTids, unreify } from '../MeldEncoding';
-import { EMPTY, merge, Observable, of, Subject as Source } from 'rxjs';
+import { EMPTY, firstValueFrom, merge, Observable, of, Subject as Source } from 'rxjs';
 import { bufferCount, expand, filter, map, mergeMap, takeWhile, toArray } from 'rxjs/operators';
-import { check, flatten, Future, getIdLogger, inflate, inflateArray } from '../util';
+import { check, completed, flatten, Future, getIdLogger, inflate, inflateArray } from '../util';
 import { Logger } from 'loglevel';
 import { MeldError } from '../MeldError';
 import { LocalLock } from '../local';
@@ -388,8 +388,7 @@ export class SuSetDataset extends MeldEncoder {
   }
 
   private findTripleTids(tripleId: string): PromiseLike<Quad[]> {
-    return this.tidsGraph.findQuads({ '@id': tripleId } as Partial<HashTid>)
-      .pipe(toArray()).toPromise();
+    return firstValueFrom(this.tidsGraph.findQuads({ '@id': tripleId }).pipe(toArray()));
   }
 
   /**
@@ -406,7 +405,7 @@ export class SuSetDataset extends MeldEncoder {
       prepare: async () =>
         ({ kvps: this.journal.reset(localTime, snapshot.gwc) })
     });
-    await inflate(snapshot.data, async batch => this.dataset.transact({
+    await completed(inflate(snapshot.data, async batch => this.dataset.transact({
       id: 'snapshot-batch',
       prepare: async () => {
         if ('inserts' in batch) {
@@ -420,7 +419,7 @@ export class SuSetDataset extends MeldEncoder {
           return { kvps: this.journal.insertPastOperation(batch.operation) };
         }
       }
-    })).toPromise();
+    })));
   }
 
   /**

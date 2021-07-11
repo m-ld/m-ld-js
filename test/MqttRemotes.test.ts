@@ -3,7 +3,7 @@ import { MockProxy } from 'jest-mock-extended';
 import { AsyncMqttClient } from 'async-mqtt';
 import { OperationMessage } from '../src/engine';
 import { GlobalClock, TreeClock } from '../src/engine/clocks';
-import { of, Subject as Source } from 'rxjs';
+import { firstValueFrom, of, Subject as Source } from 'rxjs';
 import { mockLocal, MockMqtt, mockMqtt, MockProcess } from './testClones';
 import { take, toArray } from 'rxjs/operators';
 import { comesAlive } from '../src/engine/AbstractMeld';
@@ -35,7 +35,7 @@ describe('New MQTT remotes', () => {
 
   test('goes offline if no other clones', async () => {
     mqtt.mockConnect();
-    await expect(remotes.live.pipe(take(2), toArray()).toPromise())
+    await expect(firstValueFrom(remotes.live.pipe(take(2), toArray())))
       .resolves.toEqual([null, false]);
   });
 
@@ -44,7 +44,7 @@ describe('New MQTT remotes', () => {
       '__presence/test.m-ld.org/client2',
       '{"consumer2":"test.m-ld.org/control"}');
     mqtt.mockConnect();
-    await expect(remotes.live.pipe(take(2), toArray()).toPromise())
+    await expect(firstValueFrom(remotes.live.pipe(take(2), toArray())))
       .resolves.toEqual([null, true]);
   });
 
@@ -92,7 +92,7 @@ describe('New MQTT remotes', () => {
       mqtt.mockPublish(
         '__presence/test.m-ld.org/client2',
         '{"consumer2":"test.m-ld.org/control"}');
-      await expect(remotes.live.pipe(take(3), toArray()).toPromise())
+      await expect(firstValueFrom(remotes.live.pipe(take(3), toArray())))
         .resolves.toEqual([null, false, true]);
     });
 
@@ -140,7 +140,7 @@ describe('New MQTT remotes', () => {
 
       updates.next(new MockProcess(TreeClock.GENESIS.forked().left).sentOperation('{}', '{}'));
 
-      await expect(remotes.updates.toPromise()).rejects.toBe('Delivery failed');
+      await expect(firstValueFrom(remotes.updates)).rejects.toBe('Delivery failed');
     });
 
     test('live goes unknown if mqtt closes', async () => {

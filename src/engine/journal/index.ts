@@ -8,7 +8,7 @@ import { Triple } from '../quads';
 import { JournalOperation, TickTid } from './JournalOperation';
 import { JournalEntry } from './JournalEntry';
 import { JournalState } from './JournalState';
-import { Observable, Subject as Source } from 'rxjs';
+import { defaultIfEmpty, firstValueFrom, Observable, Subject as Source } from 'rxjs';
 
 export { JournalState, JournalEntry };
 
@@ -114,12 +114,12 @@ export class Journal {
    */
   async entryAfter(key: number | TickKey = TICK_KEY_MIN): Promise<JournalEntry | undefined> {
     return this.withLockedHistory(async () => {
-      const [foundKey, value] = await this.store.read({
+      const [foundKey, value] = await firstValueFrom(this.store.read({
         gt: typeof key == 'number' ? tickKey(key) : key,
         lt: TICK_KEY_MAX,
         limit: 1
-      }).toPromise() ?? [];
-      return foundKey != null ? {
+      }).pipe(defaultIfEmpty([]))) ?? [];
+      return foundKey != null && value != null ? {
         return: JournalEntry.fromJson(this, foundKey, MsgPack.decode(value))
       } : {};
     });

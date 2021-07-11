@@ -1,14 +1,14 @@
 import { MeldLocal, MeldRemotes, OperationMessage, Revup, Snapshot } from '../index';
 import {
-  BehaviorSubject, defer, EMPTY, from, identity, Observable, Observer, of, onErrorResumeNext,
-  Subject as Source, Subscription
+  BehaviorSubject, defer, EMPTY, firstValueFrom, from, identity, Observable, Observer, of,
+  onErrorResumeNext, Subject as Source, Subscription
 } from 'rxjs';
 import { TreeClock } from '../clocks';
 import { generate as uuid } from 'short-uuid';
 import { Request, Response } from '../ControlMessage';
-import { Future, MsgPack, Stopwatch, toJSON } from '../util';
+import { completed, Future, MsgPack, Stopwatch, toJSON } from '../util';
 import {
-  concatMap, delay, finalize, first, map, materialize, reduce, timeout, toArray
+  concatMap, delay, finalize, first, map, materialize, reduce, tap, timeout, toArray
 } from 'rxjs/operators';
 import { MeldError, MeldErrorStatus } from '../MeldError';
 import { AbstractMeld } from '../AbstractMeld';
@@ -115,9 +115,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
       this.log.info('Shutting down normally');
     // This finalises the #updates, thereby notifying the clone
     super.close(err);
-    // Wait until the clone has closed
-    await this.localClone.pipe(first(null)).toPromise();
-    // Wait until all activity have finalised
+    // Wait until all activities have finalised
     await Promise.all(this.activity); // TODO unit test this
   }
 
@@ -189,12 +187,12 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
 
   protected onPresenceChange() {
     // Don't process a presence change until connected
-    this.connected.pipe(first(identity)).toPromise().then(() => {
+    this.connected.pipe(first(identity), tap(() => {
       // If there is more than just me present, we are live
       this.present()
         .pipe(reduce((live, id) => live || id !== this.id, false))
         .subscribe(live => this.setLive(live));
-    });
+    })).subscribe();
   }
 
   protected onRemoteUpdate(payload: Buffer) {
@@ -441,7 +439,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
         // out from the network so here we make best efforts to notify an error
         // and then give up.
         .catch(err => notifyError(err));
-    return data.pipe(
+    return completed(data.pipe(
       map(datumToPayload),
       materialize(),
       concatMap(notification => {
@@ -451,8 +449,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
           case 'C': return notifyComplete();
         }
       }),
-      finalize(() => notifier.close?.()))
-      .toPromise();
+      finalize(() => notifier.close?.())));
   }
 
   private async reply(
@@ -472,7 +469,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
   }
 
   private async nextSender(messageId: string): Promise<SubPub | null> {
-    const present = await this.present().pipe(toArray()).toPromise();
+    const present = await firstValueFrom(this.present().pipe(toArray()));
     if (present.every(id => this.recentlySentTo.has(id)))
       this.recentlySentTo.clear();
 

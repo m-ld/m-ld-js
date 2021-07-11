@@ -1,9 +1,9 @@
 import { SuSetDataset } from '../src/engine/dataset/SuSetDataset';
 import { memStore, MockProcess } from './testClones';
 import { TreeClock } from '../src/engine/clocks';
-import { first, isEmpty, take, toArray } from 'rxjs/operators';
+import { toArray } from 'rxjs/operators';
 import { Dataset } from '../src/engine/dataset';
-import { from } from 'rxjs';
+import { EmptyError, firstValueFrom, from, lastValueFrom } from 'rxjs';
 import { Describe, MeldConstraint } from '../src';
 import { jsonify } from './testUtil';
 import { MeldEncoder } from '../src/engine/MeldEncoding';
@@ -25,7 +25,7 @@ describe('SU-Set Dataset', () => {
 
   function captureUpdate() {
     // Convert the subject graphs to JSON for matching convenience
-    return ssd.updates.pipe(first()).toPromise().then(jsonify);
+    return firstValueFrom(ssd.updates).then(jsonify);
   }
 
   describe('with basic config', () => {
@@ -58,18 +58,18 @@ describe('SU-Set Dataset', () => {
 
       test('has no operations since first time', async () => {
         const ops = await ssd.operationsSince(local.time);
-        await expect(ops && ops.pipe(isEmpty()).toPromise()).resolves.toBe(true);
+        await expect(firstValueFrom(ops!)).rejects.toBeInstanceOf(EmptyError);
       });
 
       test('answers the time', async () => {
         const savedTime = await ssd.loadClock();
-        expect(savedTime && savedTime.equals(local.time)).toBe(true);
+        expect(savedTime!.equals(local.time)).toBe(true);
       });
 
       test('answers an empty snapshot', async () => {
         const snapshot = await ssd.takeSnapshot();
         expect(snapshot.gwc.equals(local.gwc)).toBe(true);
-        await expect(snapshot.data.toPromise()).resolves.toBeUndefined();
+        await expect(lastValueFrom(snapshot.data)).rejects.toBeInstanceOf(EmptyError);
       });
 
       test('transacts a no-op', async () => {
@@ -113,9 +113,9 @@ describe('SU-Set Dataset', () => {
           local.tick().time);
         await expect(willUpdate).resolves.toHaveProperty('@insert', [fred]);
 
-        await expect(ssd.read<Describe>({
+        await expect(firstValueFrom(ssd.read<Describe>({
           '@describe': 'http://test.m-ld.org/fred'
-        }).pipe(toArray()).toPromise()).resolves.toEqual([fred]);
+        }).pipe(toArray()))).resolves.toEqual([fred]);
       });
 
       test('applies a no-op operation', async () => {
@@ -148,7 +148,7 @@ describe('SU-Set Dataset', () => {
         test('answers a snapshot', async () => {
           const snapshot = await ssd.takeSnapshot();
           expect(snapshot.gwc.equals(local.gwc)).toBe(true);
-          const data = await snapshot.data.pipe(toArray()).toPromise();
+          const data = await firstValueFrom(snapshot.data.pipe(toArray()));
           expect(data.length).toBe(2);
           const reifiedFredJson =
             `(,?("s":"fred"|"p":"#name"|"o":"Fred"|"tid":"${firstTid}")){4}`;
@@ -166,7 +166,7 @@ describe('SU-Set Dataset', () => {
           ]);
           const snapshot = await ssd.takeSnapshot();
           expect(snapshot.gwc.equals(local.gwc)).toBe(true);
-          const data = await snapshot.data.pipe(toArray()).toPromise();
+          const data = await firstValueFrom(snapshot.data.pipe(toArray()));
           expect(data.length).toBe(2);
           const reifiedFlintstoneJson = // Not a great check but must have all properties
             `(.+("s":"fred"|"s":"wilma"|"p":"#name"|"o":"Fred"|"o":"Wilma"|"tid":"${firstTid}|"tid":"${local.time.hash()}")){8}`;
@@ -191,7 +191,7 @@ describe('SU-Set Dataset', () => {
             })
           });
           const snapshot = await ssd.takeSnapshot();
-          const data = await snapshot.data.pipe(toArray()).toPromise();
+          const data = await firstValueFrom(snapshot.data.pipe(toArray()));
           expect(data.length).toBe(2);
           const reifiedSexJson = // Not a great check but must have all properties
             `(.+("s":"fred"|"p":("#name"|"#sex")|"o":("Fred"|"male")|"tid":"${firstTid}")){7}`;
@@ -203,16 +203,16 @@ describe('SU-Set Dataset', () => {
 
         test('applies a snapshot', async () => {
           const snapshot = await ssd.takeSnapshot();
-          const staticData = await snapshot.data.pipe(toArray()).toPromise();
+          const staticData = await firstValueFrom(snapshot.data.pipe(toArray()));
           await ssd.applySnapshot({ gwc: local.gwc, data: from(staticData) }, local.tick().time);
-          await expect(ssd.read<Describe>({
+          await expect(firstValueFrom(ssd.read<Describe>({
             '@describe': 'http://test.m-ld.org/fred'
-          }).pipe(toArray()).toPromise()).resolves.toEqual([fred]);
+          }).pipe(toArray()))).resolves.toEqual([fred]);
         });
 
         test('does not answer operations since before snapshot start', async () => {
           const snapshot = await ssd.takeSnapshot();
-          const staticData = await snapshot.data.pipe(toArray()).toPromise();
+          const staticData = await firstValueFrom(snapshot.data.pipe(toArray()));
           await ssd.applySnapshot({ gwc: local.gwc, data: from(staticData) }, local.tick().time);
           await expect(ssd.operationsSince(remote.time)).resolves.toBeUndefined();
         });
@@ -247,9 +247,9 @@ describe('SU-Set Dataset', () => {
             local.tick().time);
           expect(willUpdate).resolves.toHaveProperty('@delete', [fred]);
 
-          await expect(ssd.read<Describe>({
+          await expect(firstValueFrom(ssd.read<Describe>({
             '@describe': 'http://test.m-ld.org/fred'
-          }).pipe(toArray()).toPromise()).resolves.toEqual([]);
+          }).pipe(toArray()))).resolves.toEqual([]);
         });
 
         test('transacts another insert', async () => {
@@ -259,9 +259,9 @@ describe('SU-Set Dataset', () => {
           ]) ?? fail();
           expect(msg.time.equals(local.time)).toBe(true);
 
-          await expect(ssd.read<Describe>({
+          await expect(firstValueFrom(ssd.read<Describe>({
             '@describe': 'http://test.m-ld.org/barney'
-          }).pipe(toArray()).toPromise()).resolves.toEqual([barney]);
+          }).pipe(toArray()))).resolves.toEqual([barney]);
         });
 
         test('answers local op since first', async () => {
@@ -274,7 +274,7 @@ describe('SU-Set Dataset', () => {
           ]);
           const ops = await ssd.operationsSince(remote.time);
           expect(ops).not.toBeUndefined();
-          const opArray = ops ? await ops.pipe(toArray()).toPromise() : [];
+          const opArray = ops ? await firstValueFrom(ops.pipe(toArray())) : [];
           expect(opArray.length).toBe(1);
           expect(local.time.equals(opArray[0].time)).toBe(true);
         });
@@ -291,7 +291,7 @@ describe('SU-Set Dataset', () => {
 
           const ops = await ssd.operationsSince(remote.time);
           expect(ops).not.toBeUndefined();
-          const opArray = ops ? await ops.pipe(toArray()).toPromise() : [];
+          const opArray = ops ? await firstValueFrom(ops.pipe(toArray())) : [];
           expect(opArray.length).toBe(1);
           expect(thirdClock.time.equals(opArray[0].time)).toBe(true);
         });
@@ -311,7 +311,7 @@ describe('SU-Set Dataset', () => {
 
           const ops = await ssd.operationsSince(remote.time);
           expect(ops).not.toBeUndefined();
-          const opArray = ops ? await ops.pipe(toArray()).toPromise() : [];
+          const opArray = ops ? await firstValueFrom(ops.pipe(toArray())) : [];
           // We expect the missed local op (barney) but not the remote op
           // (wilma), because it should be filtered out
           expect(opArray.length).toBe(1);
@@ -335,7 +335,7 @@ describe('SU-Set Dataset', () => {
 
           const ops = await ssd.operationsSince(remote.time);
           expect(ops).not.toBeUndefined();
-          const opArray = ops ? await ops.pipe(toArray()).toPromise() : [];
+          const opArray = ops ? await firstValueFrom(ops.pipe(toArray())) : [];
           // We expect only the missed remote op
           expect(opArray.length).toBe(1);
           expect(opArray[0].data).toEqual(thirdOp.data);
@@ -348,9 +348,9 @@ describe('SU-Set Dataset', () => {
             local.time,
             local.tick().time);
 
-          await expect(ssd.read<Describe>({
+          await expect(firstValueFrom(ssd.read<Describe>({
             '@describe': 'http://test.m-ld.org/wilma'
-          }).pipe(toArray()).toPromise()).resolves.toEqual([wilma]);
+          }).pipe(toArray()))).resolves.toEqual([wilma]);
         });
 
         // @see https://github.com/m-ld/m-ld-js/issues/29
@@ -366,7 +366,7 @@ describe('SU-Set Dataset', () => {
           // The remote asks for its previous time
           const ops = await ssd.operationsSince(remoteTime);
           expect(ops).not.toBeUndefined();
-          const opArray = ops ? await ops.pipe(toArray()).toPromise() : [];
+          const opArray = ops ? await firstValueFrom(ops.pipe(toArray())) : [];
           expect(opArray.length).toBe(1);
           expect(remote.time.equals(opArray[0].time)).toBe(true);
         });
@@ -391,9 +391,9 @@ describe('SU-Set Dataset', () => {
               {"tid":"${remote.time.hash()}","o":"Barney","p":"#name","s":"barney"}]`]),
             local.time, local.tick().time);
           // Result should not include wilma because of the third-party delete
-          await expect(ssd.read<Describe>({
+          await expect(firstValueFrom(ssd.read<Describe>({
             '@describe': 'http://test.m-ld.org/wilma'
-          }).pipe(toArray()).toPromise()).resolves.toEqual([]);
+          }).pipe(toArray()))).resolves.toEqual([]);
         });
 
         test('cuts stale fusion from incoming fusion', async () => {
@@ -415,15 +415,15 @@ describe('SU-Set Dataset', () => {
               {"tid":"${remote.time.hash()}","o":"Barney","p":"#name","s":"barney"}]`]),
             local.time, local.tick().time);
           // Result should not include betty because the fusion omits it
-          await expect(ssd.read<Describe>({
+          await expect(firstValueFrom(ssd.read<Describe>({
             '@describe': 'http://test.m-ld.org/betty'
-          }).pipe(toArray()).toPromise()).resolves.toEqual([]);
+          }).pipe(toArray()))).resolves.toEqual([]);
         });
 
         test('cuts snapshot last-seen message from incoming fusion', async () => {
           // Restart the clone with its own snapshot (unrealistic but benign)
           const snapshot = await ssd.takeSnapshot();
-          const staticData = await snapshot.data.pipe(toArray()).toPromise();
+          const staticData = await firstValueFrom(snapshot.data.pipe(toArray()));
           // Get a new clock for the rejuvenated clone
           const newLocal = remote.join(local.time).fork();
           await ssd.applySnapshot({ gwc: remote.gwc, data: from(staticData) }, newLocal.time);
@@ -442,9 +442,9 @@ describe('SU-Set Dataset', () => {
               {"tid":"${local.time.hash()}","o":"Barney","p":"#name","s":"barney"}]`]),
             newLocal.time, newLocal.tick().time);
           // Result should not include fred because of the remote delete
-          await expect(ssd.read<Describe>({
+          await expect(firstValueFrom(ssd.read<Describe>({
             '@describe': 'http://test.m-ld.org/fred'
-          }).pipe(toArray()).toPromise()).resolves.toEqual([]);
+          }).pipe(toArray()))).resolves.toEqual([]);
         });
       });
     });
@@ -482,10 +482,7 @@ describe('SU-Set Dataset', () => {
         await ssd.write({ '@insert': wilma })
       ]);
       constraint.check = async state =>
-        state.read<Describe>({ '@describe': 'http://test.m-ld.org/wilma' }).toPromise().then(wilma => {
-          if (wilma == null)
-            throw 'not found!';
-        });
+        firstValueFrom(state.read<Describe>({ '@describe': 'http://test.m-ld.org/wilma' }));
       await expect(ssd.transact(async () => [
         local.tick().time,
         await ssd.write({ '@insert': fred })
@@ -505,8 +502,8 @@ describe('SU-Set Dataset', () => {
         local.tick().time,
         await ssd.write({ '@insert': fred })
       ])).resolves.toBeDefined();
-      await expect(ssd.read(<Describe>{ '@describe': wilma['@id'] })
-        .pipe(take(1)).toPromise()).resolves.toEqual(wilma);
+      await expect(firstValueFrom(ssd.read(<Describe>{ '@describe': wilma['@id'] })))
+        .resolves.toEqual(wilma);
     });
 
     test('applies an inserting constraint', async () => {
@@ -528,9 +525,9 @@ describe('SU-Set Dataset', () => {
         expect(del).toBe('{}');
         expect(ins).toBe('{"@id":"wilma","name":"Wilma"}');
       }
-      await expect(ssd.read<Describe>({
+      await expect(firstValueFrom(ssd.read<Describe>({
         '@describe': 'http://test.m-ld.org/wilma'
-      }).pipe(toArray()).toPromise()).resolves.toEqual([wilma]);
+      }).pipe(toArray()))).resolves.toEqual([wilma]);
 
       const newLocalTime = (<TreeClock>await ssd.loadClock());
       expect(newLocalTime.equals(local.time)).toBe(true);
@@ -539,7 +536,7 @@ describe('SU-Set Dataset', () => {
       const ops = await ssd.operationsSince(remote.time);
       if (ops == null)
         return fail();
-      const entries = await ops.pipe(toArray()).toPromise();
+      const entries = await firstValueFrom(ops.pipe(toArray()));
       expect(entries.length).toBe(1);
       expect(entries[0].time.equals(local.time)).toBe(true);
       const [, from, time, del, ins] = entries[0].data;
@@ -564,9 +561,9 @@ describe('SU-Set Dataset', () => {
       expect(willUpdate).resolves.toEqual(
         { '@insert': [fred], '@delete': [wilma], '@ticks': local.time.ticks });
 
-      await expect(ssd.read<Describe>({
+      await expect(firstValueFrom(ssd.read<Describe>({
         '@describe': 'http://test.m-ld.org/wilma'
-      }).pipe(toArray()).toPromise()).resolves.toEqual([]);
+      }).pipe(toArray()))).resolves.toEqual([]);
     });
 
     test('applies a self-deleting constraint', async () => {
@@ -579,9 +576,9 @@ describe('SU-Set Dataset', () => {
         local.join(remote.time).tick().time,
         local.tick().time);
 
-      await expect(ssd.read<Describe>({
+      await expect(firstValueFrom(ssd.read<Describe>({
         '@describe': 'http://test.m-ld.org/wilma'
-      }).pipe(toArray()).toPromise()).resolves.toEqual([]);
+      }).pipe(toArray()))).resolves.toEqual([]);
 
       // The inserted data was deleted, but Wilma may have existed before
       await expect(willUpdate).resolves.toEqual(
@@ -603,9 +600,9 @@ describe('SU-Set Dataset', () => {
         local.join(remote.time).tick().time,
         local.tick().time);
 
-      await expect(ssd.read<Describe>({
+      await expect(firstValueFrom(ssd.read<Describe>({
         '@describe': 'http://test.m-ld.org/wilma'
-      }).pipe(toArray()).toPromise()).resolves.toEqual([wilma]);
+      }).pipe(toArray()))).resolves.toEqual([wilma]);
 
       // The deleted data was re-inserted, but Wilma may not have existed before
       await expect(willUpdate).resolves.toEqual(

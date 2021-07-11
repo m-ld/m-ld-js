@@ -1,6 +1,6 @@
 import {
-  AsyncSubject, BehaviorSubject, concat, from, NEVER, Observable, ObservableInput, ObservedValueOf,
-  Observer, onErrorResumeNext, OperatorFunction, Subject, Subscription, throwError
+  AsyncSubject, BehaviorSubject, concat, firstValueFrom, from, NEVER, Observable, ObservableInput,
+  ObservedValueOf, Observer, onErrorResumeNext, OperatorFunction, Subject, Subscription, throwError
 } from 'rxjs';
 import { mergeMap, publish, switchAll, tap } from 'rxjs/operators';
 import { getLogger, getLoggers, LogLevelDesc } from 'loglevel';
@@ -50,6 +50,11 @@ export function settled(result: PromiseLike<unknown>): Promise<unknown> {
   return new Promise(done => result.then(done, done));
 }
 
+export function completed(observable: Observable<unknown>): Promise<void> {
+  return new Promise((resolve, reject) =>
+    observable.subscribe({ complete: resolve, error: reject }));
+}
+
 export function sha1Digest(...items: (string | Buffer)[]) {
   const hash = createHash('sha1'); // Fastest
   for (let item of items)
@@ -59,6 +64,7 @@ export function sha1Digest(...items: (string | Buffer)[]) {
 
 export class Future<T = void> implements PromiseLike<T> {
   private readonly subject = new AsyncSubject<T>();
+  private _pending = true;
 
   constructor(value?: T) {
     if (value !== undefined) {
@@ -68,7 +74,7 @@ export class Future<T = void> implements PromiseLike<T> {
   }
 
   get pending() {
-    return !this.subject.isStopped;
+    return this._pending;
   }
 
   get settle() {
@@ -76,16 +82,18 @@ export class Future<T = void> implements PromiseLike<T> {
   }
 
   resolve = (value: T) => {
+    this._pending = false;
     this.subject.next(value);
     this.subject.complete();
   };
 
   reject = (err: any) => {
+    this._pending = false;
     this.subject.error(err);
   };
 
   then: PromiseLike<T>['then'] = (onfulfilled, onrejected) => {
-    return this.subject.toPromise().then(onfulfilled, onrejected);
+    return firstValueFrom(this.subject).then(onfulfilled, onrejected);
   };
 }
 

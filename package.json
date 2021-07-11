@@ -91,7 +91,7 @@
     "quadstore": "^9.1.0",
     "quadstore-comunica": "^1.1.0",
     "rdf-data-factory": "^1.0.4",
-    "rxjs": "^6.6.3",
+    "rxjs": "^7.2.0",
     "short-uuid": "^4.1.0",
     "valid-data-url": "^4.0.0"
   },

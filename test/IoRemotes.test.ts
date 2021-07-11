@@ -6,7 +6,7 @@ import { AddressInfo } from 'net';
 import { comesAlive } from '../src/engine/AbstractMeld';
 import { mockLocal, MockProcess } from './testClones';
 import { GlobalClock, TreeClock } from '../src/engine/clocks';
-import { of } from 'rxjs';
+import { lastValueFrom, of } from 'rxjs';
 
 describe('Socket.io Remotes', () => {
   let serverIo: ServerIo;
@@ -85,7 +85,7 @@ describe('Socket.io Remotes', () => {
       })
     }));
     const revup = await localRemotes.revupFrom(TreeClock.GENESIS.forked().right);
-    const op = await revup!.updates.toPromise();
+    const op = await lastValueFrom(revup!.updates);
     expect(op.time.equals(remote.time)).toBe(true);
   });
 

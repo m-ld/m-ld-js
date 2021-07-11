@@ -5,7 +5,7 @@ import { idling } from '../local';
 import { CausalOperator, CausalTimeRange } from '../ops';
 import { Triple } from '../quads';
 import { TreeClock } from '../clocks';
-import { getIdLogger, inflate } from '../util';
+import { completed, getIdLogger, inflate } from '../util';
 import { array, MeldConfig } from '../../index';
 import { TickTid } from './JournalOperation';
 
@@ -78,15 +78,16 @@ export class JournalClerk {
       share());
     // Kick things off by subscribing the logger
     const log = getIdLogger(this.constructor, config['@id'], config.logLevel);
-    this.activity.subscribe(
-      action => log.debug(`${action}`),
-      err => log.error(err),
-      () => this.closing.complete());
+    this.activity.subscribe({
+      next: action => log.debug(`${action}`),
+      error: err => log.error(err),
+      complete: () => this.closing.complete()
+    });
   }
 
   async close() {
     this.closing.next(true);
-    await this.closing.toPromise();
+    await completed(this.closing);
   }
 
   private process(entry: JournalEntry | CheckPoint): Observable<ClerkAction> {

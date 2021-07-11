@@ -1,8 +1,11 @@
 import { DatasetEngine } from '../src/engine/dataset/DatasetEngine';
 import { hotLive, MemDown, memStore, MockProcess, mockRemotes, testConfig } from './testClones';
-import { asapScheduler, BehaviorSubject, EMPTY, NEVER, Subject as Source, throwError } from 'rxjs';
+import {
+  asapScheduler, BehaviorSubject, EMPTY, EmptyError, firstValueFrom, NEVER, Subject as Source,
+  throwError
+} from 'rxjs';
 import { comesAlive } from '../src/engine/AbstractMeld';
-import { count, first, map, observeOn, take, toArray } from 'rxjs/operators';
+import { count, map, observeOn, take, toArray } from 'rxjs/operators';
 import { TreeClock } from '../src/engine/clocks';
 import { MeldRemotes, OperationMessage, Snapshot } from '../src/engine';
 import { Describe, MeldConfig, Subject, Update } from '../src';
@@ -55,9 +58,9 @@ describe('Dataset engine', () => {
     });
 
     test('not found is empty', async () => {
-      await expect(silo.read({
+      await expect(firstValueFrom(silo.read({
         '@describe': 'http://test.m-ld.org/fred'
-      } as Describe).toPromise()).resolves.toBeUndefined();
+      } as Describe))).rejects.toBeInstanceOf(EmptyError);
     });
 
     test('stores a JSON-LD object', async () => {
@@ -73,10 +76,9 @@ describe('Dataset engine', () => {
         '@id': 'http://test.m-ld.org/fred',
         'http://test.m-ld.org/#name': 'Fred'
       } as Subject);
-      const result = silo.read({
+      const fred = await firstValueFrom(silo.read({
         '@describe': 'http://test.m-ld.org/fred'
-      } as Describe);
-      const fred = await result.toPromise();
+      } as Describe));
       expect(fred['@id']).toBe('http://test.m-ld.org/fred');
       expect(fred['http://test.m-ld.org/#name']).toBe('Fred');
     });
@@ -90,12 +92,12 @@ describe('Dataset engine', () => {
         '@id': 'http://test.m-ld.org/fred',
         'http://test.m-ld.org/#name': 'Fred'
       } as Subject);
-      await silo.dataUpdates.pipe(first()).toPromise();
+      await firstValueFrom(silo.dataUpdates);
       expect(silo.status.value).toEqual({ online: true, outdated: false, silo: true, ticks: 1 });
     });
 
     test('follow after initial ticks', async () => {
-      const firstUpdate = silo.dataUpdates.pipe(first()).toPromise();
+      const firstUpdate = firstValueFrom(silo.dataUpdates);
       silo.write({
         '@id': 'http://test.m-ld.org/fred',
         'http://test.m-ld.org/#name': 'Fred'
@@ -109,7 +111,7 @@ describe('Dataset engine', () => {
         'http://test.m-ld.org/#name': 'Fred'
       } as Subject);
       expect(silo.status.value.ticks).toBe(1);
-      const firstUpdate = silo.dataUpdates.pipe(first()).toPromise();
+      const firstUpdate = firstValueFrom(silo.dataUpdates);
       await silo.write({
         '@id': 'http://test.m-ld.org/wilma',
         'http://test.m-ld.org/#name': 'Wilma'
@@ -139,7 +141,7 @@ describe('Dataset engine', () => {
     test('answers rev-up from the new clone', async () => {
       const revup = await clone.revupFrom(remote.time);
       expect(revup).toBeDefined();
-      await expect(revup?.updates.toPromise()).resolves.toBeUndefined();
+      await expect(firstValueFrom(revup!.updates)).rejects.toBeInstanceOf(EmptyError);
     });
 
     test('comes online as not silo', async () => {
@@ -149,8 +151,8 @@ describe('Dataset engine', () => {
     test('ticks increase monotonically', async () => {
       // Edge case from compliance tests: a local transaction racing a remote
       // transaction could cause a clock reversal.
-      const updates = clone.dataUpdates.pipe(map(next => next['@ticks']),
-        take(2), toArray()).toPromise();
+      const updates = firstValueFrom(clone.dataUpdates.pipe(map(next => next['@ticks']),
+        take(2), toArray()));
       clone.write({
         '@id': 'http://test.m-ld.org/fred',
         'http://test.m-ld.org/#name': 'Fred'
@@ -167,7 +169,7 @@ describe('Dataset engine', () => {
     // even if it doesn't have a journalled entry. This can also happen due to:
     // 1. a remote transaction, because of the clock space made for a constraint
     test('answers rev-up from next new clone after apply', async () => {
-      const updated = clone.dataUpdates.pipe(take(1)).toPromise();
+      const updated = firstValueFrom(clone.dataUpdates);
       remoteUpdates.next(remote.sentOperation(
         '{}', '{"@id":"http://test.m-ld.org/wilma","http://test.m-ld.org/#name":"Wilma"}'));
       await updated;
@@ -231,7 +233,7 @@ describe('Dataset engine', () => {
         dataset: await memStore(), remotes, config: testConfig({ genesis: false })
       });
       await clone.initialise();
-      const updates = clone.dataUpdates.pipe(count()).toPromise();
+      const updates = firstValueFrom(clone.dataUpdates.pipe(count()));
       remoteUpdates.next(collabPrevOp);
       // Also enqueue a no-op write, which we can wait for - relying on queue ordering
       await clone.write({ '@insert': [] } as Update);
@@ -340,8 +342,8 @@ describe('Dataset engine', () => {
       clone = new DatasetEngine({
         dataset: await memStore({ backend }), remotes, config: testConfig()
       });
-      const observedTicks = clone.updates.pipe(map(next => next.time.ticks),
-        take(2), toArray()).toPromise();
+      const observedTicks = firstValueFrom(clone.updates.pipe(map(next => next.time.ticks),
+        take(2), toArray()));
       await clone.initialise();
       // Do a new update during rev-up, this will immediately produce an update
       await clone.write({
@@ -387,7 +389,7 @@ describe('Dataset engine', () => {
       await clone.initialise();
       await clone.status.becomes({ outdated: false });
 
-      const updates = clone.dataUpdates.pipe(toArray()).toPromise();
+      const updates = firstValueFrom(clone.dataUpdates.pipe(toArray()));
       const op = remote.sentOperation(
         '{}', '{"@id":"http://test.m-ld.org/wilma","http://test.m-ld.org/#name":"Wilma"}');
       // Push a operation

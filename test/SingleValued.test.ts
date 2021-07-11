@@ -1,4 +1,4 @@
-import { MeldReadState, InterimUpdate, MeldUpdate } from '../src/api';
+import { InterimUpdate, MeldReadState, MeldUpdate } from '../src';
 import { memStore } from './testClones';
 import { SingleValued } from '../src/constraints/SingleValued';
 import { JrqlGraph } from '../src/engine/dataset/JrqlGraph';
@@ -6,6 +6,7 @@ import { GraphState } from '../src/engine/dataset/GraphState';
 import { Dataset } from '../src/engine/dataset';
 import { mock } from 'jest-mock-extended';
 import { SubjectGraph } from '../src/engine/SubjectGraph';
+import { firstValueFrom } from 'rxjs';
 
 describe('Single-valued constraint', () => {
   let data: Dataset;
@@ -152,9 +153,9 @@ describe('Single-valued constraint', () => {
     await constraint.apply(state, update);
     // FIXME: not applied to the dataset!
 
-    await expect(graph.describe1('http://test.m-ld.org/fred').toPromise())
+    await expect(firstValueFrom(graph.describe1('http://test.m-ld.org/fred')))
       .resolves.toMatchObject({ 'http://test.m-ld.org/#name': 'Fred' });
-    await expect(graph.describe1('http://test.m-ld.org/wilma').toPromise())
+    await expect(firstValueFrom(graph.describe1('http://test.m-ld.org/wilma')))
       .resolves.toMatchObject({ 'http://test.m-ld.org/#name': 'Wilma' });
   });
 });
