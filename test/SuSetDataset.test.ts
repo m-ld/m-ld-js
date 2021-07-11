@@ -89,12 +89,12 @@ describe('SU-Set Dataset', () => {
         const msg = await ssd.transact(async () => [
           local.tick().time,
           await ssd.write({ '@insert': fred })
-        ]) ?? fail();
+        ]);
         // The update should happen in-transaction, so no 'await' here
-        expect(willUpdate).resolves.toHaveProperty('@insert', [fred]);
+        await expect(willUpdate).resolves.toHaveProperty('@insert', [fred]);
 
-        expect(msg.time.equals(local.time)).toBe(true);
-        const [ver, from, time, del, ins] = msg.data;
+        expect(msg!.time.equals(local.time)).toBe(true);
+        const [ver, from, time, del, ins] = msg!.data;
         expect(ver).toBe(2);
 
         expect(from).toBe(local.time.ticks);
@@ -137,7 +137,7 @@ describe('SU-Set Dataset', () => {
           firstTid = (await ssd.transact(async () => [
             local.tick().time,
             await ssd.write({ '@insert': fred })
-          ]) ?? fail()).time.hash();
+          ]))!.time.hash();
         });
 
         test('answers the new time', async () => {
@@ -223,11 +223,11 @@ describe('SU-Set Dataset', () => {
           const msg = await ssd.transact(async () => [
             local.tick().time,
             await ssd.write({ '@delete': { '@id': 'http://test.m-ld.org/fred' } })
-          ]) ?? fail();
-          expect(willUpdate).resolves.toHaveProperty('@delete', [fred]);
+          ]);
+          await expect(willUpdate).resolves.toHaveProperty('@delete', [fred]);
 
-          expect(msg.time.equals(local.time)).toBe(true);
-          const [, , , del, ins] = msg.data;
+          expect(msg!.time.equals(local.time)).toBe(true);
+          const [, , , del, ins] = msg!.data;
 
           expect(MeldEncoder.jsonFromBuffer(ins)).toEqual({});
           expect(MeldEncoder.jsonFromBuffer(del)).toMatchObject({
@@ -256,8 +256,8 @@ describe('SU-Set Dataset', () => {
           const msg = await ssd.transact(async () => [
             local.tick().time,
             await ssd.write({ '@insert': barney })
-          ]) ?? fail();
-          expect(msg.time.equals(local.time)).toBe(true);
+          ]);
+          expect(msg!.time.equals(local.time)).toBe(true);
 
           await expect(firstValueFrom(ssd.read<Describe>({
             '@describe': 'http://test.m-ld.org/barney'
@@ -302,7 +302,7 @@ describe('SU-Set Dataset', () => {
           const localOp = await ssd.transact(async () => [
             local.tick().time,
             await ssd.write({ '@insert': barney })
-          ]) ?? fail();
+          ]);
           // Don't update remote time from local
           await ssd.apply(
             remote.sentOperation('{}', JSON.stringify(wilma)),
@@ -315,7 +315,7 @@ describe('SU-Set Dataset', () => {
           // We expect the missed local op (barney) but not the remote op
           // (wilma), because it should be filtered out
           expect(opArray.length).toBe(1);
-          expect(opArray[0].time.equals(localOp.time)).toBe(true);
+          expect(opArray[0].time.equals(localOp!.time)).toBe(true);
         });
 
         test('answers missed third party op', async () => {
@@ -534,9 +534,7 @@ describe('SU-Set Dataset', () => {
 
       // Check that we have a valid journal
       const ops = await ssd.operationsSince(remote.time);
-      if (ops == null)
-        return fail();
-      const entries = await firstValueFrom(ops.pipe(toArray()));
+      const entries = await firstValueFrom(ops!.pipe(toArray()));
       expect(entries.length).toBe(1);
       expect(entries[0].time.equals(local.time)).toBe(true);
       const [, from, time, del, ins] = entries[0].data;
@@ -592,7 +590,7 @@ describe('SU-Set Dataset', () => {
       const tid = (await ssd.transact(async () => [
         local.tick().time,
         await ssd.write({ '@insert': wilma })
-      ]) ?? fail()).data[1];
+      ]))!.data[1];
 
       const willUpdate = captureUpdate();
       await ssd.apply(

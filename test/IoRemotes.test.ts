@@ -11,10 +11,11 @@ import { lastValueFrom, of } from 'rxjs';
 describe('Socket.io Remotes', () => {
   let serverIo: ServerIo;
   let remoteRemotes: IoRemotes;
+  let localRemotes: IoRemotes;
   let domain: string;
   let port: number;
 
-  beforeAll((done) => {
+  beforeAll(done => {
     const server = createServer();
     serverIo = new ServerIo(server);
     new IoRemotesService(serverIo.sockets)
@@ -45,7 +46,7 @@ describe('Socket.io Remotes', () => {
 
   test('comes alive with remote clone', async () => {
     // This tests presence
-    const localRemotes = new IoRemotes({
+    localRemotes = new IoRemotes({
       '@id': 'local-remotes', '@domain': domain, genesis: false,
       io: { uri: `http://localhost:${port}` }
     });
@@ -59,7 +60,7 @@ describe('Socket.io Remotes', () => {
 
   test('can get clock', async () => {
     // This tests sending and replying
-    const localRemotes = new IoRemotes({
+    localRemotes = new IoRemotes({
       '@id': 'local-remotes', '@domain': domain, genesis: false,
       io: { uri: `http://localhost:${port}` }
     });
@@ -73,7 +74,7 @@ describe('Socket.io Remotes', () => {
 
   test('can rev-up', async () => {
     // This tests notification channels
-    const localRemotes = new IoRemotes({
+    localRemotes = new IoRemotes({
       '@id': 'local-remotes', '@domain': domain, genesis: false,
       io: { uri: `http://localhost:${port}` }
     });
@@ -90,11 +91,11 @@ describe('Socket.io Remotes', () => {
   });
 
   afterEach(async () => {
+    await localRemotes?.close();
     await remoteRemotes.close();
   });
 
-  afterAll(() => {
-    serverIo.close();
+  afterAll(done => {
+    serverIo.close(done);
   });
-
 });

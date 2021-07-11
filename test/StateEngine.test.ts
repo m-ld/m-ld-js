@@ -46,7 +46,8 @@ describe('State Engine', () => {
 
   test('can read initial state and follow', done => {
     states.read(async state => {
-      await expect(firstValueFrom(state.read({}))).resolves.toMatchObject({ tick: 0 }).catch(fail);
+      await expect(firstValueFrom(state.read({})))
+        .resolves.toMatchObject({ tick: 0 }).catch(err => done.fail(err));
     }, async update => {
       expect(update).toMatchObject({ '@ticks': 1 });
       done();
@@ -145,7 +146,7 @@ describe('State Engine', () => {
       await state.write({});
       try {
         await state.write({});
-        fail('Expecting de-scoped state');
+        done.fail('Expecting de-scoped state');
       } catch (err) {
         done();
       }
@@ -157,7 +158,7 @@ describe('State Engine', () => {
       await state.write({});
       try {
         state.read({});
-        fail('Expecting de-scoped state');
+        done.fail('Expecting de-scoped state');
       } catch (err) {
         done();
       }

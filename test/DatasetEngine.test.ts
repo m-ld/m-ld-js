@@ -180,7 +180,7 @@ describe('Dataset engine', () => {
     test('answers rev-up from next new clone after failure', async () => {
       // Insert with union is not valid
       await clone.write(<Update>{ '@union': [] })
-        .then(() => fail('Expecting error'), () => { });
+        .then(() => { throw 'Expecting error'; }, () => { });
       const thirdTime = await clone.newClock();
       await expect(clone.revupFrom(thirdTime)).resolves.toBeDefined();
     });

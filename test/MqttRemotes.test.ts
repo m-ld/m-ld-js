@@ -204,13 +204,11 @@ describe('New MQTT remotes', () => {
   describe('when not genesis', () => {
     beforeEach(() => mqtt.mockConnect());
 
-    test('cannot get new clock if no peers', async () => {
-      try {
-        await remotes.newClock();
-        fail();
-      } catch (error) {
+    test('cannot get new clock if no peers', done => {
+      remotes.newClock().then(() => { throw 'expecting error'; }, error => {
         expect(error.message).toMatch(/No-one present/);
-      }
+        done();
+      });
     });
 
     test('can get clock', async () => {

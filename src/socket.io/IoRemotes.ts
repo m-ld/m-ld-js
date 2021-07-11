@@ -42,6 +42,11 @@ export class IoRemotes extends PubsubRemotes {
       .on('notify', (params: NotifyParams, msg: Buffer) => this.onNotify(params.channelId, msg));
   }
 
+  async close(err?: any): Promise<void> {
+    await super.close(err);
+    this.socket.close();
+  }
+
   protected present(): Observable<string> {
     return new Observable(subs => {
       this.socket.emit('presence', (err: string | null, present: string[]) => {

@@ -25,7 +25,7 @@ describe('Ably remotes', () => {
   function otherPresent() {
     const [subscriber] = operations.presence.subscribe.mock.calls[0];
     if (typeof subscriber != 'function')
-      fail();
+      throw 'expecting subscriber function';
     setImmediate(() => {
       // The implementation relies on the presence set rather than just the
       // subscriber parameter.
@@ -157,7 +157,7 @@ describe('Ably remotes', () => {
     connCallbacks.connected?.(mock<Ably.Types.ConnectionStateChange>());
     const [subscriber] = control.subscribe.mock.calls[0];
     if (typeof subscriber != 'function')
-      return fail();
+      throw 'expecting subscriber function';
     // Set up the other clone's direct channel
     const other = mock<Ably.Types.RealtimeChannelPromise>();
     client.channels.get.calledWith('test.m-ld.org:other').mockReturnValue(other);
