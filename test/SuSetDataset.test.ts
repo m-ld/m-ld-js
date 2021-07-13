@@ -1,14 +1,13 @@
 import { SuSetDataset } from '../src/engine/dataset/SuSetDataset';
-import { txnId } from '../src/engine/dataset/SuSetGraph';
-import { memStore } from './testClones';
+import { memStore, MockProcess } from './testClones';
 import { TreeClock } from '../src/engine/clocks';
-import { first, toArray, isEmpty, take } from 'rxjs/operators';
-import { DeltaMessage, EncodedDelta } from '../src/engine';
+import { toArray } from 'rxjs/operators';
 import { Dataset } from '../src/engine/dataset';
-import { from } from 'rxjs';
-import { Describe, MeldConstraint, Subject } from '../src';
+import { EmptyError, firstValueFrom, from, lastValueFrom } from 'rxjs';
+import { Describe, MeldConstraint } from '../src';
 import { jsonify } from './testUtil';
-import { SubjectGraph } from '../src/engine/SubjectGraph';
+import { MeldEncoder } from '../src/engine/MeldEncoding';
+import { OperationMessage } from '../src/engine';
 
 const fred = {
   '@id': 'http://test.m-ld.org/fred',
@@ -26,7 +25,7 @@ describe('SU-Set Dataset', () => {
 
   function captureUpdate() {
     // Convert the subject graphs to JSON for matching convenience
-    return ssd.updates.pipe(first()).toPromise().then(jsonify);
+    return firstValueFrom(ssd.updates).then(jsonify);
   }
 
   describe('with basic config', () => {
@@ -44,43 +43,39 @@ describe('SU-Set Dataset', () => {
     });
 
     test('does not have a time', async () => {
-      expect(await ssd.loadClock()).toBeNull();
+      expect(await ssd.loadClock()).toBeUndefined();
     });
 
     describe('with an initial time', () => {
-      let localTime: TreeClock, remoteTime: TreeClock;
+      let local: MockProcess, remote: MockProcess;
 
       beforeEach(async () => {
         let { left, right } = TreeClock.GENESIS.forked();
-        localTime = left;
-        remoteTime = right;
-        await ssd.saveClock(() => localTime = localTime.ticked(), true);
-      });
-
-      test('does not answer operations since before start', async () => {
-        await expect(ssd.operationsSince(remoteTime)).resolves.toBeUndefined();
+        local = new MockProcess(left);
+        remote = new MockProcess(right);
+        await ssd.resetClock(local.time);
       });
 
       test('has no operations since first time', async () => {
-        const ops = await ssd.operationsSince(localTime);
-        await expect(ops && ops.pipe(isEmpty()).toPromise()).resolves.toBe(true);
+        const ops = await ssd.operationsSince(local.time);
+        await expect(firstValueFrom(ops!)).rejects.toBeInstanceOf(EmptyError);
       });
 
       test('answers the time', async () => {
         const savedTime = await ssd.loadClock();
-        expect(savedTime && savedTime.equals(localTime)).toBe(true);
+        expect(savedTime!.equals(local.time)).toBe(true);
       });
 
       test('answers an empty snapshot', async () => {
         const snapshot = await ssd.takeSnapshot();
-        expect(snapshot.lastTime.equals(localTime.scrubId())).toBe(true);
-        await expect(snapshot.quads.toPromise()).resolves.toBeUndefined();
+        expect(snapshot.gwc.equals(local.gwc)).toBe(true);
+        await expect(lastValueFrom(snapshot.data)).rejects.toBeInstanceOf(EmptyError);
       });
 
       test('transacts a no-op', async () => {
         const willUpdate = captureUpdate();
         const msg = await ssd.transact(async () => [
-          localTime = localTime.ticked(),
+          local.tick().time,
           await ssd.write({ '@insert': [] })
         ]);
         expect(msg).toBeNull();
@@ -92,44 +87,43 @@ describe('SU-Set Dataset', () => {
         const willUpdate = captureUpdate();
 
         const msg = await ssd.transact(async () => [
-          localTime = localTime.ticked(),
+          local.tick().time,
           await ssd.write({ '@insert': fred })
-        ]) ?? fail();
+        ]);
         // The update should happen in-transaction, so no 'await' here
-        expect(willUpdate).resolves.toHaveProperty('@insert', [fred]);
+        await expect(willUpdate).resolves.toHaveProperty('@insert', [fred]);
 
-        expect(msg.time.equals(localTime)).toBe(true);
-        const [ver, del, ins] = msg.data;
-        expect(ver).toBe(1);
+        expect(msg!.time.equals(local.time)).toBe(true);
+        const [ver, from, time, del, ins] = msg!.data;
+        expect(ver).toBe(2);
 
-        expect(await EncodedDelta.decode(ins))
+        expect(from).toBe(local.time.ticks);
+        expect(local.time.equals(TreeClock.fromJson(time) as TreeClock)).toBe(true);
+        expect(MeldEncoder.jsonFromBuffer(ins))
           .toEqual({ '@id': 'fred', 'name': 'Fred' });
-        expect(await EncodedDelta.decode(del)).toEqual({});
+        expect(MeldEncoder.jsonFromBuffer(del)).toEqual({});
       });
 
-      test('applies an insert delta', async () => {
+      test('applies an insert operation', async () => {
         const willUpdate = captureUpdate();
 
-        await ssd.apply(new DeltaMessage(
-          remoteTime.ticks, remoteTime = remoteTime.ticked(),
-          [1, '{}', '{"@id":"fred","name":"Fred"}']),
-          localTime = localTime.update(remoteTime).ticked(),
-          localTime = localTime.ticked());
-        expect(willUpdate).resolves.toHaveProperty('@insert', [fred]);
+        await ssd.apply(
+          remote.sentOperation('{}', '{"@id":"fred","name":"Fred"}'),
+          local.join(remote.time).tick().time,
+          local.tick().time);
+        await expect(willUpdate).resolves.toHaveProperty('@insert', [fred]);
 
-        await expect(ssd.read<Describe>({
+        await expect(firstValueFrom(ssd.read<Describe>({
           '@describe': 'http://test.m-ld.org/fred'
-        }).pipe(toArray()).toPromise()).resolves.toEqual([fred]);
+        }).pipe(toArray()))).resolves.toEqual([fred]);
       });
 
-      test('applies a no-op delta', async () => {
+      test('applies a no-op operation', async () => {
         const willUpdate = captureUpdate();
 
-        const msg = await ssd.apply(new DeltaMessage(
-          remoteTime.ticks,
-          remoteTime = remoteTime.ticked(), [1, '{}', '{}']),
-          localTime = localTime.update(remoteTime).ticked(),
-          localTime = localTime.ticked());
+        const msg = await ssd.apply(remote.sentOperation('{}', '{}'),
+          local.join(remote.time).tick().time,
+          local.tick().time);
 
         expect(msg).toBeNull();
         await expect(Promise.race([willUpdate, Promise.resolve()]))
@@ -140,32 +134,46 @@ describe('SU-Set Dataset', () => {
         let firstTid: string;
 
         beforeEach(async () => {
-          firstTid = txnId((await ssd.transact(async () => [
-            localTime = localTime.ticked(),
+          firstTid = (await ssd.transact(async () => [
+            local.tick().time,
             await ssd.write({ '@insert': fred })
-          ]) ?? fail()).time);
+          ]))!.time.hash();
         });
 
         test('answers the new time', async () => {
           const newTime = await ssd.loadClock();
-          expect(newTime && newTime.equals(localTime)).toBe(true);
+          expect(newTime && newTime.equals(local.time)).toBe(true);
         });
 
         test('answers a snapshot', async () => {
           const snapshot = await ssd.takeSnapshot();
-          expect(snapshot.lastTime.equals(localTime.scrubId())).toBe(true);
-          const data = await snapshot.quads.toPromise();
-          expect(SubjectGraph.fromRDF(data)).toMatchObject([{
-            '@type': 'http://www.w3.org/1999/02/22-rdf-syntax-ns#Statement',
-            'http://m-ld.org/#tid': firstTid,
-            'http://www.w3.org/1999/02/22-rdf-syntax-ns#subject': {
-              '@id': 'http://test.m-ld.org/fred'
-            },
-            'http://www.w3.org/1999/02/22-rdf-syntax-ns#predicate': {
-              '@id': 'http://test.m-ld.org/#name'
-            },
-            'http://www.w3.org/1999/02/22-rdf-syntax-ns#object': 'Fred'
-          }]);
+          expect(snapshot.gwc.equals(local.gwc)).toBe(true);
+          const data = await firstValueFrom(snapshot.data.pipe(toArray()));
+          expect(data.length).toBe(2);
+          const reifiedFredJson =
+            `(,?("s":"fred"|"p":"#name"|"o":"Fred"|"tid":"${firstTid}")){4}`;
+          expect(data).toEqual(expect.arrayContaining([
+            { operation: [2, local.time.ticks, local.time.toJSON(), '{}', '{"@id":"fred","name":"Fred"}'] },
+            { inserts: expect.stringMatching(reifiedFredJson) }
+          ]));
+        });
+
+        test('answers a snapshot with fused last operations', async () => {
+          const firstTick = local.time.ticks;
+          await ssd.transact(async () => [
+            local.tick().time,
+            await ssd.write({ '@insert': wilma })
+          ]);
+          const snapshot = await ssd.takeSnapshot();
+          expect(snapshot.gwc.equals(local.gwc)).toBe(true);
+          const data = await firstValueFrom(snapshot.data.pipe(toArray()));
+          expect(data.length).toBe(2);
+          const reifiedFlintstoneJson = // Not a great check but must have all properties
+            `(.+("s":"fred"|"s":"wilma"|"p":"#name"|"o":"Fred"|"o":"Wilma"|"tid":"${firstTid}|"tid":"${local.time.hash()}")){8}`;
+          expect(data).toEqual(expect.arrayContaining([
+            { operation: [2, firstTick, local.time.toJSON(), '{}', expect.stringMatching(reifiedFlintstoneJson)] },
+            { inserts: expect.stringMatching(reifiedFlintstoneJson) }
+          ]));
         });
 
         test('snapshot includes entailed triples', async () => {
@@ -183,49 +191,46 @@ describe('SU-Set Dataset', () => {
             })
           });
           const snapshot = await ssd.takeSnapshot();
-          const data = await snapshot.quads.toPromise();
-          expect(SubjectGraph.fromRDF(data)).toMatchObject(expect.arrayContaining([
-            expect.objectContaining({
-              '@type': 'http://www.w3.org/1999/02/22-rdf-syntax-ns#Statement',
-              // No tids here
-              'http://www.w3.org/1999/02/22-rdf-syntax-ns#subject': {
-                '@id': 'http://test.m-ld.org/fred'
-              },
-              'http://www.w3.org/1999/02/22-rdf-syntax-ns#predicate': {
-                '@id': 'http://test.m-ld.org/#sex'
-              },
-              'http://www.w3.org/1999/02/22-rdf-syntax-ns#object': 'male'
-            })
+          const data = await firstValueFrom(snapshot.data.pipe(toArray()));
+          expect(data.length).toBe(2);
+          const reifiedSexJson = // Not a great check but must have all properties
+            `(.+("s":"fred"|"p":("#name"|"#sex")|"o":("Fred"|"male")|"tid":"${firstTid}")){7}`;
+          expect(data).toEqual(expect.arrayContaining([
+            { operation: [2, local.time.ticks, local.time.toJSON(), '{}', '{"@id":"fred","name":"Fred"}'] },
+            { inserts: expect.stringMatching(reifiedSexJson) }
           ]));
         });
 
         test('applies a snapshot', async () => {
           const snapshot = await ssd.takeSnapshot();
-          const staticData = await snapshot.quads.pipe(toArray()).toPromise();
-          await ssd.applySnapshot({
-            lastTime: localTime,
-            quads: from(staticData)
-          }, localTime = localTime.ticked());
-          await expect(ssd.read<Describe>({
+          const staticData = await firstValueFrom(snapshot.data.pipe(toArray()));
+          await ssd.applySnapshot({ gwc: local.gwc, data: from(staticData) }, local.tick().time);
+          await expect(firstValueFrom(ssd.read<Describe>({
             '@describe': 'http://test.m-ld.org/fred'
-          }).pipe(toArray()).toPromise()).resolves.toEqual([fred]);
+          }).pipe(toArray()))).resolves.toEqual([fred]);
+        });
+
+        test('does not answer operations since before snapshot start', async () => {
+          const snapshot = await ssd.takeSnapshot();
+          const staticData = await firstValueFrom(snapshot.data.pipe(toArray()));
+          await ssd.applySnapshot({ gwc: local.gwc, data: from(staticData) }, local.tick().time);
+          await expect(ssd.operationsSince(remote.time)).resolves.toBeUndefined();
         });
 
         test('transacts a delete', async () => {
           const willUpdate = captureUpdate();
 
           const msg = await ssd.transact(async () => [
-            localTime = localTime.ticked(),
+            local.tick().time,
             await ssd.write({ '@delete': { '@id': 'http://test.m-ld.org/fred' } })
-          ]) ?? fail();
-          expect(willUpdate).resolves.toHaveProperty('@delete', [fred]);
+          ]);
+          await expect(willUpdate).resolves.toHaveProperty('@delete', [fred]);
 
-          expect(msg.time.equals(localTime)).toBe(true);
-          const [_, del, ins] = msg.data;
+          expect(msg!.time.equals(local.time)).toBe(true);
+          const [, , , del, ins] = msg!.data;
 
-          expect(await EncodedDelta.decode(ins)).toEqual({});
-          expect(await EncodedDelta.decode(del)).toMatchObject({
-            '@type': 'rdf:Statement',
+          expect(MeldEncoder.jsonFromBuffer(ins)).toEqual({});
+          expect(MeldEncoder.jsonFromBuffer(del)).toMatchObject({
             'tid': firstTid,
             's': 'fred',
             'p': '#name',
@@ -233,171 +238,226 @@ describe('SU-Set Dataset', () => {
           });
         });
 
-        test('applies a delete delta', async () => {
+        test('applies a delete operation', async () => {
           const willUpdate = captureUpdate();
 
-          await ssd.apply(new DeltaMessage(
-            remoteTime.ticks,
-            remoteTime = remoteTime.ticked(),
-            // Deleting the triple based on the inserted Transaction ID
-            [1, `{"@type":"rdf:Statement",
-              "tid":"${firstTid}","o":"Fred","p":"#name", "s":"fred"}`, '{}']),
-            localTime = localTime.update(remoteTime).ticked(),
-            localTime = localTime.ticked());
+          await ssd.apply(
+            remote.sentOperation(`{"tid":"${firstTid}","o":"Fred","p":"#name", "s":"fred"}`, '{}'),
+            local.join(remote.time).tick().time,
+            local.tick().time);
           expect(willUpdate).resolves.toHaveProperty('@delete', [fred]);
 
-          await expect(ssd.read<Describe>({
+          await expect(firstValueFrom(ssd.read<Describe>({
             '@describe': 'http://test.m-ld.org/fred'
-          }).pipe(toArray()).toPromise()).resolves.toEqual([]);
+          }).pipe(toArray()))).resolves.toEqual([]);
         });
 
         test('transacts another insert', async () => {
           const msg = await ssd.transact(async () => [
-            localTime = localTime.ticked(),
+            local.tick().time,
             await ssd.write({ '@insert': barney })
-          ]) ?? fail();
-          expect(msg.time.equals(localTime)).toBe(true);
+          ]);
+          expect(msg!.time.equals(local.time)).toBe(true);
 
-          await expect(ssd.read<Describe>({
+          await expect(firstValueFrom(ssd.read<Describe>({
             '@describe': 'http://test.m-ld.org/barney'
-          }).pipe(toArray()).toPromise()).resolves.toEqual([barney]);
+          }).pipe(toArray()))).resolves.toEqual([barney]);
         });
 
         test('answers local op since first', async () => {
           // Remote knows about first entry
-          remoteTime = remoteTime.update(localTime);
+          remote.join(local.time);
           // Create a new journal entry that the remote doesn't know
           await ssd.transact(async () => [
-            localTime = localTime.ticked(),
+            local.tick().time,
             await ssd.write({ '@insert': barney })
           ]);
-          const ops = await ssd.operationsSince(remoteTime);
+          const ops = await ssd.operationsSince(remote.time);
           expect(ops).not.toBeUndefined();
-          const opArray = ops ? await ops.pipe(toArray()).toPromise() : [];
+          const opArray = ops ? await firstValueFrom(ops.pipe(toArray())) : [];
           expect(opArray.length).toBe(1);
-          expect(localTime.equals(opArray[0].time)).toBe(true);
+          expect(local.time.equals(opArray[0].time)).toBe(true);
         });
 
         test('answers remote op since first', async () => {
           // Remote knows about first entry
-          remoteTime = remoteTime.update(localTime);
+          remote.join(local.time);
           // Create a remote entry from a third clone that the remote doesn't know
-          const forkLocal = localTime.forked();
-          localTime = forkLocal.left;
-          let thirdTime = forkLocal.right;
-          await ssd.apply(new DeltaMessage(
-            thirdTime.ticks,
-            thirdTime = thirdTime.ticked(),
-            [1, `{"@type":"rdf:Statement",
-              "tid":"${firstTid}","o":"Fred","p":"#name",
-              "s":"fred"}`, '{}']),
-            localTime = localTime.update(thirdTime).ticked(),
-            localTime = localTime.ticked());
+          let thirdClock = local.fork();
+          await ssd.apply(
+            thirdClock.sentOperation(`{"tid":"${firstTid}","o":"Fred","p":"#name","s":"fred"}`, '{}'),
+            local.join(thirdClock.time).tick().time,
+            local.tick().time);
 
-          const ops = await ssd.operationsSince(remoteTime);
+          const ops = await ssd.operationsSince(remote.time);
           expect(ops).not.toBeUndefined();
-          const opArray = ops ? await ops.pipe(toArray()).toPromise() : [];
+          const opArray = ops ? await firstValueFrom(ops.pipe(toArray())) : [];
           expect(opArray.length).toBe(1);
-          expect(thirdTime.equals(opArray[0].time)).toBe(true);
+          expect(thirdClock.time.equals(opArray[0].time)).toBe(true);
         });
 
         test('answers missed local op', async () => {
-          remoteTime = remoteTime.update(localTime);
+          remote.join(local.time);
           // New entry that the remote hasn't seen
           const localOp = await ssd.transact(async () => [
-            localTime = localTime.ticked(),
+            local.tick().time,
             await ssd.write({ '@insert': barney })
-          ]) ?? fail();
+          ]);
           // Don't update remote time from local
-          await ssd.apply(new DeltaMessage(
-            remoteTime.ticks,
-            remoteTime = remoteTime.ticked(),
-            remoteInsert(wilma)),
-            localTime = localTime.update(remoteTime).ticked(),
-            localTime = localTime.ticked());
+          await ssd.apply(
+            remote.sentOperation('{}', JSON.stringify(wilma)),
+            local.join(remote.time).tick().time,
+            local.tick().time);
 
-          const ops = await ssd.operationsSince(remoteTime);
+          const ops = await ssd.operationsSince(remote.time);
           expect(ops).not.toBeUndefined();
-          const opArray = ops ? await ops.pipe(toArray()).toPromise() : [];
-          // We expect only the missed local op
+          const opArray = ops ? await firstValueFrom(ops.pipe(toArray())) : [];
+          // We expect the missed local op (barney) but not the remote op
+          // (wilma), because it should be filtered out
           expect(opArray.length).toBe(1);
-          expect(opArray[0].data[1]).toBe(localOp.data[1]);
+          expect(opArray[0].time.equals(localOp!.time)).toBe(true);
         });
 
         test('answers missed third party op', async () => {
-          remoteTime = remoteTime.update(localTime);
-          let { left, right } = remoteTime.forked();
-          remoteTime = left;
-          let { left: thirdTime, right: fourthTime } = right.forked();
+          remote.join(local.time);
+          const third = remote.fork();
+          const fourth = third.fork();
           // Remote doesn't see third party op
-          const thirdOp = remoteInsert(wilma);
-          await ssd.apply(new DeltaMessage(
-            thirdTime.ticks,
-            thirdTime = thirdTime.ticked(),
-            thirdOp),
-            localTime = localTime.update(thirdTime).ticked(),
-            localTime = localTime.ticked());
+          const thirdOp = third.sentOperation('{}', JSON.stringify(wilma));
+          await ssd.apply(thirdOp,
+            local.join(third.time).tick().time,
+            local.tick().time);
           // Remote does see fourth party op
-          await ssd.apply(new DeltaMessage(
-            fourthTime.ticks,
-            fourthTime = fourthTime.ticked(),
-            remoteInsert(barney)),
-            localTime = localTime.update(fourthTime).ticked(),
-            localTime = localTime.ticked());
-          remoteTime = remoteTime.update(fourthTime).ticked();
+          await ssd.apply(fourth.sentOperation('{}', JSON.stringify(barney)),
+            local.join(fourth.time).tick().time,
+            local.tick().time);
+          remote.join(fourth.time).tick();
 
-          const ops = await ssd.operationsSince(remoteTime);
+          const ops = await ssd.operationsSince(remote.time);
           expect(ops).not.toBeUndefined();
-          const opArray = ops ? await ops.pipe(toArray()).toPromise() : [];
+          const opArray = ops ? await firstValueFrom(ops.pipe(toArray())) : [];
           // We expect only the missed remote op
           expect(opArray.length).toBe(1);
-          expect(opArray[0].data[1]).toBe(thirdOp[1]);
+          expect(opArray[0].data).toEqual(thirdOp.data);
         });
 
         // @see https://github.com/m-ld/m-ld-js/issues/29
         test('accepts own unpersisted update', async () => {
-          await ssd.apply(new DeltaMessage(
-            localTime.ticks,
-            localTime = localTime.ticked(),
-            [1, '{}', '{"@id":"wilma","name":"Wilma"}']),
-            localTime,
-            localTime = localTime.ticked());
+          await ssd.apply(local.sentOperation(
+            '{}', '{"@id":"wilma","name":"Wilma"}'),
+            local.time,
+            local.tick().time);
 
-          await expect(ssd.read<Describe>({
+          await expect(firstValueFrom(ssd.read<Describe>({
             '@describe': 'http://test.m-ld.org/wilma'
-          }).pipe(toArray()).toPromise()).resolves.toEqual([wilma]);
+          }).pipe(toArray()))).resolves.toEqual([wilma]);
         });
 
         // @see https://github.com/m-ld/m-ld-js/issues/29
         test('answers unpersisted remote op', async () => {
           // Remote knows about first entry
-          remoteTime = remoteTime.update(localTime);
+          remote.join(local.time);
+          const remoteTime = remote.time;
           // Create a remote entry that the remote fails to persist fully
-          const unpersistedTime = remoteTime.ticked();
-          await ssd.apply(new DeltaMessage(
-            remoteTime.ticks,
-            unpersistedTime,
-            [1, `{"@type":"rdf:Statement",
-              "tid":"${firstTid}","o":"Fred","p":"#name",
-              "s":"fred"}`, '{}']),
-            localTime = localTime.update(unpersistedTime).ticked(),
-            localTime = localTime.ticked());
-
+          await ssd.apply(
+            remote.sentOperation(`{"tid":"${firstTid}","o":"Fred","p":"#name","s":"fred"}`, '{}'),
+            local.join(remote.time).tick().time,
+            local.tick().time);
+          // The remote asks for its previous time
           const ops = await ssd.operationsSince(remoteTime);
           expect(ops).not.toBeUndefined();
-          const opArray = ops ? await ops.pipe(toArray()).toPromise() : [];
+          const opArray = ops ? await firstValueFrom(ops.pipe(toArray())) : [];
           expect(opArray.length).toBe(1);
-          expect(unpersistedTime.equals(opArray[0].time)).toBe(true);
+          expect(remote.time.equals(opArray[0].time)).toBe(true);
+        });
+
+        test('cuts stale message from incoming fusion', async () => {
+          const third = remote.fork();
+          // The remote will have two transactions, which fuse in its journal.
+          // The local sees the first, adding wilma...
+          const one = remote.sentOperation('{}', '{"@id":"wilma","name":"Wilma"}');
+          const oneTid = one.time.hash();
+          await ssd.apply(one, local.time, local.tick().time);
+          // ... and then get a third-party txn, deleting wilma
+          await ssd.apply(third.sentOperation(
+            `{"tid":"${oneTid}","o":"Wilma","p":"#name","s":"wilma"}`, '{}'),
+            local.time, local.tick().time);
+          // Finally the local gets the remote fusion (as a rev-up), which still
+          // includes the insert of wilma
+          remote.tick();
+          await ssd.apply(new OperationMessage(one.time.ticks, // Previous tick of remote
+            [2, one.time.ticks, remote.time.toJSON(), '{}', `[
+              {"tid":"${oneTid}","o":"Wilma","p":"#name","s":"wilma"},
+              {"tid":"${remote.time.hash()}","o":"Barney","p":"#name","s":"barney"}]`]),
+            local.time, local.tick().time);
+          // Result should not include wilma because of the third-party delete
+          await expect(firstValueFrom(ssd.read<Describe>({
+            '@describe': 'http://test.m-ld.org/wilma'
+          }).pipe(toArray()))).resolves.toEqual([]);
+        });
+
+        test('cuts stale fusion from incoming fusion', async () => {
+          remote.fork();
+          // The remote will have two transactions, which fuse in its journal.
+          // The local sees the first, adding wilma...
+          const one = remote.sentOperation('{}', '{"@id":"wilma","name":"Wilma"}');
+          const oneTid = one.time.hash();
+          await ssd.apply(one, local.time, local.tick().time);
+          // ... and a second, adding betty (this will fuse with the first)
+          await ssd.apply(remote.sentOperation('{}', '{"@id":"betty","name":"Betty"}'),
+            local.time, local.tick().time);
+          // Finally the local gets the remote fusion (as a rev-up), which still
+          // includes the insert of wilma but not betty
+          remote.tick();
+          await ssd.apply(new OperationMessage(one.time.ticks, // Previous tick of remote
+            [2, one.time.ticks, remote.time.toJSON(), '{}', `[
+              {"tid":"${oneTid}","o":"Wilma","p":"#name","s":"wilma"},
+              {"tid":"${remote.time.hash()}","o":"Barney","p":"#name","s":"barney"}]`]),
+            local.time, local.tick().time);
+          // Result should not include betty because the fusion omits it
+          await expect(firstValueFrom(ssd.read<Describe>({
+            '@describe': 'http://test.m-ld.org/betty'
+          }).pipe(toArray()))).resolves.toEqual([]);
+        });
+
+        test('cuts snapshot last-seen message from incoming fusion', async () => {
+          // Restart the clone with its own snapshot (unrealistic but benign)
+          const snapshot = await ssd.takeSnapshot();
+          const staticData = await firstValueFrom(snapshot.data.pipe(toArray()));
+          // Get a new clock for the rejuvenated clone
+          const newLocal = remote.join(local.time).fork();
+          await ssd.applySnapshot({ gwc: remote.gwc, data: from(staticData) }, newLocal.time);
+          // SSD should now have the 'fred' operation as a 'last operation'
+          // The remote deletes fred...
+          await ssd.apply(remote.sentOperation(
+            `{"tid":"${firstTid}","o":"Fred","p":"#name","s":"fred"}`, '{}'),
+            newLocal.time, newLocal.tick().time);
+          // Finally the local gets its own data back in a rev-up, which still
+          // includes the insert of fred, plus barney who it forgot about
+          const firstTick = local.time.ticks;
+          local.tick();
+          await ssd.apply(new OperationMessage(0, // genesis, i.e. before Fred
+            [2, firstTick, local.time.toJSON(), '{}', `[
+              {"tid":"${firstTid}","o":"Fred","p":"#name","s":"fred"},
+              {"tid":"${local.time.hash()}","o":"Barney","p":"#name","s":"barney"}]`]),
+            newLocal.time, newLocal.tick().time);
+          // Result should not include fred because of the remote delete
+          await expect(firstValueFrom(ssd.read<Describe>({
+            '@describe': 'http://test.m-ld.org/fred'
+          }).pipe(toArray()))).resolves.toEqual([]);
         });
       });
     });
   });
 
   describe('with a constraint', () => {
-    let { left: localTime, right: remoteTime } = TreeClock.GENESIS.forked();
+    let local: MockProcess, remote: MockProcess;
     let constraint: MeldConstraint;
 
     beforeEach(async () => {
+      let { left, right } = TreeClock.GENESIS.forked();
+      local = new MockProcess(left);
+      remote = new MockProcess(right);
       constraint = {
         check: () => Promise.resolve(),
         apply: () => Promise.resolve()
@@ -405,29 +465,26 @@ describe('SU-Set Dataset', () => {
       ssd = new SuSetDataset(await memStore(), {}, [constraint],
         { '@id': 'test', '@domain': 'test.m-ld.org' });
       await ssd.initialise();
-      await ssd.saveClock(() => localTime = localTime.ticked(), true);
+      await ssd.resetClock(local.tick().time);
     });
 
     test('checks the constraint', async () => {
       constraint.check = () => Promise.reject('Failed!');
       await expect(ssd.transact(async () => [
-        localTime = localTime.ticked(),
+        local.tick().time,
         await ssd.write({ '@insert': fred })
       ])).rejects.toBe('Failed!');
     });
 
     test('provides state to the constraint', async () => {
       await ssd.transact(async () => [
-        localTime = localTime.ticked(),
+        local.tick().time,
         await ssd.write({ '@insert': wilma })
       ]);
       constraint.check = async state =>
-        state.read<Describe>({ '@describe': 'http://test.m-ld.org/wilma' }).toPromise().then(wilma => {
-          if (wilma == null)
-            throw 'not found!';
-        });
+        firstValueFrom(state.read<Describe>({ '@describe': 'http://test.m-ld.org/wilma' }));
       await expect(ssd.transact(async () => [
-        localTime = localTime.ticked(),
+        local.tick().time,
         await ssd.write({ '@insert': fred })
       ])).resolves.toBeDefined();
     });
@@ -442,44 +499,46 @@ describe('SU-Set Dataset', () => {
         expect(update['@insert']).toMatchObject(expect.arrayContaining([wilma, barney]));
       };
       await expect(ssd.transact(async () => [
-        localTime = localTime.ticked(),
+        local.tick().time,
         await ssd.write({ '@insert': fred })
       ])).resolves.toBeDefined();
-      await expect(ssd.read(<Describe>{ '@describe': wilma['@id'] })
-        .pipe(take(1)).toPromise()).resolves.toEqual(wilma);
+      await expect(firstValueFrom(ssd.read(<Describe>{ '@describe': wilma['@id'] })))
+        .resolves.toEqual(wilma);
     });
 
     test('applies an inserting constraint', async () => {
       constraint.apply = async (_, update) => update.assert({ '@insert': wilma });
       const willUpdate = captureUpdate();
-      const msg = await ssd.apply(new DeltaMessage(
-        remoteTime.ticks,
-        remoteTime = remoteTime.update(localTime).ticked(),
-        [1, '{}', '{"@id":"fred","name":"Fred"}']),
-        localTime = localTime.update(remoteTime).ticked(),
-        localTime = localTime.ticked());
+      remote.join(local.time);
+      const msg = await ssd.apply(
+        remote.sentOperation('{}', '{"@id":"fred","name":"Fred"}'),
+        local.join(remote.time).tick().time,
+        local.tick().time);
       expect(willUpdate).resolves.toEqual(
-        { '@delete': [], '@insert': [fred, wilma], '@ticks': localTime.ticks });
+        { '@delete': [], '@insert': [fred, wilma], '@ticks': local.time.ticks });
 
       expect(msg).not.toBeNull();
       if (msg != null) {
-        expect(msg.time.equals(localTime)).toBe(true);
-        expect(msg.data[1]).toBeTruthy();
+        expect(msg.time.equals(local.time)).toBe(true);
+        const [, from, time, del, ins] = msg.data;
+        expect(from).toBe(TreeClock.fromJson(time)?.ticks);
+        expect(del).toBe('{}');
+        expect(ins).toBe('{"@id":"wilma","name":"Wilma"}');
       }
-      await expect(ssd.read<Describe>({
+      await expect(firstValueFrom(ssd.read<Describe>({
         '@describe': 'http://test.m-ld.org/wilma'
-      }).pipe(toArray()).toPromise()).resolves.toEqual([wilma]);
+      }).pipe(toArray()))).resolves.toEqual([wilma]);
 
-      expect((<TreeClock>await ssd.loadClock()).equals(localTime)).toBe(true);
+      const newLocalTime = (<TreeClock>await ssd.loadClock());
+      expect(newLocalTime.equals(local.time)).toBe(true);
 
       // Check that we have a valid journal
-      const ops = await ssd.operationsSince(remoteTime);
-      if (ops == null)
-        fail();
-      const entries = await ops.pipe(toArray()).toPromise();
+      const ops = await ssd.operationsSince(remote.time);
+      const entries = await firstValueFrom(ops!.pipe(toArray()));
       expect(entries.length).toBe(1);
-      expect(entries[0].time.equals(localTime)).toBe(true);
-      const [, del, ins] = entries[0].data;
+      expect(entries[0].time.equals(local.time)).toBe(true);
+      const [, from, time, del, ins] = entries[0].data;
+      expect(from).toBe(TreeClock.fromJson(time)?.ticks);
       expect(del).toBe('{}');
       expect(ins).toBe('{\"@id\":\"wilma\",\"name\":\"Wilma\"}');
     });
@@ -488,23 +547,21 @@ describe('SU-Set Dataset', () => {
       constraint.apply = async (_, update) => update.assert({ '@delete': wilma });
 
       await ssd.transact(async () => [
-        localTime = localTime.ticked(),
+        local.tick().time,
         await ssd.write({ '@insert': wilma })
       ]);
 
       const willUpdate = captureUpdate();
-      await ssd.apply(new DeltaMessage(
-        remoteTime.ticks,
-        remoteTime = remoteTime.ticked(),
-        [1, '{}', '{"@id":"fred","name":"Fred"}']),
-        localTime = localTime.update(remoteTime).ticked(),
-        localTime = localTime.ticked());
+      await ssd.apply(
+        remote.sentOperation('{}', '{"@id":"fred","name":"Fred"}'),
+        local.join(remote.time).tick().time,
+        local.tick().time);
       expect(willUpdate).resolves.toEqual(
-        { '@insert': [fred], '@delete': [wilma], '@ticks': localTime.ticks });
+        { '@insert': [fred], '@delete': [wilma], '@ticks': local.time.ticks });
 
-      await expect(ssd.read<Describe>({
+      await expect(firstValueFrom(ssd.read<Describe>({
         '@describe': 'http://test.m-ld.org/wilma'
-      }).pipe(toArray()).toPromise()).resolves.toEqual([]);
+      }).pipe(toArray()))).resolves.toEqual([]);
     });
 
     test('applies a self-deleting constraint', async () => {
@@ -512,20 +569,18 @@ describe('SU-Set Dataset', () => {
       constraint.apply = async (_, update) => update.assert({ '@delete': wilma });
 
       const willUpdate = captureUpdate();
-      await ssd.apply(new DeltaMessage(
-        remoteTime.ticks,
-        remoteTime = remoteTime.ticked(),
-        [1, '{}', '{"@id":"wilma","name":"Wilma"}']),
-        localTime = localTime.update(remoteTime).ticked(),
-        localTime = localTime.ticked());
+      await ssd.apply(
+        remote.sentOperation('{}', '{"@id":"wilma","name":"Wilma"}'),
+        local.join(remote.time).tick().time,
+        local.tick().time);
 
-      await expect(ssd.read<Describe>({
+      await expect(firstValueFrom(ssd.read<Describe>({
         '@describe': 'http://test.m-ld.org/wilma'
-      }).pipe(toArray()).toPromise()).resolves.toEqual([]);
+      }).pipe(toArray()))).resolves.toEqual([]);
 
       // The inserted data was deleted, but Wilma may have existed before
       await expect(willUpdate).resolves.toEqual(
-        { '@insert': [], '@delete': [wilma], '@ticks': localTime.ticks });
+        { '@insert': [], '@delete': [wilma], '@ticks': local.time.ticks });
     });
 
     test('applies a self-inserting constraint', async () => {
@@ -533,41 +588,34 @@ describe('SU-Set Dataset', () => {
       constraint.apply = async (_, update) => update.assert({ '@insert': wilma });
 
       const tid = (await ssd.transact(async () => [
-        localTime = localTime.ticked(),
+        local.tick().time,
         await ssd.write({ '@insert': wilma })
-      ]) ?? fail()).data[1];
+      ]))!.data[1];
 
       const willUpdate = captureUpdate();
-      await ssd.apply(new DeltaMessage(
-        remoteTime.ticks,
-        remoteTime = remoteTime.ticked(),
-        [1, `{"@type":"rdf:Statement",
-              "tid":"${tid}","o":"Wilma","p":"#name", "s":"wilma"}`, '{}']),
-        localTime = localTime.update(remoteTime).ticked(),
-        localTime = localTime.ticked());
+      await ssd.apply(
+        remote.sentOperation(`{"tid":"${tid}","o":"Wilma","p":"#name", "s":"wilma"}`, '{}'),
+        local.join(remote.time).tick().time,
+        local.tick().time);
 
-      await expect(ssd.read<Describe>({
+      await expect(firstValueFrom(ssd.read<Describe>({
         '@describe': 'http://test.m-ld.org/wilma'
-      }).pipe(toArray()).toPromise()).resolves.toEqual([wilma]);
+      }).pipe(toArray()))).resolves.toEqual([wilma]);
 
       // The deleted data was re-inserted, but Wilma may not have existed before
       await expect(willUpdate).resolves.toEqual(
-        { '@insert': [wilma], '@delete': [], '@ticks': localTime.ticks });
+        { '@insert': [wilma], '@delete': [], '@ticks': local.time.ticks });
     });
   });
 
-  test('enforces delta size limit', async () => {
+  test('enforces operation size limit', async () => {
     ssd = new SuSetDataset(await memStore(), {}, [],
-      { '@id': 'test', '@domain': 'test.m-ld.org', maxDeltaSize: 1 });
+      { '@id': 'test', '@domain': 'test.m-ld.org', maxOperationSize: 1 });
     await ssd.initialise();
-    await ssd.saveClock(() => TreeClock.GENESIS, true);
+    await ssd.resetClock(TreeClock.GENESIS);
     await expect(ssd.transact(async () => [
       TreeClock.GENESIS.ticked(),
       await ssd.write({ '@insert': fred })
     ])).rejects.toThrow();
   });
 });
-
-function remoteInsert(subject: Subject): EncodedDelta {
-  return [1, '{}', JSON.stringify(subject)];
-}

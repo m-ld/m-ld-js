@@ -1,8 +1,6 @@
 import * as spec from '@m-ld/m-ld-spec';
-import {
-  Subject, Update, Reference, Variable, Read, Write, SubjectProperty
-} from './jrql-support';
-import { Observable, Subscription } from 'rxjs';
+import { Read, Reference, Subject, SubjectProperty, Update, Variable, Write } from './jrql-support';
+import { firstValueFrom, Observable, Subscription } from 'rxjs';
 import { toArray } from 'rxjs/operators';
 import { shortId } from './util';
 import { Iri } from 'jsonld/jsonld-spec';
@@ -60,7 +58,7 @@ export type ReadResult = Observable<GraphSubject> & PromiseLike<GraphSubjects>;
 /** @internal */
 export function readResult(result: Observable<GraphSubject>): ReadResult {
   const then: PromiseLike<GraphSubjects>['then'] =
-    (onfulfilled, onrejected) => result.pipe(toArray<GraphSubject>()).toPromise()
+    (onfulfilled, onrejected) => firstValueFrom(result.pipe(toArray<GraphSubject>()))
       .then(onfulfilled == null ? null : graph => onfulfilled(new SubjectGraph(graph)), onrejected);
   return Object.assign(result, { then });
 }

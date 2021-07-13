@@ -1,17 +1,17 @@
-import { DeltaMessage, MeldRemotes } from '..';
+import { OperationMessage, MeldRemotes } from '..';
 import { LiveValue } from "../LiveValue";
 import { Observable, merge, NEVER, BehaviorSubject, from } from 'rxjs';
 import { delayUntil, Future, tapLast, onErrorNever, HotSwitch, settled } from '../util';
 
 export class RemoteUpdates {
   private readonly outdatedState = new BehaviorSubject<boolean>(true);
-  private readonly updates = new HotSwitch<DeltaMessage>();
+  private readonly updates = new HotSwitch<OperationMessage>();
 
   constructor(
     private readonly remotes: MeldRemotes) {
   }
 
-  get receiving(): Observable<DeltaMessage> {
+  get receiving(): Observable<OperationMessage> {
     return this.updates;
   }
 
@@ -32,8 +32,8 @@ export class RemoteUpdates {
     this.updates.switch(NEVER);
   };
 
-  attach(revups: Observable<DeltaMessage>): Promise<unknown> {
-    const lastRevup = new Future<DeltaMessage | undefined>();
+  attach(revups: Observable<OperationMessage>): Promise<unknown> {
+    const lastRevup = new Future<OperationMessage | undefined>();
     // Push the rev-up to next tick - probably only for unit tests' sake
     setImmediate(() => {
       // Updates must be paused during revups because the collaborator might
@@ -45,7 +45,7 @@ export class RemoteUpdates {
         // If the revups error, we will detach, below
         this.remotes.updates.pipe(delayUntil(settled(lastRevup)))));
       lastRevup.then(
-        async (lastRevup: DeltaMessage | undefined) => {
+        async (lastRevup: OperationMessage | undefined) => {
           // Here, we are definitely before the first post-revup update, but
           // the actual last revup might not yet have been applied to the dataset.
           if (lastRevup != null)

@@ -1,4 +1,4 @@
-import { TreeClock, CausalClock } from "./clocks";
+import { TreeClock, CausalClock, TickTree } from "./clocks";
 
 export interface Message<C, D> {
   time: C;
@@ -8,9 +8,9 @@ export interface Message<C, D> {
 /**
  * A process that accepts messages
  */
-export type Process<M, C extends CausalClock<C>> = (message: M, prev: C) => void;
+export type Process<M, C extends CausalClock> = (message: M, prev: C) => void;
 
-export abstract class MessageService<C extends CausalClock<C>> {
+export abstract class MessageService<C extends CausalClock> {
   /**
    * Call to process newly received message data from the wire.
    *
@@ -57,7 +57,7 @@ export abstract class MessageService<C extends CausalClock<C>> {
   abstract push(time: C): void;
 
   private readyFor(senderTime: C) {
-    return !this.peek().anyLt(senderTime);
+    return !this.peek().anyNonIdLt(senderTime);
   }
 }
 
@@ -77,7 +77,7 @@ export class TreeClockMessageService extends MessageService<TreeClock> {
     return this.localTime = this.localTime.ticked();
   }
 
-  join(time: TreeClock): void {
+  join(time: TickTree): void {
     this.localTime = this.localTime.update(time);
   }
 

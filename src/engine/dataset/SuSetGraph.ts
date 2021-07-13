@@ -1,17 +1,15 @@
 import { Context } from '../../jrql-support';
 import { Iri } from 'jsonld/jsonld-spec';
 import { Triple, tripleKey } from '../quads';
-import { createHash } from 'crypto';
-import { TreeClock } from '../clocks';
-import { MsgPack } from '../util';
-import { qs } from '../../ns';
+import { sha1Digest } from '../util';
+import { QS } from '../../ns';
 
 /**
  * Context for SU-Set Dataset code to manipulate control content.
  */
 export const SUSET_CONTEXT: Context = {
-  tid: qs.tid, // Property of triple hash
-  thash: qs.thash // Namespace for triple hashes
+  tid: QS.tid, // Property of triple hash
+  thash: QS.thash // Namespace for triple hashes
 }
 
 export function toPrefixedId(prefix: string, ...path: string[]): Iri {
@@ -19,13 +17,5 @@ export function toPrefixedId(prefix: string, ...path: string[]): Iri {
 }
 
 export function tripleId(triple: Triple): string {
-  const hash = createHash('sha1'); // Fastest
-  tripleKey(triple).forEach(key => hash.update(key));
-  return toPrefixedId('thash', hash.digest('base64'));
-}
-
-export function txnId(time: TreeClock): string {
-  return createHash('sha1')
-    .update(MsgPack.encode(time.toJson()))
-    .digest('base64');
+  return toPrefixedId('thash', sha1Digest(...tripleKey(triple)));
 }

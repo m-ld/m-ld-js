@@ -8,7 +8,7 @@ import { generate } from 'short-uuid';
  * property values in common cases.
  * @param value the value to normalise to an array
  */
-export function array<T>(value?: T | T[]): T[] {
+export function array<T>(value?: T | T[] | null): T[] {
   return value == null ? [] : ([] as T[]).concat(value).filter(v => v != null);
 }
 

@@ -1,9 +1,9 @@
 import { Url } from 'jsonld/jsonld-spec';
-import { SubjectPropertyObject, Subject, SubjectProperty, Value } from '../jrql-support';
-import { jrql } from '../ns';
-import { setAtPath, trimTail, isNaturalNumber, isArray } from './util';
+import { Subject, SubjectProperty, SubjectPropertyObject, Value } from '../jrql-support';
+import { JRQL } from '../ns';
+import { isArray, isNaturalNumber, setAtPath, trimTail } from './util';
+import { includeValues } from '../updates';
 import validDataUrl = require('valid-data-url');
-import { includeValues } from '..';
 
 /**
  * - `match`: querying
@@ -40,7 +40,7 @@ export function* listItems(
         yield* subItems(list, toIndexNumber(indexKey, 'strict'), item);
       } else {
         // Provided index is either a variable (string) or an index number
-        const index = jrql.matchVar(indexKey) ?? toIndexNumber(indexKey, 'strict');
+        const index = JRQL.matchVar(indexKey) ?? toIndexNumber(indexKey, 'strict');
         if (typeof index == 'string' || mode === 'match')
           // Definitely a variable if a string
           yield [index, item];

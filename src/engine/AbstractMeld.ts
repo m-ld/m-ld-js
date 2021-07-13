@@ -1,10 +1,10 @@
-import { Meld, Snapshot, DeltaMessage, Revup } from '.';
-import { LiveValue } from "./LiveValue";
+import { Meld, OperationMessage, Revup, Snapshot } from '.';
+import { LiveValue } from './LiveValue';
 import { TreeClock } from './clocks';
-import { Observable, BehaviorSubject, asapScheduler, of } from 'rxjs';
-import { observeOn, tap, distinctUntilChanged, first, skip, catchError } from 'rxjs/operators';
+import { asapScheduler, BehaviorSubject, firstValueFrom, Observable, of } from 'rxjs';
+import { catchError, distinctUntilChanged, filter, observeOn, skip, tap } from 'rxjs/operators';
 import { Logger } from 'loglevel';
-import { getIdLogger, check, PauseableSource } from './util';
+import { check, getIdLogger, PauseableSource } from './util';
 import { MeldError } from './MeldError';
 import { MeldConfig } from '..';
 
@@ -14,10 +14,10 @@ export abstract class AbstractMeld implements Meld {
   protected static checkNotClosed =
     check((m: AbstractMeld) => !m.closed, () => new MeldError('Clone has closed'));
 
-  readonly updates: Observable<DeltaMessage>;
+  readonly updates: Observable<OperationMessage>;
   readonly live: LiveValue<boolean | null>;
 
-  private readonly updateSource = new PauseableSource<DeltaMessage>();
+  private readonly updateSource = new PauseableSource<OperationMessage>();
   private readonly liveSource: BehaviorSubject<boolean | null> = new BehaviorSubject(null);
   
   private closed = false;
@@ -39,14 +39,14 @@ export abstract class AbstractMeld implements Meld {
     // indicates a return to undecided liveness followed by completion.
     this.live = Object.defineProperties(
       this.liveSource.pipe(catchError(() => of(null)), distinctUntilChanged()),
-      { value: { get: () => this.liveSource.value } });
+      { value: { get: () => this.liveSource.value } }) as LiveValue<boolean | null>;
 
     // Log liveness
     this.live.pipe(skip(1)).subscribe(
       live => this.log.debug('is', live == null ? 'gone' : live ? 'live' : 'dead'));
   }
 
-  protected nextUpdate = (update: DeltaMessage) => this.updateSource.next(update);
+  protected nextUpdate = (update: OperationMessage) => this.updateSource.next(update);
   protected pauseUpdates = (until: PromiseLike<unknown>) => this.updateSource.pause(until);
 
   protected warnError = (err: any) => this.log.warn(err);
@@ -71,8 +71,8 @@ export abstract class AbstractMeld implements Meld {
   }
 }
 
-export function comesAlive(meld: Pick<Meld, 'live'>, expected: boolean | null | 'notNull' = true): Promise<boolean | null> {
-  const filter: (live: boolean | null) => boolean =
-    expected === 'notNull' ? (live => live != null) : (live => live === expected);
-  return meld.live.pipe(first(filter)).toPromise();
-};
+export function comesAlive(
+  meld: Pick<Meld, 'live'>, expected: boolean | null | 'notNull' = true): Promise<boolean | null> {
+  return firstValueFrom(meld.live.pipe(filter(
+    expected === 'notNull' ? (live => live != null) : (live => live === expected))));
+}

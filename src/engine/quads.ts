@@ -46,10 +46,10 @@ export function tripleKey(triple: Triple): string[] {
   }
 }
 
-const tripleIndexKey = memoise((triple: Triple) =>
+export const tripleIndexKey = memoise((triple: Triple) =>
   tripleKey(triple).join('^'));
 
-const quadIndexKey = memoise((quad: Quad) => 
+export const quadIndexKey = memoise((quad: Quad) => 
   [quad.graph.value].concat(tripleKey(quad)).join('^'));
 
 export function canPosition<P extends TriplePos>(pos: P, value?: Term): value is Quad[P] {

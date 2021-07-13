@@ -12,7 +12,8 @@ module.exports = {
     './src/ns/**',
     './src/ably/**',
     './src/mqtt/**',
-    './src/wrtc/**'
+    './src/wrtc/**',
+    './src/socket.io/**'
   ],
   excludePrivate: true,
   excludeProtected: true,

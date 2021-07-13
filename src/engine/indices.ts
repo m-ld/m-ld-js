@@ -22,6 +22,13 @@ export abstract class Index<K, T> {
     return this.index.size;
   }
 
+  get footprint() {
+    let len = 0;
+    for (let key of this.index.keys())
+      len += key.length;
+    return len;
+  }
+
   [Symbol.iterator]() {
     return this.index.values();
   }

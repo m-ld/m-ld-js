@@ -120,14 +120,15 @@ describe('WebRTC peering', () => {
       })).rejects.toThrowError();
     });
 
-    test('peer can be closed by notifier', async done => {
+    test('peer can be closed by notifier', done => {
       const notifierPromise = peering.pubSub({
         toId: 'peerId', channelId: 'channelId', fromId: 'test'
       });
       peerEvents.emit('connect');
-      const notifier = await notifierPromise;
-      peerEvents.on('close', done);
-      notifier.close();
+      notifierPromise.then(notifier => {
+        peerEvents.on('close', done);
+        notifier.close?.();
+      });
     });
   });
 });

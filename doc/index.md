@@ -1,10 +1,12 @@
-🚧 *This documentation is for the [developer preview](http://m-ld.org/#developer-preview) of **m-ld**.*
+🚧 *This documentation is for
+the [developer preview](http://m-ld.org/#developer-preview) of **m-ld**.*
 
 [![github](https://img.shields.io/badge/m--ld-m--ld--js-red?logo=github)](https://github.com/m-ld/m-ld-js)
 [![licence](https://img.shields.io/github/license/m-ld/m-ld-js)](https://github.com/m-ld/m-ld-js/blob/master/LICENSE)
 [![npm (tag)](https://img.shields.io/npm/v/@m-ld/m-ld/master?label=npm)](https://www.npmjs.com/package/@m-ld/m-ld)
 
 # **m-ld** Javascript clone engine
+
 The Javascript engine can be used in a modern browser or a server engine like
 [Node.js](https://nodejs.org/).
 
@@ -14,14 +16,23 @@ The Javascript engine can be used in a modern browser or a server engine like
 > model is based on immutable states.
 
 ## Getting Started
+
 `npm install @m-ld/m-ld`
 
-To see some executable code, have a look at the Node.js
-[starter&nbsp;project](https://github.com/m-ld/m-ld-nodejs-starter).
+There are two starter projects available:
+
+- The [Node.js&nbsp;project](https://github.com/m-ld/m-ld-nodejs-starter)
+  uses Node processes to initialise two clones, and an MQTT broker for
+  messaging.
+- The [Web&nbsp;project](https://github.com/m-ld/m-ld-web-starter) shows one way
+  to build a multi-collaborator forms application for browsers, using Socket.io
+  for messaging.
 
 ### Data Persistence
+
 **m-ld** uses [levelup](https://github.com/level/levelup) to interface with a
 LevelDB-compatible storage backend.
+
 - For the fastest responses use [memdown](https://github.com/level/memdown)
   (memory storage).
 - In the browser, use [level-js](https://github.com/Level/level-js)
@@ -30,17 +41,23 @@ LevelDB-compatible storage backend.
   [leveldown](https://github.com/level/leveldown/) (file system storage).
 
 ### Connecting to Other Clones
+
 A **m-ld** clone uses a 'remotes' object to communicate with other clones.
-- If you have an MQTT broker available, use [`MqttRemotes`](#mqtt-remotes).
+
+- With an MQTT broker, use [`MqttRemotes`](#mqtt-remotes).
 - For a scalable global managed service, use [`AblyRemotes`](#ably-remotes).
+- If you have a live web server (not just CDN or serverless), you can use
+  [`IoRemotes`](#socketio-remotes) (🚀new!).
 
 > 🚧 *If your architecture includes some other publish/subscribe service like
 > AMQP, or you would like to use a fully peer-to-peer protocol, please
 > [contact&nbsp;us](https://m-ld.org/hello/) to discuss your use-case.*
 
 ### Initialisation
+
 The [clone](#clone) function initialises the m-ld engine with a leveldb back-end
 and the clone [configuration](interfaces/meldconfig.html).
+
 ```typescript
 import MemDown from 'memdown';
 import { clone, uuid } from '@m-ld/m-ld';
@@ -61,13 +78,18 @@ transactions against the domain. If this clone has has been re-started from
 persisted state, it may still be receiving updates from the domain. This can
 cause a UI to start showing these updates. If instead, you want to wait until
 the clone has the most recent data, you can add:
+
 ```typescript
 await meld.status.becomes({ online: true, outdated: false });
 ```
 
+## Remotes
+
 [[include:mqtt-remotes.md]]
 
 [[include:ably-remotes.md]]
+
+[[include:socketio-remotes.md]]
 
 [[include:transactions.md]]
 

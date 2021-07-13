@@ -1,15 +1,16 @@
 import { QuadStoreDataset } from './engine/dataset';
 import { DatasetEngine } from './engine/dataset/DatasetEngine';
-import { AbstractLevelDOWN } from 'abstract-leveldown';
-import { ApiStateMachine } from "./engine/MeldState";
+import { ApiStateMachine } from './engine/MeldState';
 import { LogLevelDesc } from 'loglevel';
 import { ConstraintConfig, constraintFromConfig } from './constraints';
 import { DomainContext } from './engine/MeldEncoding';
 import { Context } from './jrql-support';
 import { MeldClone, MeldConstraint } from './api';
-import { MeldStatus, LiveStatus } from '@m-ld/m-ld-spec';
-import { Observable } from 'rxjs';
+import { LiveStatus, MeldStatus } from '@m-ld/m-ld-spec';
 import { MeldRemotes } from './engine';
+import type { AbstractLevelDOWN } from 'abstract-leveldown';
+import type { Observable } from 'rxjs';
+import type EventEmitter = require('events');
 
 export {
   Pattern, Reference, Context, Variable, Value, Describe, Construct,
@@ -50,6 +51,10 @@ export interface MeldConfig {
    */
   constraints?: ConstraintConfig[];
   /**
+   * Journaling configuration
+   */
+  journal?: JournalConfig;
+  /**
    * Set to `true` to indicate that this clone will be 'genesis'; that is, the
    * first new clone on a new domain. This flag will be ignored if the clone is
    * not new. If `false`, and this clone is new, successful clone initialisation
@@ -65,16 +70,37 @@ export interface MeldConfig {
    */
   networkTimeout?: number;
   /**
-   * An upper bound on delta message size, in bytes. Usually imposed by the
+   * An upper bound on operation message size, in bytes. Usually imposed by the
    * message publishing implementation. Default is infinity. Exceeding this
    * limit will cause a transaction to fail, to prevent a clone from being
    * unable to transmit the update to its peers.
    */
-  maxDeltaSize?: number;
+  maxOperationSize?: number;
   /**
    * Log level for the clone
    */
   logLevel?: LogLevelDesc;
+}
+
+/**
+ * **m-ld** clone journal configuration.
+ */
+export interface JournalConfig {
+  /**
+   * Time, in milliseconds, to delay expensive journal administration tasks such
+   * as truncation and compaction, while the clone is highly active. Default is
+   * one second.
+   * @default 1000
+   */
+  adminDebounce?: number;
+  /**
+   * A threshold of approximate entry size, in bytes, beyond which a fused entry will be
+   * committed rather than further extended. The entry storage size may be less than this if it
+   * compresses well, and can also be greater if the last (or only) individual transaction was
+   * itself large. Default is 10K.
+   * @default 10000
+   */
+  maxEntryFootprint?: number;
 }
 
 /**
@@ -89,23 +115,37 @@ export interface MeldConfig {
  * This can be a configured object (e.g. `new MqttRemotes(config)`) or just the
  * class (`MqttRemotes`).
  * @param config the clone configuration
- * @param constraints constraints in addition to those in the configuration. 🚧
- * Experimental: use with caution.
+ * @param options runtime options
+ * @param options.constraints constraints in addition to those in the
+ * configuration. 🚧 Experimental: use with caution.
+ * @param options.backendEvents an event emitter receiving low-level backend
+ * transaction events. Use to debug or trigger offline save. Received events
+ * are:
+ * - `commit(id: string)`: a transaction batch with the given ID has committed
+ *   normally
+ * - `error(err: any)`: an error has occurred in the store (most such errors
+ *   will also manifest in the operation performed)
+ * - `clear()`: the store has been cleared, as when applying a new snapshot
  */
 export async function clone(
   backend: AbstractLevelDOWN,
   remotes: MeldRemotes | (new (config: MeldConfig) => MeldRemotes),
   config: MeldConfig,
-  constraints?: MeldConstraint[]): Promise<MeldClone> {
+  options?: {
+    constraints?: MeldConstraint[],
+    backendEvents?: EventEmitter
+  }): Promise<MeldClone> {
 
   const context = new DomainContext(config['@domain'], config['@context']);
-  const dataset = await new QuadStoreDataset(backend, context).initialise();
+  const dataset = await new QuadStoreDataset(
+    backend, context, options?.backendEvents).initialise();
 
   if (typeof remotes == 'function')
     remotes = new remotes(config);
-  
-  constraints ??= await Promise.all((config.constraints ?? [])
-    .map(item => constraintFromConfig(item, context)));
+
+  const constraints = options?.constraints ??
+    await Promise.all((config.constraints ?? [])
+      .map(item => constraintFromConfig(item, context)));
 
   const engine = new DatasetEngine({ dataset, remotes, config, constraints, context });
   await engine.initialise();

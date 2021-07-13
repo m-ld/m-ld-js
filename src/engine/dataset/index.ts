@@ -1,98 +1,76 @@
 import {
-  Quad, DefaultGraph, NamedNode, Quad_Subject,
-  Quad_Predicate, Quad_Object, DataFactory
+  DataFactory, DefaultGraph, NamedNode, Quad, Quad_Object, Quad_Predicate, Quad_Subject
 } from 'rdf-js';
 import { Quadstore } from 'quadstore';
-import { AbstractChainedBatch, AbstractLevelDOWN } from 'abstract-leveldown';
+import {
+  AbstractChainedBatch, AbstractIterator, AbstractIteratorOptions, AbstractLevelDOWN
+} from 'abstract-leveldown';
 import { Observable } from 'rxjs';
 import { generate as uuid } from 'short-uuid';
 import { check, observeAsyncIterator, Stopwatch } from '../util';
 import { LockManager } from '../locks';
 import { QuadSet, RdfFactory } from '../quads';
-import { Filter } from '../indices';
 import { BatchOpts, Binding, ResultType } from 'quadstore/dist/lib/types';
 import { Context, Iri } from 'jsonld/jsonld-spec';
-import { activeCtx, compactIri, expandTerm, ActiveContext } from '../jsonld';
+import { ActiveContext, activeCtx, compactIri, expandTerm } from '../jsonld';
 import { Algebra } from 'sparqlalgebrajs';
 import { newEngine } from 'quadstore-comunica';
 import { DataFactory as RdfDataFactory } from 'rdf-data-factory';
-import { mld, rdf, jrql, xs, qs } from '../../ns';
-import { wrap, EmptyIterator } from 'asynciterator';
+import { JRQL, M_LD, QS, RDF, XS } from '../../ns';
+import { EmptyIterator, wrap } from 'asynciterator';
+import { MutableOperation } from '../ops';
+import { MeldError } from '../MeldError';
+import type EventEmitter = require('events');
 
 /**
  * Atomically-applied patch to a quad-store.
  */
 export interface Patch {
-  readonly oldQuads: Quad[] | Partial<Quad>;
-  readonly newQuads: Quad[];
+  readonly deletes: Iterable<Quad> | Partial<Quad>;
+  readonly inserts: Iterable<Quad>;
 }
 
-/**
- * Requires that the oldQuads are concrete Quads and not a MatchTerms.
- */
-export type DefinitePatch = { [key in keyof Patch]?: Iterable<Quad> };
+function isDeletePattern(deletes: Patch['deletes']): deletes is Partial<Quad> {
+  return !(Symbol.iterator in deletes);
+}
 
 /**
  * Specialised patch that allows concatenation.
  */
-export class PatchQuads implements Patch, DefinitePatch {
-  private readonly sets: { [key in keyof Patch]: QuadSet };
-
-  constructor({ oldQuads = [], newQuads = [] }: DefinitePatch = {}) {
-    this.sets = { oldQuads: new QuadSet(oldQuads), newQuads: new QuadSet(newQuads) };
-    // del(a), ins(a) == ins(a)
-    this.sets.oldQuads.deleteAll(this.sets.newQuads);
-  }
-
-  get oldQuads() {
-    return [...this.sets.oldQuads];
-  }
-
-  get newQuads() {
-    return [...this.sets.newQuads];
-  }
-
-  get isEmpty() {
-    return this.sets.newQuads.size === 0 && this.sets.oldQuads.size === 0;
-  }
-
-  append(patch: DefinitePatch) {
-    // ins(a), del(a) == del(a)
-    this.sets.newQuads.deleteAll(patch.oldQuads);
-
-    this.sets.oldQuads.addAll(patch.oldQuads);
-    this.sets.newQuads.addAll(patch.newQuads);
-    // del(a), ins(a) == ins(a)
-    this.sets.oldQuads.deleteAll(this.sets.newQuads);
-    return this;
-  }
-
-  remove(key: keyof Patch, quads: Iterable<Quad> | Filter<Quad>): Quad[] {
-    return [...this.sets[key].deleteAll(quads)];
+export class PatchQuads extends MutableOperation<Quad> implements Patch {
+  protected constructSet(quads?: Iterable<Quad>): QuadSet {
+    return new QuadSet(quads);
   }
 }
 
 export type GraphName = DefaultGraph | NamedNode;
+
+export interface KvpStore {
+  /** Exact match kvp retrieval */
+  get(key: string): Promise<Buffer | undefined>;
+  /** Exact match kvp retrieval */
+  has(key: string): Promise<boolean>;
+  /** Kvp retrieval by range options */
+  read(range: AbstractIteratorOptions<string>): Observable<[string, Buffer]>;
+  /**
+   * Ensures that write transactions are executed serially against the store.
+   * @param txn prepares a write operation to be performed
+   */
+  transact<T = unknown>(txn: TxnOptions<KvpResult<T>>): Promise<T>;
+}
 
 /**
  * Writeable dataset. Transactions are atomically and serially applied.
  * Note that the patch created by a transaction can span Graphs - each
  * Quad in the patch will have a graph property.
  */
-export interface Dataset {
+export interface Dataset extends KvpStore {
   readonly location: string;
-  readonly dataFactory: Required<DataFactory>;
+  readonly rdf: Required<DataFactory>;
 
   graph(name?: GraphName): Graph;
 
-  /**
-   * Ensures that write transactions are executed serially against the store.
-   * @param prepare prepares a write operation to be performed
-   */
-  transact(txn: TxnOptions<TxnResult>): Promise<void>;
-  transact<T>(txn: TxnOptions<TxnValueResult<T>>): Promise<T>;
-
-  get(key: string): Promise<Buffer | undefined>;
+  transact<T = unknown>(txn: TxnOptions<PatchResult<T>>): Promise<T>;
 
   clear(): Promise<void>;
 
@@ -101,21 +79,21 @@ export interface Dataset {
 }
 
 export type Kvps = // NonNullable<BatchOpts['preWrite']> with strong kv types
-  (batch: AbstractChainedBatch<string, Buffer>) => Promise<unknown> | unknown;
+  (batch: Pick<AbstractChainedBatch<string, Buffer>, 'put' | 'del'>) => Promise<unknown> | unknown;
 
-export interface TxnResult {
-  patch?: Patch;
+export interface KvpResult<T = unknown> {
   kvps?: Kvps;
   after?(): unknown | Promise<unknown>;
-  return?: unknown;
+  return?: T;
 }
 
-export interface TxnValueResult<T> extends TxnResult {
-  return: T
+export interface PatchResult<T = unknown> extends KvpResult<T> {
+  patch?: Patch;
 }
 
-export interface TxnOptions<T extends TxnResult> extends Partial<TxnContext> {
-  prepare(txc: TxnContext): Promise<T>;
+export interface TxnOptions<T extends KvpResult> extends Partial<TxnContext> {
+  prepare(txc: TxnContext): T | Promise<T>;
+  lock?: string;
 }
 
 export interface TxnContext {
@@ -123,7 +101,9 @@ export interface TxnContext {
   sw: Stopwatch
 }
 
-const notClosed = check((d: Dataset) => !d.closed, () => new Error('Dataset closed'));
+const notClosed = check((d: Dataset) => !d.closed,
+  // m-ld-specific error used here to simplify exception handling
+  () => new MeldError('Clone has closed'));
 
 /**
  * Read-only utility interface for reading Quads from a Dataset.
@@ -143,22 +123,26 @@ export interface Graph extends RdfFactory {
  * optimise (minimise) both control and user content.
  */
 export const STORAGE_CONTEXT: Context = {
-  qs: qs.$base,
-  jrql: jrql.$base,
-  mld: mld.$base,
-  xs: xs.$base,
-  rdf: rdf.$base
-}
+  qs: QS.$base,
+  jrql: JRQL.$base,
+  mld: M_LD.$base,
+  xs: XS.$base,
+  rdf: RDF.$base
+};
 
 export class QuadStoreDataset implements Dataset {
   readonly location: string;
-  /* readonly */ store: Quadstore;
+  /* readonly */
+  store: Quadstore;
   private readonly activeCtx?: Promise<ActiveContext>;
   private readonly lock = new LockManager;
   private isClosed: boolean = false;
   base: Iri | undefined;
 
-  constructor(private readonly backend: AbstractLevelDOWN, context?: Context) {
+  constructor(
+    private readonly backend: AbstractLevelDOWN,
+    context?: Context,
+    private readonly events?: EventEmitter) {
     // Internal of level-js and leveldown
     this.location = (<any>backend).location ?? uuid();
     this.activeCtx = activeCtx({ ...STORAGE_CONTEXT, ...context });
@@ -185,18 +169,19 @@ export class QuadStoreDataset implements Dataset {
     return this;
   }
 
-  get dataFactory() {
+  get rdf() {
     return <Required<DataFactory>>this.store.dataFactory;
   };
 
   graph(name?: GraphName): Graph {
-    return new QuadStoreGraph(this, name || this.dataFactory.defaultGraph());
+    return new QuadStoreGraph(this, name || this.rdf.defaultGraph());
   }
 
   @notClosed.async
-  transact<T, O extends TxnResult>(txn: TxnOptions<O>): Promise<T> {
+  transact<T, O extends PatchResult>(txn: TxnOptions<O>): Promise<T> {
+    const lockKey = txn.lock ?? 'txn';
     const id = txn.id ?? uuid();
-    const sw = txn.sw ?? new Stopwatch('txn', id);
+    const sw = txn.sw ?? new Stopwatch(lockKey, id);
     // The transaction lock ensures that read operations that are part of a
     // transaction (e.g. evaluating the @where clause) are not affected by
     // concurrent transactions (fully serialiseable consistency). This is
@@ -206,7 +191,7 @@ export class QuadStoreDataset implements Dataset {
     same event loop tick, see https://github.com/Level/leveldown/issues/486
     */
     sw.next('lock-wait');
-    return this.lock.exclusive('txn', async () => {
+    return this.lock.exclusive(lockKey, async () => {
       sw.next('prepare');
       const result = await txn.prepare({ id, sw: sw.lap });
       sw.next('apply');
@@ -218,6 +203,12 @@ export class QuadStoreDataset implements Dataset {
       await result.after?.();
       sw.stop();
       return <T>result.return;
+    }).then(result => {
+      this.events?.emit('commit', txn.id);
+      return result;
+    }, err => {
+      this.events?.emit('error', err);
+      throw err;
     });
   }
 
@@ -229,15 +220,15 @@ export class QuadStoreDataset implements Dataset {
   }
 
   private async applyQuads(patch: Patch, opts?: BatchOpts) {
-    if (Array.isArray(patch.oldQuads)) {
-      await this.store.multiPatch(patch.oldQuads, patch.newQuads, opts);
+    if (!isDeletePattern(patch.deletes)) {
+      await this.store.multiPatch([...patch.deletes], [...patch.inserts], opts);
     } else {
       // FIXME: Not atomic! – Rarely used
-      const { subject, predicate, object, graph } = patch.oldQuads;
+      const { subject, predicate, object, graph } = patch.deletes;
       await new Promise((resolve, reject) =>
         this.store.removeMatches(subject, predicate, object, graph)
           .on('end', resolve).on('error', reject));
-      await this.store.multiPut(patch.newQuads, opts);
+      await this.store.multiPut([...patch.inserts], opts);
     }
   }
 
@@ -246,10 +237,12 @@ export class QuadStoreDataset implements Dataset {
     return new Promise<Buffer | undefined>((resolve, reject) =>
       this.store.db.get(key, { asBuffer: true }, (err, buf) => {
         if (err) {
-          if (err.message.startsWith('NotFound'))
+          if (err.message.startsWith('NotFound')) {
             resolve(undefined);
-          else
+          } else {
             reject(err);
+            this.events?.emit('error', err);
+          }
         } else {
           resolve(buf);
         }
@@ -257,9 +250,60 @@ export class QuadStoreDataset implements Dataset {
   }
 
   @notClosed.async
+  has(key: string): Promise<boolean> {
+    return new Promise<boolean>((resolve, reject) => {
+      const it = this.store.db.iterator({
+        gte: key, limit: 1, values: false, keyAsBuffer: false
+      });
+      it.next((err, foundKey: string) => {
+        if (err) {
+          reject(err);
+          this.events?.emit('error', err);
+        } else if (foundKey != null) {
+          resolve(foundKey === key);
+        } else {
+          resolve(false);
+        }
+        this.end(it);
+      });
+    });
+  }
+
+  @notClosed.rx
+  read(range: AbstractIteratorOptions<string>): Observable<[string, Buffer]> {
+    return new Observable(subs => {
+      const it = this.store.db.iterator({ ...range, keyAsBuffer: false });
+      const pull = () => {
+        it.next((err, key: string, value: Buffer) => {
+          if (err) {
+            subs.error(err);
+            this.end(it);
+            this.events?.emit('error', err);
+          } else if (key != null && value != null) {
+            subs.next([key, value]);
+            pull();
+          } else {
+            subs.complete();
+            this.end(it);
+          }
+        });
+      };
+      pull();
+    });
+  }
+
+  @notClosed.async
   clear(): Promise<void> {
     return new Promise<void>((resolve, reject) =>
-      this.store.db.clear(err => err ? reject(err) : resolve()));
+      this.store.db.clear(err => {
+        if (err) {
+          reject(err);
+          this.events?.emit('error', err);
+        } else {
+          resolve();
+          this.events?.emit('clear');
+        }
+      }));
   }
 
   @notClosed.async
@@ -273,6 +317,10 @@ export class QuadStoreDataset implements Dataset {
 
   get closed(): boolean {
     return this.isClosed;
+  }
+
+  private end(it: AbstractIterator<any, any>) {
+    it.end(err => err && this.events?.emit('error', err));
   }
 }
 
@@ -291,14 +339,13 @@ class QuadStoreGraph implements Graph {
         const stream = await this.dataset.store.sparqlStream(query);
         if (stream.type === ResultType.BINDINGS || stream.type === ResultType.QUADS)
           return stream.iterator;
-        else
-          throw new Error('Expected bindings or quads');
       } catch (err) {
         // TODO: Comunica bug? Cannot read property 'close' of undefined, if stream empty
         if (err instanceof TypeError)
           return new EmptyIterator();
         throw err;
       }
+      throw new Error('Expected bindings or quads');
     });
   }
 
@@ -307,15 +354,16 @@ class QuadStoreGraph implements Graph {
       wrap(this.dataset.store.match(subject, predicate, object, this.name)));
   }
 
-  skolem = () => this.dataset.dataFactory.namedNode(
-    new URL(`/.well-known/genid/${uuid()}`, this.dataset.base).href)
+  skolem = () => this.dataset.rdf.namedNode(
+    new URL(`/.well-known/genid/${uuid()}`, this.dataset.base).href);
 
-  namedNode = this.dataset.dataFactory.namedNode;
-  blankNode = this.dataset.dataFactory.blankNode;
-  literal = this.dataset.dataFactory.literal;
-  variable = this.dataset.dataFactory.variable;
-  defaultGraph = this.dataset.dataFactory.defaultGraph;
+  namedNode = this.dataset.rdf.namedNode;
+  // noinspection JSUnusedGlobalSymbols
+  blankNode = this.dataset.rdf.blankNode;
+  literal = this.dataset.rdf.literal;
+  variable = this.dataset.rdf.variable;
+  defaultGraph = this.dataset.rdf.defaultGraph;
 
   quad = (subject: Quad_Subject, predicate: Quad_Predicate, object: Quad_Object) =>
-    this.dataset.dataFactory.quad(subject, predicate, object, this.name);
+    this.dataset.rdf.quad(subject, predicate, object, this.name);
 }

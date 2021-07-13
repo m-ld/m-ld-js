@@ -1,5 +1,7 @@
-import { isList, isPropertyObject, isSet, List, Reference, Slot, Subject, Value } from './jrql-support';
-import { DeleteInsert, isDeleteInsert, GraphSubjects, GraphSubject } from './api';
+import {
+  isList, isPropertyObject, isSet, List, Reference, Slot, Subject, Value
+} from './jrql-support';
+import { DeleteInsert, GraphSubject, GraphSubjects, isDeleteInsert } from './api';
 import { compareValues, getValues, hasProperty, hasValue } from './engine/jsonld';
 import { deepValues, isArray, isNaturalNumber, setAtPath } from './engine/util';
 import { array } from './util';
@@ -191,7 +193,8 @@ export class SubjectUpdater {
       items.unshift(...splices[i].items ?? []);
       if (!(i - 1 in splices)) {
         splice.call(list, i, deleteCount, ...items);
-        deleteCount = 0, items = [];
+        deleteCount = 0;
+        items = [];
       }
     }
   }
@@ -204,13 +207,15 @@ function isListUpdate(updatePart?: Subject): updatePart is List {
 
 /** @internal */
 class SubjectPropertyUpdater {
-  private wasArray: boolean;
+  private readonly wasArray: boolean;
+  private readonly configurable: boolean;
 
   constructor(
     readonly subject: Subject,
     readonly property: string,
     readonly subjectUpdater?: SubjectUpdater) {
     this.wasArray = isArray(this.subject[this.property]);
+    this.configurable = Object.getOwnPropertyDescriptor(subject, property)?.configurable ?? false;
   }
 
   get values() {
@@ -224,7 +229,7 @@ class SubjectPropertyUpdater {
     this.subject[this.property] = values.length === 0 ? [] : // See next
       // Properties which were not an array before get collapsed
       values.length === 1 && !this.wasArray ? values[0] : values;
-    if (values.length === 0)
+    if (values.length === 0 && this.configurable)
       delete this.subject[this.property];
   }
 
@@ -269,7 +274,7 @@ class SubjectPropertyUpdater {
  * semantics by expanding the property to an array, if necessary.
  * @param subject the subject to add the value to.
  * @param property the property that relates the value to the subject.
- * @param value the value to add.
+ * @param values the value to add.
  */
 export function includeValues(subject: Subject, property: string, ...values: Value[]) {
   new SubjectPropertyUpdater(subject, property).insert(...values);
@@ -279,7 +284,8 @@ export function includeValues(subject: Subject, property: string, ...values: Val
  * Determines whether the given set of values contains the given value. This
  * method accounts for the identity semantics of {@link Reference}s and
  * {@link Subject}s.
- * @param set the set of values to inspect
+ * @param subject the subject to inspect
+ * @param property the property to inspect
  * @param value the value to find in the set. If `undefined`, then wildcard
  * checks for any value at all.
  */

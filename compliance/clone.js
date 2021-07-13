@@ -37,7 +37,7 @@ clone(leveldown(tmpDirName), new MqttRemotes(config), config).then(meld => {
     if (message['@type'] in handlers)
       handlers[message['@type']](message);
     else
-      send(message.id, 'error', { err: `No handler for ${message['@type']}` });
+      sendError(message.id, `No handler for ${message['@type']}`);
   });
 
   meld.follow(update => send(requestId, 'updated', { body: update }));

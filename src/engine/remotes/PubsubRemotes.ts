@@ -1,52 +1,24 @@
-import { Snapshot, DeltaMessage, MeldRemotes, MeldLocal, Revup } from '.';
+import { MeldLocal, MeldRemotes, OperationMessage, Revup, Snapshot } from '../index';
 import {
-  Observable, Subject as Source, BehaviorSubject, identity, defer,
-  Observer, Subscription, from, of, EMPTY, onErrorResumeNext
+  BehaviorSubject, defer, EMPTY, firstValueFrom, from, identity, Observable, Observer, of,
+  onErrorResumeNext, Subject as Source, Subscription
 } from 'rxjs';
-import { TreeClock } from './clocks';
+import { TreeClock } from '../clocks';
 import { generate as uuid } from 'short-uuid';
-import { Response, Request } from './ControlMessage';
-import { MsgPack, Future, toJson, Stopwatch } from './util';
+import { Request, Response } from '../ControlMessage';
+import { completed, Future, MsgPack, Stopwatch, toJSON } from '../util';
 import {
-  finalize, reduce, toArray, first, concatMap, materialize, timeout, delay, map
+  concatMap, delay, finalize, first, map, materialize, reduce, tap, timeout, toArray
 } from 'rxjs/operators';
-import { MeldError, MeldErrorStatus } from './MeldError';
-import { AbstractMeld } from './AbstractMeld';
-import { MeldConfig, shortId } from '..';
-import { Triple } from './quads';
-
-// @see org.m_ld.json.MeldJacksonModule.NotificationDeserializer
-export interface JsonNotification {
-  next?: any;
-  complete?: true;
-  error?: any;
-}
-
-/** Parameters for sending, receiving and notifying a peer */
-export interface PeerParams {
-  toId: string;
-  fromId: string;
-}
-
-/** Parameters for sending a single message */
-export interface SendParams extends PeerParams {
-  messageId: string;
-}
-
-/** Parameters for replying to a message */
-export interface ReplyParams extends SendParams {
-  sentMessageId: string;
-}
-
-/** Parameters for multiple messages on some channel */
-export interface NotifyParams extends PeerParams {
-  channelId: string;
-}
+import { MeldError, MeldErrorStatus } from '../MeldError';
+import { AbstractMeld } from '../AbstractMeld';
+import { MeldConfig, shortId } from '../../index';
+import { JsonNotification, NotifyParams, ReplyParams, SendParams } from './PubsubParams';
 
 export interface SubPub {
   readonly id: string;
   publish(msg: Buffer): Promise<unknown>;
-  close(): void;
+  close?(): void;
 }
 
 /** A m-ld ack is a reply to a reply with a null body */
@@ -91,16 +63,16 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
           // They will be replayed from the clone's journal on re-connection.
           if (this.connected.value) {
             try {
-              // Delta received from the local clone. Relay to the domain
-              await this.publishDelta(msg.encode());
+              // Operation received from the local clone. Relay to the domain
+              await this.publishOperation(msg.encode());
               // When done, mark the message as delivered
               msg.delivered.resolve();
             } catch (err) {
               // Failed to send an update while (probably) connected
               this.log.warn(err);
-              // Delta delivery is guaranteed at-least-once. So, if it fails,
-              // something catastrophic must have happened. Signal failure of
-              // this service and allow the clone to deal with it.
+              // Operation delivery is guaranteed at-least-once. So, if it
+              // fails, something catastrophic must have happened. Signal
+              // failure of this service and allow the clone to deal with it.
               this.closeSafely(err);
             }
           }
@@ -124,9 +96,9 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
   protected abstract setPresent(present: boolean): Promise<unknown>;
 
   /**
-   * Publishes a delta message with at-least-once guaranteed delivery.
+   * Publishes a operation message with at-least-once guaranteed delivery.
    */
-  protected abstract publishDelta(msg: Buffer): Promise<unknown>;
+  protected abstract publishOperation(msg: Buffer): Promise<unknown>;
 
   protected abstract present(): Observable<string>;
 
@@ -143,9 +115,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
       this.log.info('Shutting down normally');
     // This finalises the #updates, thereby notifying the clone
     super.close(err);
-    // Wait until the clone has closed
-    await this.localClone.pipe(first(null)).toPromise();
-    // Wait until all activity have finalised
+    // Wait until all activities have finalised
     await Promise.all(this.activity); // TODO unit test this
   }
 
@@ -167,37 +137,34 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
       new Request.Snapshot, { readyToAck, sw });
     sw.next('consume');
     // Subscribe in parallel (subscription can be slow)
-    const [quads, updates] = await Promise.all([
-      this.consume(fromId, res.quadsAddress, this.triplesFromBuffer, 'failIfSlow'),
-      this.consume(fromId, res.updatesAddress, DeltaMessage.decode)
+    const [data, updates] = await Promise.all([
+      this.consume(fromId, res.dataAddress, MsgPack.decode, 'failIfSlow'),
+      this.consume(fromId, res.updatesAddress, OperationMessage.decode)
     ]);
     sw.stop();
     return {
-      lastTime: res.lastTime, quads: defer(() => {
+      gwc: res.gwc, data: defer(() => {
         // Ack the response to start the streams
         readyToAck.resolve();
-        return quads;
+        return data;
       }), updates
     };
   }
-
-  private triplesFromBuffer = (payload: Buffer) =>
-    this.requireClone().encoding.triplesFromJson(MsgPack.decode(payload))
 
   async revupFrom(time: TreeClock): Promise<Revup | undefined> {
     const readyToAck = new Future;
     const sw = new Stopwatch('revup', shortId(4));
     const { res, fromId: from } = await this.send<Response.Revup>(new Request.Revup(time), {
       // Try everyone until we find someone who can revup
-      readyToAck, check: res => res.lastTime != null, sw
+      readyToAck, check: res => res.gwc != null, sw
     });
-    if (res.lastTime != null) {
+    if (res.gwc != null) {
       sw.next('consume');
       const updates = await this.consume(
-        from, res.updatesAddress, DeltaMessage.decode, 'failIfSlow');
+        from, res.updatesAddress, OperationMessage.decode, 'failIfSlow');
       sw.stop();
       return {
-        lastTime: res.lastTime, updates: defer(() => {
+        gwc: res.gwc, updates: defer(() => {
           // Ack the response to start the streams
           readyToAck.resolve();
           return updates;
@@ -220,16 +187,16 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
 
   protected onPresenceChange() {
     // Don't process a presence change until connected
-    this.connected.pipe(first(identity)).toPromise().then(() => {
+    this.connected.pipe(first(identity), tap(() => {
       // If there is more than just me present, we are live
       this.present()
         .pipe(reduce((live, id) => live || id !== this.id, false))
         .subscribe(live => this.setLive(live));
-    });
+    })).subscribe();
   }
 
   protected onRemoteUpdate(payload: Buffer) {
-    const update = DeltaMessage.decode(payload);
+    const update = OperationMessage.decode(payload);
     if (update)
       this.nextUpdate(update);
     else
@@ -295,7 +262,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
   protected onNotify(channelId: string, payload: Buffer) {
     if (channelId in this.consuming) {
       const json = MsgPack.decode(payload);
-      this.log.debug(`Notified on channel ${channelId}:`, json);
+      this.log.debug(`Notified ${Object.keys(json)[0]} on channel ${channelId}`);
       if (json.next)
         this.consuming[channelId].next(json.next);
       else if (json.complete)
@@ -303,13 +270,6 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
       else if (json.error)
         this.consuming[channelId].error(MeldError.from(json.error));
     }
-  }
-
-  private requireClone() {
-    const clone = this.clone;
-    if (clone == null)
-      throw new Error('No local clone');
-    return clone;
   }
 
   private get clone() {
@@ -347,8 +307,8 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     this.log.debug('Sending request', messageId, request, sender.id);
     sw.next('send');
     const sent = sender
-      .publish(MsgPack.encode(request.toJson()))
-      .finally(() => sender.close());
+      .publish(MsgPack.encode(request.toJSON()))
+      .finally(() => sender.close?.());
     tried[sender.id] = this.getResponse<T>(sent, messageId, { readyToAck })
       .then(res => ({ res, fromId: sender.id }));
     // If the publish fails, don't keep trying other addresses
@@ -410,33 +370,30 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
   }
 
   private async replySnapshot(sentParams: SendParams, snapshot: Snapshot): Promise<void> {
-    const { lastTime, quads, updates } = snapshot;
-    const quadsAddress = uuid(), updatesAddress = uuid();
+    const { gwc: gwc, data, updates } = snapshot;
+    const dataAddress = uuid(), updatesAddress = uuid();
     // Send the reply in parallel with establishing notifiers
     const replyId = uuid();
     const replied = this.reply(sentParams,
-      new Response.Snapshot(lastTime, quadsAddress, updatesAddress), replyId);
+      new Response.Snapshot(gwc, dataAddress, updatesAddress), replyId);
     // Allow time for the notifiers to resolve while waiting for a reply
-    const [quadsNotifier, updatesNotifier] = await this.getAck(replied, replyId, Promise.all([
-      this.notifier({ toId: sentParams.fromId, fromId: this.id, channelId: quadsAddress }),
+    const [dataNotifier, updatesNotifier] = await this.getAck(replied, replyId, Promise.all([
+      this.notifier({ toId: sentParams.fromId, fromId: this.id, channelId: dataAddress }),
       this.notifier({ toId: sentParams.fromId, fromId: this.id, channelId: updatesAddress })
     ]));
     // Ack has been sent, start streaming the data and updates concurrently
     await Promise.all([
-      this.produce(quads, quadsNotifier, this.bufferFromTriples, 'snapshot'),
+      this.produce(data, dataNotifier, MsgPack.encode, 'snapshot'),
       this.produce(updates, updatesNotifier, msg => msg.encode(), 'updates')
     ]);
   }
-
-  private bufferFromTriples = (triples: Triple[]) =>
-    MsgPack.encode(this.requireClone().encoding.jsonFromTriples(triples));
 
   private async replyRevup(sentParams: SendParams, revup: Revup | undefined) {
     if (revup) {
       const updatesAddress = uuid();
       const replyId = uuid();
       const replied = this.reply(sentParams,
-        new Response.Revup(revup.lastTime, updatesAddress), replyId);
+        new Response.Revup(revup.gwc, updatesAddress), replyId);
       const notifier = await this.getAck(replied, replyId, Promise.resolve(this.notifier({
         toId: sentParams.fromId, fromId: this.id, channelId: updatesAddress
       })));
@@ -454,7 +411,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     const src = this.consuming[channelId] = new Source;
     const complete = () => {
       // TODO unit test this
-      notifier.close();
+      notifier.close?.();
       delete this.consuming[channelId];
     };
     onErrorResumeNext(src, EMPTY).subscribe({ complete });
@@ -470,7 +427,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     datumToPayload: (datum: T) => Buffer, type: string) {
     const notifyError = (error: any) => {
       this.log.warn('Notifying error on', notifier.id, error);
-      return notify({ error: toJson(error) });
+      return notify({ error: toJSON(error) });
     }
     const notifyComplete = () => {
       this.log.debug(`Completed production of ${type} on ${notifier.id}`);
@@ -482,7 +439,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
         // out from the network so here we make best efforts to notify an error
         // and then give up.
         .catch(err => notifyError(err));
-    return data.pipe(
+    return completed(data.pipe(
       map(datumToPayload),
       materialize(),
       concatMap(notification => {
@@ -492,8 +449,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
           case 'C': return notifyComplete();
         }
       }),
-      finalize(() => notifier.close()))
-      .toPromise();
+      finalize(() => notifier.close?.())));
   }
 
   private async reply(
@@ -502,8 +458,8 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     const replier = await this.replier({ fromId: this.id, toId, messageId, sentMessageId });
     this.log.debug('Replying response', messageId, 'to', sentMessageId, res, replier.id);
     return replier
-      .publish(MsgPack.encode(res == null ? null : res.toJson()))
-      .finally(() => replier.close());
+      .publish(MsgPack.encode(res == null ? null : res.toJSON()))
+      .finally(() => replier.close?.());
   }
 
   private async getAck<T>(
@@ -513,7 +469,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
   }
 
   private async nextSender(messageId: string): Promise<SubPub | null> {
-    const present = await this.present().pipe(toArray()).toPromise();
+    const present = await firstValueFrom(this.present().pipe(toArray()));
     if (present.every(id => this.recentlySentTo.has(id)))
       this.recentlySentTo.clear();
 

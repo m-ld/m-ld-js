@@ -1,43 +1,41 @@
 /**
  * Primary interfaces involved in a m-ld engine
  */
-import { TreeClock } from './clocks';
+import { GlobalClock, TreeClock, TreeClockJson } from './clocks';
 import { Observable } from 'rxjs';
 import { Message } from './messages';
-import { MsgPack, Future } from './util';
+import { Future, MsgPack } from './util';
 import { LiveValue } from './LiveValue';
 import { MeldError } from './MeldError';
-import { gzip as gzipCb, gunzip as gunzipCb, InputType } from 'zlib';
-import { Triple } from './quads';
-import { MeldEncoding } from './MeldEncoding';
-const gzip = (input: InputType) => new Promise<Buffer>((resolve, reject) =>
-  gzipCb(input, (err, buf) => err ? reject(err) : resolve(buf)));
-const gunzip = (input: InputType) => new Promise<Buffer>((resolve, reject) =>
-  gunzipCb(input, (err, buf) => err ? reject(err) : resolve(buf)));
+import { MeldEncoder } from './MeldEncoding';
+
 const inspect = Symbol.for('nodejs.util.inspect.custom');
 
-const COMPRESS_THRESHOLD_BYTES = 1024;
-
-export class DeltaMessage implements Message<TreeClock, EncodedDelta> {
+export class OperationMessage implements Message<TreeClock, EncodedOperation> {
   readonly delivered = new Future;
+  private _buffer: Buffer;
 
   constructor(
+    /** Previous public tick from the operation source */
     readonly prev: number,
-    readonly time: TreeClock,
-    readonly data: EncodedDelta) {
+    /** Encoded update operation */
+    readonly data: EncodedOperation,
+    /** Message time if you happen to have it, otherwise read from data */
+    readonly time = TreeClock.fromJson(data[2])) {
   }
 
   encode(): Buffer {
-    return MsgPack.encode({
-      time: this.time.toJson(), prev: this.prev, data: this.data
-    });
+    if (this._buffer == null) {
+      const { prev, data } = this;
+      this._buffer = MsgPack.encode({ prev, data });
+    }
+    return this._buffer;
   }
 
-  static decode(enc: Buffer): DeltaMessage {
+  static decode(enc: Buffer): OperationMessage {
     const json = MsgPack.decode(enc);
-    const time = TreeClock.fromJson(json.time);
-    if (time && json.data)
-      return new DeltaMessage(json.prev, time, json.data);
+    if (typeof json.prev == 'number' && Array.isArray(json.data))
+      return new OperationMessage(json.prev, json.data);
     else
       throw new MeldError('Bad update');
   }
@@ -63,7 +61,7 @@ export interface Meld {
    * Completion or an error means that this Meld has closed.
    * @see live
    */
-  readonly updates: Observable<DeltaMessage>;
+  readonly updates: Observable<OperationMessage>;
   /**
    * Liveness of this Meld. To be 'live' means that it is able to collaborate
    * with newly starting clones via snapshot & rev-up. A value of null indicates
@@ -80,42 +78,30 @@ export interface Meld {
   revupFrom(time: TreeClock): Promise<Revup | undefined>;
 }
 
-export interface MeldDelta extends Object {
-  readonly insert: Triple[];
-  readonly delete: Triple[];
-  /**
-   * Serialisation output of triples is not required to be normalised.
-   * For any m-ld delta, there are many possible serialisations.
-   * A delta carries its serialisation with it, for journaling and hashing.
-   */
-  readonly encoded: EncodedDelta;
-}
+/** A JSON string, which may be compressed into a buffer with gzip */
+export type JsonBuffer = string | Buffer;
 
 /**
- * A tuple containing encoding version, delete and insert components of a
- * {@link MeldDelta}. The delete and insert components are UTF-8 encoded JSON-LD
- * strings, which may be GZIP compressed into a Buffer if bigger than a
- * threshold. Intended to be efficiently serialised with MessagePack.
+ * A tuple containing encoding components of a {@link MeldOperation}. The delete
+ * and insert components are UTF-8 encoded JSON-LD strings, which may be GZIP
+ * compressed into a Buffer if bigger than a threshold. Intended to be
+ * efficiently serialised with MessagePack.
  */
-export type EncodedDelta = [1, string | Buffer, string | Buffer];
-
-export namespace EncodedDelta {
-  export async function encode(json: any): Promise<Buffer | string> {
-    const stringified = JSON.stringify(json);
-    return stringified.length > COMPRESS_THRESHOLD_BYTES ?
-      gzip(stringified) : stringified;
-  }
-
-  export async function decode(enc: string | Buffer): Promise<any> {
-    if (typeof enc != 'string')
-      enc = (await gunzip(enc)).toString();
-    return JSON.parse(enc);
-  }
-}
+export type EncodedOperation = [
+  version: 2,
+  /** first tick of causal time range */
+  from: number,
+  /** time as JSON */
+  time: TreeClockJson,
+  /** delete as gzip Buffer or JSON-LD string */
+  deletes: JsonBuffer,
+  /** insert as gzip Buffer or JSON-LD string */
+  inserts: JsonBuffer
+];
 
 export interface Recovery {
-  readonly lastTime: TreeClock;
-  readonly updates: Observable<DeltaMessage>;
+  readonly gwc: GlobalClock;
+  readonly updates: Observable<OperationMessage>;
 }
 
 export interface Revup extends Recovery {
@@ -123,10 +109,11 @@ export interface Revup extends Recovery {
 
 export interface Snapshot extends Recovery {
   /**
-   * An observable of reified quad arrays. Reified quads include their observed
-   * TIDs. Arrays for batching (sender decides array size).
+   * All data in the snapshot. Data is either reified triples with their
+   * observed TIDs (sender decides how many triples per emission) as JSON-LD, or
+   * a latest operation from remotes.
    */
-  readonly quads: Observable<Triple[]>;
+  readonly data: Observable<{ inserts: JsonBuffer } | { operation: EncodedOperation }>;
 }
 
 export interface MeldRemotes extends Meld {
@@ -135,5 +122,5 @@ export interface MeldRemotes extends Meld {
 
 export interface MeldLocal extends Meld {
   readonly id: string;
-  readonly encoding: MeldEncoding;
+  readonly encoder: MeldEncoder;
 }

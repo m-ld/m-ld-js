@@ -1,11 +1,12 @@
 import {
-  MeldConstraint, MeldReadState, asSubjectUpdates, updateSubject, InterimUpdate, GraphSubject
+  asSubjectUpdates, GraphSubject, InterimUpdate, MeldConstraint, MeldReadState, updateSubject
 } from '..';
 import { Iri } from 'jsonld/jsonld-spec';
-import { map, filter, take, concatMap } from 'rxjs/operators';
-import { Subject, Select, Value, isValueObject, Reference } from '../jrql-support';
-import { Observable, EMPTY, concat, defer, from } from 'rxjs';
+import { concatMap, filter, map } from 'rxjs/operators';
+import { isValueObject, Reference, Select, Subject, Value } from '../jrql-support';
+import { concat, defaultIfEmpty, defer, EMPTY, firstValueFrom, from, Observable } from 'rxjs';
 import { DeleteInsert } from '../api';
+import { completed } from '../engine/util';
 
 /**
  * Configuration for a `SingleValued` constraint. The configured property should
@@ -43,14 +44,14 @@ export class SingleValued implements MeldConstraint {
 
   async check(state: MeldReadState, interim: InterimUpdate): Promise<unknown> {
     // Report the first failure
-    const failed = await this.affected(state, await interim.update).pipe(
+    const failed = await firstValueFrom(this.affected(state, await interim.update).pipe(
       filter(subject => isMultiValued(subject[this.property])),
-      take(1)).toPromise();
+      defaultIfEmpty(null)));
     return failed != null ? Promise.reject(this.failure(failed)) : Promise.resolve();
   }
 
   async apply(state: MeldReadState, interim: InterimUpdate): Promise<unknown> {
-    return this.affected(state, await interim.update).pipe(
+    return completed(this.affected(state, await interim.update).pipe(
       concatMap(async subject => {
         const values = subject[this.property];
         if (isMultiValued(values)) {
@@ -62,7 +63,7 @@ export class SingleValued implements MeldConstraint {
             }
           });
         }
-      })).toPromise();
+      })));
   }
 
   private affected(state: MeldReadState, update: DeleteInsert<GraphSubject[]>): Observable<Subject> {

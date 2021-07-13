@@ -1,18 +1,18 @@
 import { Iri } from 'jsonld/jsonld-spec';
 import { Binding } from 'quadstore';
-import { from, Observable } from 'rxjs';
-import { mergeMap } from 'rxjs/operators';
+import { Observable } from 'rxjs';
 import { blank, GraphSubject } from '../..';
 import { anyName } from '../../api';
 import {
-  isList, isPropertyObject, isSet, isSubjectObject, Subject,
-  SubjectProperty, SubjectPropertyObject, Value, Variable
+  isList, isPropertyObject, isSet, isSubjectObject, Subject, SubjectProperty, SubjectPropertyObject,
+  Value, Variable
 } from '../../jrql-support';
 import { matchVar } from '../../ns/json-rql';
 import { array } from '../../util';
 import { addPropertyObject, listItems } from '../jrql-util';
 import { ActiveContext, compactIri } from '../jsonld';
 import { jrqlProperty, jrqlValue } from '../SubjectGraph';
+import { inflate } from '../util';
 
 export class ConstructTemplate {
   private templates: SubjectTemplate[];
@@ -32,8 +32,7 @@ export class ConstructTemplate {
   }
 
   get results(): Observable<GraphSubject> {
-    return from(this.templates).pipe(
-      mergeMap(template => template.results.values()));
+    return inflate(this.templates,template => template.results.values());
   }
 }
 

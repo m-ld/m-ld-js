@@ -1,20 +1,20 @@
 import { Logger } from 'loglevel';
+import type { Instance as Peer, Options as PeerOpts, SignalData } from 'simple-peer';
 import * as SimplePeer from 'simple-peer';
 import { getIdLogger } from '../engine/util';
-import type { Instance as Peer, Options as PeerOpts, SignalData } from 'simple-peer';
-import type { MeldConfig } from '..';
-import type { SubPub, NotifyParams } from '../engine/PubsubRemotes';
 import { timer } from 'rxjs';
-
-export type CreatePeer = (opts?: PeerOpts) => Peer;
+import type { MeldConfig } from '..';
+import type { NotifyParams, SubPub } from '../engine/remotes';
 
 export interface MeldWrtcConfig extends MeldConfig {
   wrtc?: RTCConfiguration;
 }
 
-export interface PeerSignal extends SignalData {
+type Unavailable = {
   unavailable?: true;
-}
+};
+
+export type PeerSignal = SignalData | Unavailable;
 
 export interface PeerSignaller {
   notify: (channelId: string, payload: Buffer) => void;
@@ -68,20 +68,20 @@ export class WrtcPeering {
       // Wait a bit before destroying so the socket flushes
       // https://github.com/feross/simple-peer/blob/9ea1805d992a8164a42b750160ed3425f2a494f1/index.js#L580
       close: () => timer(1000).subscribe(() => peer.destroy())
-    }
+    };
   }
 
   signal(fromId: string, channelId: string, data: PeerSignal) {
     // Note that a signal can arrive before the peer has been set up.
-    if (!(channelId in this.peers) && (!this.available || data.unavailable)) {
+    if (!(channelId in this.peers) && (!this.available || isUnavailable(data))) {
       // Peering not possible. Remember this channel as unavailable.
-      this.dispose(fromId, channelId, !data.unavailable, 'marked unavailable');
+      this.dispose(fromId, channelId, !isUnavailable(data), 'marked unavailable');
     } else {
       // Get an existing peer or create a new one
       const { peer } = this.peer(fromId, channelId);
       if (peer == null)
         this.log.debug(`Disposed channel ${channelId} peer ${fromId} received signal`);
-      else if (data.unavailable)
+      else if (isUnavailable(data))
         peer.destroy(new UnavailableError(fromId));
       else
         peer.signal(data);
@@ -139,4 +139,8 @@ export class WrtcPeering {
   private timeout(cb: () => void) {
     return timer(this.networkTimeout).subscribe(cb);
   }
+}
+
+function isUnavailable(signal: PeerSignal): signal is Unavailable {
+  return 'unavailable' in signal;
 }

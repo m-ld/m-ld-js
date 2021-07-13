@@ -252,7 +252,7 @@ describe('Sharable lock', () => {
       await pushOp(1);
       await pushOp(2);
     });
-    expect(lock.share('it', async () => {
+    await expect(lock.share('it', async () => {
       await pushOp(3);
       throw new Error();
     })).rejects.toThrowError();

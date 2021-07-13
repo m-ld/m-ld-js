@@ -28,6 +28,15 @@ the engine documentation website at https://js.m-ld.org/ using
   [CAA](./CONTRIBUTING), the GitHub Community
   [Guidelines](https://docs.github.com/articles/github-community-guidelines),
   and the [privacy](https://m-ld.org/privacy/) policy.
+  
+## extensions
+Plug-ins such as remotes implementations in this repository are structured as:
+- Directories under `src`
+- Entries in `package.json#exports` like `"./dist/socket.io": "./dist/socket.
+  io/index.js"`
+- Dependencies in `package.json#peerDependencies` and marked `optional` in
+  `package.json#peerDependenciesMeta`. Also in `package.json#devDependencies` 
+  for unit tests.
 
 ## scripts
 Scripts are run with `npm`.
@@ -52,5 +61,6 @@ the `compliance` tests script ([ticket](https://github.com/m-ld/m-ld-js/issues/1
 
 `VERSION=? npm publish` builds the project, increments the version as specified
 with the VERSION variable (e.g. `patch`), pushes the code and publishes the
-package. *Ensure the repo is up-to-date and on* master *(release) or* edge *(pre-release)*
+package. *Ensure the repo is up-to-date and on* master *(release) or* edge
+*(pre-release)*
 

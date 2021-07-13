@@ -1,9 +1,9 @@
-import { MeldRemotes, DeltaMessage, MeldLocal } from '../src/engine';
+import { EncodedOperation, MeldLocal, MeldRemotes, OperationMessage } from '../src/engine';
 import { mock, MockProxy } from 'jest-mock-extended';
-import { Observable, NEVER, BehaviorSubject, from, asapScheduler } from 'rxjs';
+import { asapScheduler, BehaviorSubject, from, NEVER, Observable, Observer } from 'rxjs';
 import { Dataset, QuadStoreDataset } from '../src/engine/dataset';
-import MemDown from 'memdown';
-import { TreeClock } from '../src/engine/clocks';
+import type { MemDownConstructor } from 'memdown';
+import { GlobalClock, TreeClock } from '../src/engine/clocks';
 import { AsyncMqttClient, IPublishPacket } from 'async-mqtt';
 import { EventEmitter } from 'events';
 import { observeOn } from 'rxjs/operators';
@@ -12,18 +12,21 @@ import { AbstractLevelDOWN } from 'abstract-leveldown';
 import { LiveValue } from '../src/engine/LiveValue';
 import { Context } from 'jsonld/jsonld-spec';
 
+// Default import has gone away: https://github.com/Level/community/issues/87
+export const MemDown: MemDownConstructor = require('memdown');
+
 export function testConfig(config?: Partial<MeldConfig>): MeldConfig {
   return { '@id': 'test', '@domain': 'test.m-ld.org', genesis: true, ...config };
 }
 
 export function mockRemotes(
-  updates: Observable<DeltaMessage> = NEVER,
+  updates: Observable<OperationMessage> = NEVER,
   lives: Array<boolean | null> | LiveValue<boolean | null> = [false],
   newClock: TreeClock = TreeClock.GENESIS): MeldRemotes {
   // This weirdness is due to jest-mock-extended trying to mock arrays
   return {
     ...mock<MeldRemotes>(),
-    setLocal: () => { },
+    setLocal: () => {},
     updates,
     live: Array.isArray(lives) ? hotLive(lives) : lives,
     newClock: () => Promise.resolve(newClock)
@@ -44,9 +47,55 @@ export async function memStore(opts?: {
 }
 
 export function mockLocal(
-  impl?: Partial<MeldLocal>, lives: Array<boolean | null> = [true]): MeldLocal {
+  impl?: Partial<MeldLocal>, lives: Array<boolean | null> = [true]):
+  MeldLocal & { liveSource: Observer<boolean | null> } {
+  const live = hotLive(lives);
   // This weirdness is due to jest-mock-extended trying to mock arrays
-  return { ...mock<MeldLocal>(), updates: NEVER, live: hotLive(lives), ...impl };
+  return { ...mock<MeldLocal>(), updates: NEVER, live, liveSource: live, ...impl };
+}
+
+/**
+ * Wraps a clock and provides mock MessageService-like test mutations
+ */
+export class MockProcess {
+  gwc: GlobalClock;
+
+  constructor(
+    public time: TreeClock,
+    public prev: number = time.ticks) {
+    this.gwc = GlobalClock.GENESIS.update(time);
+  }
+
+  tick(internal = false) {
+    if (!internal)
+      this.prev = this.time.ticks;
+    this.time = this.time.ticked();
+    this.gwc = this.gwc.update(this.time);
+    return this;
+  }
+
+  join(clock: TreeClock) {
+    this.time = this.time.update(clock);
+    this.gwc = this.gwc.update(this.time);
+    return this;
+  }
+
+  fork() {
+    const { left, right } = this.time.forked();
+    this.time = left;
+    return new MockProcess(right);
+  }
+
+  sentOperation(deletes: string, inserts: string) {
+    // Do not inline: this sets prev
+    const op = this.operated(deletes, inserts);
+    return new OperationMessage(this.prev, op);
+  }
+
+  operated(deletes: string, inserts: string): EncodedOperation {
+    this.tick();
+    return [2, this.time.ticks, this.time.toJSON(), deletes, inserts];
+  }
 }
 
 export interface MockMqtt extends AsyncMqttClient {

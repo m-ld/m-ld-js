@@ -4,12 +4,22 @@
     "title": "Getting Started"
   },
   {
-    "url": "#mqtt-remotes",
-    "title": "MQTT Remotes"
-  },
-  {
-    "url": "#ably-remotes",
-    "title": "Ably Remotes"
+    "title": "Remotes",
+    "url": "#remotes",
+    "children": [
+      {
+        "url": "#mqtt-remotes",
+        "title": "MQTT"
+      },
+      {
+        "url": "#ably-remotes",
+        "title": "Ably"
+      },
+      {
+        "url": "#socketio-remotes",
+        "title": "Socket.io"
+      }
+    ]
   },
   {
     "url": "#transactions",

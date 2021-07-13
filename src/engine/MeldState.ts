@@ -1,9 +1,7 @@
-import { Subject, Describe, Update, Read, Write } from '../jrql-support';
-import { Observable, Subscription } from 'rxjs';
-import { take } from 'rxjs/operators';
+import { Describe, Read, Subject, Update, Write } from '../jrql-support';
+import { defaultIfEmpty, firstValueFrom, Observable, Subscription } from 'rxjs';
 import {
-  MeldState, any, MeldStateMachine,
-  ReadResult, StateProc, UpdateProc, readResult, GraphSubject
+  any, GraphSubject, MeldState, MeldStateMachine, readResult, ReadResult, StateProc, UpdateProc
 } from '../api';
 import { CloneEngine, EngineState, EngineUpdateProc, StateEngine } from './StateEngine';
 
@@ -30,7 +28,7 @@ abstract class ApiState implements MeldState {
   }
 
   get(id: string): Promise<GraphSubject | undefined> {
-    return this.read<Describe>({ '@describe': id }).pipe(take(1)).toPromise();
+    return firstValueFrom(this.read<Describe>({ '@describe': id }).pipe(defaultIfEmpty(undefined)));
   }
 
   protected abstract construct(state: EngineState): MeldState;

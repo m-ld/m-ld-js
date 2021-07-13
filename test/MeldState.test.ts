@@ -1,8 +1,9 @@
-import { any, MeldUpdate } from '../src/api';
+import {
+  any, Construct, Describe, Group, MeldUpdate, Reference, Select, Subject, Update
+} from '../src';
 import { ApiStateMachine } from '../src/engine/MeldState';
 import { memStore, mockRemotes, testConfig } from './testClones';
 import { DatasetEngine } from '../src/engine/dataset/DatasetEngine';
-import { Group, Subject, Select, Describe, Update, Reference, Construct } from '../src/jrql-support';
 import { DomainContext } from '../src/engine/MeldEncoding';
 import { Future } from '../src/engine/util';
 import { blankRegex, genIdRegex } from './testUtil';
@@ -508,15 +509,15 @@ describe('Meld State API', () => {
 
     test('matches anonymous subject property in delete-where', async () => {
       await api.write<Subject>({ '@id': 'fred', height: 5, age: 40 });
-      await api.write<Update>({ '@delete': { height: 5 } })
+      await api.write<Update>({ '@delete': { height: 5 } });
       await expect(api.read<Describe>({
-        '@describe': 'fred',
+        '@describe': 'fred'
       })).resolves.toEqual([{ '@id': 'fred', age: 40 }]);
     });
 
     test('matches nested property in delete-where', async () => {
       await api.write<Subject>({ '@id': 'fred', stats: { height: 5, age: 40 } });
-      await api.write<Update>({ '@delete': { '@id': 'fred', stats: { height: 5 } } })
+      await api.write<Update>({ '@delete': { '@id': 'fred', stats: { height: 5 } } });
       // Scary case for documentation: DELETEWHERE is aggressive
       await expect(api.read<Describe>({
         '@describe': '?stats', '@where': { '@id': 'fred', stats: { '@id': '?stats' } }
@@ -528,7 +529,7 @@ describe('Meld State API', () => {
       await api.write<Update>({
         '@delete': { '@id': '?stats', height: 5 },
         '@where': { '@id': 'fred', stats: { '@id': '?stats', height: 5 } }
-      })
+      });
       await expect(api.read<Describe>({
         '@describe': '?stats', '@where': { '@id': 'fred', stats: { '@id': '?stats' } }
       })).resolves.toEqual([{ '@id': expect.stringMatching(genIdRegex), age: 40 }]);
@@ -934,16 +935,17 @@ describe('Meld State API', () => {
   });
 
   describe('state procedures', () => {
-    test('reads with a procedure', async done => {
-      await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
-      api.read(async state => {
-        await expect(state.read<Describe>({ '@describe': 'fred' }))
-          .resolves.toMatchObject([{ '@id': 'fred', name: 'Fred' }]);
-        done();
+    test('reads with a procedure', done => {
+      api.write<Subject>({ '@id': 'fred', name: 'Fred' }).then(() => {
+        api.read(async state => {
+          await expect(state.read<Describe>({ '@describe': 'fred' }))
+            .resolves.toMatchObject([{ '@id': 'fred', name: 'Fred' }]);
+          done();
+        });
       });
     });
 
-    test('writes with a procedure', async done => {
+    test('writes with a procedure', done => {
       api.write(async state => {
         state = await state.write<Subject>({ '@id': 'fred', name: 'Fred' });
         await expect(state.read<Describe>({ '@describe': 'fred' }))
@@ -952,7 +954,7 @@ describe('Meld State API', () => {
       });
     });
 
-    test('write state is predictable', async done => {
+    test('write state is predictable', done => {
       api.write(async state => {
         state = await state.write<Subject>({ '@id': 'fred', age: 40 });
         await expect(state.read<Describe>({
@@ -966,7 +968,7 @@ describe('Meld State API', () => {
       api.write(state => state.write<Subject>({ '@id': 'wilma', age: 40 }));
     });
 
-    test('handler state follows writes', async done => {
+    test('handler state follows writes', done => {
       let hadFred = false;
       api.read(async state => {
         await expect(state.read<Describe>({

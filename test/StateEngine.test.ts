@@ -1,8 +1,8 @@
-import { of, Subject as Source } from 'rxjs';
-import { MeldUpdate } from '../src/api';
+import { firstValueFrom, of, Subject as Source } from 'rxjs';
+import { MeldUpdate } from '../src';
 import { LockManager } from '../src/engine/locks';
 import { CloneEngine, StateEngine } from '../src/engine/StateEngine';
-import {SubjectGraph} from '../src/engine/SubjectGraph'
+import { SubjectGraph } from '../src/engine/SubjectGraph';
 
 describe('State Engine', () => {
   class MockCloneEngine implements CloneEngine {
@@ -31,7 +31,7 @@ describe('State Engine', () => {
 
   test('can read initial state', done => {
     states.read(async state => {
-      await expect(state.read({}).toPromise()).resolves.toMatchObject({ tick: 0 });
+      await expect(firstValueFrom(state.read({}))).resolves.toMatchObject({ tick: 0 });
       done();
     });
   });
@@ -46,7 +46,8 @@ describe('State Engine', () => {
 
   test('can read initial state and follow', done => {
     states.read(async state => {
-      await expect(state.read({}).toPromise()).resolves.toMatchObject({ tick: 0 }).catch(fail);
+      await expect(firstValueFrom(state.read({})))
+        .resolves.toMatchObject({ tick: 0 }).catch(err => done.fail(err));
     }, async update => {
       expect(update).toMatchObject({ '@ticks': 1 });
       done();
@@ -55,12 +56,12 @@ describe('State Engine', () => {
   });
 
   test('can unsubscribe a follow handler', done => {
-    states.follow(fail).unsubscribe();
+    states.follow(() => done.fail()).unsubscribe();
     states.write(state => state.write({})).then(() => done());
   });
 
   test('can unsubscribe a read follow handler', done => {
-    states.read(() => { }, fail).unsubscribe();
+    states.read(() => { }, () => done.fail()).unsubscribe();
     states.write(state => state.write({})).then(() => done());
   });
 
@@ -145,7 +146,7 @@ describe('State Engine', () => {
       await state.write({});
       try {
         await state.write({});
-        fail('Expecting de-scoped state');
+        done.fail('Expecting de-scoped state');
       } catch (err) {
         done();
       }
@@ -157,7 +158,7 @@ describe('State Engine', () => {
       await state.write({});
       try {
         state.read({});
-        fail('Expecting de-scoped state');
+        done.fail('Expecting de-scoped state');
       } catch (err) {
         done();
       }

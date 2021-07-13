@@ -1,22 +1,21 @@
 import { Iri } from 'jsonld/jsonld-spec';
 import {
-  Read, Subject, Update, isDescribe, isGroup, isSubject, isUpdate,
-  Group, isSelect, Result, Variable, Write, Constraint, Expression, operators,
-  isConstraint, VariableExpression, isConstruct
+  Constraint, Expression, Group, isConstraint, isConstruct, isDescribe, isGroup, isSelect,
+  isSubject, isUpdate, operators, Read, Result, Subject, Update, Variable, VariableExpression, Write
 } from '../../jrql-support';
 import { NamedNode, Quad, Term } from 'rdf-js';
 import { Graph, PatchQuads } from '.';
-import { toArray, mergeMap, groupBy, reduce, map } from 'rxjs/operators';
+import { groupBy, map, mergeMap, reduce, toArray } from 'rxjs/operators';
 import { EMPTY, merge, Observable, of, throwError } from 'rxjs';
 import { canPosition, inPosition, TriplePos } from '../quads';
-import { ActiveContext, expandTerm, initialCtx, nextCtx } from "../jsonld";
+import { ActiveContext, expandTerm, initialCtx, nextCtx } from '../jsonld';
 import { Binding } from 'quadstore';
 import { Algebra, Factory as SparqlFactory } from 'sparqlalgebrajs';
-import { jrql } from '../../ns';
+import { JRQL } from '../../ns';
 import { JrqlQuads } from './JrqlQuads';
 import { MeldError } from '../MeldError';
 import { anyName, array, GraphSubject } from '../..';
-import { binaryFold, flatten, fromPromise, isArray } from '../util';
+import { binaryFold, flatten, inflate, isArray } from '../util';
 import { ConstructTemplate } from './ConstructTemplate';
 
 /**
@@ -30,7 +29,7 @@ export class JrqlGraph {
 
   /**
    * @param graph a quads graph to operate on
-   * @param defaultContext default context for interpreting JSON patterns
+   * @param defaultCtx
    */
   constructor(
     readonly graph: Graph,
@@ -40,7 +39,7 @@ export class JrqlGraph {
   }
 
   read(query: Read, ctx = this.defaultCtx): Observable<GraphSubject> {
-    return fromPromise(nextCtx(ctx, query['@context']), ctx => {
+    return inflate(nextCtx(ctx, query['@context']), ctx => {
       if (isDescribe(query))
         return this.describe(array(query['@describe']), query['@where'], ctx);
       else if (isSelect(query) && query['@where'] != null)
@@ -76,7 +75,7 @@ export class JrqlGraph {
     where?: Subject | Subject[] | Group,
     ctx = this.defaultCtx): Observable<GraphSubject> {
     return merge(...describes.map(describe => {
-      const describedVarName = jrql.matchVar(describe);
+      const describedVarName = JRQL.matchVar(describe);
       if (describedVarName) {
         const vars = {
           subject: this.any(), property: this.any(),
@@ -150,7 +149,7 @@ export class JrqlGraph {
       this.sparql.createBgp([this.sparql.createPattern(
         subject, property, value, this.graph.name)]),
       this.sparql.createBgp([this.sparql.createPattern(
-        value, this.graph.namedNode(jrql.item), item, this.graph.name)]));
+        value, this.graph.namedNode(JRQL.item), item, this.graph.name)]));
   }
 
   findQuads(jrqlPattern: Subject, ctx = this.defaultCtx): Observable<Quad> {
@@ -184,13 +183,13 @@ export class JrqlGraph {
         const matchingQuads = (template?: Quad[]) => template == null ? [] :
           this.fillTemplate(template, solution).filter(quad => !anyVarTerm(quad));
         patch.append(new PatchQuads({
-          oldQuads: matchingQuads(deleteQuads),
-          newQuads: matchingQuads(insertQuads)
+          deletes: matchingQuads(deleteQuads),
+          inserts: matchingQuads(insertQuads)
         }));
       });
     } else if (!insertQuads?.some(anyVarTerm)) {
       // Both @delete and @insert have fixed quads, just apply them
-      patch.append({ oldQuads: deleteQuads, newQuads: insertQuads });
+      patch.append({ deletes: deleteQuads ?? [], inserts: insertQuads ?? [] });
     }
     return patch;
   }
@@ -255,7 +254,7 @@ export class JrqlGraph {
     const variablesTerms = values.map<{ [variable: string]: Term }>(
       variableExpr => Object.entries(variableExpr).reduce<{ [variable: string]: Term }>(
         (variableTerms, [variable, expr]) => {
-          const varName = jrql.matchVar(variable);
+          const varName = JRQL.matchVar(variable);
           if (!varName)
             throw new Error('Variable not specified in a values expression');
           variableNames.add(varName);
@@ -299,7 +298,7 @@ export class JrqlGraph {
     if (isConstraint(expr)) {
       return this.constraintExpr([expr], ctx);
     } else {
-      const varName = typeof expr == 'string' && jrql.matchVar(expr);
+      const varName = typeof expr == 'string' && JRQL.matchVar(expr);
       return this.sparql.createTermExpression(varName ?
         this.graph.variable(varName) : this.jrql.toObjectTerm(expr, ctx));
     }
@@ -339,7 +338,7 @@ export class JrqlGraph {
           return value;
 
         // If this variable is a sub-variable, see if the parent variable is bound
-        const [varName, subVarName] = jrql.matchSubVarName(term.value);
+        const [varName, subVarName] = JRQL.matchSubVarName(term.value);
         const genValue = subVarName != null ?
           this.jrql.genSubValue(binding[`?${varName}`], subVarName) : null;
         if (genValue != null)

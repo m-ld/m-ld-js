@@ -2,13 +2,12 @@ import * as Ably from 'ably';
 import { mockDeep as mock, MockProxy } from 'jest-mock-extended';
 import { AblyRemotes, MeldAblyConfig } from '../src/ably';
 import { comesAlive } from '../src/engine/AbstractMeld';
-import { DeltaMessage } from '../src/engine';
+import { OperationMessage } from '../src/engine';
 import { mockLocal } from './testClones';
-import { Subject as Source, BehaviorSubject } from 'rxjs';
-import { Future, isArray } from '../src/engine/util';
+import { BehaviorSubject, Subject as Source } from 'rxjs';
+import { Future, isArray, MsgPack } from '../src/engine/util';
 import { TreeClock } from '../src/engine/clocks';
 import { Request, Response } from '../src/engine/ControlMessage';
-import { MsgPack } from '../src/engine/util';
 
 /**
  * These tests use a fully mocked Ably to avoid incurring costs. The behaviour
@@ -26,7 +25,7 @@ describe('Ably remotes', () => {
   function otherPresent() {
     const [subscriber] = operations.presence.subscribe.mock.calls[0];
     if (typeof subscriber != 'function')
-      fail();
+      throw 'expecting subscriber function';
     setImmediate(() => {
       // The implementation relies on the presence set rather than just the
       // subscriber parameter.
@@ -137,18 +136,18 @@ describe('Ably remotes', () => {
     await expect(left).resolves.toBe(undefined);
   });
 
-  test('publishes a delta', async () => {
+  test('publishes an operation', async () => {
     const remotes = new AblyRemotes(config, connect);
     connCallbacks.connected?.(mock<Ably.Types.ConnectionStateChange>());
     otherPresent();
     await comesAlive(remotes);
-    const time = TreeClock.GENESIS.forked().left;
-    const entry = new DeltaMessage(time.ticks,
-      time.ticked(), [1, '{}', '{}']);
-    const updates = new Source<DeltaMessage>();
+    const prevTime = TreeClock.GENESIS.forked().left, time = prevTime.ticked();
+    const entry = new OperationMessage(prevTime.ticks,
+      [2, time.ticks, time.toJSON(), '{}', '{}']);
+    const updates = new Source<OperationMessage>();
     remotes.setLocal(mockLocal({ updates }));
     updates.next(entry);
-    expect(operations.publish).toHaveBeenCalledWith('__delta', entry.encode());
+    expect(operations.publish).toHaveBeenCalledWith('__op', entry.encode());
   });
 
   test('sends a new clock request', async () => {
@@ -158,7 +157,7 @@ describe('Ably remotes', () => {
     connCallbacks.connected?.(mock<Ably.Types.ConnectionStateChange>());
     const [subscriber] = control.subscribe.mock.calls[0];
     if (typeof subscriber != 'function')
-      return fail();
+      throw 'expecting subscriber function';
     // Set up the other clone's direct channel
     const other = mock<Ably.Types.RealtimeChannelPromise>();
     client.channels.get.calledWith('test.m-ld.org:other').mockReturnValue(other);
@@ -166,10 +165,10 @@ describe('Ably remotes', () => {
     other.publish.mockImplementation((name, data) => {
       const splitName = name.split(':');
       expect(splitName[0]).toBe('__send');
-      expect(MsgPack.decode(data)).toEqual(new Request.NewClock().toJson());
+      expect(MsgPack.decode(data)).toEqual(new Request.NewClock().toJSON());
       setImmediate(() => subscriber(mock<Ably.Types.Message>({
         clientId: 'other',
-        data: MsgPack.encode(new Response.NewClock(newClock).toJson()),
+        data: MsgPack.encode(new Response.NewClock(newClock).toJSON()),
         name: `__reply:reply1:${splitName[1]}`
       })));
       return Promise.resolve();

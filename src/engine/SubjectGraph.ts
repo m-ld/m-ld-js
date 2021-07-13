@@ -3,7 +3,7 @@ import {
   Reference, Subject, isReference, SubjectProperty
 } from '../jrql-support';
 import { Triple } from './quads';
-import { xs, jrql, rdf } from '../ns';
+import { XS, JRQL, RDF } from '../ns';
 import { GraphSubject, GraphSubjects } from '../api';
 import { deepValues, setAtPath, isArray } from './util';
 import { addPropertyObject, toIndexNumber } from './jrql-util';
@@ -140,13 +140,13 @@ export function jrqlValue(property: SubjectProperty, object: Term, ctx?: ActiveC
     else {
       const type = object.datatype == null ?
         getContextType(property, ctx) : object.datatype.value;
-      if (type == null || type === xs.string)
+      if (type == null || type === XS.string)
         return object.value;
-      else if (type === xs.boolean)
+      else if (type === XS.boolean)
         return object.value === 'true';
-      else if (type === xs.integer)
+      else if (type === XS.integer)
         return parseInt(object.value, 10);
-      else if (type === xs.double)
+      else if (type === XS.double)
         return parseFloat(object.value);
       else
         return { '@value': object.value, '@type': compactIri(type, ctx, { vocab: true }) };
@@ -159,9 +159,9 @@ export function jrqlValue(property: SubjectProperty, object: Term, ctx?: ActiveC
 /** Converts RDF predicate to json-rql keyword, Iri, or list indexes */
 export function jrqlProperty(predicate: Iri, ctx?: ActiveContext): SubjectProperty {
   switch (predicate) {
-    case rdf.type: return '@type';
-    case jrql.index: return '@index';
-    case jrql.item: return '@item';
+    case RDF.type: return '@type';
+    case JRQL.index: return '@index';
+    case JRQL.item: return '@item';
   }
   const index = toIndexNumber(predicate);
   return index != null ? ['@list', ...index] :

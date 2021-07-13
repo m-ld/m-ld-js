@@ -1,19 +1,24 @@
 import { DatasetEngine } from '../src/engine/dataset/DatasetEngine';
-import { memStore, mockRemotes, hotLive, testConfig } from './testClones';
-import { NEVER, Subject as Source, asapScheduler, EMPTY, throwError, BehaviorSubject } from 'rxjs';
+import { hotLive, MemDown, memStore, MockProcess, mockRemotes, testConfig } from './testClones';
+import {
+  asapScheduler, BehaviorSubject, EMPTY, EmptyError, firstValueFrom, NEVER, Subject as Source,
+  throwError
+} from 'rxjs';
 import { comesAlive } from '../src/engine/AbstractMeld';
-import { first, take, toArray, map, observeOn, count } from 'rxjs/operators';
+import { count, map, observeOn, take, toArray } from 'rxjs/operators';
 import { TreeClock } from '../src/engine/clocks';
-import { DeltaMessage, MeldRemotes, Snapshot } from '../src/engine';
-import { MeldConfig, Subject, Describe, Update } from '../src';
-import MemDown from 'memdown';
+import { MeldRemotes, OperationMessage, Snapshot } from '../src/engine';
+import { Describe, MeldConfig, Subject, Update } from '../src';
 import { AbstractLevelDOWN } from 'abstract-leveldown';
 import { jsonify } from './testUtil';
 
 describe('Dataset engine', () => {
   describe('as genesis', () => {
-    async function genesis(remotes: MeldRemotes, config?: Partial<MeldConfig>): Promise<DatasetEngine> {
-      let clone = new DatasetEngine({ dataset: await memStore(), remotes, config: testConfig(config) });
+    async function genesis(
+      remotes: MeldRemotes, config?: Partial<MeldConfig>): Promise<DatasetEngine> {
+      let clone = new DatasetEngine({
+        dataset: await memStore(), remotes, config: testConfig(config)
+      });
       await clone.initialise();
       return clone;
     }
@@ -46,14 +51,16 @@ describe('Dataset engine', () => {
     let silo: DatasetEngine;
 
     beforeEach(async () => {
-      silo = new DatasetEngine({ dataset: await memStore(), remotes: mockRemotes(), config: testConfig() });
+      silo = new DatasetEngine({
+        dataset: await memStore(), remotes: mockRemotes(), config: testConfig()
+      });
       await silo.initialise();
     });
 
     test('not found is empty', async () => {
-      await expect(silo.read({
+      await expect(firstValueFrom(silo.read({
         '@describe': 'http://test.m-ld.org/fred'
-      } as Describe).toPromise()).resolves.toBeUndefined();
+      } as Describe))).rejects.toBeInstanceOf(EmptyError);
     });
 
     test('stores a JSON-LD object', async () => {
@@ -69,10 +76,9 @@ describe('Dataset engine', () => {
         '@id': 'http://test.m-ld.org/fred',
         'http://test.m-ld.org/#name': 'Fred'
       } as Subject);
-      const result = silo.read({
+      const fred = await firstValueFrom(silo.read({
         '@describe': 'http://test.m-ld.org/fred'
-      } as Describe);
-      const fred = await result.toPromise();
+      } as Describe));
       expect(fred['@id']).toBe('http://test.m-ld.org/fred');
       expect(fred['http://test.m-ld.org/#name']).toBe('Fred');
     });
@@ -86,12 +92,12 @@ describe('Dataset engine', () => {
         '@id': 'http://test.m-ld.org/fred',
         'http://test.m-ld.org/#name': 'Fred'
       } as Subject);
-      await silo.dataUpdates.pipe(first()).toPromise();
+      await firstValueFrom(silo.dataUpdates);
       expect(silo.status.value).toEqual({ online: true, outdated: false, silo: true, ticks: 1 });
     });
 
     test('follow after initial ticks', async () => {
-      const firstUpdate = silo.dataUpdates.pipe(first()).toPromise();
+      const firstUpdate = firstValueFrom(silo.dataUpdates);
       silo.write({
         '@id': 'http://test.m-ld.org/fred',
         'http://test.m-ld.org/#name': 'Fred'
@@ -105,7 +111,7 @@ describe('Dataset engine', () => {
         'http://test.m-ld.org/#name': 'Fred'
       } as Subject);
       expect(silo.status.value.ticks).toBe(1);
-      const firstUpdate = silo.dataUpdates.pipe(first()).toPromise();
+      const firstUpdate = firstValueFrom(silo.dataUpdates);
       await silo.write({
         '@id': 'http://test.m-ld.org/wilma',
         'http://test.m-ld.org/#name': 'Wilma'
@@ -116,8 +122,8 @@ describe('Dataset engine', () => {
 
   describe('as genesis with remote clone', () => {
     let clone: DatasetEngine;
-    let remoteTime: TreeClock;
-    let remoteUpdates: Source<DeltaMessage> = new Source;
+    let remote: MockProcess;
+    let remoteUpdates: Source<OperationMessage> = new Source;
 
     beforeEach(async () => {
       const remotesLive = hotLive([false]);
@@ -126,16 +132,16 @@ describe('Dataset engine', () => {
       clone = new DatasetEngine({ dataset: await memStore(), remotes, config: testConfig() });
       await clone.initialise();
       await comesAlive(clone); // genesis is alive
-      remoteTime = await clone.newClock(); // no longer genesis
-      remotes.revupFrom = async () => ({ lastTime: remoteTime, updates: EMPTY });
+      remote = new MockProcess(await clone.newClock()); // no longer genesis
+      remotes.revupFrom = async () => ({ gwc: remote.gwc, updates: EMPTY });
       remotesLive.next(true); // remotes come alive
       await clone.status.becomes({ outdated: false });
     });
 
     test('answers rev-up from the new clone', async () => {
-      const revup = await clone.revupFrom(remoteTime);
+      const revup = await clone.revupFrom(remote.time);
       expect(revup).toBeDefined();
-      await expect(revup?.updates.toPromise()).resolves.toBeUndefined();
+      await expect(firstValueFrom(revup!.updates)).rejects.toBeInstanceOf(EmptyError);
     });
 
     test('comes online as not silo', async () => {
@@ -145,13 +151,14 @@ describe('Dataset engine', () => {
     test('ticks increase monotonically', async () => {
       // Edge case from compliance tests: a local transaction racing a remote
       // transaction could cause a clock reversal.
-      const updates = clone.dataUpdates.pipe(map(next => next['@ticks']), take(2), toArray()).toPromise();
+      const updates = firstValueFrom(clone.dataUpdates.pipe(map(next => next['@ticks']),
+        take(2), toArray()));
       clone.write({
         '@id': 'http://test.m-ld.org/fred',
         'http://test.m-ld.org/#name': 'Fred'
       } as Subject);
-      remoteUpdates.next(new DeltaMessage(remoteTime.ticks, remoteTime.ticked(),
-        [1, '{}', '{"@id":"http://test.m-ld.org/wilma","http://test.m-ld.org/#name":"Wilma"}']));
+      remoteUpdates.next(remote.sentOperation(
+        '{}', '{"@id":"http://test.m-ld.org/wilma","http://test.m-ld.org/#name":"Wilma"}'));
       // Note extra tick for constraint application in remote update
       const received = await updates;
       expect(received.length).toBe(2);
@@ -162,9 +169,9 @@ describe('Dataset engine', () => {
     // even if it doesn't have a journalled entry. This can also happen due to:
     // 1. a remote transaction, because of the clock space made for a constraint
     test('answers rev-up from next new clone after apply', async () => {
-      const updated = clone.dataUpdates.pipe(take(1)).toPromise();
-      remoteUpdates.next(new DeltaMessage(remoteTime.ticks, remoteTime.ticked(),
-        [1, '{}', '{"@id":"http://test.m-ld.org/wilma","http://test.m-ld.org/#name":"Wilma"}']));
+      const updated = firstValueFrom(clone.dataUpdates);
+      remoteUpdates.next(remote.sentOperation(
+        '{}', '{"@id":"http://test.m-ld.org/wilma","http://test.m-ld.org/#name":"Wilma"}'));
       await updated;
       const thirdTime = await clone.newClock();
       await expect(clone.revupFrom(thirdTime)).resolves.toBeDefined();
@@ -173,7 +180,7 @@ describe('Dataset engine', () => {
     test('answers rev-up from next new clone after failure', async () => {
       // Insert with union is not valid
       await clone.write(<Update>{ '@union': [] })
-        .then(() => fail('Expecting error'), () => { });
+        .then(() => { throw 'Expecting error'; }, () => { });
       const thirdTime = await clone.newClock();
       await expect(clone.revupFrom(thirdTime)).resolves.toBeDefined();
     });
@@ -181,45 +188,53 @@ describe('Dataset engine', () => {
 
   describe('as new clone', () => {
     let remotes: MeldRemotes;
-    let remoteUpdates: Source<DeltaMessage>;
+    let remoteUpdates: Source<OperationMessage>;
     let snapshot: jest.Mock<Promise<Snapshot>, void[]>;
-    let collabClock: TreeClock;
+    let collaborator: MockProcess;
+    let collabPrevOp: OperationMessage;
     let remotesLive: BehaviorSubject<boolean | null>;
 
     beforeEach(async () => {
       const { left, right } = TreeClock.GENESIS.forked()
-      collabClock = right;
-      remoteUpdates = new Source<DeltaMessage>();
+      collaborator = new MockProcess(right);
+      collabPrevOp = collaborator.sentOperation(
+        '{}', '{"@id":"http://test.m-ld.org/wilma","http://test.m-ld.org/#name":"Wilma"}');
+      remoteUpdates = new Source<OperationMessage>();
       remotesLive = hotLive([true]);
       remotes = mockRemotes(remoteUpdates, remotesLive, left);
       snapshot = jest.fn().mockReturnValueOnce(Promise.resolve<Snapshot>({
-        lastTime: collabClock.ticked().scrubId(),
-        quads: EMPTY,
+        gwc: collaborator.gwc,
+        data: EMPTY, // Cheating, should really contain Wilma (see op above)
         updates: EMPTY
       }));
       remotes.snapshot = snapshot;
     });
 
     test('initialises from snapshot', async () => {
-      const clone = new DatasetEngine({ dataset: await memStore(), remotes, config: testConfig({ genesis: false }) });
+      const clone = new DatasetEngine({
+        dataset: await memStore(), remotes, config: testConfig({ genesis: false })
+      });
       await clone.initialise();
       await expect(clone.status.becomes({ outdated: false })).resolves.toBeDefined();
       expect(snapshot.mock.calls.length).toBe(1);
     });
 
     test('can become a silo', async () => {
-      const clone = new DatasetEngine({ dataset: await memStore(), remotes, config: testConfig({ genesis: false }) });
+      const clone = new DatasetEngine({
+        dataset: await memStore(), remotes, config: testConfig({ genesis: false })
+      });
       await clone.initialise();
       remotesLive.next(false);
       await expect(clone.status.becomes({ silo: true })).resolves.toBeDefined();
     });
 
-    test('ignores delta from before snapshot', async () => {
-      const clone = new DatasetEngine({ dataset: await memStore(), remotes, config: testConfig({ genesis: false }) });
+    test('ignores operation from before snapshot', async () => {
+      const clone = new DatasetEngine({
+        dataset: await memStore(), remotes, config: testConfig({ genesis: false })
+      });
       await clone.initialise();
-      const updates = clone.dataUpdates.pipe(count()).toPromise();
-      remoteUpdates.next(new DeltaMessage(collabClock.ticks, collabClock.ticked(),
-        [1, '{}', '{"@id":"http://test.m-ld.org/wilma","http://test.m-ld.org/#name":"Wilma"}']));
+      const updates = firstValueFrom(clone.dataUpdates.pipe(count()));
+      remoteUpdates.next(collabPrevOp);
       // Also enqueue a no-op write, which we can wait for - relying on queue ordering
       await clone.write({ '@insert': [] } as Update);
       await clone.close(); // Will complete the updates
@@ -230,15 +245,17 @@ describe('Dataset engine', () => {
   describe('as post-genesis clone', () => {
     let backend: AbstractLevelDOWN;
     let config: MeldConfig;
-    let remoteTime: TreeClock;
+    let remote: MockProcess;
 
     beforeEach(async () => {
       backend = new MemDown();
       config = testConfig();
       // Start a temporary genesis clone to initialise the store
-      let clone = new DatasetEngine({ dataset: await memStore({ backend }), remotes: mockRemotes(), config });
+      let clone = new DatasetEngine({
+        dataset: await memStore({ backend }), remotes: mockRemotes(), config
+      });
       await clone.initialise();
-      remoteTime = await clone.newClock(); // Forks the clock so no longer genesis
+      remote = new MockProcess(await clone.newClock()); // Forks the clock so no longer genesis
       await clone.close();
       // Now the ldb represents a former genesis clone
     });
@@ -246,8 +263,10 @@ describe('Dataset engine', () => {
     test('is outdated while revving-up', async () => {
       // Re-start on the same data, with a rev-up that never completes
       const remotes = mockRemotes(NEVER, [true]);
-      remotes.revupFrom = async () => ({ lastTime: remoteTime, updates: NEVER });
-      const clone = new DatasetEngine({ dataset: await memStore({ backend }), remotes, config: testConfig() });
+      remotes.revupFrom = async () => ({ gwc: remote.gwc, updates: NEVER });
+      const clone = new DatasetEngine({
+        dataset: await memStore({ backend }), remotes, config: testConfig()
+      });
 
       // Check that we are never not outdated
       const everNotOutdated = clone.status.becomes({ outdated: false });
@@ -261,8 +280,10 @@ describe('Dataset engine', () => {
     test('is not outdated when revved-up', async () => {
       // Re-start on the same data, with a rev-up that completes with no updates
       const remotes = mockRemotes(NEVER, [true]);
-      remotes.revupFrom = async () => ({ lastTime: remoteTime, updates: EMPTY });
-      const clone = new DatasetEngine({ dataset: await memStore({ backend }), remotes, config: testConfig() });
+      remotes.revupFrom = async () => ({ gwc: remote.gwc, updates: EMPTY });
+      const clone = new DatasetEngine({
+        dataset: await memStore({ backend }), remotes, config: testConfig()
+      });
 
       // Check that we do transition through an outdated state
       const wasOutdated = clone.status.becomes({ outdated: true });
@@ -276,7 +297,9 @@ describe('Dataset engine', () => {
 
     test('is not outdated if immediately siloed', async () => {
       const remotes = mockRemotes(NEVER, [null, false]);
-      const clone = new DatasetEngine({ dataset: await memStore({ backend }), remotes, config: testConfig() });
+      const clone = new DatasetEngine({
+        dataset: await memStore({ backend }), remotes, config: testConfig()
+      });
 
       await clone.initialise();
 
@@ -287,10 +310,12 @@ describe('Dataset engine', () => {
     test('immediately re-connects if rev-up fails', async () => {
       const remotes = mockRemotes(NEVER, [true]);
       const revupFrom = jest.fn()
-        .mockReturnValueOnce(Promise.resolve({ lastTime: remoteTime, updates: throwError('boom') }))
-        .mockReturnValueOnce(Promise.resolve({ lastTime: remoteTime, updates: EMPTY }));
+        .mockReturnValueOnce(Promise.resolve({ gwc: remote.gwc, updates: throwError('boom') }))
+        .mockReturnValueOnce(Promise.resolve({ gwc: remote.gwc, updates: EMPTY }));
       remotes.revupFrom = revupFrom;
-      const clone = new DatasetEngine({ dataset: await memStore({ backend }), remotes, config: testConfig() });
+      const clone = new DatasetEngine({
+        dataset: await memStore({ backend }), remotes, config: testConfig()
+      });
       await clone.initialise();
       await expect(clone.status.becomes({ outdated: false })).resolves.toBeDefined();
       expect(revupFrom.mock.calls.length).toBe(2);
@@ -298,7 +323,9 @@ describe('Dataset engine', () => {
 
     test('maintains fifo during rev-up', async () => {
       // We need local siloed update
-      let clone = new DatasetEngine({ dataset: await memStore({ backend }), remotes: mockRemotes(), config });
+      let clone = new DatasetEngine({
+        dataset: await memStore({ backend }), remotes: mockRemotes(), config
+      });
       await clone.initialise();
       await clone.write({
         '@id': 'http://test.m-ld.org/fred',
@@ -307,11 +334,16 @@ describe('Dataset engine', () => {
       await clone.close();
       // Need a remote with rev-ups to share
       const remotes = mockRemotes(NEVER, [true]);
-      const revUps = new Source<DeltaMessage>();
-      remotes.revupFrom = async () => ({ lastTime: remoteTime.ticked(), updates: revUps });
+      const revUps = new Source<OperationMessage>();
+      remotes.revupFrom = async () => ({
+        gwc: remote.gwc.update(remote.time.ticked()), updates: revUps
+      });
       // The clone will initialise into a revving-up state, waiting for a revUp
-      clone = new DatasetEngine({ dataset: await memStore({ backend }), remotes, config: testConfig() });
-      const observedTicks = clone.updates.pipe(map(next => next.time.ticks), take(2), toArray()).toPromise();
+      clone = new DatasetEngine({
+        dataset: await memStore({ backend }), remotes, config: testConfig()
+      });
+      const observedTicks = firstValueFrom(clone.updates.pipe(map(next => next.time.ticks),
+        take(2), toArray()));
       await clone.initialise();
       // Do a new update during rev-up, this will immediately produce an update
       await clone.write({
@@ -319,46 +351,51 @@ describe('Dataset engine', () => {
         'http://test.m-ld.org/#name': 'Flintstone'
       });
       // Provide a rev-up that pre-dates the local siloed update
-      revUps.next(new DeltaMessage(remoteTime.ticks, remoteTime.ticked(),
-        [1, '{}', '{"@id":"http://test.m-ld.org/wilma","http://test.m-ld.org/#name":"Wilma"}']));
+      revUps.next(remote.sentOperation(
+        '{}', '{"@id":"http://test.m-ld.org/wilma","http://test.m-ld.org/#name":"Wilma"}'));
       revUps.complete();
       // Check that the updates are not out of order
       await expect(observedTicks).resolves.toEqual([1, 2]);
     });
 
-    test('immediately re-connects after out of order delta', async () => {
+    test('immediately re-connects after out of order operation', async () => {
       // Re-start on the same data
-      const remoteUpdates = new Source<DeltaMessage>();
+      const remoteUpdates = new Source<OperationMessage>();
       const remotes = mockRemotes(remoteUpdates, [true]);
-      remotes.revupFrom = async () => ({ lastTime: remoteTime, updates: EMPTY });
-      const clone = new DatasetEngine({ dataset: await memStore({ backend }), remotes, config: testConfig() });
+      remotes.revupFrom = async () => ({ gwc: remote.gwc, updates: EMPTY });
+      const clone = new DatasetEngine({
+        dataset: await memStore({ backend }), remotes, config: testConfig()
+      });
       await clone.initialise();
       await clone.status.becomes({ outdated: false });
 
-      // Push a delta claiming a missed tick
-      remoteUpdates.next(new DeltaMessage(remoteTime.ticks + 1, remoteTime.ticked().ticked(),
-        [1, '{}', '{"@id":"http://test.m-ld.org/wilma","http://test.m-ld.org/#name":"Wilma"}']));
+      // Push a operation claiming a missed public tick
+      remote.tick();
+      remoteUpdates.next(remote.sentOperation(
+        '{}', '{"@id":"http://test.m-ld.org/wilma","http://test.m-ld.org/#name":"Wilma"}'));
 
       await expect(clone.status.becomes({ outdated: true })).resolves.toBeDefined();
       await expect(clone.status.becomes({ outdated: false })).resolves.toBeDefined();
     });
 
-    test('ignores outdated delta', async () => {
+    test('ignores outdated operation', async () => {
       // Re-start on the same data
-      const remoteUpdates = new Source<DeltaMessage>();
+      const remoteUpdates = new Source<OperationMessage>();
       const remotes = mockRemotes(remoteUpdates, [true]);
-      remotes.revupFrom = async () => ({ lastTime: remoteTime, updates: EMPTY });
-      const clone = new DatasetEngine({ dataset: await memStore({ backend }), remotes, config: testConfig() });
+      remotes.revupFrom = async () => ({ gwc: remote.gwc, updates: EMPTY });
+      const clone = new DatasetEngine({
+        dataset: await memStore({ backend }), remotes, config: testConfig()
+      });
       await clone.initialise();
       await clone.status.becomes({ outdated: false });
 
-      const updates = clone.dataUpdates.pipe(toArray()).toPromise();
-      const delta = new DeltaMessage(remoteTime.ticks, remoteTime.ticked(),
-        [1, '{}', '{"@id":"http://test.m-ld.org/wilma","http://test.m-ld.org/#name":"Wilma"}']);
-      // Push a delta
-      remoteUpdates.next(delta);
-      // Push the same delta again
-      remoteUpdates.next(delta);
+      const updates = firstValueFrom(clone.dataUpdates.pipe(toArray()));
+      const op = remote.sentOperation(
+        '{}', '{"@id":"http://test.m-ld.org/wilma","http://test.m-ld.org/#name":"Wilma"}');
+      // Push a operation
+      remoteUpdates.next(op);
+      // Push the same operation again
+      remoteUpdates.next(op);
       // Also enqueue a no-op write, which we can wait for - relying on queue ordering
       await clone.write({ '@insert': [] } as Update);
       await clone.close(); // Will complete the updates

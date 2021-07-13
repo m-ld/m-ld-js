@@ -1,6 +1,7 @@
 import { MeldReadState, readResult } from '../../api';
-import { Subject, Read } from '../../jrql-support';
+import { Read } from '../../jrql-support';
 import { JrqlGraph } from './JrqlGraph';
+import { defaultIfEmpty, firstValueFrom } from 'rxjs';
 
 /**
  * Utility class to directly coerce a JrqlGraph to be a MeldReadState, with no
@@ -16,6 +17,6 @@ export class GraphState implements MeldReadState {
   }
 
   get(id: string) {
-    return this.graph.describe1(id).toPromise();
+    return firstValueFrom(this.graph.describe1(id).pipe(defaultIfEmpty(undefined)));
   }
 }

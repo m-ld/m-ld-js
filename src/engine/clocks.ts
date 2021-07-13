@@ -1,74 +1,174 @@
+import { MsgPack, sha1Digest } from './util';
+
 const inspect = Symbol.for('nodejs.util.inspect.custom');
 
-export interface CausalClock<T> {
-  anyLt(other: T, includeIds?: 'includeIds'): boolean;
+export interface CausalClock {
+  /**
+   * Ticks for this clock. This includes only ticks for this clock's ID
+   */
+  readonly ticks: number;
+  /**
+   * Sets the clock to a causally contiguous time.
+   * @param ticks ticks to set. If omitted, `this.ticks + 1`.
+   * @returns a copy of the clock with the new time
+   */
+  ticked(ticks?: number): this;
+  /**
+   * Are any of this clock's ticks less than the other clock's ticks?
+   * @param other the clock to compare
+   * identities
+   */
+  anyNonIdLt(other: this): boolean;
+  /**
+   * @return A hash of the time, usable as a stable operation or message
+   * identifier
+   */
+  hash(): string;
 }
 
-export class TreeClockFork {
+export class Fork<T> {
   constructor(
-    readonly left: TreeClock,
-    readonly right: TreeClock) {
-    if (!left || !right)
-      throw new Error('Fork cannot have missing tines');
+    readonly left: T,
+    readonly right: T) {
+  }
+}
+
+export abstract class TickTree<T = unknown> {
+  private readonly _part: Fork<this> | T;
+
+  protected constructor(
+    part: Fork<TickTree<T>> | T,
+    readonly localTicks: number = 0) {
+    if (localTicks < 0)
+      throw new Error('Tree clock must have positive ticks');
+    this._part = part as Fork<this> | T;
   }
 
-  get allTicks(): number {
-    return this.left.allTicks + this.right.allTicks;
+  get value() {
+    return this._part instanceof Fork ? null : this._part;
   }
 
-  get nonIdTicks(): number | null {
-    const left = this.left.nonIdTicks, right = this.right.nonIdTicks;
-    // Since a fork is not an event, zero ticks don't count
-    return left || right ? (left ?? 0) + (right ?? 0) : null;
+  get fork() {
+    return this._part instanceof Fork ? this._part as Fork<this> : null;
   }
 
-  getTicks(forId: TreeClockFork): number | null {
-    const left = this.left.getTicks(forId.left), right = this.right.getTicks(forId.right);
-    return left != null || right != null ? (left ?? 0) + (right ?? 0) : null;
+  /** @returns a valid default branch even if this is not a fork */
+  get leftBud(): this {
+    return (this.fork?.left ?? this.bud());
   }
 
-  equals(that: TreeClockFork): boolean {
-    return this.left.equals(that.left) && this.right.equals(that.right);
+  /** @returns a valid default branch even if this is not a fork */
+  get rightBud(): this {
+    return (this.fork?.right ?? this.bud());
+  }
+
+  protected abstract bud(value?: T): this;
+
+  /**
+   * @returns the sum of all ticks in the tree
+   */
+  get deepTicks(): number {
+    return this.localTicks + (this.fork != null ?
+      this.fork.left.deepTicks + this.fork.right.deepTicks : 0);
+  }
+
+  /**
+   * Get the ticks for a different process ID in the same process group
+   * @param filter another clock to be used as the ID
+   */
+  getTicks(filter: TickTree<boolean>): number {
+    const ticks = this._getTicks(filter);
+    if (ticks == null)
+      throw new Error('Trying to get ticks from a clock with no ID');
+    return ticks;
+  }
+
+  /**
+   * Private variant returns undefined for a tree with no identity in it,
+   * which never arises from the API
+   */
+  private _getTicks(filter: TickTree<boolean>): number | undefined {
+    if (filter.value) {
+      // Want ID ticks and this is an ID
+      return this.deepTicks;
+    } else if (this.fork || filter.fork) {
+      // The ID tree has a fork
+      // Post-order traversal to discover if there are any IDs in the fork
+      // If we or ID tree don't have a matching fork, substitute hallows (no IDs)
+      const left = this.leftBud._getTicks(filter.leftBud),
+        right = this.rightBud._getTicks(filter.rightBud);
+      // Include our ticks if some matching ticks found in the fork
+      if (left != null || right != null)
+        return this.localTicks + (left ?? 0) + (right ?? 0);
+    }
+  }
+
+  anyLt(other: TickTree): boolean {
+    if (this.fork == null || other.fork == null) {
+      return this.deepTicks < other.deepTicks;
+    } else {
+      return this.fork.left.anyLt(other.fork.left) ||
+        this.fork.right.anyLt(other.fork.right);
+    }
+  }
+
+  equals(that: this): boolean {
+    return this.value === that.value &&
+      this.localTicks === that.localTicks &&
+      (this.fork === that.fork ||
+        (this.fork !== null && that.fork !== null &&
+          this.fork.left.equals(that.fork.left) &&
+          this.fork.right.equals(that.fork.right)));
+  }
+
+  protected updateFromOther<O extends TickTree>(other: O,
+    recurse: (tree: this, that: O) => this): [part: Fork<this> | T, localTicks: number] {
+    return [
+      other.fork === null ? this._part : new Fork(
+        recurse(this.leftBud, other.fork.left),
+        recurse(this.rightBud, other.fork.right)),
+      Math.max(this.localTicks, other.localTicks)];
   }
 
   toString(): string {
-    return `{ ${this.left}, ${this.right} }`;
+    return JSON.stringify(this.toJSON());
   }
 
-  toJson(): any {
-    return [this.left.toJson(), this.right.toJson()];
-  }
+  // v8(chrome/nodejs) console
+  [inspect] = () => this.toString();
 
-  static fromJson(json: any): TreeClockFork | null {
-    if (json == null) {
-      return null;
-    } else {
-      const compact = Array.isArray(json);
-      const leftClock = TreeClock.fromJson(compact ? json[0] : json.left);
-      const rightClock = TreeClock.fromJson(compact ? json[1] : json.right);
-      return leftClock && rightClock ?
-        new TreeClockFork(leftClock, rightClock) : null;
-    }
-  }
+  abstract toJSON(): any;
 }
 
-export class TreeClock implements CausalClock<TreeClock> {
-  private constructor(
-    readonly isId: boolean,
-    private readonly _ticks: number = 0,
-    private readonly _fork: TreeClockFork | null = null) {
-    if (_ticks < 0)
-      throw new Error('Tree clock must have positive ticks');
-    // TODO: isId is redundant with fork - refactor?
-    if (isId && _fork != null)
-      throw new Error('Tree clock ID must be a leaf');
+/**
+ * A tree clock is a causal clock that carries the identity of a process. Only
+ * one leaf node is marked as the identity at any time.
+ */
+export class TreeClock extends TickTree<boolean> implements CausalClock {
+  get isId() {
+    return this.value === true;
+  }
+
+  protected bud(isId?: boolean) {
+    // Default is hallows; TreeClock is final
+    return (isId ? TreeClock.GENESIS : TreeClock.HALLOWS) as this;
   }
 
   static GENESIS = new TreeClock(true);
   // Hallows is private because it violates the contract that a TreeClock must
   // have an identity (somewhere in it).
   private static HALLOWS = new TreeClock(false);
-  private static HALLOWS_FORK = new TreeClockFork(TreeClock.HALLOWS, TreeClock.HALLOWS);
+
+  /**
+   * Formal mapping from a clock time to a transaction ID. Used in the creation
+   * of reified operation deletes and inserts. Injective but not safely one-way
+   * (do not use as a cryptographic hash).
+   */
+  hash() {
+    const buf = MsgPack.encode(this.toJSON('forHash'));
+    // If shorter than sha1 (20 bytes), do not hash
+    return buf.length > 20 ? sha1Digest(buf) : buf.toString('base64');
+  }
 
   /**
    * @returns the ticks for this clock. This includes only ticks for this clock's ID
@@ -76,204 +176,274 @@ export class TreeClock implements CausalClock<TreeClock> {
    */
   get ticks(): number {
     // ticks for this clock's embedded ID (should never return null)
-    return this.getTicks(this) as number;
-  }
-
-  /**
-   * Get all ticks irrespective of ID
-   */
-  get allTicks(): number {
-    return this._ticks + (this._fork != null ? this._fork.allTicks : 0);
+    return this.getTicks(this);
   }
 
   /**
    * Get the ticks for the union of all other process identities (like an inverse)
    */
   get nonIdTicks(): number | null {
-    if (!this.isId && this._fork == null) {
-      return this._ticks;
-    } else if (this._fork) {
+    if (!this.isId && this.fork == null) {
+      return this.localTicks;
+    } else if (this.fork) {
       // Post-order traversal to discover if there are any non-IDs in the fork
-      const forkResult = this._fork.nonIdTicks;
-      // Include our ticks if some non-ID ticks found in the fork
-      if (forkResult != null)
-        return this._ticks + forkResult;
+      const left = this.fork.left.nonIdTicks, right = this.fork.right.nonIdTicks;
+      // Since a fork is not an event, zero ticks don't count
+      if (left || right)
+        // Include our ticks if some non-ID ticks found in the fork
+        return this.localTicks + (left ?? 0) + (right ?? 0);
     }
     return null; // We're all ID
   }
 
-  /**
-   * Get the ticks for a different process ID in the same process group
-   * @param forId another clock to be used as the ID
-   */
-  getTicks(forId: TreeClock): number {
-    return this._getTicks(forId) as number;
+  ticked(ticks?: number): this {
+    // Note this class cannot be extended
+    return this._ticked(ticks) as this;
   }
 
   /**
    * Private variant returns undefined for a tree with no identity in it,
    * which never arises from the API
    */
-  private _getTicks(forId: TreeClock): number | undefined {
-    if (forId.isId) {
-      // Want ID ticks and this is an ID
-      return this.allTicks;
-    } else if (this._fork || forId._fork) {
-      // The ID tree has a fork
-      // Post-order traversal to discover if there are any IDs in the fork
-      // If we or ID tree don't have a matching fork, substitute hallows (no IDs)
-      const forkResult = (this._fork ?? TreeClock.HALLOWS_FORK)
-        .getTicks(forId._fork ?? TreeClock.HALLOWS_FORK);
-      // Include our ticks if some matching ticks found in the fork
-      if (forkResult != null)
-        return this._ticks + forkResult;
+  private _ticked(ticks: number | null = null): TreeClock | undefined {
+    if (ticks != null && ticks < 0) {
+      throw new Error('Trying to set ticks < 0');
+    } else if (this.isId) {
+      if (ticks === this.localTicks)
+        return this;
+      else
+        return new TreeClock(true, ticks ?? this.localTicks + 1);
+    } else if (this.fork) {
+      if (ticks != null && ticks < this.localTicks) {
+        // If ticks < localTicks and we have a buried ID, we can drop the fork
+        if (this.hasId)
+          return new TreeClock(true, ticks);
+      } else {
+        const forkTicks = ticks == null ? null : ticks - this.localTicks;
+        const leftResult = this.fork.left._ticked(forkTicks);
+        if (leftResult)
+          return leftResult === this.fork.left ? this :
+            new TreeClock(new Fork(leftResult, this.fork.right), this.localTicks);
+
+        const rightResult = this.fork.right._ticked(forkTicks);
+        if (rightResult)
+          return rightResult === this.fork.right ? this :
+            new TreeClock(new Fork(this.fork.left, rightResult), this.localTicks);
+      }
     }
   }
 
-  ticked(ticks: number = 1): TreeClock {
-    return this._ticked(ticks) as TreeClock;
+  forked(): Fork<TreeClock> {
+    return this._forked() as Fork<TreeClock>;
   }
 
   /**
    * Private variant returns undefined for a tree with no identity in it,
    * which never arises from the API
    */
-  private _ticked(ticks: number): TreeClock | undefined {
+  private _forked(): Fork<TreeClock> | undefined {
     if (this.isId) {
-      return new TreeClock(true, this._ticks + ticks, this._fork);
-    } else if (this._fork) {
-      const leftResult = this._fork.left._ticked(ticks);
-      if (leftResult)
-        return new TreeClock(false, this._ticks, new TreeClockFork(leftResult, this._fork.right));
-
-      const rightResult = this._fork.right._ticked(ticks);
-      if (rightResult)
-        return new TreeClock(false, this._ticks, new TreeClockFork(this._fork.left, rightResult));
-    }
-  }
-
-  forked(ticks?: number): TreeClockFork {
-    return this._forked(ticks) as TreeClockFork;
-  }
-
-  /**
-   * Private variant returns undefined for a tree with no identity in it,
-   * which never arises from the API
-   */
-  private _forked(ticks: number | null = null): TreeClockFork | undefined {
-    if (this.isId) {
-      return new TreeClockFork(
-        new TreeClock(false, ticks ?? this._ticks, new TreeClockFork(
-          new TreeClock(true, 0, this._fork), new TreeClock(false, 0, this._fork))),
-        new TreeClock(false, ticks ?? this._ticks, new TreeClockFork(
-          new TreeClock(false, 0, this._fork), new TreeClock(true, 0, this._fork)))
+      return new Fork(
+        new TreeClock(new Fork(
+          TreeClock.GENESIS, TreeClock.HALLOWS), this.localTicks),
+        new TreeClock(new Fork(
+          TreeClock.HALLOWS, TreeClock.GENESIS), this.localTicks)
       );
-    } else if (this._fork) {
-      const leftResult = this._fork.left._forked(ticks != null ? ticks - this._ticks : null);
+    } else if (this.fork) {
+      const leftResult = this.fork.left._forked();
       if (leftResult)
-        return new TreeClockFork(
-          new TreeClock(false, this._ticks, new TreeClockFork(leftResult.left, this._fork.right)),
-          new TreeClock(false, this._ticks, new TreeClockFork(leftResult.right, this._fork.right))
+        return new Fork(
+          new TreeClock(new Fork(leftResult.left, this.fork.right), this.localTicks),
+          new TreeClock(new Fork(leftResult.right, this.fork.right), this.localTicks)
         );
 
-      const rightResult = this._fork.right._forked(ticks != null ? ticks - this._ticks : null);
+      const rightResult = this.fork.right._forked();
       if (rightResult)
-        return new TreeClockFork(
-          new TreeClock(false, this._ticks, new TreeClockFork(this._fork.left, rightResult.left)),
-          new TreeClock(false, this._ticks, new TreeClockFork(this._fork.left, rightResult.right))
+        return new Fork(
+          new TreeClock(new Fork(this.fork.left, rightResult.left), this.localTicks),
+          new TreeClock(new Fork(this.fork.left, rightResult.right), this.localTicks)
         );
     }
   }
 
-  update(other: TreeClock): TreeClock {
+  update(other: TickTree): TreeClock {
     if (this.isId) {
-      if (other._fork != null)
-        throw new Error("Trying to update from overlapping forked clock");
-      else if (other._ticks > this._ticks)
-        return new TreeClock(true, other._ticks);
+      if (other.fork != null)
+        throw new Error('Trying to update from overlapping forked clock');
+      else if (other.localTicks > this.localTicks)
+        return new TreeClock(true, other.localTicks);
       else
         return this; // Typical case: we have the most ticks for our own ID
     } else {
-      return new TreeClock(
-        false, Math.max(this._ticks, other._ticks),
-        other._fork === null ? this._fork : new TreeClockFork(
-          (this._fork === null ? TreeClock.HALLOWS : this._fork.left).update(other._fork.left),
-          (this._fork === null ? TreeClock.HALLOWS : this._fork.right).update(other._fork.right)));
+      return new TreeClock(...this.updateFromOther(other,
+        (tree, time) => tree.update(time) as this));
     }
   }
 
-  scrubId(): TreeClock {
-    if (this.isId) {
-      return new TreeClock(false, this._ticks);
-    } else if (this._fork != null) {
-      const [left, right] = [this._fork.left.scrubId(), this._fork.right.scrubId()];
-      return new TreeClock(false, this._ticks, new TreeClockFork(left, right));
-    } else {
-      return this;
-    }
+  get hasId(): boolean {
+    return this.isId || (this.fork != null && (this.fork.left.hasId || this.fork.right.hasId));
   }
 
-  anyLt(other: TreeClock, includeIds?: 'includeIds'): boolean {
-    if (this._fork == null || other._fork == null) {
-      if (includeIds) {
-        return this.allTicks < other.allTicks;
+  anyNonIdLt(other: TreeClock): boolean {
+    if (this.fork == null || other.fork == null) {
+      const thisTicks = this.nonIdTicks, otherTicks = other.nonIdTicks;
+      if (thisTicks != null && otherTicks != null) {
+        return thisTicks < otherTicks;
       } else {
-        const thisTicks = this.nonIdTicks, otherTicks = other.nonIdTicks;
-        if (thisTicks != null && otherTicks != null) {
-          return thisTicks < otherTicks;
-        } else {
-          return false; // Either is an ID but we don't want IDs, or both not IDs and we want IDs
-        }
+        return false; // Either is an ID but we don't want IDs, or both not IDs and we want IDs
       }
     } else {
-      return this._fork.left.anyLt(other._fork.left, includeIds) ||
-        this._fork.right.anyLt(other._fork.right, includeIds);
+      return this.fork.left.anyNonIdLt(other.fork.left) ||
+        this.fork.right.anyNonIdLt(other.fork.right);
     }
   }
 
-  equals(that: TreeClock): boolean {
-    return this.isId === that.isId &&
-      this._ticks === that._ticks &&
-      (this._fork === that._fork ||
-        (this._fork !== null && that._fork !== null && this._fork.equals(that._fork)));
+  toJSON(forHash?: 'forHash'): TreeClockJson {
+    if (this.isId) {
+      return this.leafJson(true);
+    } else if (this.fork == null) {
+      return this.leafJson(false);
+    } else { // We're a fork
+      const forkJson: TreeClockJson =
+        [this.fork.left.toJSON(forHash), this.fork.right.toJSON(forHash)];
+      if (forHash) {
+        const zero = forkJson.map(isZeroId);
+        if (!zero.includes(null))
+          return this.leafJson(zero.includes(true));
+      }
+      if (this.localTicks == 0) // 2 element array for ticks and fork
+        return forkJson;
+      else // 3 element array for ticks and fork
+        return [this.localTicks, ...forkJson];
+    }
   }
 
-  toString(): string {
-    return JSON.stringify(this.toJson());
+  private leafJson(isId: boolean): TreeClockJson {
+    if (isId) // 0 or 1 element array for ID
+      return this.localTicks > 0 ? [this.localTicks] : [];
+    else // Plain number for non-ID
+      return this.localTicks;
   }
 
-  // v8(chrome/nodejs) console
-  [inspect] = () => this.toString();
-
-  toJson(): any {
-    if (this.isId) // 0 or 1 element array for ID
-      return this._ticks > 0 ? [this._ticks] : [];
-    else if (this._fork == null) // Plain number for non-ID
-      return this._ticks;
-    else if (this._ticks == 0) // 2 element array for ticks and fork
-      return this._fork.toJson();
-    else // 3 element array for ticks and fork
-      return [this._ticks].concat(this._fork.toJson());
-  }
-
-  static fromJson(json: any): TreeClock | null {
-    if (json == null) {
-      return null;
-    } else if (typeof json == 'number') { // Plain number for non-ID
+  static fromJson(json: TreeClockJson): TreeClock {
+    if (typeof json == 'number') { // Plain number for non-ID
       return new TreeClock(false, json);
-    } else if (Array.isArray(json)) { // Compact tuple format
-      if (json.length == 0) // ID with zero ticks
-        return new TreeClock(true, 0);
-      else if (json.length == 1) // ID with given ticks
+    } else if (Array.isArray(json) && json.length <= 3) {
+      if (json.length == 0) { // ID with zero ticks
+        return TreeClock.GENESIS;
+      } else if (json.length == 1) { // ID with given ticks
         return new TreeClock(true, json[0]);
-      else if (json.length == 2) // Zero-tick with fork
-        return new TreeClock(false, 0, TreeClockFork.fromJson(json));
-      else if (json.length == 3) // Given ticks and fork
-        return new TreeClock(false, json[0], TreeClockFork.fromJson(json.slice(1)));
-      else
-        return null;
-    } else { // Fully expanded format
-      return new TreeClock(json.isId, json.ticks, TreeClockFork.fromJson(json.fork));
+      } else if (json.length == 2) { // Zero-tick with fork
+        return new TreeClock(TreeClock.forkFromJson(json), 0);
+      } else if (json.length == 3) { // Given ticks and fork
+        const [ticks, left, right] = json;
+        return new TreeClock(TreeClock.forkFromJson([left, right]), ticks);
+      }
     }
+    throw new Error('Bad clock JSON');
+  }
+
+  private static forkFromJson(json: [TreeClockJson, TreeClockJson]): Fork<TreeClock> {
+    const [left, right] = json.map(TreeClock.fromJson);
+    return new Fork(left, right);
   }
 }
+
+/**
+ * @returns - `true` if 0 ticks and is ID
+ * - `false` if 0 ticks and not ID
+ * - `null` if non-zero ticks
+ */
+function isZeroId(json: TreeClockJson) {
+  if (typeof json == 'number')
+    return json === 0 ? false : null;
+  else if (json.length === 0)
+    return true;
+  else
+    return null;
+}
+
+export type TreeClockJson =
+  number |
+  [] |
+  [number] |
+  [TreeClockJson, TreeClockJson] |
+  [number, TreeClockJson, TreeClockJson];
+
+/**
+ * Public clock time, carries latest public ticks seen for all processes (never
+ * internal ticks). It also carries the latest seen time hash (transaction ID)
+ * for every process ID (leaf).
+ */
+export class GlobalClock extends TickTree<string> {
+  static GENESIS = new GlobalClock('').update(TreeClock.GENESIS);
+
+  protected bud(tid?: string): this {
+    return new GlobalClock(tid ?? this.value ?? '', 0) as this;
+  }
+
+  update(time: TreeClock): GlobalClock {
+    return this._update(time, time.hash());
+  }
+
+  private _update(time: TreeClock, tid: string): GlobalClock {
+    if (time.isId) {
+      if (this.fork != null)
+        throw new Error('Global clock is in the future');
+      return new GlobalClock(tid, Math.max(this.localTicks, time.ticks));
+    } else {
+      return new GlobalClock(...this.updateFromOther(time,
+        (tree, time) => tree._update(time, tid) as this));
+    }
+  }
+
+  tid(time: TreeClock): string {
+    const tid = this._tid(time);
+    if (tid == null)
+      throw new Error('Global clock is in the future');
+    return tid;
+  }
+
+  private _tid(time: TreeClock): string | null {
+    if (time.isId) {
+      return this.value;
+    } else if (this.fork != null || time.fork != null) {
+      return this.leftBud._tid(time.leftBud) ??
+        this.rightBud._tid(time.rightBud);
+    }
+    return null;
+  }
+
+  *tids(): IterableIterator<string> {
+    if (this.value) { // Note '' is not yielded
+      yield this.value;
+    } else if (this.fork != null) {
+      yield *this.fork.left.tids();
+      yield *this.fork.right.tids();
+    }
+  }
+
+  toJSON(): GlobalClockJson {
+    if (this.value != null)
+      return [this.localTicks, this.value];
+    else if (this.fork != null)
+      return [this.localTicks, [this.fork.left.toJSON(), this.fork.right.toJSON()]];
+    else
+      throw new Error();
+  }
+
+  static fromJSON(json: GlobalClockJson): GlobalClock {
+    const [ticks, parts] = json;
+    if (typeof parts == 'string') {
+      return new GlobalClock(parts, ticks);
+    } else if (Array.isArray(json) && json.length == 2) {
+      const [left, right] = parts;
+      return new GlobalClock(new Fork(
+        GlobalClock.fromJSON(left),
+        GlobalClock.fromJSON(right)), ticks);
+    }
+    throw new Error('Bad global clock JSON');
+  }
+}
+
+export type GlobalClockJson = [number, string | [GlobalClockJson, GlobalClockJson]];

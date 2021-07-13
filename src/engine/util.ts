@@ -1,12 +1,13 @@
 import {
-  concat, Observable, OperatorFunction, Subscription, throwError,
-  AsyncSubject, ObservableInput, onErrorResumeNext, NEVER, from, BehaviorSubject, Subject, Observer
-} from "rxjs";
-import { publish, tap, mergeMap, switchAll, scan, endWith, pluck, filter } from "rxjs/operators";
-import { LogLevelDesc, getLogger, getLoggers } from 'loglevel';
+  AsyncSubject, BehaviorSubject, concat, firstValueFrom, from, NEVER, Observable, ObservableInput,
+  ObservedValueOf, Observer, onErrorResumeNext, OperatorFunction, Subject, Subscription, throwError
+} from 'rxjs';
+import { mergeMap, publish, switchAll, tap } from 'rxjs/operators';
+import { getLogger, getLoggers, LogLevelDesc } from 'loglevel';
 import * as performance from 'marky';
-import { encode as rawEncode, decode as rawDecode } from '@ably/msgpack-js';
+import { decode as rawDecode, encode as rawEncode } from '@ably/msgpack-js';
 import { AsyncIterator } from 'asynciterator';
+import { createHash } from 'crypto';
 
 export const isArray = Array.isArray;
 
@@ -19,19 +20,26 @@ export function flatten<T>(bumpy: T[][]): T[] {
   return ([] as T[]).concat(...bumpy);
 }
 
-export function fromPromise<T, P>(promise: Promise<P>, map: (p: P) => Observable<T>): Observable<T> {
-  return from(promise).pipe(mergeMap(map));
+/**
+ * Sugar for the common pattern of taking an observable input (typically a Promise) and 'inflating'
+ * its result (or each of its results) into an observable output.
+ * @param input a source of stuff to inflate
+ * @param pump the map function that inflates the input to an observable output
+ */
+export function inflate<T extends ObservableInput<any>, O extends ObservableInput<any>>(
+  input: O, pump: (p: ObservedValueOf<O>) => T): Observable<ObservedValueOf<T>> {
+  return from(input).pipe(mergeMap(pump));
 }
 
-export function fromArrayPromise<T>(promise: Promise<T[]>): Observable<T> {
-  return fromPromise(promise, from);
+export function inflateArray<T>(promise: Promise<T[]>): Observable<T> {
+  return inflate(promise, from);
 }
 
-export function toJson(thing: any): any {
+export function toJSON(thing: any): any {
   if (thing == null)
     return null;
-  else if (typeof thing.toJson == 'function')
-    return thing.toJson();
+  else if (typeof thing.toJSON == 'function')
+    return thing.toJSON();
   else if (thing instanceof Error)
     return { ...thing, message: thing.message };
   else
@@ -42,8 +50,21 @@ export function settled(result: PromiseLike<unknown>): Promise<unknown> {
   return new Promise(done => result.then(done, done));
 }
 
+export function completed(observable: Observable<unknown>): Promise<void> {
+  return new Promise((resolve, reject) =>
+    observable.subscribe({ complete: resolve, error: reject }));
+}
+
+export function sha1Digest(...items: (string | Buffer)[]) {
+  const hash = createHash('sha1'); // Fastest
+  for (let item of items)
+    hash.update(item);
+  return hash.digest('base64');
+}
+
 export class Future<T = void> implements PromiseLike<T> {
   private readonly subject = new AsyncSubject<T>();
+  private _pending = true;
 
   constructor(value?: T) {
     if (value !== undefined) {
@@ -53,7 +74,7 @@ export class Future<T = void> implements PromiseLike<T> {
   }
 
   get pending() {
-    return !this.subject.isStopped;
+    return this._pending;
   }
 
   get settle() {
@@ -61,17 +82,19 @@ export class Future<T = void> implements PromiseLike<T> {
   }
 
   resolve = (value: T) => {
+    this._pending = false;
     this.subject.next(value);
     this.subject.complete();
-  }
+  };
 
   reject = (err: any) => {
+    this._pending = false;
     this.subject.error(err);
-  }
+  };
 
   then: PromiseLike<T>['then'] = (onfulfilled, onrejected) => {
-    return this.subject.toPromise().then(onfulfilled, onrejected);
-  }
+    return firstValueFrom(this.subject).then(onfulfilled, onrejected);
+  };
 }
 
 export function tapCount<T>(done: Future<number>): OperatorFunction<T, T> {
@@ -86,7 +109,9 @@ export function tapCount<T>(done: Future<number>): OperatorFunction<T, T> {
 export function tapLast<T>(done: Future<T | undefined>): OperatorFunction<T, T> {
   let last: T | undefined;
   return tap({
-    next: item => { last = item; },
+    next: item => {
+      last = item;
+    },
     complete: () => done.resolve(last),
     error: done.reject
   });
@@ -95,25 +120,6 @@ export function tapLast<T>(done: Future<T | undefined>): OperatorFunction<T, T> 
 export function tapComplete<T>(done: Future): OperatorFunction<T, T> {
   return tap({ complete: () => done.resolve(), error: done.reject });
 }
-
-export function toArrays<T>(groupBy: (value: T) => unknown): OperatorFunction<T, T[]> {
-  return source => source.pipe(
-    endWith(null),
-    scan<T, { out: T[] | null, buf: T[] }>(({ buf }, value) => {
-      if (value == null) // Terminator
-        return { out: buf.length ? buf : null, buf: [] };
-      else if (!buf.length) // First value
-        return { out: null, buf: [value] };
-      else if (groupBy(buf[buf.length - 1]) !== groupBy(value))
-        return { out: buf, buf: [value] };
-      else
-        return { out: null, buf: [...buf, value] };
-    }, { out: null, buf: [] }),
-    pluck('out'),
-    filter<T[]>(out => out != null)
-  );
-}
-
 /**
  * Delays notifications from a source until a signal is received from a notifier.
  * @see https://ncjamieson.com/how-to-write-delayuntil/
@@ -249,7 +255,9 @@ type RxMethod<T> = (this: T, ...args: any[]) => Observable<any>;
 
 export function check<T>(assertion: (t: T) => boolean, otherwise: () => Error) {
   return {
-    sync: checkWith<T, SyncMethod<T>>(assertion, otherwise, err => { throw err; }),
+    sync: checkWith<T, SyncMethod<T>>(assertion, otherwise, err => {
+      throw err;
+    }),
     async: checkWith<T, AsyncMethod<T>>(assertion, otherwise, Promise.reject.bind(Promise)),
     rx: checkWith<T, RxMethod<T>>(assertion, otherwise, throwError)
   };
@@ -265,7 +273,7 @@ export function checkWith<T, M extends (this: T, ...args: any[]) => any>(
       else
         return reject(otherwise());
     };
-  }
+  };
 }
 
 export class Stopwatch {
@@ -341,18 +349,20 @@ export function mapObject(
   return Object.assign({}, ...Object.entries(o).map(([k, v]) => fn(k, v)));
 }
 
-export function* deepValues(o: any,
+export function *deepValues(o: any,
   filter: (o: any, path: string[]) => boolean = o => typeof o != 'object',
   path: string[] = []): IterableIterator<[string[], any]> {
   if (filter(o, path))
     yield [path, o];
   else if (typeof o == 'object')
-    for (let key in o)
-      yield* deepValues(o[key], filter, path.concat(key));
+    for (let key of Object.keys(o))
+      yield *deepValues(o[key], filter, path.concat(key));
 }
 
 export function setAtPath<T>(o: any, path: string[], value: T,
-  createAt: (path: string[]) => any = path => { throw `nothing at ${path}`; },
+  createAt: (path: string[]) => any = path => {
+    throw `nothing at ${path}`;
+  },
   start = 0): T {
   if (path.length > start)
     if (path.length - start === 1)
