@@ -1,11 +1,10 @@
-import { Quad, Quad_Object, Quad_Subject } from 'rdf-js';
 import { any, anyName, blank } from '../api';
 import {
   Atom, isPropertyObject, isReference, isSet, isValueObject, Reference, Subject,
   SubjectPropertyObject
 } from '../jrql-support';
 import { canonicalDouble, expandTerm } from './jsonld';
-import { RdfFactory } from './quads';
+import { Quad, Quad_Object, Quad_Subject, RdfFactory } from './quads';
 import { JRQL, RDF, XS } from '../ns';
 import { JrqlMode, ListIndex, listItems, toIndexDataUrl } from './jrql-util';
 import { ActiveContext, getContextValue } from 'jsonld/lib/context';

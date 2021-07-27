@@ -1,12 +1,9 @@
 import { Binding } from 'quadstore';
-import { Quad, Quad_Object, Term } from 'rdf-js';
 import { Graph } from '.';
-import { GraphSubject, blank } from '../..';
-import {
-  Subject, Result, Value, Atom, Reference
-} from '../../jrql-support';
+import { blank, GraphSubject } from '../..';
+import { Atom, Reference, Result, Subject, Value } from '../../jrql-support';
 import { ActiveContext, compactIri } from '../jsonld';
-import { inPosition } from '../quads';
+import { inPosition, Quad, Quad_Object, Term } from '../quads';
 import { JRQL } from '../../ns';
 import { SubjectGraph } from '../SubjectGraph';
 import { JrqlMode, toIndexDataUrl } from '../jrql-util';
@@ -54,6 +51,7 @@ export class JrqlQuads {
   /**
    * @param propertyQuads subject-property-value quads
    * @param listItemQuads subject-index-item quads for list-like subjects
+   * @param ctx JSON-LD context
    * @returns a single subject compacted against the given context
    */
   toApiSubject(

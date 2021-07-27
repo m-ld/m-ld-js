@@ -4,11 +4,14 @@ import {
   any, GraphSubject, MeldState, MeldStateMachine, readResult, ReadResult, StateProc, UpdateProc
 } from '../api';
 import { CloneEngine, EngineState, EngineUpdateProc, StateEngine } from './StateEngine';
+import { QuadSource } from './quads';
 
 abstract class ApiState implements MeldState {
   constructor(
     private readonly state: EngineState) {
   }
+
+  match: QuadSource['match'] = (...args) => this.state.match(...args);
 
   read<R extends Read = Read>(request: R): ReadResult {
     return readResult(this.state.read(request));
@@ -49,6 +52,7 @@ export class ApiStateMachine extends ApiState implements MeldStateMachine {
   constructor(engine: CloneEngine) {
     const stateEngine = new StateEngine(engine);
     super({
+      match: (...args) => stateEngine.match(...args),
       read: (request: Read): Observable<GraphSubject> => {
         return new Observable(subs => {
           const subscription = new Subscription;

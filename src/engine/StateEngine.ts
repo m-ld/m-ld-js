@@ -2,20 +2,18 @@ import { Read, Write } from '../jrql-support';
 import { GraphSubject, MeldUpdate } from '../api';
 import { LockManager } from './locks';
 import { Observable, Subscription } from 'rxjs';
+import { QuadSource } from './quads';
 
 /** Simplified clone engine with only the basic requirements of an engine */
-export interface CloneEngine {
+export interface CloneEngine extends EngineState {
   readonly lock: LockManager<'state'>;
   /** An update MUST happen during a write OR when 'state' is exclusively locked */
   readonly dataUpdates: Observable<MeldUpdate>;
-
-  read(request: Read): Observable<GraphSubject>;
-  write(request: Write): Promise<unknown>;
 }
 
-export interface EngineState {
+export interface EngineState extends QuadSource {
   read(request: Read): Observable<GraphSubject>;
-  write(request: Write): Promise<EngineState>;
+  write(request: Write): Promise<this>;
 }
 
 export type EngineUpdateProc = (update: MeldUpdate, state: EngineState) => PromiseLike<unknown> | void;
@@ -35,6 +33,8 @@ export class StateEngine {
     this.newState();
     this.engine.dataUpdates.subscribe(this.nextState);
   }
+
+  match: QuadSource['match'] = (...args) => this.state.match(...args);
 
   follow(handler: EngineUpdateProc): Subscription {
     const key = this.handlers.push(handler) - 1;
@@ -69,8 +69,9 @@ export class StateEngine {
 
   private newState() {
     const state: EngineState = {
-      read: (request: Read) => gateEngine().read(request),
-      write: async (request: Write) => {
+      match: (...args) => gateEngine().match(...args),
+      read: request => gateEngine().read(request),
+      write: async request => {
         // Ensure all read handlers are complete before changing state
         await this.handling;
         await gateEngine().write(request);

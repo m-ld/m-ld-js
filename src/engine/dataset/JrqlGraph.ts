@@ -3,11 +3,10 @@ import {
   Constraint, Expression, Group, isConstraint, isConstruct, isDescribe, isGroup, isSelect,
   isSubject, isUpdate, operators, Read, Result, Subject, Update, Variable, VariableExpression, Write
 } from '../../jrql-support';
-import { NamedNode, Quad, Term } from 'rdf-js';
 import { Graph, PatchQuads } from '.';
 import { groupBy, map, mergeMap, reduce, toArray } from 'rxjs/operators';
 import { EMPTY, merge, Observable, of, throwError } from 'rxjs';
-import { canPosition, inPosition, TriplePos } from '../quads';
+import { canPosition, inPosition, NamedNode, Quad, Term, TriplePos } from '../quads';
 import { ActiveContext, expandTerm, initialCtx, nextCtx } from '../jsonld';
 import { Binding } from 'quadstore';
 import { Algebra, Factory as SparqlFactory } from 'sparqlalgebrajs';
@@ -242,9 +241,8 @@ export class JrqlGraph {
         this.sparql.createJoin(bgp, unionOp) : unionOp ?? bgp;
       const filtered = filter.length ? this.sparql.createFilter(
         unioned, this.constraintExpr(filter, ctx)) : unioned;
-      const valued = values.length ? this.sparql.createJoin(
+      return values.length ? this.sparql.createJoin(
         this.valuesExpr(values, ctx), filtered) : filtered;
-      return valued;
     }
   }
 
@@ -298,6 +296,7 @@ export class JrqlGraph {
     if (isConstraint(expr)) {
       return this.constraintExpr([expr], ctx);
     } else {
+      // noinspection SuspiciousTypeOfGuard
       const varName = typeof expr == 'string' && JRQL.matchVar(expr);
       return this.sparql.createTermExpression(varName ?
         this.graph.variable(varName) : this.jrql.toObjectTerm(expr, ctx));

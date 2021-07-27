@@ -1,9 +1,14 @@
-import { Quad, Term, DataFactory, NamedNode } from 'rdf-js';
-import { IndexMap, IndexSet } from "./indices";
+import type { DataFactory, NamedNode, Quad, Term } from 'rdf-js';
+import { IndexMap, IndexSet } from './indices';
 import { memoise } from './util';
 
 export type Triple = Omit<Quad, 'graph'>;
 export type TriplePos = 'subject' | 'predicate' | 'object';
+
+export type {
+  DefaultGraph, Quad, Term, DataFactory, NamedNode, Source as QuadSource,
+  Quad_Subject, Quad_Predicate, Quad_Object
+} from 'rdf-js';
 
 export class QuadMap<T> extends IndexMap<Quad, T> {
   protected getIndex(key: Quad): string {
@@ -29,27 +34,29 @@ export class QuadSet extends IndexSet<Quad> {
 
 export function tripleKey(triple: Triple): string[] {
   switch (triple.object.termType) {
-    case 'Literal': return [
-      triple.subject.value,
-      triple.predicate.value,
-      triple.object.termType,
-      triple.object.value || '',
-      triple.object.datatype.value || '',
-      triple.object.language || ''
-    ];
-    default: return [
-      triple.subject.value,
-      triple.predicate.value,
-      triple.object.termType,
-      triple.object.value
-    ];
+    case 'Literal':
+      return [
+        triple.subject.value,
+        triple.predicate.value,
+        triple.object.termType,
+        triple.object.value || '',
+        triple.object.datatype.value || '',
+        triple.object.language || ''
+      ];
+    default:
+      return [
+        triple.subject.value,
+        triple.predicate.value,
+        triple.object.termType,
+        triple.object.value
+      ];
   }
 }
 
 export const tripleIndexKey = memoise((triple: Triple) =>
   tripleKey(triple).join('^'));
 
-export const quadIndexKey = memoise((quad: Quad) => 
+export const quadIndexKey = memoise((quad: Quad) =>
   [quad.graph.value].concat(tripleKey(quad)).join('^'));
 
 export function canPosition<P extends TriplePos>(pos: P, value?: Term): value is Quad[P] {
@@ -59,9 +66,8 @@ export function canPosition<P extends TriplePos>(pos: P, value?: Term): value is
   if ((pos == 'subject' || pos == 'predicate') && value.termType == 'Literal')
     return false;
   // Predicates don't allow blank nodes
-  if (pos == 'predicate' && value.termType == 'BlankNode')
-    return false;
-  return true;
+  return !(pos == 'predicate' && value.termType == 'BlankNode');
+
 }
 
 export function inPosition<P extends TriplePos>(pos: P, value?: Term): Quad[P] {

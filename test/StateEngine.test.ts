@@ -3,12 +3,19 @@ import { MeldUpdate } from '../src';
 import { LockManager } from '../src/engine/locks';
 import { CloneEngine, StateEngine } from '../src/engine/StateEngine';
 import { SubjectGraph } from '../src/engine/SubjectGraph';
+import { single } from 'asynciterator';
+import { DataFactory as RdfDataFactory, Quad } from 'rdf-data-factory';
 
 describe('State Engine', () => {
   class MockCloneEngine implements CloneEngine {
     tick = 0;
     readonly lock = new LockManager<'state'>();
     readonly dataUpdates = new Source<MeldUpdate>();
+    // noinspection JSUnusedGlobalSymbols
+    match: CloneEngine['match'] = () => single(
+      rdf.quad(rdf.namedNode('state'),
+        rdf.namedNode('tick'),
+        rdf.literal(this.tick.toString())));
     read = () => of({ '@id': 'state', tick: this.tick });
     write = async () => {
       this.dataUpdates.next({
@@ -16,12 +23,15 @@ describe('State Engine', () => {
         '@insert': new SubjectGraph([]),
         '@ticks': ++this.tick
       });
-    }
+      return this;
+    };
   }
+
   let clone: MockCloneEngine;
   let states: StateEngine;
   let ops: number[]; // Used to assert concurrent operation ordering
   const pushOp = async (n: number) => ops.push(n);
+  const rdf = new RdfDataFactory();
 
   beforeEach(() => {
     clone = new MockCloneEngine;
@@ -32,6 +42,13 @@ describe('State Engine', () => {
   test('can read initial state', done => {
     states.read(async state => {
       await expect(firstValueFrom(state.read({}))).resolves.toMatchObject({ tick: 0 });
+      done();
+    });
+  });
+
+  test('can match initial state', done => {
+    states.match().on('data', (quad: Quad) => {
+      expect(quad.object.equals(rdf.literal('0'))).toBe(true);
       done();
     });
   });
@@ -55,13 +72,33 @@ describe('State Engine', () => {
     states.write(state => state.write({}));
   });
 
+  test('can match in initial state', done => {
+    states.read(async state => {
+      state.match().on('data', (quad: Quad) => {
+        expect(quad.object.equals(rdf.literal('0'))).toBe(true);
+        done();
+      });
+    });
+  });
+
+  test('can match in follow', done => {
+    states.follow(async (_, state) => {
+      state.match().on('data', (quad: Quad) => {
+        expect(quad.object.equals(rdf.literal('1'))).toBe(true);
+        done();
+      });
+    });
+    states.write(state => state.write({}));
+  });
+
   test('can unsubscribe a follow handler', done => {
     states.follow(() => done.fail()).unsubscribe();
     states.write(state => state.write({})).then(() => done());
   });
 
   test('can unsubscribe a read follow handler', done => {
-    states.read(() => { }, () => done.fail()).unsubscribe();
+    states.read(() => {
+    }, () => done.fail()).unsubscribe();
     states.write(state => state.write({})).then(() => done());
   });
 

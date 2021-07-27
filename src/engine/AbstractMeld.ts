@@ -12,7 +12,7 @@ export abstract class AbstractMeld implements Meld {
   protected static checkLive =
     check((m: AbstractMeld) => m.live.value === true, () => new MeldError('Meld is offline'));
   protected static checkNotClosed =
-    check((m: AbstractMeld) => !m.closed, () => new MeldError('Clone has closed'));
+    check((m: AbstractMeld) => !m._closed, () => new MeldError('Clone has closed'));
 
   readonly updates: Observable<OperationMessage>;
   readonly live: LiveValue<boolean | null>;
@@ -20,13 +20,13 @@ export abstract class AbstractMeld implements Meld {
   private readonly updateSource = new PauseableSource<OperationMessage>();
   private readonly liveSource: BehaviorSubject<boolean | null> = new BehaviorSubject(null);
   
-  private closed = false;
+  private _closed = false;
   protected readonly log: Logger;
 
   readonly id: string;
   readonly domain: string;
 
-  constructor(config: MeldConfig) {
+  protected constructor(config: MeldConfig) {
     this.id = config['@id'];
     this.domain = config['@domain'];
     this.log = getIdLogger(this.constructor, this.id, config.logLevel ?? 'info');
@@ -55,12 +55,16 @@ export abstract class AbstractMeld implements Meld {
     return this.liveSource.next(live);
   };
 
+  protected get closed() {
+    return this._closed;
+  }
+
   abstract newClock(): Promise<TreeClock>;
   abstract snapshot(): Promise<Snapshot>;
   abstract revupFrom(time: TreeClock): Promise<Revup | undefined>;
 
   close(err?: any) {
-    this.closed = true;
+    this._closed = true;
     if (err) {
       this.updateSource.error(err);
       this.liveSource.error(err);

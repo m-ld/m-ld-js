@@ -1,13 +1,10 @@
 import { Iri } from 'jsonld/jsonld-spec';
-import {
-  Reference, Subject, isReference, SubjectProperty
-} from '../jrql-support';
-import { Triple } from './quads';
-import { XS, JRQL, RDF } from '../ns';
+import { isReference, Reference, Subject, SubjectProperty } from '../jrql-support';
+import { Quad_Predicate, Quad_Subject, Term, Triple } from './quads';
+import { JRQL, RDF, XS } from '../ns';
 import { GraphSubject, GraphSubjects } from '../api';
-import { deepValues, setAtPath, isArray } from './util';
+import { deepValues, isArray, setAtPath } from './util';
 import { addPropertyObject, toIndexNumber } from './jrql-util';
-import { Quad_Predicate, Quad_Subject, Term } from 'rdf-js';
 import { ActiveContext, getContextValue } from 'jsonld/lib/context';
 import { compactIri } from './jsonld';
 

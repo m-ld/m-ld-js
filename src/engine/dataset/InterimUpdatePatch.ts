@@ -1,4 +1,4 @@
-import { InterimUpdate, DeleteInsert, MeldUpdate } from '../../api';
+import { DeleteInsert, InterimUpdate, MeldUpdate } from '../../api';
 import { TreeClock } from '../clocks';
 import { Subject, SubjectProperty, Update } from '../../jrql-support';
 import { PatchQuads } from '.';
@@ -6,11 +6,11 @@ import { JrqlGraph } from './JrqlGraph';
 import { GraphAliases, SubjectGraph } from '../SubjectGraph';
 import { Iri } from 'jsonld/jsonld-spec';
 import { ActiveContext } from 'jsonld/lib/context';
-import { Quad } from 'rdf-js';
+import { Quad } from '../quads';
 
 export class InterimUpdatePatch implements InterimUpdate {
   /** Assertions made by the constraint (not including the app patch if not mutable) */
-  private assertions: PatchQuads;
+  private readonly assertions: PatchQuads;
   /** Entailments made by the constraint */
   private entailments = new PatchQuads();
   /** Whether to recreate the insert & delete fields from the assertions */
@@ -20,7 +20,12 @@ export class InterimUpdatePatch implements InterimUpdate {
   /** Aliases for use in updates */
   private subjectAliases = new Map<Iri | null, { [property in '@id' | string]: SubjectProperty }>();
 
-  /** @param patch the starting app patch (will not be mutated unless 'mutable') */
+  /**
+   * @param graph
+   * @param time
+   * @param mutable
+   * @param patch the starting app patch (will not be mutated unless 'mutable')
+   */
   constructor(
     private readonly graph: JrqlGraph,
     private readonly time: TreeClock,
@@ -34,7 +39,11 @@ export class InterimUpdatePatch implements InterimUpdate {
   /** @returns the final update to be presented to the app */
   async finalise(ctx: ActiveContext) {
     await this.needsUpdate; // Ensure up-to-date with any changes
-    this.needsUpdate = { then: () => { throw 'Interim update has been finalised'; } };
+    this.needsUpdate = {
+      then: () => {
+        throw 'Interim update has been finalised';
+      }
+    };
     // The final update to the app includes all assertions and entailments
     const update = this.createUpdate(
       new PatchQuads(this.allAssertions).append(this.entailments), ctx);
@@ -81,7 +90,7 @@ export class InterimUpdatePatch implements InterimUpdate {
 
   private aliases: GraphAliases = (subject, property) => {
     return this.subjectAliases.get(subject)?.[property];
-  }
+  };
 
   private createUpdate(patch: PatchQuads, ctx?: ActiveContext): MeldUpdate {
     return {

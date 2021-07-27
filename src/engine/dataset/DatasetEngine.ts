@@ -22,10 +22,13 @@ import { GraphSubject, MeldConfig } from '../..';
 import { RemoteUpdates } from './RemoteUpdates';
 import { CloneEngine } from '../StateEngine';
 import { MeldError, MeldErrorStatus } from '../MeldError';
+import { TransformIterator, wrap } from 'asynciterator';
+import { QuadSource } from '../quads';
 
 enum ConnectStyle {
   SOFT, HARD
 }
+
 enum OperationOutcome {
   /** Operation was accepted (and may have precipitated un-buffering) */
   ACCEPTED,
@@ -143,7 +146,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
         // Soft retry is a distribution ~(>=0 mean 2) * network timeout
         return interval((poisson(2) + 1) * Math.random() * this.networkTimeout);
     }
-  }
+  };
 
   get dataUpdates() {
     return this.dataset.updates;
@@ -182,8 +185,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
           // Let's re-connect to see if we can get back on track.
           this.log.warn('Messages are out of order and backing up. Re-connecting.');
           return true;
-        }
-        else {
+        } else {
           this.log.debug('Messages were out of order, but now cleared.');
           return false;
         }
@@ -225,7 +227,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
           if (cxUpdate != null)
             this.nextUpdate(cxUpdate);
           msg.delivered.resolve();
-        }))
+        }));
         return accepted ? OperationOutcome.ACCEPTED : OperationOutcome.BUFFERED;
       } catch (err) {
         if (err instanceof MeldError && err.status === MeldErrorStatus['Update out of order']) {
@@ -448,8 +450,14 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
       this.remoteUpdates.receiving.pipe(
         filter(message => message.time.anyLt(now)),
         takeUntil(from(until)))).pipe(tap(msg =>
-          this.log.debug('Forwarding update', msg)));
+      this.log.debug('Forwarding update', msg)));
   }
+
+  match: QuadSource['match'] = (...args) => {
+    return new TransformIterator(this.closed ?
+      Promise.reject(new MeldError('Clone has closed')) :
+      this.lock.share('live', async () => wrap(this.dataset.match(...args))));
+  };
 
   @AbstractMeld.checkNotClosed.rx
   read(request: Read): Observable<GraphSubject> {
@@ -465,9 +473,9 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
   }
 
   @AbstractMeld.checkNotClosed.async
-  async write(request: Write): Promise<unknown> {
+  async write(request: Write): Promise<this> {
     // For a write, execute immediately.
-    return this.lock.share('live', async () => {
+    await this.lock.share('live', async () => {
       this.logRequest('write', request);
       // Take the send timestamp just before enqueuing the transaction. This
       // ensures that transaction stamps increase monotonically.
@@ -478,6 +486,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
       if (update != null)
         this.nextUpdate(update);
     });
+    return this;
   }
 
   private logRequest(type: 'read' | 'write', request: Pattern) {

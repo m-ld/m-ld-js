@@ -1,10 +1,13 @@
 import * as spec from '@m-ld/m-ld-spec';
-import { Read, Reference, Subject, SubjectProperty, Update, Variable, Write } from './jrql-support';
+import type {
+  Read, Reference, Subject, SubjectProperty, Update, Variable, Write
+} from './jrql-support';
 import { firstValueFrom, Observable, Subscription } from 'rxjs';
 import { toArray } from 'rxjs/operators';
 import { shortId } from './util';
 import { Iri } from 'jsonld/jsonld-spec';
 import { SubjectGraph } from './engine/SubjectGraph';
+import type { Source } from 'rdf-js';
 
 /**
  * A convenience type for a struct with a `@insert` and `@delete` property, like
@@ -70,7 +73,7 @@ export function readResult(result: Observable<GraphSubject>): ReadResult {
  * [data&nbsp;semantics](http://spec.m-ld.org/#data-semantics). See the
  * [Resource](/#resource) type for more details.
  */
-export interface MeldReadState {
+export interface MeldReadState extends Source {
   /**
    * Actively reads data from the domain.
    *

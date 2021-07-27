@@ -1,6 +1,7 @@
 import {
-  DataFactory, DefaultGraph, NamedNode, Quad, Quad_Object, Quad_Predicate, Quad_Subject
-} from 'rdf-js';
+  DataFactory, DefaultGraph, NamedNode, Quad, Quad_Object, Quad_Predicate, Quad_Subject, QuadSet,
+  QuadSource, RdfFactory
+} from '../quads';
 import { Quadstore } from 'quadstore';
 import {
   AbstractChainedBatch, AbstractIterator, AbstractIteratorOptions, AbstractLevelDOWN
@@ -9,7 +10,6 @@ import { Observable } from 'rxjs';
 import { generate as uuid } from 'short-uuid';
 import { check, observeAsyncIterator, Stopwatch } from '../util';
 import { LockManager } from '../locks';
-import { QuadSet, RdfFactory } from '../quads';
 import { BatchOpts, Binding, ResultType } from 'quadstore/dist/lib/types';
 import { Context, Iri } from 'jsonld/jsonld-spec';
 import { ActiveContext, activeCtx, compactIri, expandTerm } from '../jsonld';
@@ -17,7 +17,7 @@ import { Algebra } from 'sparqlalgebrajs';
 import { newEngine } from 'quadstore-comunica';
 import { DataFactory as RdfDataFactory } from 'rdf-data-factory';
 import { JRQL, M_LD, QS, RDF, XS } from '../../ns';
-import { EmptyIterator, wrap } from 'asynciterator';
+import { empty, EmptyIterator, wrap } from 'asynciterator';
 import { MutableOperation } from '../ops';
 import { MeldError } from '../MeldError';
 import type EventEmitter = require('events');
@@ -108,11 +108,10 @@ const notClosed = check((d: Dataset) => !d.closed,
 /**
  * Read-only utility interface for reading Quads from a Dataset.
  */
-export interface Graph extends RdfFactory {
+export interface Graph extends RdfFactory, QuadSource {
   readonly name: GraphName;
 
-  match(subject?: Quad_Subject, predicate?: Quad_Predicate, object?: Quad_Object): Observable<Quad>;
-
+  query(): Observable<Quad>;
   query(query: Algebra.Construct): Observable<Quad>;
   query(query: Algebra.Describe): Observable<Quad>;
   query(query: Algebra.Project): Observable<Binding>;
@@ -330,15 +329,28 @@ class QuadStoreGraph implements Graph {
     readonly name: GraphName) {
   }
 
+  match: QuadSource['match'] = (subject, predicate, object, graph) => {
+    if (graph != null && !graph.equals(this.name))
+      return empty();
+    else
+      // Must specify graph term due to optimised indexing
+      return (<QuadSource>this.dataset.store).match(subject, predicate, object, this.name);
+  };
+
+  query(): Observable<Quad>;
   query(query: Algebra.Construct): Observable<Quad>;
   query(query: Algebra.Describe): Observable<Quad>;
   query(query: Algebra.Project): Observable<Binding>;
-  query(query: Algebra.Project | Algebra.Describe | Algebra.Construct): Observable<Binding | Quad> {
+  query(query?: Algebra.Project | Algebra.Describe | Algebra.Construct): Observable<Binding | Quad> {
     return observeAsyncIterator(async () => {
       try {
-        const stream = await this.dataset.store.sparqlStream(query);
-        if (stream.type === ResultType.BINDINGS || stream.type === ResultType.QUADS)
-          return stream.iterator;
+        if (query != null) {
+          const stream = await this.dataset.store.sparqlStream(query);
+          if (stream.type === ResultType.BINDINGS || stream.type === ResultType.QUADS)
+            return stream.iterator;
+        } else {
+          return wrap(this.match());
+        }
       } catch (err) {
         // TODO: Comunica bug? Cannot read property 'close' of undefined, if stream empty
         if (err instanceof TypeError)
@@ -347,11 +359,6 @@ class QuadStoreGraph implements Graph {
       }
       throw new Error('Expected bindings or quads');
     });
-  }
-
-  match(subject?: Quad_Subject, predicate?: Quad_Predicate, object?: Quad_Object): Observable<Quad> {
-    return observeAsyncIterator(async () =>
-      wrap(this.dataset.store.match(subject, predicate, object, this.name)));
   }
 
   skolem = () => this.dataset.rdf.namedNode(

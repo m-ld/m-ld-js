@@ -1,6 +1,5 @@
 import { MeldConstraint, MeldReadState, MeldUpdate } from '../../api';
 import { OperationMessage, Snapshot, UUID } from '..';
-import { Quad } from 'rdf-js';
 import { GlobalClock, TickTree, TreeClock } from '../clocks';
 import { Context, Subject, Write } from '../../jrql-support';
 import { Dataset, PatchQuads } from '.';
@@ -15,7 +14,7 @@ import { MeldError } from '../MeldError';
 import { LocalLock } from '../local';
 import { SUSET_CONTEXT, tripleId } from './SuSetGraph';
 import { array, GraphSubject, MeldConfig, Read } from '../..';
-import { QuadMap, Triple, TripleMap } from '../quads';
+import { Quad, QuadMap, QuadSource, Triple, TripleMap } from '../quads';
 import { CheckList } from '../../constraints/CheckList';
 import { DefaultList } from '../../constraints/DefaultList';
 import { QS } from '../../ns';
@@ -45,7 +44,7 @@ type DatasetConfig = Pick<MeldConfig,
  * Writeable Graph, similar to a Dataset, but with a slightly different transaction API.
  * Journals every transaction and creates m-ld compliant operations.
  */
-export class SuSetDataset extends MeldEncoder {
+export class SuSetDataset extends MeldEncoder implements QuadSource {
   private static checkNotClosed =
     check((d: SuSetDataset) => !d.dataset.closed, () => new MeldError('Clone has closed'));
 
@@ -98,6 +97,8 @@ export class SuSetDataset extends MeldEncoder {
   get updates(): Observable<MeldUpdate> {
     return this.updateSource;
   }
+
+  match: QuadSource['match'] = (...args) => this.state.match(...args);
 
   read<R extends Read>(request: R): Observable<GraphSubject> {
     return this.userGraph.read(request, this.userCtx);
@@ -432,7 +433,7 @@ export class SuSetDataset extends MeldEncoder {
     return {
       gwc: journal.gwc,
       data: merge(
-        this.userGraph.graph.match().pipe(
+        this.userGraph.graph.query().pipe(
           bufferCount(10), // TODO batch size config
           mergeMap(async batch => {
             const tidQuads = await this.findTriplesTids(batch, 'includeEmpty');

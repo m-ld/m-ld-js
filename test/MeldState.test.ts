@@ -8,10 +8,12 @@ import { DomainContext } from '../src/engine/MeldEncoding';
 import { Future } from '../src/engine/util';
 import { blankRegex, genIdRegex } from './testUtil';
 import { SubjectGraph } from '../src/engine/SubjectGraph';
+import { DataFactory as RdfDataFactory, Quad } from 'rdf-data-factory';
 
 describe('Meld State API', () => {
   let api: ApiStateMachine;
   let captureUpdate: Future<MeldUpdate>;
+  const rdf = new RdfDataFactory();
 
   beforeEach(async () => {
     const context = new DomainContext('test.m-ld.org');
@@ -141,6 +143,16 @@ describe('Meld State API', () => {
   });
 
   describe('basic reads', () => {
+    test('matches quad subject', done => {
+      api.write<Subject>({ '@id': 'fred', name: 'Fred' }).then(() =>
+        api.match(rdf.namedNode('http://test.m-ld.org/fred')).on('data', (quad: Quad) => {
+          expect(quad.subject.equals(rdf.namedNode('http://test.m-ld.org/fred'))).toBe(true);
+          expect(quad.predicate.equals(rdf.namedNode('http://test.m-ld.org/#name'))).toBe(true);
+          expect(quad.object.equals(rdf.literal('Fred'))).toBe(true);
+          done();
+        }));
+    });
+
     test('selects where', async () => {
       await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
       await api.write<Subject>({ '@id': 'wilma', name: 'Wilma' });

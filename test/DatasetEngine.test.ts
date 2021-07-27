@@ -67,7 +67,7 @@ describe('Dataset engine', () => {
       await expect(silo.write({
         '@id': 'http://test.m-ld.org/fred',
         'http://test.m-ld.org/#name': 'Fred'
-      } as Subject)).resolves.toBeUndefined();
+      } as Subject)).resolves.toBe(silo);
       expect(silo.status.value.ticks).toBe(1);
     });
 
