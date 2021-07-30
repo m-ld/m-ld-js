@@ -165,7 +165,7 @@ export abstract class FusableCausalOperation<T, C extends CausalClock>
       }
 
       get footprint() {
-        return this.fused?.footprint ?? original.footprint;
+        return (this.fused ?? original).footprint;
       }
     };
   }
@@ -224,7 +224,7 @@ export abstract class FusableCausalOperation<T, C extends CausalClock>
       }
 
       get footprint() {
-        return this.cut?.footprint ?? original.footprint;
+        return (this.cut ?? original).footprint;
       }
     };
   }
