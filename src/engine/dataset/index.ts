@@ -111,7 +111,7 @@ const notClosed = check((d: Dataset) => !d.closed,
 export interface Graph extends RdfFactory, QuadSource {
   readonly name: GraphName;
 
-  query(): Observable<Quad>;
+  query(...args: Parameters<QuadSource['match']>): Observable<Quad>;
   query(query: Algebra.Construct): Observable<Quad>;
   query(query: Algebra.Describe): Observable<Quad>;
   query(query: Algebra.Project): Observable<Binding>;
@@ -337,19 +337,21 @@ class QuadStoreGraph implements Graph {
       return (<QuadSource>this.dataset.store).match(subject, predicate, object, this.name);
   };
 
-  query(): Observable<Quad>;
+  query(...args: Parameters<QuadSource['match']>): Observable<Quad>;
   query(query: Algebra.Construct): Observable<Quad>;
   query(query: Algebra.Describe): Observable<Quad>;
   query(query: Algebra.Project): Observable<Binding>;
-  query(query?: Algebra.Project | Algebra.Describe | Algebra.Construct): Observable<Binding | Quad> {
+  query(...args: Parameters<QuadSource['match']> |
+    [Algebra.Construct | Algebra.Describe | Algebra.Project]): Observable<Binding | Quad> {
     return observeAsyncIterator(async () => {
       try {
-        if (query != null) {
-          const stream = await this.dataset.store.sparqlStream(query);
+        const [query] = args;
+        if (query != null && 'type' in query) {
+          const stream = await this.dataset.store.sparqlStream(<Algebra.Operation>query);
           if (stream.type === ResultType.BINDINGS || stream.type === ResultType.QUADS)
             return stream.iterator;
         } else {
-          return wrap(this.match());
+          return wrap(this.match(...<Parameters<QuadSource['match']>>args));
         }
       } catch (err) {
         // TODO: Comunica bug? Cannot read property 'close' of undefined, if stream empty

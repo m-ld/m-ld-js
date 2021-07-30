@@ -46,7 +46,7 @@ export class JrqlGraph {
       else if (isConstruct(query))
         return this.construct(query['@construct'], query['@where'], ctx);
       else
-        return throwError(new MeldError('Unsupported pattern', 'Read type not supported.'));
+        return throwError(() => new MeldError('Unsupported pattern', 'Read type not supported.'));
     });
   }
 
@@ -151,8 +151,8 @@ export class JrqlGraph {
         value, this.graph.namedNode(JRQL.item), item, this.graph.name)]));
   }
 
-  findQuads(jrqlPattern: Subject, ctx = this.defaultCtx): Observable<Quad> {
-    return this.matchQuads(this.jrql.quads(jrqlPattern, { mode: 'match' }, ctx));
+  findQuads(id: Iri, ctx = this.defaultCtx): Observable<Quad> {
+    return this.graph.query(this.resolve(id, ctx));
   }
 
   private async update(query: Update, ctx: ActiveContext): Promise<PatchQuads> {
@@ -204,13 +204,6 @@ export class JrqlGraph {
   private toPattern = (quad: Quad): Algebra.Pattern => {
     return this.sparql.createPattern(
       quad.subject, quad.predicate, quad.object, quad.graph);
-  }
-
-  private matchQuads(quads: Quad[]): Observable<Quad> {
-    const patterns = quads.map(this.toPattern);
-    // CONSTRUCT <quads> WHERE <quads>
-    return this.graph.query(this.sparql.createConstruct(
-      this.sparql.createBgp(patterns), patterns));
   }
 
   private solutions<T>(where: Subject | Subject[] | Group,

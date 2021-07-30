@@ -389,7 +389,7 @@ export class SuSetDataset extends MeldEncoder implements QuadSource {
   }
 
   private findTripleTids(tripleId: string): PromiseLike<Quad[]> {
-    return firstValueFrom(this.tidsGraph.findQuads({ '@id': tripleId }).pipe(toArray()));
+    return firstValueFrom(this.tidsGraph.findQuads(tripleId).pipe(toArray()));
   }
 
   /**
