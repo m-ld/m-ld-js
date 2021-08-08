@@ -34,8 +34,8 @@ type PeerTypeParams = SendTypeParams | ReplyTypeParams | NotifyTypeParams | Sign
 
 export class AblyRemotes extends PubsubRemotes implements PeerSignaller {
   private readonly client: Ably.Types.RealtimePromise;
-  private readonly operations: Ably.Types.RealtimeChannelPromise;
-  private readonly direct: Ably.Types.RealtimeChannelPromise;
+  private readonly opsChannel: Ably.Types.RealtimeChannelPromise;
+  private readonly directChannel: Ably.Types.RealtimeChannelPromise;
   private readonly traffic: AblyTraffic;
   private readonly subscribed: Promise<unknown>;
   private readonly peering?: WrtcPeering;
@@ -49,16 +49,16 @@ export class AblyRemotes extends PubsubRemotes implements PeerSignaller {
       impl = impl.connect ?? ablyConnect;
     }
     this.client = impl({ ...config.ably, echoMessages: false, clientId: config['@id'] });
-    this.operations = this.channel('operations');
+    this.opsChannel = this.channel('operations');
     this.traffic = new AblyTraffic(config.ably);
     // Direct channel that is specific to us, for sending and replying to
     // requests and receiving notifications
-    this.direct = this.channel(config['@id']);
+    this.directChannel = this.channel(config['@id']);
     // Ensure we are fully subscribed before we make any presence claims
     this.subscribed = Promise.all([
-      this.traffic.subscribe(this.operations, data => this.onRemoteUpdate(data)),
-      this.operations.presence.subscribe(() => this.onPresenceChange()),
-      this.traffic.subscribe(this.direct, this.onDirectMessage)
+      this.traffic.subscribe(this.opsChannel, data => this.onOperation(data)),
+      this.opsChannel.presence.subscribe(() => this.onPresenceChange()),
+      this.traffic.subscribe(this.directChannel, this.onDirectMessage)
     ]).catch(err => this.close(err));
     // Ably does not notify if no-one around, so check presence once subscribed
     this.subscribed.then(() => this.onPresenceChange());
@@ -106,17 +106,17 @@ export class AblyRemotes extends PubsubRemotes implements PeerSignaller {
 
   protected setPresent(present: boolean): Promise<unknown> {
     if (present)
-      return this.operations.presence.update('__live');
+      return this.opsChannel.presence.update('__live');
     else
-      return this.operations.presence.leave();
+      return this.opsChannel.presence.leave();
   }
 
   protected publishOperation(msg: Buffer): Promise<unknown> {
-    return this.traffic.publish(this.operations, '__op', msg);
+    return this.traffic.publish(this.opsChannel, '__op', msg);
   }
 
   protected present(): Observable<string> {
-    return inflateArray(this.operations.presence.get()).pipe(
+    return inflateArray(this.opsChannel.presence.get()).pipe(
       filter(present => present.data === '__live'),
       map(present => present.clientId));
   }

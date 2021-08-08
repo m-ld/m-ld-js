@@ -145,7 +145,7 @@ describe('Ably remotes', () => {
     const entry = new OperationMessage(prevTime.ticks,
       [2, time.ticks, time.toJSON(), '{}', '{}']);
     const updates = new Source<OperationMessage>();
-    remotes.setLocal(mockLocal({ updates }));
+    remotes.setLocal(mockLocal({ operations: updates }));
     updates.next(entry);
     expect(operations.publish).toHaveBeenCalledWith('__op', entry.encode());
   });

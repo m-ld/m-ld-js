@@ -14,10 +14,10 @@ export abstract class AbstractMeld implements Meld {
   protected static checkNotClosed =
     check((m: AbstractMeld) => !m._closed, () => new MeldError('Clone has closed'));
 
-  readonly updates: Observable<OperationMessage>;
+  readonly operations: Observable<OperationMessage>;
   readonly live: LiveValue<boolean | null>;
 
-  private readonly updateSource = new PauseableSource<OperationMessage>();
+  private readonly operationSource = new PauseableSource<OperationMessage>();
   private readonly liveSource: BehaviorSubject<boolean | null> = new BehaviorSubject(null);
   
   private _closed = false;
@@ -31,9 +31,9 @@ export abstract class AbstractMeld implements Meld {
     this.domain = config['@domain'];
     this.log = getIdLogger(this.constructor, this.id, config.logLevel ?? 'info');
 
-    // Update notifications are delayed to ensure internal processing has priority
-    this.updates = this.updateSource.pipe(observeOn(asapScheduler),
-      tap(msg => this.log.debug('has update', msg)));
+    // Operation notifications are delayed to ensure internal processing has priority
+    this.operations = this.operationSource.pipe(observeOn(asapScheduler),
+      tap(msg => this.log.debug('has operation', msg)));
 
     // Live notifications are distinct, only transitions are notified; an error
     // indicates a return to undecided liveness followed by completion.
@@ -46,8 +46,8 @@ export abstract class AbstractMeld implements Meld {
       live => this.log.debug('is', live == null ? 'gone' : live ? 'live' : 'dead'));
   }
 
-  protected nextUpdate = (update: OperationMessage) => this.updateSource.next(update);
-  protected pauseUpdates = (until: PromiseLike<unknown>) => this.updateSource.pause(until);
+  protected nextOperation = (op: OperationMessage) => this.operationSource.next(op);
+  protected pauseOperations = (until: PromiseLike<unknown>) => this.operationSource.pause(until);
 
   protected warnError = (err: any) => this.log.warn(err);
 
@@ -66,10 +66,10 @@ export abstract class AbstractMeld implements Meld {
   close(err?: any) {
     this._closed = true;
     if (err) {
-      this.updateSource.error(err);
+      this.operationSource.error(err);
       this.liveSource.error(err);
     } else {
-      this.updateSource.complete();
+      this.operationSource.complete();
       this.liveSource.complete();
     }
   }

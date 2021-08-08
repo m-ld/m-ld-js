@@ -1,4 +1,4 @@
-import { EncodedOperation, JsonBuffer, UUID } from '.';
+import { EncodedOperation, JsonBuffer } from '.';
 import { flatten, lazy } from './util';
 import { Context, ExpandedTermDef } from '../jrql-support';
 import { Iri } from 'jsonld/jsonld-spec';
@@ -13,6 +13,8 @@ import { gunzipSync, gzipSync } from 'zlib';
 import { CausalOperation, FusableCausalOperation } from './ops';
 
 const COMPRESS_THRESHOLD_BYTES = 1024;
+
+export type UUID = string;
 
 export class DomainContext implements Context {
   '@base': Iri;

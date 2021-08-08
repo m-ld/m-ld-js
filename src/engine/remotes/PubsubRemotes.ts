@@ -15,16 +15,51 @@ import { AbstractMeld } from '../AbstractMeld';
 import { MeldConfig, shortId } from '../../index';
 import { JsonNotification, NotifyParams, ReplyParams, SendParams } from './PubsubParams';
 
+/**
+ * A sub-publisher, used to temporarily address unicast messages to one peer clone. Sub-publishers
+ * are created on the demand of the {@link PubsubRemotes} base class, and are closed when no longer
+ * required. During its lifetime, the sub-publisher will only address one other clone.
+ * @see PubsubRemotes.sender
+ * @see PubsubRemotes.replier
+ * @see PubsubRemotes.notifier
+ */
 export interface SubPub {
+  /**
+   * Context-dependent identity of this sub-publisher, see usages for more information.
+   */
   readonly id: string;
+  /**
+   * Unicast a message to the peer addressed by this sub-publisher.
+   * @param msg the message payload to send
+   */
   publish(msg: Buffer): Promise<unknown>;
+  /**
+   * Optional tidy-up of this sub-publisher.
+   */
   close?(): void;
 }
 
 /** A m-ld ack is a reply to a reply with a null body */
-type ACK = null;
 const ACK = null;
+type ACK = typeof ACK;
 
+/**
+ * An abstract implementation of {@link MeldRemotes}, providing a common base for publish/subscribe
+ * message transports able to broadcast moderate-sized binary payloads between nodes.
+ *
+ * In addition to message broadcast, the subclass must also be able to provide:
+ * - A set of peer clone identities which are currently reachable ('present')
+ * - Unicasting of a single message or a stream of messages to _one_ other identified peer clone
+ *
+ * These functions may make use of the publish/subscribe service if it has such capability, or by
+ * any other means, as required.
+ *
+ * A subclass must:
+ * 1. Implement the abstract methods to broadcast, unicast, and obtain peer presence
+ * 1. Call the protected methods prefixed with "`on`" (`onConnect`, `onDisconnect`, `onNotify`,
+ * `onPresenceChange`, `onOperation`, `onReply`, `onSent`) when the relevant transport state
+ * change happens, or a message arrives
+ */
 export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes {
   private readonly localClone = new BehaviorSubject<MeldLocal | null>(null);
   private readonly replyResolvers: {
@@ -38,12 +73,12 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
   private readonly sendTimeout: number;
   private readonly activity: Set<PromiseLike<void>> = new Set;
   /**
-   * This is separate to liveness because decided liveness requires presence,
-   * which happens after connection. Connected =/=> decided liveness.
+   * This is separate to liveness because decided liveness requires presence, which is discovered
+   * after connection. Connected is not equivalent to decided-liveness.
    */
   private connected = new BehaviorSubject<boolean>(false);
 
-  constructor(config: MeldConfig) {
+  protected constructor(config: MeldConfig) {
     super(config);
     this.sendTimeout = config.networkTimeout ?? 5000;
   }
@@ -57,7 +92,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     } else if (this.clone == null) {
       this.clone = clone;
       // Start sending updates from the local clone to the remotes
-      clone.updates.subscribe({
+      clone.operations.subscribe({
         next: async msg => {
           // If we are not connected, we just ignore updates.
           // They will be replayed from the clone's journal on re-connection.
@@ -93,19 +128,60 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     }
   }
 
-  protected abstract setPresent(present: boolean): Promise<unknown>;
-
   /**
-   * Publishes a operation message with at-least-once guaranteed delivery.
+   * Broadcasts a operation message to all clones on the domain, not including the local one
+   * (messages **must not** be echoed).
    */
   protected abstract publishOperation(msg: Buffer): Promise<unknown>;
 
+  /**
+   * Retrieve a set of peer clone identities which are 'live' for recovery collaboration. A
+   * returned identity may be used to establish a unicast channel via {@link sender} or
+   * {@link notifier}.
+   *
+   * Note that while the return is an observable, the full set should be available quickly,
+   * comfortably with a single network timeout.
+   * @see MeldLocal.id
+   * @see Meld.live
+   */
   protected abstract present(): Observable<string>;
 
+  /**
+   * Indicate to other peer clones that the local clone is 'live' for recovery collaboration, or
+   * has gone away.
+   * @param present whether the local clone is available to other clones for recovery collaboration
+   * @see Meld.live
+   */
+  protected abstract setPresent(present: boolean): Promise<unknown>;
+
+  /**
+   * Allocate a new {@link SubPub sub-publisher} to address another clone with a stream of
+   * messages, via a notification 'channel'. Multiple channels may be allocated at the same time to
+   * the same recipient.
+   *
+   * The {@link SubPub.id} of the returned object **must** equal the {@link NotifyParams.channelId}
+   * of the parameter. TODO: refactor, make this warning unnecessary
+   * @param params details of the sender, intended recipient, and channel
+   */
   protected abstract notifier(params: NotifyParams): SubPub | Promise<SubPub>;
 
+  /**
+   * Allocate a new {@link SubPub sub-publisher} to address another clone with a single message,
+   * which may incur a {@link replier reply}.
+   *
+   * The {@link SubPub.id} of the returned object **must** equal the {@link SendParams.toId}
+   * of the parameter. TODO: refactor, make this warning unnecessary
+   * @param params details of the sender, intended recipient and message identity
+   */
   protected abstract sender(params: SendParams): SubPub | Promise<SubPub>;
 
+  /**
+   * Allocate a new {@link SubPub sub-publisher} to reply to a {@link sender sent} message.
+   *
+   * The {@link SubPub.id} of the returned object **must** equal the {@link SendParams.toId}
+   * of the parameter. TODO: refactor, make this warning unnecessary
+   * @param params details of the replier, sender, sent message identity and reply message identity
+   */
   protected abstract replier(params: ReplyParams): SubPub | Promise<SubPub>;
 
   async close(err?: any) {
@@ -174,17 +250,30 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     sw.stop();
   }
 
+  /**
+   * Call from the subclass when the transport is connected. Generally this indicates that the
+   * network is available and the publish/subscribe service has been reached.
+   */
   protected async onConnect() {
     this.connected.next(true);
     if (this.clone != null && this.clone.live.value === true)
       return this.cloneLive(true);
   }
 
+  /**
+   * Call from the subclass when the transport is disconnected. Generally this indicates that the
+   * network is unavailable or the publish/subscribe service is not reachable.
+   */
   protected onDisconnect() {
     this.connected.next(false);
     this.setLive(null);
   }
 
+  /**
+   * Call from the subclass when the set of present peer clone identities has changed, for example
+   * because a peer has become present. This **must** also be called after connection, when the
+   * presence set becomes available and {@link present} is callable without error.
+   */
   protected onPresenceChange() {
     // Don't process a presence change until connected
     this.connected.pipe(first(identity), tap(() => {
@@ -195,22 +284,33 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     })).subscribe();
   }
 
-  protected onRemoteUpdate(payload: Buffer) {
+  /**
+   * Call from the subclass when an operation message has arrived.
+   * @param payload the operation message payload
+   */
+  protected onOperation(payload: Buffer) {
     const update = OperationMessage.decode(payload);
     if (update)
-      this.nextUpdate(update);
+      this.nextOperation(update);
     else
       // This is extremely bad - may indicate a bad actor
       this.closeSafely(new MeldError('Bad update'));
   }
 
+  /**
+   * Call from the subclass when a message has been sent intended for the local clone.
+   * @param payload the sent message payload
+   * @param sentParams details of the sender, recipient (always the local clone
+   *   {@link MeldLocal.id identity}, and message identity
+   * @see sender
+   */
   protected async onSent(payload: Buffer, sentParams: SendParams) {
     // Ignore control messages before we have a clone
     const replyRejected = (err: any) => {
       this.reply(sentParams, new Response.Rejected(asMeldErrorStatus(err)))
         .catch(this.warnError);
       throw err;
-    }
+    };
     if (this.clone) {
       // Keep track of long-running activity so that we can shut down cleanly
       const active = this.active();
@@ -220,7 +320,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
         if (req instanceof Request.NewClock) {
           sw.next('clock');
           const clock = await this.clone.newClock().catch(replyRejected);
-          sw.lap.next('send')
+          sw.lap.next('send');
           await this.replyClock(sentParams, clock);
         } else if (req instanceof Request.Snapshot) {
           sw.next('snapshot');
@@ -243,6 +343,13 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     }
   }
 
+  /**
+   * Call from the subclass when a reply arrives to a message {@link sender sent} by us.
+   * @param payload the reply message payload
+   * @param replyParams details of the sender, recipient (always the local clone
+   *   {@link MeldLocal.id identity}, original sent message identity and reply message identity
+   * @see replier
+   */
   protected async onReply(payload: Buffer, replyParams: ReplyParams) {
     if (replyParams.sentMessageId in this.replyResolvers) {
       try {
@@ -259,6 +366,12 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     }
   }
 
+  /**
+   * Call from the subclass when a single message arrives from a notification 'channel'.
+   * @param channelId the notification channel identifier
+   * @param payload the notified message payload
+   * @see notifier
+   */
   protected onNotify(channelId: string, payload: Buffer) {
     if (channelId in this.consuming) {
       const json = MsgPack.decode(payload);
@@ -315,7 +428,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     await sent;
     // If the caller doesn't like this response, try again
     return tried[sender.id].then(rtn => check == null || check(rtn.res) ? rtn :
-      this.send(request, { readyToAck, check, sw }, tried, messageId),
+        this.send(request, { readyToAck, check, sw }, tried, messageId),
       () => this.send(request, { readyToAck, check, sw }, tried, messageId));
   }
 
@@ -360,7 +473,9 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
 
   private active(): Future {
     const active = new Future();
-    const done = active.then(() => { this.activity.delete(done); });
+    const done = active.then(() => {
+      this.activity.delete(done);
+    });
     this.activity.add(done);
     return active;
   }
@@ -428,7 +543,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     const notifyError = (error: any) => {
       this.log.warn('Notifying error on', notifier.id, error);
       return notify({ error: toJSON(error) });
-    }
+    };
     const notifyComplete = () => {
       this.log.debug(`Completed production of ${type} on ${notifier.id}`);
       return notify({ complete: true });
@@ -444,9 +559,12 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
       materialize(),
       concatMap(notification => {
         switch (notification.kind) {
-          case 'N': return notify({ next: notification.value });
-          case 'E': return notifyError(notification.error);
-          case 'C': return notifyComplete();
+          case 'N':
+            return notify({ next: notification.value });
+          case 'E':
+            return notifyError(notification.error);
+          case 'C':
+            return notifyComplete();
         }
       }),
       finalize(() => notifier.close?.())));

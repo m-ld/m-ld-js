@@ -27,7 +27,7 @@ export function mockRemotes(
   return {
     ...mock<MeldRemotes>(),
     setLocal: () => {},
-    updates,
+    operations: updates,
     live: Array.isArray(lives) ? hotLive(lives) : lives,
     newClock: () => Promise.resolve(newClock)
   };
@@ -51,7 +51,7 @@ export function mockLocal(
   MeldLocal & { liveSource: Observer<boolean | null> } {
   const live = hotLive(lives);
   // This weirdness is due to jest-mock-extended trying to mock arrays
-  return { ...mock<MeldLocal>(), updates: NEVER, live, liveSource: live, ...impl };
+  return { ...mock<MeldLocal>(), operations: NEVER, live, liveSource: live, ...impl };
 }
 
 /**

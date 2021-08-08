@@ -64,7 +64,7 @@ export class MqttRemotes extends PubsubRemotes {
     this.mqtt.on('message', (topic, payload) => {
       this.operationsTopic.match(topic, params => {
         if (params.clientId !== this.id) // Prevent echo
-          this.onRemoteUpdate(payload);
+          this.onOperation(payload);
       });
       this.sentTopic.match(topic, sent => this.onSent(payload, sent));
       this.replyTopic.match(topic, replied => this.onReply(payload, replied));

@@ -84,7 +84,7 @@ describe('New MQTT remotes', () => {
         data: [2, time.ticked().ticks, time.ticked().toJSON(), '{}', '{}']
       }));
       await expect(new Promise((resolve) => {
-        remotes.updates.subscribe({ next: resolve });
+        remotes.operations.subscribe({ next: resolve });
       })).resolves.toHaveProperty('data');
     });
 
@@ -114,14 +114,14 @@ describe('New MQTT remotes', () => {
       await comesAlive(remotes);
 
       const entry = new MockProcess(TreeClock.GENESIS.forked().left).sentOperation('{}', '{}');
-      const updates = new Source<OperationMessage>();
-      remotes.setLocal(mockLocal({ updates }));
+      const operations = new Source<OperationMessage>();
+      remotes.setLocal(mockLocal({ operations }));
       // Setting retained presence on the channel
       expect(mqtt.publish).lastCalledWith(
         '__presence/test.m-ld.org/client1',
         '{"client1":"test.m-ld.org/control"}',
         { qos: 1, retain: true });
-      updates.next(entry);
+      operations.next(entry);
       expect(mqtt.publish).toBeCalled();
       await mqtt.lastPublish();
       await expect(entry.delivered).resolves.toBeUndefined();
@@ -133,14 +133,14 @@ describe('New MQTT remotes', () => {
         '{"consumer2":"test.m-ld.org/control"}');
       await comesAlive(remotes);
 
-      const updates = new Source<OperationMessage>();
-      remotes.setLocal(mockLocal({ updates }));
+      const operations = new Source<OperationMessage>();
+      remotes.setLocal(mockLocal({ operations }));
 
       mqtt.publish.mockReturnValue(<any>Promise.reject('Delivery failed'));
 
-      updates.next(new MockProcess(TreeClock.GENESIS.forked().left).sentOperation('{}', '{}'));
+      operations.next(new MockProcess(TreeClock.GENESIS.forked().left).sentOperation('{}', '{}'));
 
-      await expect(firstValueFrom(remotes.updates)).rejects.toBe('Delivery failed');
+      await expect(firstValueFrom(remotes.operations)).rejects.toBe('Delivery failed');
     });
 
     test('live goes unknown if mqtt closes', async () => {
@@ -149,9 +149,9 @@ describe('New MQTT remotes', () => {
     });
 
     test('closes with local clone', async () => {
-      const updates = new Source<OperationMessage>();
-      remotes.setLocal(mockLocal({ updates }));
-      updates.complete();
+      const operations = new Source<OperationMessage>();
+      remotes.setLocal(mockLocal({ operations }));
+      operations.complete();
       remotes.setLocal(null);
 
       expect(mqtt.publish).lastCalledWith(

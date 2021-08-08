@@ -1,18 +1,18 @@
-import { OperationMessage, MeldRemotes } from '..';
-import { LiveValue } from "../LiveValue";
-import { Observable, merge, NEVER, BehaviorSubject, from } from 'rxjs';
-import { delayUntil, Future, tapLast, onErrorNever, HotSwitch, settled } from '../util';
+import { MeldRemotes, OperationMessage } from '..';
+import { LiveValue } from '../LiveValue';
+import { BehaviorSubject, merge, NEVER, Observable } from 'rxjs';
+import { delayUntil, Future, HotSwitch, onErrorNever, settled, tapLast } from '../util';
 
-export class RemoteUpdates {
+export class RemoteOperations {
   private readonly outdatedState = new BehaviorSubject<boolean>(true);
-  private readonly updates = new HotSwitch<OperationMessage>();
+  private readonly operations = new HotSwitch<OperationMessage>();
 
   constructor(
     private readonly remotes: MeldRemotes) {
   }
 
   get receiving(): Observable<OperationMessage> {
-    return this.updates;
+    return this.operations;
   }
 
   get outdated(): LiveValue<boolean> {
@@ -29,21 +29,21 @@ export class RemoteUpdates {
   detach = (outdated?: 'outdated') => {
     if (outdated)
       this.outdatedState.next(true);
-    this.updates.switch(NEVER);
+    this.operations.switch(NEVER);
   };
 
   attach(revups: Observable<OperationMessage>): Promise<unknown> {
     const lastRevup = new Future<OperationMessage | undefined>();
     // Push the rev-up to next tick - probably only for unit tests' sake
     setImmediate(() => {
-      // Updates must be paused during revups because the collaborator might
-      // send an update while also sending revups of its own prior updates.
+      // Operations must be paused during revups because the collaborator might
+      // send an update while also sending revups of its own prior operations.
       // That would break the fifo guarantee.
-      this.updates.switch(merge(
+      this.operations.switch(merge(
         // Errors should be handled in the returned promise
         onErrorNever(revups.pipe(tapLast(lastRevup))),
         // If the revups error, we will detach, below
-        this.remotes.updates.pipe(delayUntil(settled(lastRevup)))));
+        this.remotes.operations.pipe(delayUntil(settled(lastRevup)))));
       lastRevup.then(
         async (lastRevup: OperationMessage | undefined) => {
           // Here, we are definitely before the first post-revup update, but
@@ -53,7 +53,7 @@ export class RemoteUpdates {
           this.outdatedState.next(false);
         },
         // Rev-up failed - detached and nothing-doing
-        () => this.updates.switch(NEVER));
+        () => this.operations.switch(NEVER));
     });
     return Promise.resolve(lastRevup);
   }

@@ -19,7 +19,7 @@ import { LockManager } from '../locks';
 import { levels } from 'loglevel';
 import { AbstractMeld, comesAlive } from '../AbstractMeld';
 import { GraphSubject, MeldConfig } from '../..';
-import { RemoteUpdates } from './RemoteUpdates';
+import { RemoteOperations } from './RemoteOperations';
 import { CloneEngine } from '../StateEngine';
 import { MeldError, MeldErrorStatus } from '../MeldError';
 import { TransformIterator, wrap } from 'asynciterator';
@@ -42,8 +42,8 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
   private readonly dataset: SuSetDataset;
   private messageService: TreeClockMessageService;
   private readonly orderingBuffer: OperationMessage[] = [];
-  private readonly remotes: Omit<MeldRemotes, 'updates'>;
-  private readonly remoteUpdates: RemoteUpdates;
+  private readonly remotes: Omit<MeldRemotes, 'operations'>;
+  private readonly remoteOps: RemoteOperations;
   private subs = new Subscription;
   readonly lock = new LockManager<'live' | 'state'>();
   // FIXME: New clone flag should be inferred from the journal (e.g. tail has no
@@ -67,15 +67,11 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
       .pipe(map(update => update['@ticks']))
       .subscribe(this.latestTicks));
     this.remotes = remotes;
-    this.remoteUpdates = new RemoteUpdates(remotes);
+    this.remoteOps = new RemoteOperations(remotes);
     this.networkTimeout = config.networkTimeout ?? 5000;
     this.genesisClaim = config.genesis;
     this.status = this.createStatus();
     this.subs.add(this.status.subscribe(status => this.log.debug(status)));
-  }
-
-  get encoder() {
-    return this.dataset;
   }
 
   /**
@@ -106,7 +102,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
 
     // Revving-up will inject missed messages so the ordering buffer is
     // redundant when outdated, even if the remotes were previously attached.
-    this.subs.add(this.remoteUpdates.outdated.subscribe(outdated => {
+    this.subs.add(this.remoteOps.outdated.subscribe(outdated => {
       if (outdated && this.orderingBuffer.length > 0) {
         this.log.info(`Discarding ${this.orderingBuffer.length} items from ordering buffer`);
         this.orderingBuffer.length = 0;
@@ -169,7 +165,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
    * timeout. This observables are subscribed in the initialise() method.
    */
   private get operationProblems(): Observable<OperationOutcome> {
-    const [disordered, maybeBuffering] = partition(this.remoteUpdates.receiving.pipe(
+    const [disordered, maybeBuffering] = partition(this.remoteOps.receiving.pipe(
       mergeMap(op => this.acceptRemoteOperation(op)), share()),
       outcome => outcome === OperationOutcome.DISORDERED);
     // Disordered messages are an immediate problem, buffering only if chronic
@@ -189,7 +185,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
           this.log.debug('Messages were out of order, but now cleared.');
           return false;
         }
-      }))).pipe(tap(() => this.remoteUpdates.detach('outdated')));
+      }))).pipe(tap(() => this.remoteOps.detach('outdated')));
   }
 
   private async acceptRemoteOperation(op: OperationMessage): Promise<OperationOutcome> {
@@ -223,9 +219,9 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
         });
         // The applys will enqueue in order on the dataset's transaction lock
         await Promise.all(applys.map(async ([msg, localTime, cxnTime]) => {
-          const cxUpdate = await this.dataset.apply(msg, localTime, cxnTime);
-          if (cxUpdate != null)
-            this.nextUpdate(cxUpdate);
+          const cxOp = await this.dataset.apply(msg, localTime, cxnTime);
+          if (cxOp != null)
+            this.nextOperation(cxOp);
           msg.delivered.resolve();
         }));
         return accepted ? OperationOutcome.ACCEPTED : OperationOutcome.BUFFERED;
@@ -248,8 +244,8 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
   private decideLive(): Observable<ConnectStyle> {
     return new Observable(retry => {
       // As soon as a decision on liveness needs to be made, pause output
-      // updates to mitigate against breaking fifo with emitOpsSince(). 
-      this.pauseUpdates(
+      // operations to mitigate against breaking fifo with emitOpsSince().
+      this.pauseOperations(
         // Also block transactions, revups and other connect attempts.
         this.lock.exclusive('live', async () => {
           const remotesLive = this.remotes.live.value;
@@ -260,8 +256,8 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
             await this.connect(retry);
             this.setLive(true);
           } else {
-            // Stop receiving updates until re-connect, do not change outdated
-            this.remoteUpdates.detach();
+            // Stop receiving operations until re-connect, do not change outdated
+            this.remoteOps.detach();
             if (remotesLive === false) {
               // We are the silo, the last survivor.
               if (this.newClone)
@@ -309,7 +305,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
 
   /**
    * This method returns async as soon as the revup has started. There may
-   * still be updates incoming from the collaborator.
+   * still be operations incoming from the collaborator.
    * @param retry to be notified of collaboration completion
    * @see decideLive return value
    * @returns `true` if the rev-up request found a collaborator
@@ -330,7 +326,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
 
   /**
    * This method returns async as soon as the snapshot is delivered. There may
-   * still be updates incoming from the collaborator.
+   * still be operations incoming from the collaborator.
    * @param retry to be notified of collaboration completion
    * @see decideLive return value
    */
@@ -369,13 +365,13 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
       if (recent == null)
         throw new MeldError('Clone outdated', `Missing local ticks since ${recovery.gwc}`);
       else
-        return toReturn(recent.pipe(tap(this.nextUpdate)));
+        return toReturn(recent.pipe(tap(this.nextOperation)));
     }
   }
 
   private acceptRecoveryUpdates(
     updates: Observable<OperationMessage>, retry: Subscriber<ConnectStyle>) {
-    this.remoteUpdates.attach(updates).then(() => {
+    this.remoteOps.attach(updates).then(() => {
       // If we were a new clone, we're up-to-date now
       this.log.info('connected');
       this.newClone = false;
@@ -447,7 +443,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
       // #1 Anything currently in our ordering buffer
       from(this.orderingBuffer),
       // #2 Anything that arrives stamped prior to now
-      this.remoteUpdates.receiving.pipe(
+      this.remoteOps.receiving.pipe(
         filter(message => message.time.anyLt(now)),
         takeUntil(from(until)))).pipe(tap(msg =>
       this.log.debug('Forwarding update', msg)));
@@ -484,7 +480,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
         [sendTime, await this.dataset.write(request)]);
       // Publish the operation
       if (update != null)
-        this.nextUpdate(update);
+        this.nextOperation(update);
     });
     return this;
   }
@@ -499,7 +495,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
     const stateRollup = liveRollup({
       live: this.live,
       remotesLive: this.remotes.live,
-      outdated: this.remoteUpdates.outdated,
+      outdated: this.remoteOps.outdated,
       ticks: this.latestTicks
     });
     const toStatus = (state: typeof stateRollup['value']): MeldStatus => {
@@ -539,7 +535,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
 
     // Make sure we never receive another remote update
     this.subs.unsubscribe();
-    this.remoteUpdates.close(err);
+    this.remoteOps.close(err);
     this.remotes.setLocal(null);
 
     if (this.orderingBuffer.length) {

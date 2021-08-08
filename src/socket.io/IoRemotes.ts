@@ -36,7 +36,7 @@ export class IoRemotes extends PubsubRemotes {
       .on('connect', () => this.onConnect())
       .on('disconnect', () => this.onDisconnect())
       .on('presence', () => this.onPresenceChange())
-      .on('operation', (payload: Buffer) => this.onRemoteUpdate(payload))
+      .on('operation', (payload: Buffer) => this.onOperation(payload))
       .on('send', (params: SendParams, msg: Buffer) => this.onSent(msg, params))
       .on('reply', (params: ReplyParams, msg: Buffer) => this.onReply(msg, params))
       .on('notify', (params: NotifyParams, msg: Buffer) => this.onNotify(params.channelId, msg));

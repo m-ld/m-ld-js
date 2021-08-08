@@ -1,11 +1,11 @@
 import { MeldConstraint, MeldReadState, MeldUpdate } from '../../api';
-import { OperationMessage, Snapshot, UUID } from '..';
+import { OperationMessage, Snapshot } from '..';
 import { GlobalClock, TickTree, TreeClock } from '../clocks';
 import { Context, Subject, Write } from '../../jrql-support';
 import { Dataset, PatchQuads } from '.';
 import { Iri } from 'jsonld/jsonld-spec';
 import { JrqlGraph } from './JrqlGraph';
-import { MeldEncoder, MeldOperation, TriplesTids, unreify } from '../MeldEncoding';
+import { MeldEncoder, MeldOperation, TriplesTids, unreify, UUID } from '../MeldEncoding';
 import { EMPTY, firstValueFrom, merge, Observable, of, Subject as Source } from 'rxjs';
 import { bufferCount, expand, filter, map, mergeMap, takeWhile, toArray } from 'rxjs/operators';
 import { check, completed, flatten, Future, getIdLogger, inflate, inflateArray } from '../util';

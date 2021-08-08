@@ -342,7 +342,7 @@ describe('Dataset engine', () => {
       clone = new DatasetEngine({
         dataset: await memStore({ backend }), remotes, config: testConfig()
       });
-      const observedTicks = firstValueFrom(clone.updates.pipe(map(next => next.time.ticks),
+      const observedTicks = firstValueFrom(clone.operations.pipe(map(next => next.time.ticks),
         take(2), toArray()));
       await clone.initialise();
       // Do a new update during rev-up, this will immediately produce an update
