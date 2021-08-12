@@ -138,7 +138,14 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
    * Retrieve a set of peer clone identities which are 'live' for recovery collaboration. A
    * returned identity may be used to establish a unicast channel via {@link sender} or
    * {@link notifier}.
-   *
+   * <p>
+   * The subclass can choose whether to return the identities of _all_ other 'present' clones (who
+   * have called {@link setPresent} locally), or some subset. To not include the identity of some
+   * clone can prevent unwanted load, for example if the clone has restricted compute resources;
+   * but this symmetrically increases the potential for load on clones that _are_ included. It may
+   * also be most efficient to route all sent messages to some central clones, in a hub-and-spoke
+   * architecture.
+   * <p>
    * Note that while the return is an observable, the full set should be available quickly,
    * comfortably with a single network timeout.
    * @see MeldLocal.id
@@ -147,9 +154,11 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
   protected abstract present(): Observable<string>;
 
   /**
-   * Indicate to other peer clones that the local clone is 'live' for recovery collaboration, or
-   * has gone away.
-   * @param present whether the local clone is available to other clones for recovery collaboration
+   * Called to indicate whether the local clone is 'live' for recovery collaboration.
+   * <p>
+   * The implementation can choose whether to actually make this clone available in other peers'
+   * {@link present} sets.
+   * @param present whether the local clone is available for recovery collaboration
    * @see Meld.live
    */
   protected abstract setPresent(present: boolean): Promise<unknown>;
