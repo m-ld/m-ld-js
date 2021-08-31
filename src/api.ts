@@ -329,7 +329,7 @@ export interface MeldClone extends MeldStateMachine {
  * constraint requires to know the final state, it must infer it from the given
  * reader and the update.
  *
- * @see [m-ld concurrency](http://m-ld/org/doc/#concurrency)
+ * @see [m-ld concurrency](http://m-ld.org/doc/#concurrency)
  */
 export interface MeldConstraint {
   /**
