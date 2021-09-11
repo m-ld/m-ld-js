@@ -1,1 +1,1 @@
-export { IoRemotes } from './IoRemotes';
+export { IoRemotes, MeldIoConfig } from './IoRemotes';
