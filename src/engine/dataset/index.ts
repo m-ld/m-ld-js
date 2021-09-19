@@ -8,7 +8,7 @@ import {
 } from 'abstract-leveldown';
 import { Observable } from 'rxjs';
 import { generate as uuid } from 'short-uuid';
-import { check, observeAsyncIterator, Stopwatch } from '../util';
+import { check, Stopwatch } from '../util';
 import { LockManager } from '../locks';
 import { BatchOpts, Binding, ResultType } from 'quadstore/dist/lib/types';
 import { Context, Iri } from 'jsonld/jsonld-spec';
@@ -17,9 +17,10 @@ import { Algebra } from 'sparqlalgebrajs';
 import { newEngine } from 'quadstore-comunica';
 import { DataFactory as RdfDataFactory } from 'rdf-data-factory';
 import { JRQL, M_LD, QS, RDF, XS } from '../../ns';
-import { empty, EmptyIterator, wrap } from 'asynciterator';
+import { AsyncIterator, empty, EmptyIterator, TransformIterator, wrap } from 'asynciterator';
 import { MutableOperation } from '../ops';
 import { MeldError } from '../MeldError';
+import { CountableRdf, QueryableRdfSource } from '../../rdfjs-support';
 import type EventEmitter = require('events');
 
 /**
@@ -108,13 +109,13 @@ const notClosed = check((d: Dataset) => !d.closed,
 /**
  * Read-only utility interface for reading Quads from a Dataset.
  */
-export interface Graph extends RdfFactory, QuadSource {
+export interface Graph extends RdfFactory, QueryableRdfSource {
   readonly name: GraphName;
 
-  query(...args: Parameters<QuadSource['match']>): Observable<Quad>;
-  query(query: Algebra.Construct): Observable<Quad>;
-  query(query: Algebra.Describe): Observable<Quad>;
-  query(query: Algebra.Project): Observable<Binding>;
+  query(...args: Parameters<QuadSource['match']>): AsyncIterator<Quad>;
+  query(query: Algebra.Construct): AsyncIterator<Quad>;
+  query(query: Algebra.Describe): AsyncIterator<Quad>;
+  query(query: Algebra.Project): AsyncIterator<Binding>;
 }
 
 /**
@@ -329,7 +330,7 @@ class QuadStoreGraph implements Graph {
     readonly name: GraphName) {
   }
 
-  match: QuadSource['match'] = (subject, predicate, object, graph) => {
+  match: Graph['match'] = (subject, predicate, object, graph) => {
     if (graph != null && !graph.equals(this.name))
       return empty();
     else
@@ -337,13 +338,21 @@ class QuadStoreGraph implements Graph {
       return (<QuadSource>this.dataset.store).match(subject, predicate, object, this.name);
   };
 
-  query(...args: Parameters<QuadSource['match']>): Observable<Quad>;
-  query(query: Algebra.Construct): Observable<Quad>;
-  query(query: Algebra.Describe): Observable<Quad>;
-  query(query: Algebra.Project): Observable<Binding>;
+  countQuads: Graph['countQuads'] = async (subject, predicate, object, graph) => {
+    if (graph != null && !graph.equals(this.name))
+      return 0;
+    else
+      // Must specify graph term due to optimised indexing
+      return (<CountableRdf>this.dataset.store).countQuads(subject, predicate, object, this.name);
+  };
+
+  query(...args: Parameters<QuadSource['match']>): AsyncIterator<Quad>;
+  query(query: Algebra.Construct): AsyncIterator<Quad>;
+  query(query: Algebra.Describe): AsyncIterator<Quad>;
+  query(query: Algebra.Project): AsyncIterator<Binding>;
   query(...args: Parameters<QuadSource['match']> |
-    [Algebra.Construct | Algebra.Describe | Algebra.Project]): Observable<Binding | Quad> {
-    return observeAsyncIterator(async () => {
+    [Algebra.Construct | Algebra.Describe | Algebra.Project]): AsyncIterator<Binding | Quad> {
+    return new TransformIterator<Binding | Quad>(async () => {
       try {
         const [query] = args;
         if (query != null && 'type' in query) {
@@ -351,7 +360,7 @@ class QuadStoreGraph implements Graph {
           if (stream.type === ResultType.BINDINGS || stream.type === ResultType.QUADS)
             return stream.iterator;
         } else {
-          return wrap(this.match(...<Parameters<QuadSource['match']>>args));
+          return wrap<Quad>(this.match(...<Parameters<QuadSource['match']>>args));
         }
       } catch (err) {
         // TODO: Comunica bug? Cannot read property 'close' of undefined, if stream empty
@@ -365,14 +374,13 @@ class QuadStoreGraph implements Graph {
 
   skolem = () => this.dataset.rdf.namedNode(
     new URL(`/.well-known/genid/${uuid()}`, this.dataset.base).href);
-
   namedNode = this.dataset.rdf.namedNode;
   // noinspection JSUnusedGlobalSymbols
   blankNode = this.dataset.rdf.blankNode;
   literal = this.dataset.rdf.literal;
   variable = this.dataset.rdf.variable;
-  defaultGraph = this.dataset.rdf.defaultGraph;
 
+  defaultGraph = this.dataset.rdf.defaultGraph;
   quad = (subject: Quad_Subject, predicate: Quad_Predicate, object: Quad_Object) =>
     this.dataset.rdf.quad(subject, predicate, object, this.name);
 }

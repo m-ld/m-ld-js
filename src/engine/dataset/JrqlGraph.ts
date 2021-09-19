@@ -5,26 +5,28 @@ import {
 } from '../../jrql-support';
 import { Graph, PatchQuads } from '.';
 import { groupBy, map, mergeMap, reduce, toArray } from 'rxjs/operators';
-import { EMPTY, merge, Observable, of, throwError } from 'rxjs';
-import { canPosition, inPosition, NamedNode, Quad, Term, TriplePos } from '../quads';
+import { defaultIfEmpty, EMPTY, firstValueFrom, merge, Observable, of, throwError } from 'rxjs';
+import {
+  canPosition, inPosition, NamedNode, Quad, QueryableRdfSourceProxy, Term, TriplePos
+} from '../quads';
 import { ActiveContext, expandTerm, initialCtx, nextCtx } from '../jsonld';
-import { Binding } from 'quadstore';
 import { Algebra, Factory as SparqlFactory } from 'sparqlalgebrajs';
 import { JRQL } from '../../ns';
 import { JrqlQuads } from './JrqlQuads';
 import { MeldError } from '../MeldError';
-import { anyName, array, GraphSubject } from '../..';
-import { binaryFold, flatten, inflate, isArray } from '../util';
+import { anyName, array, GraphSubject, ReadResult, readResult } from '../..';
+import { binaryFold, flatten, inflate, isArray, observeAsyncIterator } from '../util';
 import { ConstructTemplate } from './ConstructTemplate';
+import { Binding } from '../../rdfjs-support';
 
 /**
  * A graph wrapper that provides low-level json-rql handling for queries. The
  * write methods don't actually make changes but produce Patches which can then
  * be applied to a Dataset.
  */
-export class JrqlGraph {
-  sparql: SparqlFactory;
-  jrql: JrqlQuads;
+export class JrqlGraph extends QueryableRdfSourceProxy {
+  readonly sparql: SparqlFactory;
+  readonly jrql: JrqlQuads;
 
   /**
    * @param graph a quads graph to operate on
@@ -33,12 +35,13 @@ export class JrqlGraph {
   constructor(
     readonly graph: Graph,
     readonly defaultCtx = initialCtx()) {
+    super(graph);
     this.sparql = new SparqlFactory(graph);
     this.jrql = new JrqlQuads(graph);
   }
 
-  read(query: Read, ctx = this.defaultCtx): Observable<GraphSubject> {
-    return inflate(nextCtx(ctx, query['@context']), ctx => {
+  read(query: Read, ctx = this.defaultCtx): ReadResult {
+    return readResult(inflate(nextCtx(ctx, query['@context']), ctx => {
       if (isDescribe(query))
         return this.describe(array(query['@describe']), query['@where'], ctx);
       else if (isSelect(query) && query['@where'] != null)
@@ -47,7 +50,7 @@ export class JrqlGraph {
         return this.construct(query['@construct'], query['@where'], ctx);
       else
         return throwError(() => new MeldError('Unsupported pattern', 'Read type not supported.'));
-    });
+    }));
   }
 
   async write(query: Write, ctx = this.defaultCtx): Promise<PatchQuads> {
@@ -82,7 +85,7 @@ export class JrqlGraph {
           described: this.graph.variable(describedVarName)
         };
         return this.solutions(where ?? {}, op =>
-          this.graph.query(this.sparql.createProject(
+          observeAsyncIterator(this.graph.query(this.sparql.createProject(
             this.sparql.createJoin(
               // Sub-select DISTINCT to fetch subject ids
               this.sparql.createDistinct(
@@ -91,12 +94,12 @@ export class JrqlGraph {
                     this.sparql.createTermExpression(vars.described)),
                   [vars.subject])),
               this.gatherSubjectData(vars)),
-            [vars.subject, vars.property, vars.value, vars.item])), ctx).pipe(
-              // TODO: Ordering annoyance: sometimes subjects interleave, so
-              // cannot use toArrays(quad => quad.subject.value),
-              groupBy(binding => this.bound(binding, vars.subject)),
-              mergeMap(subjectBindings => subjectBindings.pipe(toArray())),
-              map(subjectBindings => this.toSubject(subjectBindings, vars, ctx)));
+            [vars.subject, vars.property, vars.value, vars.item]))), ctx).pipe(
+          // TODO: Ordering annoyance: sometimes subjects interleave, so
+          // cannot use toArrays(quad => quad.subject.value),
+          groupBy(binding => this.bound(binding, vars.subject)),
+          mergeMap(subjectBindings => subjectBindings.pipe(toArray())),
+          map(subjectBindings => this.toSubject(subjectBindings, vars, ctx)));
       } else {
         return this.describe1(describe, ctx);
       }
@@ -110,8 +113,12 @@ export class JrqlGraph {
     };
     const projection = this.sparql.createProject(
       this.gatherSubjectData(vars), [vars.property, vars.value, vars.item]);
-    return this.graph.query(projection).pipe(toArray(), mergeMap(bindings =>
+    return observeAsyncIterator(this.graph.query(projection)).pipe(toArray(), mergeMap(bindings =>
       bindings.length ? of(this.toSubject(bindings, vars, ctx)) : EMPTY));
+  }
+
+  get(id: string) {
+    return firstValueFrom(this.describe1(id).pipe(defaultIfEmpty(undefined)));
   }
 
   construct(construct: Subject | Subject[],
@@ -133,7 +140,7 @@ export class JrqlGraph {
         inPosition('subject', this.bound(binding, terms.subject)),
         inPosition('predicate', this.bound(binding, terms.property)),
         inPosition('object', this.bound(binding, item == null ? terms.value : item)),
-        this.graph.name))
+        this.graph.name));
       return quads;
     }, [[], []]), ctx);
   }
@@ -152,7 +159,7 @@ export class JrqlGraph {
   }
 
   findQuads(id: Iri, ctx = this.defaultCtx): Observable<Quad> {
-    return this.graph.query(this.resolve(id, ctx));
+    return observeAsyncIterator(this.graph.query(this.resolve(id, ctx)));
   }
 
   private async update(query: Update, ctx: ActiveContext): Promise<PatchQuads> {
@@ -204,7 +211,7 @@ export class JrqlGraph {
   private toPattern = (quad: Quad): Algebra.Pattern => {
     return this.sparql.createPattern(
       quad.subject, quad.predicate, quad.object, quad.graph);
-  }
+  };
 
   private solutions<T>(where: Subject | Subject[] | Group,
     exec: (op: Algebra.Operation, vars: Iterable<string>) => Observable<T>,
@@ -297,9 +304,9 @@ export class JrqlGraph {
   }
 
   private project = (op: Algebra.Operation, vars: Iterable<string>): Observable<Binding> => {
-    return this.graph.query(this.sparql.createProject(op,
-      [...vars].map(varName => this.graph.variable(varName))));
-  }
+    return observeAsyncIterator(this.graph.query(this.sparql.createProject(op,
+      [...vars].map(varName => this.graph.variable(varName)))));
+  };
 
   private fillTemplate(quads: Quad[], binding: Binding): Quad[] {
     return quads.map(quad => this.graph.quad(

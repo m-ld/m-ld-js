@@ -22,8 +22,8 @@ import { GraphSubject, MeldConfig } from '../..';
 import { RemoteOperations } from './RemoteOperations';
 import { CloneEngine } from '../StateEngine';
 import { MeldError, MeldErrorStatus } from '../MeldError';
-import { TransformIterator, wrap } from 'asynciterator';
-import { QuadSource } from '../quads';
+import { AsyncIterator, TransformIterator, wrap } from 'asynciterator';
+import { BaseStream } from '../../rdfjs-support';
 
 enum ConnectStyle {
   SOFT, HARD
@@ -53,6 +53,8 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
   private readonly networkTimeout: number;
   private readonly genesisClaim: boolean;
   readonly status: Observable<MeldStatus> & LiveStatus;
+  /*readonly*/ match: CloneEngine['match'];
+  /*readonly*/ query: CloneEngine['query'];
 
   constructor({ dataset, remotes, constraints, config, context }: {
     dataset: Dataset;
@@ -88,6 +90,11 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
   @AbstractMeld.checkNotClosed.async
   async initialise(): Promise<void> {
     await this.dataset.initialise();
+    // Raw RDF methods just pass through to the dataset when its initialised
+    this.match = this.wrapStreamFn(this.dataset.match.bind(this.dataset));
+    // @ts-ignore - TS can't cope with overloaded query method
+    this.query = this.wrapStreamFn(this.dataset.query.bind(this.dataset));
+
     this.remotes.setLocal(this);
     // Establish a clock for this clone
     let time = await this.dataset.loadClock();
@@ -166,7 +173,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
    */
   private get operationProblems(): Observable<OperationOutcome> {
     const [disordered, maybeBuffering] = partition(this.remoteOps.receiving.pipe(
-      mergeMap(op => this.acceptRemoteOperation(op)), share()),
+        mergeMap(op => this.acceptRemoteOperation(op)), share()),
       outcome => outcome === OperationOutcome.DISORDERED);
     // Disordered messages are an immediate problem, buffering only if chronic
     return merge(disordered, maybeBuffering.pipe(
@@ -281,7 +288,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
    */
   private async connect(retry: Subscriber<ConnectStyle>) {
     this.log.info(this.newClone ? 'new clone' :
-      this.live.value === true && this.remotes.live.value === false ? 'silo' : 'clone',
+        this.live.value === true && this.remotes.live.value === false ? 'silo' : 'clone',
       'connecting to remotes');
     try {
       if (this.newClone || !(await this.requestRevup(retry)))
@@ -449,11 +456,18 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
       this.log.debug('Forwarding update', msg)));
   }
 
-  match: QuadSource['match'] = (...args) => {
-    return new TransformIterator(this.closed ?
-      Promise.reject(new MeldError('Clone has closed')) :
-      this.lock.share('live', async () => wrap(this.dataset.match(...args))));
-  };
+  @AbstractMeld.checkNotClosed.async
+  countQuads(...args: Parameters<CloneEngine['match']>): Promise<number> {
+    return this.dataset.countQuads(...args);
+  }
+
+  private wrapStreamFn<P extends any[], T>(fn: (...args: P) => BaseStream<T>): ((...args: P) => AsyncIterator<T>) {
+    return (...args) => {
+      return new TransformIterator<T>(this.closed ?
+        Promise.reject(new MeldError('Clone has closed')) :
+        this.lock.share('live', async () => wrap(fn(...args))));
+    };
+  }
 
   @AbstractMeld.checkNotClosed.rx
   read(request: Read): Observable<GraphSubject> {

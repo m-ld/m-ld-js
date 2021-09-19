@@ -1,8 +1,7 @@
-import { InterimUpdate, MeldReadState, MeldUpdate } from '../src';
+import { InterimUpdate, MeldUpdate } from '../src';
 import { memStore } from './testClones';
 import { SingleValued } from '../src/constraints/SingleValued';
 import { JrqlGraph } from '../src/engine/dataset/JrqlGraph';
-import { GraphState } from '../src/engine/dataset/GraphState';
 import { Dataset } from '../src/engine/dataset';
 import { mock } from 'jest-mock-extended';
 import { SubjectGraph } from '../src/engine/SubjectGraph';
@@ -11,17 +10,15 @@ import { firstValueFrom } from 'rxjs';
 describe('Single-valued constraint', () => {
   let data: Dataset;
   let graph: JrqlGraph;
-  let state: MeldReadState;
 
   beforeEach(async () => {
     data = await memStore();
     graph = new JrqlGraph(data.graph());
-    state = new GraphState(graph);
   });
 
   test('Passes an empty update', async () => {
     const constraint = new SingleValued('http://test.m-ld.org/#name');
-    await expect(constraint.check(state, mockInterim({
+    await expect(constraint.check(graph, mockInterim({
       '@ticks': 0,
       '@delete': new SubjectGraph([]),
       '@insert': new SubjectGraph([])
@@ -30,7 +27,7 @@ describe('Single-valued constraint', () => {
 
   test('Passes a missing property update', async () => {
     const constraint = new SingleValued('http://test.m-ld.org/#name');
-    await expect(constraint.check(state, mockInterim({
+    await expect(constraint.check(graph, mockInterim({
       '@ticks': 0,
       '@delete': new SubjectGraph([]),
       '@insert': new SubjectGraph([{
@@ -41,7 +38,7 @@ describe('Single-valued constraint', () => {
 
   test('Passes a single-valued property update', async () => {
     const constraint = new SingleValued('http://test.m-ld.org/#name');
-    await expect(constraint.check(state, mockInterim({
+    await expect(constraint.check(graph, mockInterim({
       '@ticks': 0,
       '@delete': new SubjectGraph([]),
       '@insert': new SubjectGraph([{
@@ -52,7 +49,7 @@ describe('Single-valued constraint', () => {
 
   test('Fails a multi-valued property update', async () => {
     const constraint = new SingleValued('http://test.m-ld.org/#name');
-    await expect(constraint.check(state, mockInterim({
+    await expect(constraint.check(graph, mockInterim({
       '@ticks': 0,
       '@delete': new SubjectGraph([]),
       '@insert': new SubjectGraph([{
@@ -70,7 +67,7 @@ describe('Single-valued constraint', () => {
       })
     });
     const constraint = new SingleValued('http://test.m-ld.org/#name');
-    await expect(constraint.check(state, mockInterim({
+    await expect(constraint.check(graph, mockInterim({
       '@ticks': 0,
       '@delete': new SubjectGraph([]),
       '@insert': new SubjectGraph([{
@@ -89,7 +86,7 @@ describe('Single-valued constraint', () => {
       }])
     });
     // @ts-ignore - Type instantiation is excessively deep and possibly infinite. ts(2589)
-    await constraint.apply(state, update);
+    await constraint.apply(graph, update);
     expect(update.assert.mock.calls).toEqual([]);
   });
 
@@ -102,7 +99,7 @@ describe('Single-valued constraint', () => {
         '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': ['Fred', 'Flintstone']
       }])
     });
-    await constraint.apply(state, update);
+    await constraint.apply(graph, update);
     expect(update.assert).toBeCalledWith({
       '@delete': { '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': ['Flintstone'] }
     });
@@ -124,7 +121,7 @@ describe('Single-valued constraint', () => {
         '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Flintstone'
       }])
     });
-    await constraint.apply(state, update);
+    await constraint.apply(graph, update);
     expect(update.assert).toBeCalledWith({
       '@delete': { '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': ['Flintstone'] }
     });
@@ -150,7 +147,7 @@ describe('Single-valued constraint', () => {
         '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Flintstone'
       }])
     });
-    await constraint.apply(state, update);
+    await constraint.apply(graph, update);
     // FIXME: not applied to the dataset!
 
     await expect(firstValueFrom(graph.describe1('http://test.m-ld.org/fred')))

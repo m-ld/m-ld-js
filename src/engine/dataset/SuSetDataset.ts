@@ -1,4 +1,4 @@
-import { MeldConstraint, MeldReadState, MeldUpdate } from '../../api';
+import { MeldConstraint, MeldUpdate } from '../../api';
 import { OperationMessage, Snapshot } from '..';
 import { GlobalClock, TickTree, TreeClock } from '../clocks';
 import { Context, Subject, Write } from '../../jrql-support';
@@ -8,22 +8,24 @@ import { JrqlGraph } from './JrqlGraph';
 import { MeldEncoder, MeldOperation, TriplesTids, unreify, UUID } from '../MeldEncoding';
 import { EMPTY, firstValueFrom, merge, Observable, of, Subject as Source } from 'rxjs';
 import { bufferCount, expand, filter, map, mergeMap, takeWhile, toArray } from 'rxjs/operators';
-import { check, completed, flatten, Future, getIdLogger, inflate, inflateArray } from '../util';
+import {
+  check, completed, flatten, Future, getIdLogger, inflate, inflateArray, observeAsyncIterator
+} from '../util';
 import { Logger } from 'loglevel';
 import { MeldError } from '../MeldError';
 import { LocalLock } from '../local';
 import { SUSET_CONTEXT, tripleId } from './SuSetGraph';
 import { array, GraphSubject, MeldConfig, Read } from '../..';
-import { Quad, QuadMap, QuadSource, Triple, TripleMap } from '../quads';
+import { Quad, QuadMap, Triple, TripleMap } from '../quads';
 import { CheckList } from '../../constraints/CheckList';
 import { DefaultList } from '../../constraints/DefaultList';
 import { QS } from '../../ns';
 import { InterimUpdatePatch } from './InterimUpdatePatch';
-import { GraphState } from './GraphState';
 import { ActiveContext } from 'jsonld/lib/context';
 import { activeCtx } from '../jsonld';
 import { Journal, JournalEntry, JournalState } from '../journal';
 import { JournalClerk } from '../journal/JournalClerk';
+import { QueryableRdfSource } from '../../rdfjs-support';
 
 interface HashTid extends Subject {
   '@id': Iri; // hash:<hashed triple id>
@@ -44,7 +46,7 @@ type DatasetConfig = Pick<MeldConfig,
  * Writeable Graph, similar to a Dataset, but with a slightly different transaction API.
  * Journals every transaction and creates m-ld compliant operations.
  */
-export class SuSetDataset extends MeldEncoder implements QuadSource {
+export class SuSetDataset extends MeldEncoder implements QueryableRdfSource {
   private static checkNotClosed =
     check((d: SuSetDataset) => !d.dataset.closed, () => new MeldError('Clone has closed'));
 
@@ -52,9 +54,12 @@ export class SuSetDataset extends MeldEncoder implements QuadSource {
   /*readonly*/
   userCtx: ActiveContext;
 
+  /*readonly*/ match: QueryableRdfSource['match'];
+  /*readonly*/ query: QueryableRdfSource['query'];
+  /*readonly*/ countQuads: QueryableRdfSource['countQuads'];
+
   private /*readonly*/ userGraph: JrqlGraph;
   private /*readonly*/ tidsGraph: JrqlGraph;
-  private /*readonly*/ state: MeldReadState;
   private readonly journal: Journal;
   private readonly journalClerk: JournalClerk;
   private readonly updateSource: Source<MeldUpdate> = new Source;
@@ -85,20 +90,21 @@ export class SuSetDataset extends MeldEncoder implements QuadSource {
     this.userGraph = new JrqlGraph(this.dataset.graph());
     this.tidsGraph = new JrqlGraph(this.dataset.graph(
       this.rdf.namedNode(QS.tids)), await activeCtx(SUSET_CONTEXT));
-    this.state = new GraphState(this.userGraph);
     // Check for exclusive access to the dataset location
     try {
       await this.datasetLock.acquire();
     } catch (err) {
       throw new MeldError('Clone data is locked', err);
     }
+    // Raw RDF methods just pass through to the user graph
+    this.match = this.userGraph.match.bind(this.userGraph);
+    this.query = this.userGraph.query.bind(this.userGraph);
+    this.countQuads = this.userGraph.countQuads.bind(this.userGraph);
   }
 
   get updates(): Observable<MeldUpdate> {
     return this.updateSource;
   }
-
-  match: QuadSource['match'] = (...args) => this.state.match(...args);
 
   read<R extends Read>(request: R): Observable<GraphSubject> {
     return this.userGraph.read(request, this.userCtx);
@@ -203,7 +209,7 @@ export class SuSetDataset extends MeldEncoder implements QuadSource {
 
         txc.sw.next('check-constraints');
         const interim = new InterimUpdatePatch(this.userGraph, time, patch, 'mutable');
-        await this.constraint.check(this.state, interim);
+        await this.constraint.check(this.userGraph, interim);
         const { update, entailments } = await interim.finalise(this.userCtx);
 
         txc.sw.next('find-tids');
@@ -283,7 +289,7 @@ export class SuSetDataset extends MeldEncoder implements QuadSource {
 
         txc.sw.next('apply-cx'); // "cx" = constraint
         const interim = new InterimUpdatePatch(this.userGraph, cxnTime, patch);
-        await this.constraint.apply(this.state, interim);
+        await this.constraint.apply(this.userGraph, interim);
         const { update, assertions, entailments } = await interim.finalise(this.userCtx);
         const cxn = await this.constraintTxn(assertions, patch, insertTids, cxnTime);
         // After applying the constraint, some new quads might have been removed
@@ -433,7 +439,7 @@ export class SuSetDataset extends MeldEncoder implements QuadSource {
     return {
       gwc: journal.gwc,
       data: merge(
-        this.userGraph.graph.query().pipe(
+        observeAsyncIterator(this.userGraph.graph.query()).pipe(
           bufferCount(10), // TODO batch size config
           mergeMap(async batch => {
             const tidQuads = await this.findTriplesTids(batch, 'includeEmpty');

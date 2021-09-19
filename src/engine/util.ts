@@ -165,38 +165,32 @@ export function onErrorNever<T>(v: ObservableInput<T>): Observable<T> {
   return onErrorResumeNext(v, NEVER);
 }
 
-export function observeAsyncIterator<T>(start: () => Promise<AsyncIterator<T>>): Observable<T> {
+export function observeAsyncIterator<T>(iterator: AsyncIterator<T>): Observable<T> {
   return new Observable<T>(subs => {
-    const subscription = new Subscription;
-    start().then(iterator => {
-      if (!subscription.closed) {
-        if (iterator.done) {
-          subs.complete();
-        } else {
-          const dataHandler = (datum: T) => {
-            if (!subscription.closed)
-              subs.next(datum);
-          };
-          const errorHandler = (err: any) => subs.error(err);
-          const endHandler = () => subs.complete();
-          iterator
-            .on('end', endHandler)
-            .on('close', endHandler)
-            .on('error', errorHandler)
-            .on('data', dataHandler);
-          subscription.add(() => {
-            iterator
-              .off('end', endHandler)
-              .off('close', endHandler)
-              .off('error', errorHandler)
-              .off('data', dataHandler);
-            if (!iterator.ended)
-              iterator.close();
-          });
-        }
-      }
-    }).catch(err => subs.error(err));
-    return subscription;
+    if (iterator.done) {
+      subs.complete();
+    } else {
+      const dataHandler = (datum: T) => {
+        if (!subs.closed)
+          subs.next(datum);
+      };
+      const errorHandler = (err: any) => subs.error(err);
+      const endHandler = () => subs.complete();
+      iterator
+        .on('end', endHandler)
+        .on('close', endHandler)
+        .on('error', errorHandler)
+        .on('data', dataHandler);
+      subs.add(() => {
+        iterator
+          .off('end', endHandler)
+          .off('close', endHandler)
+          .off('error', errorHandler)
+          .off('data', dataHandler);
+        if (!iterator.ended)
+          iterator.close();
+      });
+    }
   });
 }
 

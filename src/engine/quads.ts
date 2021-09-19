@@ -1,6 +1,7 @@
 import type { DataFactory, NamedNode, Quad, Term } from 'rdf-js';
 import { IndexMap, IndexSet } from './indices';
 import { memoise } from './util';
+import { QueryableRdfSource } from '../rdfjs-support';
 
 export type Triple = Omit<Quad, 'graph'>;
 export type TriplePos = 'subject' | 'predicate' | 'object';
@@ -9,6 +10,18 @@ export type {
   DefaultGraph, Quad, Term, DataFactory, NamedNode, Source as QuadSource,
   Quad_Subject, Quad_Predicate, Quad_Object
 } from 'rdf-js';
+
+export class QueryableRdfSourceProxy implements QueryableRdfSource {
+  readonly match: QueryableRdfSource['match'];
+  readonly query: QueryableRdfSource['query'];
+  readonly countQuads: QueryableRdfSource['countQuads'];
+
+  constructor(readonly src: QueryableRdfSource) {
+    this.match = src.match.bind(src);
+    this.query = src.query.bind(src);
+    this.countQuads = src.countQuads.bind(src);
+  }
+}
 
 export class QuadMap<T> extends IndexMap<Quad, T> {
   protected getIndex(key: Quad): string {

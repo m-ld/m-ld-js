@@ -2,7 +2,7 @@ import { Read, Write } from '../jrql-support';
 import { GraphSubject, MeldUpdate } from '../api';
 import { LockManager } from './locks';
 import { Observable, Subscription } from 'rxjs';
-import { QuadSource } from './quads';
+import { QueryableRdfSource } from '../rdfjs-support';
 
 /** Simplified clone engine with only the basic requirements of an engine */
 export interface CloneEngine extends EngineState {
@@ -11,7 +11,7 @@ export interface CloneEngine extends EngineState {
   readonly dataUpdates: Observable<MeldUpdate>;
 }
 
-export interface EngineState extends QuadSource {
+export interface EngineState extends QueryableRdfSource {
   read(request: Read): Observable<GraphSubject>;
   write(request: Write): Promise<this>;
 }
@@ -23,7 +23,7 @@ export type EngineStateProc = (state: EngineState) => PromiseLike<unknown> | voi
  * Gates access to a {@link CloneEngine} such that its state is immutable during
  * read and write procedures
  */
-export class StateEngine {
+export class StateEngine implements QueryableRdfSource {
   private state: EngineState;
   private readonly handlers: EngineUpdateProc[] = [];
   private handling: Promise<unknown>;
@@ -34,7 +34,10 @@ export class StateEngine {
     this.engine.dataUpdates.subscribe(this.nextState);
   }
 
-  match: QuadSource['match'] = (...args) => this.state.match(...args);
+  match: QueryableRdfSource['match'] = (...args) => this.state.match(...args);
+  // @ts-ignore - TS can't cope with overloaded query method
+  query: QueryableRdfSource['query'] = (...args) => this.state.query(...args);
+  countQuads: QueryableRdfSource['countQuads'] = (...args) => this.state.countQuads(...args);
 
   follow(handler: EngineUpdateProc): Subscription {
     const key = this.handlers.push(handler) - 1;
@@ -69,6 +72,9 @@ export class StateEngine {
 
   private newState() {
     const state: EngineState = {
+      countQuads: (...args) => gateEngine().countQuads(...args),
+      // @ts-ignore - TS can't cope with overloaded query method
+      query: (...args) => gateEngine().query(...args),
       match: (...args) => gateEngine().match(...args),
       read: request => gateEngine().read(request),
       write: async request => {

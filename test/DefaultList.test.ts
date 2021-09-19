@@ -1,8 +1,7 @@
-import { InterimUpdate, MeldReadState, MeldUpdate, Update } from '../src';
+import { InterimUpdate, MeldUpdate, Update } from '../src';
 import { memStore } from './testClones';
 import { DefaultList } from '../src/constraints/DefaultList';
 import { JrqlGraph } from '../src/engine/dataset/JrqlGraph';
-import { GraphState } from '../src/engine/dataset/GraphState';
 import { Dataset } from '../src/engine/dataset';
 import { mock } from 'jest-mock-extended';
 import { SubjectGraph } from '../src/engine/SubjectGraph';
@@ -12,12 +11,10 @@ import { SubjectGraph } from '../src/engine/SubjectGraph';
 describe('Default list constraint', () => {
   let data: Dataset;
   let graph: JrqlGraph;
-  let state: MeldReadState;
 
   beforeEach(async () => {
     data = await memStore();
     graph = new JrqlGraph(data.graph());
-    state = new GraphState(graph);
   });
 
   test('Passes an empty update', async () => {
@@ -28,7 +25,7 @@ describe('Default list constraint', () => {
       '@insert': new SubjectGraph([])
     });
     // @ts-ignore 'Type instantiation is excessively deep and possibly infinite.ts(2589)'
-    await expect(constraint.check(state, update)).resolves.toBeUndefined();
+    await expect(constraint.check(graph, update)).resolves.toBeUndefined();
   });
 
   test('Rewrites a list insert', async () => {
@@ -47,7 +44,7 @@ describe('Default list constraint', () => {
         '@item': 'Bread'
       }])
     });
-    await expect(constraint.check(state, update)).resolves.toBeUndefined();
+    await expect(constraint.check(graph, update)).resolves.toBeUndefined();
     expect(update.remove).toBeCalledWith('@insert', {
       '@id': 'http://test.m-ld.org/shopping',
       '@list': {
@@ -110,7 +107,7 @@ describe('Default list constraint', () => {
         }
       }])
     });
-    await expect(constraint.apply(state, update)).resolves.toBeDefined();
+    await expect(constraint.apply(graph, update)).resolves.toBeDefined();
     expect(update.remove).not.toHaveBeenCalled();
     expect(update.assert).toBeCalledWith({
       '@delete': {
@@ -151,7 +148,7 @@ describe('Default list constraint', () => {
         }
       }])
     });
-    await expect(constraint.apply(state, update)).resolves.toBeDefined();
+    await expect(constraint.apply(graph, update)).resolves.toBeDefined();
     expect(update.remove).not.toHaveBeenCalled();
     expect(update.assert).toBeCalledWith({
       '@delete': {
@@ -198,7 +195,7 @@ describe('Default list constraint', () => {
         }
       }])
     });
-    await expect(constraint.apply(state, update)).resolves.toBeDefined();
+    await expect(constraint.apply(graph, update)).resolves.toBeDefined();
     expect(update.remove).not.toHaveBeenCalled();
     expect(update.assert).toBeCalledWith({
       '@delete': {

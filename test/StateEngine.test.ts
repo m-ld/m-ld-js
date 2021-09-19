@@ -16,6 +16,8 @@ describe('State Engine', () => {
       rdf.quad(rdf.namedNode('state'),
         rdf.namedNode('tick'),
         rdf.literal(this.tick.toString())));
+    countQuads = async () => 1;
+    query = () => { throw undefined; };
     read = () => of({ '@id': 'state', tick: this.tick });
     write = async () => {
       this.dataUpdates.next({

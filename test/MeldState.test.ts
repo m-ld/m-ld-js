@@ -9,6 +9,8 @@ import { Future } from '../src/engine/util';
 import { blankRegex, genIdRegex } from './testUtil';
 import { SubjectGraph } from '../src/engine/SubjectGraph';
 import { DataFactory as RdfDataFactory, Quad } from 'rdf-data-factory';
+import { Factory as SparqlFactory } from 'sparqlalgebrajs';
+import { Binding } from 'quadstore';
 
 describe('Meld State API', () => {
   let api: ApiStateMachine;
@@ -142,7 +144,9 @@ describe('Meld State API', () => {
     });
   });
 
-  describe('basic reads', () => {
+  describe('rdf/js support', () => {
+    const sparql = new SparqlFactory(rdf);
+
     test('matches quad subject', done => {
       api.write<Subject>({ '@id': 'fred', name: 'Fred' }).then(() =>
         api.match(rdf.namedNode('http://test.m-ld.org/fred')).on('data', (quad: Quad) => {
@@ -153,6 +157,26 @@ describe('Meld State API', () => {
         }));
     });
 
+    test('counts subject quads', async () => {
+      await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
+      // memdown does not provide approximate size measurements, so infinity is expected
+      await expect(api.countQuads(rdf.namedNode('http://test.m-ld.org/fred'))).resolves.toBe(Infinity);
+    });
+
+    test('selects quad', done => {
+      api.write<Subject>({ '@id': 'fred', name: 'Fred' }).then(() =>
+        api.query(sparql.createProject(sparql.createBgp([sparql.createPattern(
+            rdf.namedNode('http://test.m-ld.org/fred'),
+            rdf.namedNode('http://test.m-ld.org/#name'),
+            rdf.variable('name'))]),
+          [rdf.variable('name')])).on('data', (binding: Binding) => {
+          expect(binding['?name'].equals(rdf.literal('Fred'))).toBe(true);
+          done();
+        }));
+    });
+  });
+
+  describe('basic reads', () => {
     test('selects where', async () => {
       await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
       await api.write<Subject>({ '@id': 'wilma', name: 'Wilma' });
