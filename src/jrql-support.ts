@@ -26,6 +26,15 @@ export type Pattern = jrql.Pattern;
  */
 export type Reference = jrql.Reference;
 /**
+ * Like a {@link Reference}, but used for "vocabulary" references. These are relevant to:
+ * - Subject properties: the property name is a vocabulary reference
+ * - Subject `@type`: the type value is a vocabulary reference
+ * - Any value for a property that has been defined as `@vocab` in the Context
+ * @see https://www.w3.org/TR/json-ld/#default-vocabulary
+ */
+// TODO: Push this down to json-rql
+export type VocabReference = { '@vocab': Iri };
+/**
  * A JSON-LD context for some JSON content such as a {@link Subject}. **m-ld**
  * does not require the use of a context, as plain JSON data will be stored
  * in the context of the domain. However in advanced usage, such as for
@@ -75,8 +84,7 @@ export type Container = List | Set;
  * A stand-in for a Value used as a basis for filtering.
  * @see [json-rql expression](https://json-rql.org/globals.html#expression)
  */
-// TODO: Reference should be subsumed in Atom in json-rql
-export type Expression = jrql.Atom | Reference | Constraint;
+export type Expression = jrql.Atom | VocabReference | Constraint;
 /** @internal */
 export { operators } from 'json-rql';
 
@@ -162,6 +170,11 @@ export function isValueObject(value: SubjectPropertyObject): value is jrql.Value
 /** @internal */
 export function isReference(value: SubjectPropertyObject): value is Reference {
   return typeof value == 'object' && Object.keys(value).every(k => k === '@id');
+}
+
+/** @internal */
+export function isVocabReference(value: SubjectPropertyObject): value is VocabReference {
+  return typeof value == 'object' && Object.keys(value).every(k => k === '@vocab');
 }
 
 /**
@@ -268,11 +281,12 @@ export interface Constraint {
   /**
    * Operators are based on SPARQL expression keywords, lowercase with '@' prefix.
    * @see [json-rql operators](https://json-rql.org/globals.html#operators)
-   * @see [SPARQL conditional](https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#rConditionalOrExpression)
+   * @see [SPARQL
+   *   conditional](https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#rConditionalOrExpression)
    */
   [operator: string]: Expression | Expression[]
   // It's not practical to constrain the types further here, see #isConstraint
-};
+}
 
 /** @internal */
 export function isConstraint(value: Expression): value is Constraint {
@@ -389,7 +403,7 @@ export function isWriteGroup(p: Pattern): p is Group {
  */
 export interface VariableExpression {
   [key: string]: Expression;
-};
+}
 
 /**
  * A sub-type of Pattern which matches data using a `@where` clause.

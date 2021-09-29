@@ -455,6 +455,27 @@ describe('Meld State API', () => {
       ]));
     });
 
+    test('selects property from vocab values', async () => {
+      await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
+      await api.write<Subject>({ '@id': 'wilma', age: 40 });
+      await api.write<Subject>({ '@id': 'barney', height: 5 });
+      const selection = await api.read<Select>({
+        '@select': '?v',
+        '@where': {
+          '@graph': { '@id': '?f', '?p': '?v' },
+          '@values': [
+            // Use of @vocab should resolve against the vocab, and so match a property
+            { '?p': { '@vocab': 'name' } },
+            // Use of @id should resolve against the base, and so not match a property
+            { '?p': { '@id': 'age' } }
+          ]
+        }
+      });
+      expect(selection).toEqual([
+        { '@id': expect.stringMatching(blankRegex), '?v': 'Fred' }
+      ]);
+    });
+
     test('selects name or other name', async () => {
       await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
       await api.write<Subject>({ '@id': 'wilma', name: 'Wilma' });

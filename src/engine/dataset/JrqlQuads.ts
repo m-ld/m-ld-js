@@ -1,7 +1,7 @@
 import { Binding } from 'quadstore';
 import { Graph } from '.';
 import { blank, GraphSubject } from '../..';
-import { Atom, Reference, Result, Subject, Value } from '../../jrql-support';
+import { Atom, Result, Subject, Value, VocabReference } from '../../jrql-support';
 import { ActiveContext, compactIri } from '../jsonld';
 import { inPosition, Quad, Quad_Object, Term } from '../quads';
 import { JRQL } from '../../ns';
@@ -82,7 +82,7 @@ export class JrqlQuads {
     }
   }
 
-  toObjectTerm(value: Atom | Reference, ctx: ActiveContext): Quad_Object {
+  toObjectTerm(value: Atom | VocabReference, ctx: ActiveContext): Quad_Object {
     return new SubjectQuads('match', ctx, this.graph).objectTerm(value);
   }
 }

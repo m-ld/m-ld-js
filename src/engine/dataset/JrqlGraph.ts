@@ -363,8 +363,9 @@ interface SubjectTerms {
 }
 
 function anyVarTerm(quad: Quad) {
-  return ['subject', 'predicate', 'object']
-    .some((pos: TriplePos) => quad[pos].termType === 'Variable');
+  return quad.subject.termType === 'Variable' ||
+    quad.predicate.termType === 'Variable' ||
+    quad.object.termType === 'Variable';
 }
 
 function asGroup(where: Subject | Subject[] | Group): Group {

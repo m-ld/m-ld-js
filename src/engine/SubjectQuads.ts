@@ -1,7 +1,7 @@
 import { any, anyName, blank } from '../api';
 import {
-  Atom, isPropertyObject, isReference, isSet, isValueObject, Reference, Subject,
-  SubjectPropertyObject
+  Atom, isPropertyObject, isReference, isSet, isValueObject, isVocabReference, Reference, Subject,
+  SubjectPropertyObject, VocabReference
 } from '../jrql-support';
 import { canonicalDouble, expandTerm } from './jsonld';
 import { Quad, Quad_Object, Quad_Subject, RdfFactory } from './quads';
@@ -162,13 +162,15 @@ export class SubjectQuads {
     return this.rdf.variable(this.genVarName());
   }
 
-  objectTerm(value: Atom | Reference, property?: string): Quad_Object {
+  objectTerm(value: Atom | VocabReference, property?: string): Quad_Object {
     if (isString(value)) {
       const variable = this.matchVar(value);
       if (variable != null)
         return variable;
     } else if (isReference(value)) {
-      return this.subjectId(value);
+      return this.expandNode(value['@id']);
+    } else if (isVocabReference(value)) {
+      return this.expandNode(value['@vocab'], true);
     }
     let type: string | null = null, language: string | null = null;
     if (isValueObject(value)) {
