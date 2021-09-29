@@ -172,9 +172,9 @@ export type Result = '*' | Variable | Variable[];
 
 /**
  * A resource, represented as a JSON object, that is part of the domain data.
- * 
+ *
  * ## Examples:
- * 
+ *
  * ---
  * *A subject with one property: "fred's name is Fred"*
  * ```json
@@ -268,11 +268,12 @@ export interface Constraint {
   /**
    * Operators are based on SPARQL expression keywords, lowercase with '@' prefix.
    * @see [json-rql operators](https://json-rql.org/globals.html#operators)
-   * @see [SPARQL conditional](https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#rConditionalOrExpression)
+   * @see [SPARQL
+   *   conditional](https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#rConditionalOrExpression)
    */
   [operator: string]: Expression | Expression[]
   // It's not practical to constrain the types further here, see #isConstraint
-};
+}
 
 /** @internal */
 export function isConstraint(value: Expression): value is Constraint {
@@ -284,7 +285,7 @@ export function isConstraint(value: Expression): value is Constraint {
  * (when used as a transaction pattern).
  *
  * ## Examples:
- * 
+ *
  * ---
  * *Insert multiple subjects*
  * ```json
@@ -350,8 +351,8 @@ export function isConstraint(value: Expression): value is Constraint {
 export interface Group extends Pattern {
   /**
    * Specifies a Subject or an array of Subjects.
-   * 
-   * When resolving query solutions, 
+   *
+   * When resolving query solutions,
    */
   '@graph'?: Subject | Subject[];
   /**
@@ -389,7 +390,7 @@ export function isWriteGroup(p: Pattern): p is Group {
  */
 export interface VariableExpression {
   [key: string]: Expression;
-};
+}
 
 /**
  * A sub-type of Pattern which matches data using a `@where` clause.
@@ -400,9 +401,9 @@ export interface Query extends Pattern {
    * The data pattern to match, as a set of subjects or a group. Variables are
    * used as placeholders to capture matching properties and values in the
    * domain.
-   * 
+   *
    * ## Examples:
-   * 
+   *
    * ---
    * *Match a subject by its `@id`*
    * ```json
@@ -453,7 +454,7 @@ export interface Read extends Query {
   // No support for @limit, @orderBy etc.
 }
 
-/** 
+/**
  * Determines if the given pattern will read data from the domain.
  */
 export function isRead(p: Pattern): p is Read {
@@ -473,7 +474,7 @@ export function isRead(p: Pattern): p is Read {
  */
 export type Write = Subject | Group | Update;
 
-/** 
+/**
  * Determines if the given pattern can probably be interpreted as a logical
  * write of data to the domain.
  *
@@ -483,7 +484,7 @@ export type Write = Subject | Group | Update;
  *
  * Returns `true` if the logical write is a trivial no-op, such as `{}`,
  * `{ "@insert": {} }` or `{ "@graph": [] }`.
- * 
+ *
  * @see {@link Write}
  */
 export function isWrite(p: Pattern): p is Write {
@@ -681,7 +682,7 @@ export function isConstruct(p: Pattern): p is Construct {
  * }
  * ```
  * ## Examples:
- * 
+ *
  * ---
  * *Select the ids of subjects having a given name*
  * ```json
@@ -723,9 +724,9 @@ export function isSelect(p: Pattern): p is Select {
 
 /**
  * A pattern to update the properties of matching subjects in the domain.
- * 
+ *
  * ## Examples:
- * 
+ *
  * ---
  * *Delete a subject property*
  * ```json
@@ -785,15 +786,50 @@ export function isSelect(p: Pattern): p is Select {
  */
 export interface Update extends Query {
   /**
-   * Subjects with properties to be inserted into the domain. If variables are
-   * used, then a `@where` clause must be supplied to provide matching values.
-   */
-  '@insert'?: Subject | Subject[];
-  /**
    * Subjects with properties to be deleted from the domain. Variables can be
-   * used without a `@where` clause, to match any value.
+   * used without a `@where` clause, to match any existing value.
    */
   '@delete'?: Subject | Subject[];
+  /**
+   * Subjects with properties to be inserted into the domain. Variables may be used, values for
+   * which will be established as follows:
+   * - If a `@where` clause exists, then values matched in the `@where` clause will be used.
+   * - If there is no `@where`, but a `@delete` clause exists, then values matched in the
+   * `@delete` clause will be used.
+   * - If a variable value is not matched by the `@where` or `@delete` clause as above, no
+   * insertion
+   * happens (i.e. there must exist a _complete_ solution to all variables in the `@insert`).
+   *
+   * **Note** that in the case that the `@insert` contains no variables, there is a difference
+   * between matching with a `@where` and `@delete`. If a `@where` clause is provided, it _must_
+   * match some existing data for the inserts to happen. However, if no `@where` clauses is
+   * provided, then the insertion will happen even if nothing is matched by the `@delete`.
+   *
+   * For example, assume this data exists:
+   * ```json
+   * { "@id": "fred", "name": "Fred" }`
+   * ```
+   *
+   * Compare the following update patterns:
+   * ```json
+   * {
+   *   "@delete": { "@id": "fred", "height": "?height" },
+   *   "@insert": { "@id": "fred", "height": "6" }
+   * }
+   * ```
+   *
+   * The pattern above updates Fred's height to 6, even though no prior height value exists.
+   * ```json
+   * {
+   *   "@delete": { "@id": "fred", "height": "?height" },
+   *   "@insert": { "@id": "fred", "height": "6" },
+   *   "@where": { "@id": "fred", "height": "?height" }
+   * }
+   * ```
+   *
+   * The pattern above does nothing, because no prior height value is matched by the `@where`.
+   */
+  '@insert'?: Subject | Subject[];
 }
 
 /** @internal */
@@ -807,7 +843,7 @@ export function isUpdate(p: Pattern): p is Update {
  * the list item appears naked and the slot is implicit. Slots appear:
  * - In list update notifications, in which the slot is always explicit.
  * - Optionally, when moving items in a list.
- * 
+ *
  * @see [m-ld lists specification](https://spec.m-ld.org/#lists)
  */
 export interface Slot extends Subject {

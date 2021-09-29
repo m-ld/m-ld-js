@@ -97,6 +97,40 @@ describe('Meld State API', () => {
       });
     });
 
+    test('updates a property by query with existing value', async () => {
+      await api.write<Subject>({ '@id': 'fred', name: 'Fred', height: 5 });
+      api.follow(captureUpdate.resolve);
+      await api.write<Update>({
+        '@delete': { '@id': 'fred', height: '?' },
+        '@insert': { '@id': 'fred', height: 6 }
+      });
+      await expect(api.get('fred'))
+        .resolves.toEqual({ '@id': 'fred', name: 'Fred', height: 6 });
+    });
+
+    test('updates a property by query without existing value', async () => {
+      await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
+      api.follow(captureUpdate.resolve);
+      await api.write<Update>({
+        '@delete': { '@id': 'fred', height: '?' },
+        '@insert': { '@id': 'fred', height: 6 }
+      });
+      await expect(api.get('fred'))
+        .resolves.toEqual({ '@id': 'fred', name: 'Fred', height: 6 });
+    });
+
+    test('does not update a property by query with unmatched where', async () => {
+      await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
+      api.follow(captureUpdate.resolve);
+      await api.write<Update>({
+        '@delete': { '@id': 'fred', height: '?height' },
+        '@insert': { '@id': 'fred', height: 6 },
+        '@where': { '@id': 'fred', height: '?height' }
+      });
+      await expect(api.get('fred'))
+        .resolves.toEqual({ '@id': 'fred', name: 'Fred' });
+    });
+
     test('delete where must match all', async () => {
       await api.write<Subject>({ '@id': 'fred', name: 'Fred', height: 5 });
       // This write has no effect because we're asking for triples with subject of

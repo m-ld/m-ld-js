@@ -166,19 +166,20 @@ export class JrqlGraph extends QueryableRdfSourceProxy {
     let patch = new PatchQuads();
 
     const vars = new Set<string>();
-    const deleteQuads = query['@delete'] != null ?
+    const deletes = query['@delete'] != null ?
       this.jrql.quads(query['@delete'], { mode: 'match', vars }, ctx) : undefined;
-    const insertQuads = query['@insert'] != null ?
+    const inserts = query['@insert'] != null ?
       this.jrql.quads(query['@insert'], { mode: 'load' }, ctx) : undefined;
 
     let solutions: Observable<Binding> | null = null;
-    if (query['@where'] != null) {
+    const where = query['@where'];
+    if (where != null) {
       // If there is a @where clause, use variable substitutions per solution
-      solutions = this.solutions(query['@where'], this.project, ctx);
-    } else if (deleteQuads != null && vars.size > 0) {
+      solutions = this.solutions(where, this.project, ctx);
+    } else if (deletes != null && vars.size > 0) {
       // A @delete clause with no @where may be used to bind variables
       solutions = this.project(
-        this.sparql.createBgp(deleteQuads.map(this.toPattern)), vars);
+        this.sparql.createBgp(deletes.map(this.toPattern)), vars);
     }
     if (solutions != null) {
       await solutions.forEach(solution => {
@@ -189,13 +190,18 @@ export class JrqlGraph extends QueryableRdfSourceProxy {
         const matchingQuads = (template?: Quad[]) => template == null ? [] :
           this.fillTemplate(template, solution).filter(quad => !anyVarTerm(quad));
         patch.append(new PatchQuads({
-          deletes: matchingQuads(deleteQuads),
-          inserts: matchingQuads(insertQuads)
+          deletes: matchingQuads(deletes),
+          inserts: matchingQuads(inserts)
         }));
       });
-    } else if (!insertQuads?.some(anyVarTerm)) {
-      // Both @delete and @insert have fixed quads, just apply them
-      patch.append({ deletes: deleteQuads ?? [], inserts: insertQuads ?? [] });
+    } else if (deletes != null) {
+      // If the @delete has fixed quads, always apply them
+      patch.append({ deletes });
+    }
+    if (inserts != null && where == null && !inserts.some(anyVarTerm)) {
+      // If the @insert has fixed quads (with no @where), always apply them,
+      // even if the delete had no solutions, https://github.com/m-ld/m-ld-spec/issues/76
+      patch.append({ inserts });
     }
     return patch;
   }
