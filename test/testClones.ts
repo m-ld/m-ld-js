@@ -2,7 +2,6 @@ import { EncodedOperation, MeldLocal, MeldRemotes, OperationMessage } from '../s
 import { mock, MockProxy } from 'jest-mock-extended';
 import { asapScheduler, BehaviorSubject, from, NEVER, Observable, Observer } from 'rxjs';
 import { Dataset, QuadStoreDataset } from '../src/engine/dataset';
-import type { MemDownConstructor } from 'memdown';
 import { GlobalClock, TreeClock } from '../src/engine/clocks';
 import { AsyncMqttClient, IPublishPacket } from 'async-mqtt';
 import { EventEmitter } from 'events';
@@ -11,9 +10,7 @@ import { MeldConfig } from '../src';
 import { AbstractLevelDOWN } from 'abstract-leveldown';
 import { LiveValue } from '../src/engine/LiveValue';
 import { Context } from 'jsonld/jsonld-spec';
-
-// Default import has gone away: https://github.com/Level/community/issues/87
-export const MemDown: MemDownConstructor = require('memdown');
+import { MeldMemDown } from '../src/memdown';
 
 export function testConfig(config?: Partial<MeldConfig>): MeldConfig {
   return { '@id': 'test', '@domain': 'test.m-ld.org', genesis: true, ...config };
@@ -43,7 +40,7 @@ export async function memStore(opts?: {
   backend?: AbstractLevelDOWN,
   context?: Context
 }): Promise<Dataset> {
-  return new QuadStoreDataset(opts?.backend ?? new MemDown, opts?.context).initialise();
+  return new QuadStoreDataset(opts?.backend ?? new MeldMemDown, opts?.context).initialise();
 }
 
 export function mockLocal(

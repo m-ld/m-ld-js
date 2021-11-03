@@ -26,8 +26,9 @@ const TICK_KEY_RADIX = 36;
 const TICK_KEY_PAD = '0'.repeat(TICK_KEY_LEN);
 const TICK_KEY_MIN = '_qs:tick:!'; // < '0'
 const TICK_KEY_MAX = '_qs:tick:~'; // > 'z'
-export const tickKey = (tick: number): TickKey =>
-  `_qs:tick:${TICK_KEY_PAD.concat(tick.toString(TICK_KEY_RADIX)).slice(-TICK_KEY_LEN)}`;
+export function tickKey(tick: number): TickKey {
+  return `_qs:tick:${TICK_KEY_PAD.concat(tick.toString(TICK_KEY_RADIX)).slice(-TICK_KEY_LEN)}`;
+}
 
 /** Entries are also indexed by time hash (TID) */
 function tidEntryKey(tid: string) {

@@ -10,7 +10,8 @@
     "./dist/socket.io": "./dist/socket.io/index.js",
     "./dist/socket.io-server": "./dist/socket.io/server/index.js",
     "./dist/ably": "./dist/ably/index.js",
-    "./dist/wrtc": "./dist/wrtc/index.js"
+    "./dist/wrtc": "./dist/wrtc/index.js",
+    "./dist/memdown": "./dist/memdown/index.js"
   },
   "scripts": {
     "link-locals": "npm link ../m-ld-spec ../json-rql ../typedoc-theme",
@@ -55,6 +56,7 @@
     "simple-peer": "^9.11.0",
     "socket.io": "^4.1.2",
     "socket.io-client": "^4.1.2",
+    "tape": "^5.3.1",
     "tmp": "^0.2.1",
     "ts-jest": "^27.0.3",
     "typedoc": "^0.19.2",
@@ -102,7 +104,8 @@
     "async-mqtt": "2",
     "simple-peer": "9",
     "socket.io": "4",
-    "socket.io-client": "4"
+    "socket.io-client": "4",
+    "memdown": "6"
   },
   "peerDependenciesMeta": {
     "socket.io": {
@@ -118,6 +121,9 @@
       "optional": true
     },
     "simple-peer": {
+      "optional": true
+    },
+    "memdown": {
       "optional": true
     }
   }

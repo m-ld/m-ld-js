@@ -62,20 +62,18 @@ export function *tripleKey(triple: Triple): Generator<string> {
   }
 }
 
-type IndexKeyed<T> = { _indexKey?: string } & T;
-
 export function tripleIndexKey(triple: Triple) {
-  const tik = <IndexKeyed<Triple>>triple;
-  if (tik._indexKey == null)
-    tik._indexKey = [...tripleKey(triple)].join('^');
-  return tik._indexKey;
+  const tik = <Triple & { _tik: string }>triple;
+  if (tik._tik == null)
+    tik._tik = [...tripleKey(triple)].join('^');
+  return tik._tik;
 }
 
 export function quadIndexKey(quad: Quad) {
-  const qik = <IndexKeyed<Quad>>quad;
-  if (qik._indexKey == null)
-    qik._indexKey = [quad.graph.value].concat(...tripleKey(quad)).join('^');
-  return qik._indexKey;
+  const qik = <Quad & { _qik: string }>quad;
+  if (qik._qik == null)
+    qik._qik = [quad.graph.value].concat(...tripleKey(quad)).join('^');
+  return qik._qik;
 }
 
 export function canPosition<P extends TriplePos>(pos: P, value?: Term): value is Quad[P] {

@@ -1,5 +1,5 @@
 import { DatasetEngine } from '../src/engine/dataset/DatasetEngine';
-import { hotLive, MemDown, memStore, MockProcess, mockRemotes, testConfig } from './testClones';
+import { hotLive, memStore, MockProcess, mockRemotes, testConfig } from './testClones';
 import {
   asapScheduler, BehaviorSubject, EMPTY, EmptyError, firstValueFrom, NEVER, Subject as Source,
   throwError
@@ -11,6 +11,7 @@ import { MeldRemotes, OperationMessage, Snapshot } from '../src/engine';
 import { Describe, MeldConfig, Subject, Update } from '../src';
 import { AbstractLevelDOWN } from 'abstract-leveldown';
 import { jsonify } from './testUtil';
+import { MeldMemDown } from '../src/memdown';
 
 describe('Dataset engine', () => {
   describe('as genesis', () => {
@@ -248,7 +249,7 @@ describe('Dataset engine', () => {
     let remote: MockProcess;
 
     beforeEach(async () => {
-      backend = new MemDown();
+      backend = new MeldMemDown;
       config = testConfig();
       // Start a temporary genesis clone to initialise the store
       let clone = new DatasetEngine({
