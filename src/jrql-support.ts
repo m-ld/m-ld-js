@@ -284,7 +284,7 @@ export interface Constraint {
    * @see [SPARQL
    *   conditional](https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#rConditionalOrExpression)
    */
-  [operator: string]: Expression | Expression[]
+  [operator: string]: Expression | Expression[];
   // It's not practical to constrain the types further here, see #isConstraint
 }
 
@@ -410,6 +410,13 @@ export interface VariableExpression {
  * @see [json-rql query](https://json-rql.org/interfaces/query.html)
  */
 export interface Query extends Pattern {
+  /**
+   * An optional [JSON-LD Context](https://w3c.github.io/json-ld-syntax/#the-context)
+   * for the query. Use of a query-specific Context is rarely required, as the
+   * context is typically the local application, whose needs are specified by
+   * the local clone configuration.
+   */
+  '@context'?: Context;
   /**
    * The data pattern to match, as a set of subjects or a group. Variables are
    * used as placeholders to capture matching properties and values in the

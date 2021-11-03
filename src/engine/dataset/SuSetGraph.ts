@@ -17,5 +17,5 @@ export function toPrefixedId(prefix: string, ...path: string[]): Iri {
 }
 
 export function tripleId(triple: Triple): string {
-  return toPrefixedId('thash', sha1Digest(...tripleKey(triple)));
+  return toPrefixedId('thash', sha1Digest(tripleKey(triple)));
 }

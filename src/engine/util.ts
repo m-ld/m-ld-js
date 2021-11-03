@@ -55,7 +55,7 @@ export function completed(observable: Observable<unknown>): Promise<void> {
     observable.subscribe({ complete: resolve, error: reject }));
 }
 
-export function sha1Digest(...items: (string | Buffer)[]) {
+export function sha1Digest(items: Iterable<string | Buffer>) {
   const hash = createHash('sha1'); // Fastest
   for (let item of items)
     hash.update(item);
@@ -301,16 +301,6 @@ export function poisson(mean: number) {
   for (let p = 1.0; p > threshold; p *= Math.random())
     rtn++;
   return rtn - 1;
-}
-
-export function memoise<K extends object, V extends {}>(fn: (key: K) => V): (key: K) => V {
-  const cache = new WeakMap<K, V>();
-  return key => {
-    let value = cache.get(key);
-    if (value == null)
-      cache.set(key, value = fn(key));
-    return value;
-  };
 }
 
 export function lazy<V>(create: (key: string) => V):

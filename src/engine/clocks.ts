@@ -167,7 +167,7 @@ export class TreeClock extends TickTree<boolean> implements CausalClock {
   hash() {
     const buf = MsgPack.encode(this.toJSON('forHash'));
     // If shorter than sha1 (20 bytes), do not hash
-    return buf.length > 20 ? sha1Digest(buf) : buf.toString('base64');
+    return buf.length > 20 ? sha1Digest([buf]) : buf.toString('base64');
   }
 
   /**

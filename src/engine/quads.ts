@@ -1,6 +1,5 @@
 import type { DataFactory, NamedNode, Quad, Term } from 'rdf-js';
 import { IndexMap, IndexSet } from './indices';
-import { memoise } from './util';
 import { QueryableRdfSource } from '../rdfjs-support';
 
 export type Triple = Omit<Quad, 'graph'>;
@@ -45,32 +44,39 @@ export class QuadSet extends IndexSet<Quad> {
   }
 }
 
-export function tripleKey(triple: Triple): string[] {
+export function *tripleKey(triple: Triple): Generator<string> {
   switch (triple.object.termType) {
     case 'Literal':
-      return [
-        triple.subject.value,
-        triple.predicate.value,
-        triple.object.termType,
-        triple.object.value || '',
-        triple.object.datatype.value || '',
-        triple.object.language || ''
-      ];
+      yield triple.subject.value;
+      yield triple.predicate.value;
+      yield triple.object.termType;
+      yield triple.object.value ?? '';
+      yield triple.object.datatype.value ?? '';
+      yield triple.object.language ?? '';
+      break;
     default:
-      return [
-        triple.subject.value,
-        triple.predicate.value,
-        triple.object.termType,
-        triple.object.value
-      ];
+      yield triple.subject.value;
+      yield triple.predicate.value;
+      yield triple.object.termType;
+      yield triple.object.value;
   }
 }
 
-export const tripleIndexKey = memoise((triple: Triple) =>
-  tripleKey(triple).join('^'));
+type IndexKeyed<T> = { _indexKey?: string } & T;
 
-export const quadIndexKey = memoise((quad: Quad) =>
-  [quad.graph.value].concat(tripleKey(quad)).join('^'));
+export function tripleIndexKey(triple: Triple) {
+  const tik = <IndexKeyed<Triple>>triple;
+  if (tik._indexKey == null)
+    tik._indexKey = [...tripleKey(triple)].join('^');
+  return tik._indexKey;
+}
+
+export function quadIndexKey(quad: Quad) {
+  const qik = <IndexKeyed<Quad>>quad;
+  if (qik._indexKey == null)
+    qik._indexKey = [quad.graph.value].concat(...tripleKey(quad)).join('^');
+  return qik._indexKey;
+}
 
 export function canPosition<P extends TriplePos>(pos: P, value?: Term): value is Quad[P] {
   if (!value)

@@ -6,9 +6,8 @@
 import type { NotifyParams, PeerParams, ReplyParams, SendParams } from '../engine/remotes';
 import { PubsubRemotes, SubPub } from '../engine/remotes';
 import { from, Observable } from 'rxjs';
-import { io, Socket, SocketOptions } from 'socket.io-client';
+import { io, ManagerOptions, Socket, SocketOptions } from 'socket.io-client';
 import type { MeldConfig } from '../index';
-import type { ManagerOptions } from 'socket.io-client/build/manager';
 
 export interface MeldIoConfig extends MeldConfig {
   io?: {

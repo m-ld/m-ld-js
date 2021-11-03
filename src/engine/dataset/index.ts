@@ -272,7 +272,9 @@ export class QuadStoreDataset implements Dataset {
   @notClosed.rx
   read(range: AbstractIteratorOptions<string>): Observable<[string, Buffer]> {
     return new Observable(subs => {
-      const it = this.store.db.iterator({ ...range, keyAsBuffer: false });
+      const it = this.store.db.iterator({
+        ...range, keyAsBuffer: false, valueAsBuffer: true
+      });
       const pull = () => {
         it.next((err, key: string, value: Buffer) => {
           if (err) {
