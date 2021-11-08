@@ -29,6 +29,10 @@ export abstract class Index<K, T> {
     return len;
   }
 
+  clear() {
+    this.index.clear();
+  }
+
   [Symbol.iterator]() {
     return this.index.values();
   }

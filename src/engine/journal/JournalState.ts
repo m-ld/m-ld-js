@@ -26,8 +26,9 @@ interface JournalStateJson {
   gwc: GlobalClockJson;
 }
 
-interface EntryBuilder {
+export interface EntryBuilder {
   next(operation: MeldOperation, localTime: TreeClock): this;
+  entries: JournalEntry[];
   commit: Kvps;
 }
 
@@ -61,7 +62,7 @@ export class JournalState {
     return new class {
       private localTime = state.time;
       private gwc = state.gwc;
-      private entries: JournalEntry[] = [];
+      entries: JournalEntry[] = [];
 
       next(operation: MeldOperation, localTime: TreeClock) {
         const prevTicks = this.gwc.getTicks(operation.time);

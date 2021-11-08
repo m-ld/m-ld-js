@@ -57,7 +57,7 @@ export function unreify(reifications: Triple[]): [Triple, UUID[]][] {
   }, {} as { [rid: string]: [Triple, UUID[]] }));
 }
 
-export type TriplesTids = [Triple, string[]][];
+export type TriplesTids = [Triple, UUID[]][];
 
 export class MeldOperation extends FusableCausalOperation<Triple, TreeClock> {
   static fromOperation = (encoder: MeldEncoder,

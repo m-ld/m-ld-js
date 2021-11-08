@@ -38,7 +38,10 @@ describe('SU-Set Dataset', () => {
     });
 
     test('cannot share a dataset', async () => {
-      const otherSsd = new SuSetDataset(dataset, {}, [], { '@id': 'boom', '@domain': 'test.m-ld.org' });
+      const otherSsd = new SuSetDataset(dataset, {}, [], {
+        '@id': 'boom',
+        '@domain': 'test.m-ld.org'
+      });
       await expect(otherSsd.initialise()).rejects.toThrow();
     });
 
@@ -245,8 +248,44 @@ describe('SU-Set Dataset', () => {
             remote.sentOperation(`{"tid":"${firstTid}","o":"Fred","p":"#name", "s":"fred"}`, '{}'),
             local.join(remote.time).tick().time,
             local.tick().time);
-          expect(willUpdate).resolves.toHaveProperty('@delete', [fred]);
+          await expect(willUpdate).resolves.toHaveProperty('@delete', [fred]);
 
+          await expect(firstValueFrom(ssd.read<Describe>({
+            '@describe': 'http://test.m-ld.org/fred'
+          }).pipe(toArray()))).resolves.toEqual([]);
+        });
+
+        test('applies a concurrent delete', async () => {
+          // Insert Fred again, with Wilma and a new TID
+          const remoteOp = remote.sentOperation('{}',
+            '[{"@id":"fred","name":"Fred"},{"@id":"wilma","name":"Wilma"}]');
+          await ssd.apply(
+            remoteOp,
+            local.join(remote.time).tick().time,
+            local.tick().time);
+          // Delete the remotely-inserted Flintstones
+          const willUpdate = captureUpdate();
+          await ssd.apply(
+            remote.sentOperation(`[
+            {"tid":"${remoteOp.time.hash()}","o":"Fred","p":"#name", "s":"fred"},
+            {"tid":"${remoteOp.time.hash()}","o":"Wilma","p":"#name", "s":"wilma"}
+            ]`, '{}'),
+            local.join(remote.time).tick().time,
+            local.tick().time);
+          // Expect Fred to still exist and Wilma to be deleted
+          await expect(willUpdate).resolves.toHaveProperty('@delete', [wilma]);
+          await expect(firstValueFrom(ssd.read<Describe>({
+            '@describe': 'http://test.m-ld.org/fred'
+          }).pipe(toArray()))).resolves.toEqual([fred]);
+          await expect(firstValueFrom(ssd.read<Describe>({
+            '@describe': 'http://test.m-ld.org/wilma'
+          }).pipe(toArray()))).resolves.toEqual([]);
+          // Delete the locally-inserted Fred
+          await ssd.apply(
+            remote.sentOperation(`{"tid":"${firstTid}","o":"Fred","p":"#name", "s":"fred"}`, '{}'),
+            local.join(remote.time).tick().time,
+            local.tick().time);
+          // Expect Fred to be deleted
           await expect(firstValueFrom(ssd.read<Describe>({
             '@describe': 'http://test.m-ld.org/fred'
           }).pipe(toArray()))).resolves.toEqual([]);
@@ -262,6 +301,29 @@ describe('SU-Set Dataset', () => {
           await expect(firstValueFrom(ssd.read<Describe>({
             '@describe': 'http://test.m-ld.org/barney'
           }).pipe(toArray()))).resolves.toEqual([barney]);
+        });
+
+        test('transacts a duplicating insert', async () => {
+          const willUpdate = captureUpdate();
+          const moreFred = { ...fred, height: 6 };
+          await ssd.transact(async () => [
+            local.tick().time,
+            await ssd.write(moreFred)
+          ]);
+          // The update includes the repeat value
+          await expect(willUpdate).resolves.toHaveProperty('@insert', [moreFred]);
+          await expect(firstValueFrom(ssd.read<Describe>({
+            '@describe': 'http://test.m-ld.org/fred'
+          }).pipe(toArray()))).resolves.toEqual([moreFred]);
+          // Pretend the remotes have seen only the first Fred name, and delete it
+          await ssd.apply(
+            remote.sentOperation(`{"tid":"${firstTid}","o":"Fred","p":"#name", "s":"fred"}`, '{}'),
+            local.join(remote.time).tick().time,
+            local.tick().time);
+          // Expect the second Fred name to persist
+          await expect(firstValueFrom(ssd.read<Describe>({
+            '@describe': 'http://test.m-ld.org/fred'
+          }).pipe(toArray()))).resolves.toEqual([moreFred]);
         });
 
         test('answers local op since first', async () => {
@@ -344,7 +406,7 @@ describe('SU-Set Dataset', () => {
         // @see https://github.com/m-ld/m-ld-js/issues/29
         test('accepts own unpersisted update', async () => {
           await ssd.apply(local.sentOperation(
-            '{}', '{"@id":"wilma","name":"Wilma"}'),
+              '{}', '{"@id":"wilma","name":"Wilma"}'),
             local.time,
             local.tick().time);
 
@@ -380,13 +442,13 @@ describe('SU-Set Dataset', () => {
           await ssd.apply(one, local.time, local.tick().time);
           // ... and then get a third-party txn, deleting wilma
           await ssd.apply(third.sentOperation(
-            `{"tid":"${oneTid}","o":"Wilma","p":"#name","s":"wilma"}`, '{}'),
+              `{"tid":"${oneTid}","o":"Wilma","p":"#name","s":"wilma"}`, '{}'),
             local.time, local.tick().time);
           // Finally the local gets the remote fusion (as a rev-up), which still
           // includes the insert of wilma
           remote.tick();
           await ssd.apply(new OperationMessage(one.time.ticks, // Previous tick of remote
-            [2, one.time.ticks, remote.time.toJSON(), '{}', `[
+              [2, one.time.ticks, remote.time.toJSON(), '{}', `[
               {"tid":"${oneTid}","o":"Wilma","p":"#name","s":"wilma"},
               {"tid":"${remote.time.hash()}","o":"Barney","p":"#name","s":"barney"}]`]),
             local.time, local.tick().time);
@@ -410,7 +472,7 @@ describe('SU-Set Dataset', () => {
           // includes the insert of wilma but not betty
           remote.tick();
           await ssd.apply(new OperationMessage(one.time.ticks, // Previous tick of remote
-            [2, one.time.ticks, remote.time.toJSON(), '{}', `[
+              [2, one.time.ticks, remote.time.toJSON(), '{}', `[
               {"tid":"${oneTid}","o":"Wilma","p":"#name","s":"wilma"},
               {"tid":"${remote.time.hash()}","o":"Barney","p":"#name","s":"barney"}]`]),
             local.time, local.tick().time);
@@ -430,14 +492,14 @@ describe('SU-Set Dataset', () => {
           // SSD should now have the 'fred' operation as a 'last operation'
           // The remote deletes fred...
           await ssd.apply(remote.sentOperation(
-            `{"tid":"${firstTid}","o":"Fred","p":"#name","s":"fred"}`, '{}'),
+              `{"tid":"${firstTid}","o":"Fred","p":"#name","s":"fred"}`, '{}'),
             newLocal.time, newLocal.tick().time);
           // Finally the local gets its own data back in a rev-up, which still
           // includes the insert of fred, plus barney who it forgot about
           const firstTick = local.time.ticks;
           local.tick();
           await ssd.apply(new OperationMessage(0, // genesis, i.e. before Fred
-            [2, firstTick, local.time.toJSON(), '{}', `[
+              [2, firstTick, local.time.toJSON(), '{}', `[
               {"tid":"${firstTid}","o":"Fred","p":"#name","s":"fred"},
               {"tid":"${local.time.hash()}","o":"Barney","p":"#name","s":"barney"}]`]),
             newLocal.time, newLocal.tick().time);

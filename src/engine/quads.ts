@@ -72,7 +72,7 @@ export function tripleIndexKey(triple: Triple) {
 export function quadIndexKey(quad: Quad) {
   const qik = <Quad & { _qik: string }>quad;
   if (qik._qik == null)
-    qik._qik = [quad.graph.value].concat(...tripleKey(quad)).join('^');
+    qik._qik = `${quad.graph.value}^${tripleIndexKey(quad)}`;
   return qik._qik;
 }
 

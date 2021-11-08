@@ -1,43 +1,33 @@
 import { MeldConstraint, MeldUpdate } from '../../api';
 import { OperationMessage, Snapshot } from '..';
 import { GlobalClock, TickTree, TreeClock } from '../clocks';
-import { Context, Subject, Write } from '../../jrql-support';
-import { Dataset, PatchQuads } from '.';
-import { Iri } from 'jsonld/jsonld-spec';
+import { Context, Write } from '../../jrql-support';
+import { Dataset, PatchQuads, PatchResult } from '.';
 import { JrqlGraph } from './JrqlGraph';
 import { MeldEncoder, MeldOperation, TriplesTids, unreify, UUID } from '../MeldEncoding';
-import { EMPTY, firstValueFrom, merge, Observable, of, Subject as Source } from 'rxjs';
-import { bufferCount, expand, filter, map, mergeMap, takeWhile, toArray } from 'rxjs/operators';
+import { EMPTY, merge, Observable, of, Subject as Source } from 'rxjs';
+import { bufferCount, expand, filter, map, mergeMap, takeWhile } from 'rxjs/operators';
 import {
-  check, completed, flatten, Future, getIdLogger, inflate, inflateArray, observeAsyncIterator
+  check, completed, Future, getIdLogger, inflate, inflateArray, observeAsyncIterator
 } from '../util';
 import { Logger } from 'loglevel';
 import { MeldError } from '../MeldError';
 import { LocalLock } from '../local';
-import { SUSET_CONTEXT, tripleId } from './SuSetGraph';
-import { array, GraphSubject, MeldConfig, Read } from '../..';
-import { Quad, QuadMap, Triple, TripleMap } from '../quads';
+import { GraphSubject, MeldConfig, Read } from '../..';
+import { Quad, Triple, tripleIndexKey, TripleMap } from '../quads';
 import { CheckList } from '../../constraints/CheckList';
 import { DefaultList } from '../../constraints/DefaultList';
-import { QS } from '../../ns';
 import { InterimUpdatePatch } from './InterimUpdatePatch';
 import { ActiveContext } from 'jsonld/lib/context';
 import { activeCtx } from '../jsonld';
 import { Journal, JournalEntry, JournalState } from '../journal';
 import { JournalClerk } from '../journal/JournalClerk';
 import { QueryableRdfSource } from '../../rdfjs-support';
-
-interface HashTid extends Subject {
-  '@id': Iri; // hash:<hashed triple id>
-  tid: UUID; // Transaction ID
-}
+import { PatchTids, TidsStore } from './TidsStore';
+import { flattenItemTids } from '../ops';
+import { EntryBuilder } from '../journal/JournalState';
 
 type DatasetSnapshot = Omit<Snapshot, 'updates'>;
-
-function asTriplesTids(quadTidQuads: QuadMap<Quad[]>): TriplesTids {
-  return [...quadTidQuads].map(([quad, tidQuads]) =>
-    [quad, tidQuads.map(tidQuad => tidQuad.object.value)]);
-}
 
 type DatasetConfig = Pick<MeldConfig,
   '@id' | '@domain' | 'maxOperationSize' | 'logLevel' | 'journal'>;
@@ -54,12 +44,15 @@ export class SuSetDataset extends MeldEncoder implements QueryableRdfSource {
   /*readonly*/
   userCtx: ActiveContext;
 
-  /*readonly*/ match: QueryableRdfSource['match'];
-  /*readonly*/ query: QueryableRdfSource['query'];
-  /*readonly*/ countQuads: QueryableRdfSource['countQuads'];
+  /*readonly*/
+  match: QueryableRdfSource['match'];
+  /*readonly*/
+  query: QueryableRdfSource['query'];
+  /*readonly*/
+  countQuads: QueryableRdfSource['countQuads'];
 
   private /*readonly*/ userGraph: JrqlGraph;
-  private /*readonly*/ tidsGraph: JrqlGraph;
+  private readonly tidsStore: TidsStore;
   private readonly journal: Journal;
   private readonly journalClerk: JournalClerk;
   private readonly updateSource: Source<MeldUpdate> = new Source;
@@ -76,6 +69,7 @@ export class SuSetDataset extends MeldEncoder implements QueryableRdfSource {
     super(config['@domain'], dataset.rdf);
     this.log = getIdLogger(this.constructor, config['@id'], config.logLevel);
     this.journal = new Journal(dataset, this);
+    this.tidsStore = new TidsStore(dataset);
     this.journalClerk = new JournalClerk(this.journal, config);
     // Update notifications are strictly ordered but don't hold up transactions
     this.datasetLock = new LocalLock(config['@id'], dataset.location);
@@ -88,8 +82,6 @@ export class SuSetDataset extends MeldEncoder implements QueryableRdfSource {
     await super.initialise();
     this.userCtx = await activeCtx(this.context);
     this.userGraph = new JrqlGraph(this.dataset.graph());
-    this.tidsGraph = new JrqlGraph(this.dataset.graph(
-      this.rdf.namedNode(QS.tids)), await activeCtx(SUSET_CONTEXT));
     // Check for exclusive access to the dataset location
     try {
       await this.datasetLock.acquire();
@@ -200,7 +192,8 @@ export class SuSetDataset extends MeldEncoder implements QueryableRdfSource {
   }
 
   @SuSetDataset.checkNotClosed.async
-  async transact(prepare: () => Promise<[TreeClock, PatchQuads]>): Promise<OperationMessage | null> {
+  async transact(
+    prepare: () => Promise<[TreeClock, PatchQuads]>): Promise<OperationMessage | null> {
     return this.dataset.transact<OperationMessage | null>({
       prepare: async txc => {
         const [time, patch] = await prepare();
@@ -213,27 +206,51 @@ export class SuSetDataset extends MeldEncoder implements QueryableRdfSource {
         const { update, entailments } = await interim.finalise(this.userCtx);
 
         txc.sw.next('find-tids');
-        const deletedTriplesTids = await this.findTriplesTids(patch.deletes);
+        const deletedTriplesTids = await this.tidsStore.findTriplesTids(patch.deletes);
         const tid = time.hash();
-        const op = this.txnOperation(tid, time, patch.inserts, asTriplesTids(deletedTriplesTids));
+        const op = this.txnOperation(tid, time, patch.inserts, deletedTriplesTids);
 
         // Include tid changes in final patch
         txc.sw.next('new-tids');
-        const tidPatch = await this.txnTidPatch(tid, patch.inserts, deletedTriplesTids);
+        const tidPatch = this.txnTidPatch(tid, patch.inserts, deletedTriplesTids);
 
         // Include journaling in final patch
         txc.sw.next('journal');
         const journal = await this.journal.state();
         const journaling = journal.builder().next(op, time);
+        const opMsg = await this.operationMessage(journal, time, op);
 
-        return {
-          patch: SuSetDataset.transactionPatch(patch, entailments, tidPatch),
-          kvps: journaling.commit,
-          return: this.operationMessage(journal, time, op),
-          after: () => this.emitUpdate(update)
-        };
+        return this.txnResult(
+          patch, entailments, tidPatch, journaling, opMsg, update);
       }
     });
+  }
+
+  /**
+   * Rolls up the given transaction details into a single patch. This method is
+   * just a type convenience for ensuring everything needed for a transaction is
+   * present.
+   */
+  private async txnResult(
+    assertions: PatchQuads,
+    entailments: PatchQuads,
+    tidPatch: PatchTids,
+    journaling: EntryBuilder,
+    op: OperationMessage | null,
+    update: MeldUpdate): Promise<PatchResult<OperationMessage | null>> {
+    const commitTids = await this.tidsStore.commit(tidPatch);
+    this.log.debug(`patch ${journaling.entries.map(e => e.operation.time)}:
+    deletes: ${[...assertions.deletes].map(tripleIndexKey)}
+    inserts: ${[...assertions.inserts].map(tripleIndexKey)}`);
+    return {
+      patch: new PatchQuads(assertions).append(entailments),
+      kvps: batch => {
+        commitTids(batch);
+        journaling.commit(batch);
+      },
+      return: op,
+      after: () => this.emitUpdate(update)
+    };
   }
 
   private emitUpdate(update: MeldUpdate) {
@@ -250,17 +267,18 @@ export class SuSetDataset extends MeldEncoder implements QueryableRdfSource {
     return operationMsg;
   }
 
-  private async txnTidPatch(
-    tid: string, insert: Iterable<Quad>, deletedTriplesTids: QuadMap<Quad[]>) {
-    const tidPatch = await this.newTriplesTids([...insert].map(quad => [quad, [tid]]));
-    tidPatch.append({ deletes: flatten([...deletedTriplesTids].map(([_, tids]) => tids)) });
-    return tidPatch;
+  private txnTidPatch(
+    tid: string, insert: Iterable<Quad>, deletedTriplesTids: TripleMap<UUID[]>) {
+    return new PatchTids({
+      deletes: flattenItemTids(deletedTriplesTids),
+      inserts: [...insert].map(triple => [triple, tid])
+    });
   }
 
   private txnOperation(tid: string, time: TreeClock,
-    inserts: Iterable<Quad>, deletes: TriplesTids) {
+    inserts: Iterable<Quad>, deletes: TripleMap<UUID[]>) {
     return MeldOperation.fromOperation(this, {
-      from: time.ticks, time, deletes, inserts: [...inserts].map(quad => [quad, [tid]])
+      from: time.ticks, time, deletes, inserts: [...inserts].map(triple => [triple, [tid]])
     });
   }
 
@@ -293,8 +311,10 @@ export class SuSetDataset extends MeldEncoder implements QueryableRdfSource {
         const { update, assertions, entailments } = await interim.finalise(this.userCtx);
         const cxn = await this.constraintTxn(assertions, patch, insertTids, cxnTime);
         // After applying the constraint, some new quads might have been removed
-        tidPatch.append(await this.newTriplesTids(
-          [...patch.inserts].map(quad => [quad, array(insertTids.get(quad))])));
+        tidPatch.append(new PatchTids({
+          inserts: flattenItemTids([...patch.inserts]
+            .map(triple => [triple, insertTids.get(triple) ?? []]))
+        }));
 
         // Done determining the applied operation patch. At this point we could
         // have an empty patch, but we still need to complete the journal
@@ -310,30 +330,34 @@ export class SuSetDataset extends MeldEncoder implements QueryableRdfSource {
           // Also create a journal entry for the constraint "transaction"
           journaling.next(cxn.operation, cxnTime);
         }
-        return {
-          patch: SuSetDataset.transactionPatch(patch, entailments, tidPatch),
-          kvps: journaling.commit,
-          // FIXME: If this operation message exceeds max size, what to do?
-          return: cxn != null && cxn.operation != null ?
-            this.operationMessage(journal, cxnTime, cxn.operation) : null,
-          after: () => this.emitUpdate(update)
-        };
+        // FIXME: If this operation message exceeds max size, what to do?
+        const opMsg = cxn != null && cxn.operation != null ?
+          this.operationMessage(journal, cxnTime, cxn.operation) : null;
+        return this.txnResult(patch, entailments, tidPatch, journaling, opMsg, update);
       }
     });
   }
 
-  // The operation's delete contains reifications of deleted triples.
-  // This method adds the resolved deletions to the given transaction patch.
-  private processSuDeletions(opDeletions: TriplesTids, patch: PatchQuads) {
+  /**
+   * The operation's delete contains reifications of deleted triples.
+   * This method adds the resolved deletions to the given transaction patch.
+   * @return tidPatch patch to the triple TIDs graph
+   */
+  private processSuDeletions(opDeletions: TriplesTids, patch: PatchQuads): Promise<PatchTids> {
     return opDeletions.reduce(async (tripleTidPatch, [triple, theirTids]) => {
       // For each unique deleted triple, subtract the claimed tids from the tids we have
-      const ourTripleTids = await this.findTripleTids(tripleId(triple));
-      const toRemove = ourTripleTids.filter(tripleTid => theirTids.includes(tripleTid.object.value));
+      const ourTripleTids = await this.tidsStore.findTripleTids(triple);
+      const toRemove = ourTripleTids.filter(tripleTid => theirTids.includes(tripleTid));
       // If no tids are left, delete the triple in our graph
-      if (toRemove.length > 0 && toRemove.length == ourTripleTids.length)
+      if (toRemove.length > 0 && toRemove.length == ourTripleTids.length) {
         patch.append({ deletes: [this.toUserQuad(triple)] });
-      return (await tripleTidPatch).append({ deletes: toRemove });
-    }, Promise.resolve(new PatchQuads()));
+      } else {
+        this.log.debug(`Not removing ${tripleIndexKey(triple)}:
+        Ours: ${ourTripleTids}
+        Theirs: ${theirTids}`);
+      }
+      return (await tripleTidPatch).append({ deletes: toRemove.map(tid => [triple, tid]) });
+    }, Promise.resolve(new PatchTids()));
   }
 
   /**
@@ -345,57 +369,20 @@ export class SuSetDataset extends MeldEncoder implements QueryableRdfSource {
       // Triples that were inserted in the applied transaction may have been
       // deleted by the constraint - these need to be removed from the applied
       // transaction patch but still published in the constraint operation
-      const deletedExistingTidQuads = await this.findTriplesTids(assertions.deletes);
-      const deletedTriplesTids = new TripleMap(asTriplesTids(deletedExistingTidQuads));
+      const deletedExistingTids = await this.tidsStore.findTriplesTids(assertions.deletes);
+      const deletedTriplesTids = new TripleMap(deletedExistingTids);
       patch.remove('inserts', assertions.deletes)
-        .forEach(delQuad => deletedTriplesTids.with(delQuad, () => [])
-          .push(...array(insertTids.get(delQuad))));
+        .forEach(delTriple => deletedTriplesTids.with(delTriple, () => [])
+          .push(...(insertTids.get(delTriple) ?? [])));
       // Anything deleted by the constraint that did not exist before the
       // applied transaction can now be removed from the constraint patch
-      assertions.remove('deletes', quad => deletedExistingTidQuads.get(quad) == null);
+      assertions.remove('deletes', triple => deletedExistingTids.get(triple) == null);
       const cxnId = cxnTime.hash();
       return {
-        operation: this.txnOperation(cxnId, cxnTime, assertions.inserts, [...deletedTriplesTids]),
-        tidPatch: await this.txnTidPatch(cxnId, assertions.inserts, deletedExistingTidQuads)
+        operation: this.txnOperation(cxnId, cxnTime, assertions.inserts, deletedTriplesTids),
+        tidPatch: await this.txnTidPatch(cxnId, assertions.inserts, deletedExistingTids)
       };
     }
-  }
-
-  /**
-   * Rolls up the given transaction details into a single patch. This method is
-   * just a type convenience for ensuring everything needed for a transaction is
-   * present.
-   * @param assertions the transaction data patch
-   * @param entailments
-   * @param tidPatch triple TID patch (inserts and deletes)
-   */
-  private static transactionPatch(
-    assertions: PatchQuads, entailments: PatchQuads, tidPatch: PatchQuads): PatchQuads {
-    return new PatchQuads(assertions).append(entailments).append(tidPatch);
-  }
-
-  private newTriplesTids(tripleTids: [Triple, UUID[]][]): Promise<PatchQuads> {
-    return this.tidsGraph.write({
-      '@insert': flatten(tripleTids.map(([triple, tids]) => {
-        const theTripleId = tripleId(triple);
-        return tids.map<HashTid>(tid => ({ '@id': theTripleId, tid }));
-      }))
-    });
-  }
-
-  private async findTriplesTids(
-    quads: Iterable<Quad>, includeEmpty?: 'includeEmpty'): Promise<QuadMap<Quad[]>> {
-    const quadTriplesTids = new QuadMap<Quad[]>();
-    await Promise.all([...quads].map(async quad => {
-      const tripleTids = await this.findTripleTids(tripleId(quad));
-      if (tripleTids.length || includeEmpty)
-        quadTriplesTids.set(quad, tripleTids);
-    }));
-    return quadTriplesTids;
-  }
-
-  private findTripleTids(tripleId: string): PromiseLike<Quad[]> {
-    return firstValueFrom(this.tidsGraph.findQuads(tripleId).pipe(toArray()));
   }
 
   /**
@@ -418,10 +405,12 @@ export class SuSetDataset extends MeldEncoder implements QueryableRdfSource {
         if ('inserts' in batch) {
           const triplesTids = unreify(this.triplesFromBuffer(batch.inserts));
           // For each triple in the batch, insert the TIDs into the tids graph
-          const patch = await this.newTriplesTids(triplesTids);
+          const tidPatch = new PatchTids({ inserts: flattenItemTids(triplesTids) });
           // And include the triples themselves
-          patch.append({ inserts: triplesTids.map(([triple]) => this.toUserQuad(triple)) });
-          return { patch };
+          const patch = new PatchQuads({
+            inserts: triplesTids.map(([triple]) => this.toUserQuad(triple))
+          });
+          return { kvps: await this.tidsStore.commit(tidPatch), patch };
         } else {
           return { kvps: this.journal.insertPastOperation(batch.operation) };
         }
@@ -442,8 +431,8 @@ export class SuSetDataset extends MeldEncoder implements QueryableRdfSource {
         observeAsyncIterator(this.userGraph.graph.query()).pipe(
           bufferCount(10), // TODO batch size config
           mergeMap(async batch => {
-            const tidQuads = await this.findTriplesTids(batch, 'includeEmpty');
-            const reified = this.reifyTriplesTids(asTriplesTids(tidQuads));
+            const tidQuads = await this.tidsStore.findTriplesTids(batch, 'includeEmpty');
+            const reified = this.reifyTriplesTids([...tidQuads]);
             return { inserts: this.bufferFromTriples(reified) };
           })),
         inflateArray(journal.latestOperations()).pipe(

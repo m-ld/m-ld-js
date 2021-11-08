@@ -16,7 +16,7 @@ import { ActiveContext, activeCtx, compactIri, expandTerm } from '../jsonld';
 import { Algebra } from 'sparqlalgebrajs';
 import { newEngine } from 'quadstore-comunica';
 import { DataFactory as RdfDataFactory } from 'rdf-data-factory';
-import { JRQL, M_LD, QS, RDF, XS } from '../../ns';
+import { JRQL, M_LD, RDF, XS } from '../../ns';
 import { AsyncIterator, empty, EmptyIterator, TransformIterator, wrap } from 'asynciterator';
 import { MutableOperation } from '../ops';
 import { MeldError } from '../MeldError';
@@ -123,7 +123,6 @@ export interface Graph extends RdfFactory, QueryableRdfSource {
  * optimise (minimise) both control and user content.
  */
 export const STORAGE_CONTEXT: Context = {
-  qs: QS.$base,
   jrql: JRQL.$base,
   mld: M_LD.$base,
   xs: XS.$base,
@@ -184,7 +183,7 @@ export class QuadStoreDataset implements Dataset {
     const sw = txn.sw ?? new Stopwatch(lockKey, id);
     // The transaction lock ensures that read operations that are part of a
     // transaction (e.g. evaluating the @where clause) are not affected by
-    // concurrent transactions (fully serialiseable consistency). This is
+    // concurrent transactions (fully serialisable consistency). This is
     // particularly important for SU-Set operation.
     /*
     TODO: This could be improved with snapshots, if all the reads were on the

@@ -34,8 +34,8 @@ export abstract class MutableOperation<T> implements Operation<T> {
     return this;
   }
 
-  remove(key: 'deletes' | 'inserts', quads: Iterable<T> | Filter<T>): T[] {
-    return [...this[key].deleteAll(quads)];
+  remove(key: 'deletes' | 'inserts', items: Iterable<T> | Filter<T>): T[] {
+    return [...this[key].deleteAll(items)];
   }
 
   get footprint() {
@@ -142,12 +142,12 @@ export abstract class FusableCausalOperation<T, C extends CausalClock>
         // 0. Lazily create the fusion
         this.fused ??= original.mutable();
         // 1. Fuse all deletes
-        this.fused.deletes.addAll(flatten(next.deletes));
+        this.fused.deletes.addAll(flattenItemTids(next.deletes));
         // 2. Remove anything we insert that is deleted
-        const redundant = this.fused.inserts.deleteAll(flatten(next.deletes));
+        const redundant = this.fused.inserts.deleteAll(flattenItemTids(next.deletes));
         this.fused.deletes.deleteAll(redundant);
         // 3. Fuse remaining inserts (we can't be deleting any of these)
-        this.fused.inserts.addAll(flatten(next.inserts));
+        this.fused.inserts.addAll(flattenItemTids(next.inserts));
         this.time = next.time;
         return this;
       }
@@ -186,9 +186,9 @@ export abstract class FusableCausalOperation<T, C extends CausalClock>
         // Lazily create the cutting
         this.cut ??= original.mutable();
         // Remove all overlapping deletes
-        this.cut.deletes.deleteAll(flatten(prev.deletes));
+        this.cut.deletes.deleteAll(flattenItemTids(prev.deletes));
         // Do some indexing for TID-based parts
-        const prevFlatInserts = original.newFlatIndexSet(flatten(prev.inserts));
+        const prevFlatInserts = original.newFlatIndexSet(flattenItemTids(prev.inserts));
         // Remove any deletes where tid in exclusive-prev, unless inserted in prev
         for (let tick = prev.from; tick < this.from; tick++) {
           // Can use a hash after creation for external ticks as in fusions
@@ -250,8 +250,8 @@ export abstract class FusableCausalOperation<T, C extends CausalClock>
         return newFlatIndexSet(items);
       }
     }({
-      deletes: flatten(op.deletes),
-      inserts: flatten(op.inserts)
+      deletes: flattenItemTids(op.deletes),
+      inserts: flattenItemTids(op.inserts)
     });
   }
 
@@ -278,8 +278,8 @@ export abstract class FusableCausalOperation<T, C extends CausalClock>
   };
 }
 
-function *flatten<T>(
-  itemsTids: Iterable<ItemTids<T>>): Iterable<[item: T, tid: string]> {
+export function *flattenItemTids<T>(
+  itemsTids: Iterable<ItemTids<T>>): Iterable<ItemTid<T>> {
   for (let itemTids of itemsTids) {
     const [item, tids] = itemTids;
     for (let tid of tids)
