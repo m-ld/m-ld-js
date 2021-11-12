@@ -334,6 +334,15 @@ describe('Tree clock', () => {
     right = right.forked().right;
     expect(left.hash()).toEqual(right.hash());
   });
+
+  test('big clock hash is short', () => {
+    let time = TreeClock.GENESIS;
+    for (let i = 0; i < 10; i++) {
+      const { left, right } = time.forked();
+      time = right.update(left.ticked(0xFFFFFFFF));
+      expect(time.hash().length).toBeLessThanOrEqual(22);
+    }
+  });
 });
 
 describe('Global clock', () => {

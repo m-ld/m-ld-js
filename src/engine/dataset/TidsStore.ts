@@ -49,15 +49,14 @@ export class TidsStore {
    */
   async commit(patch: PatchTids): Promise<Kvps> {
     const affected = new TripleMap<Set<UUID>>();
-    const affect =
-      (tripleTids: Iterable<[Triple, UUID]>, effect: (tids: Set<UUID>, tid: UUID) => unknown) =>
-        Promise.all([...tripleTids].map(async ([triple, tid]) => {
-          const tids = await this.tripleTids(triple);
-          affected.set(triple, tids);
-          return effect(tids, tid);
-        }));
-    await affect(patch.deletes, (tids, tid) => tids.delete(tid));
-    await affect(patch.inserts, (tids, tid) => tids.add(tid));
+    const affect = (tripleTids: Iterable<[Triple, UUID]>, effect: Set<UUID>['delete' | 'add']) =>
+      Promise.all([...tripleTids].map(async ([triple, tid]) => {
+        const tids = await this.tripleTids(triple);
+        affected.set(triple, tids);
+        effect.call(tids, tid);
+      }));
+    await affect(patch.deletes, Set.prototype.delete);
+    await affect(patch.inserts, Set.prototype.add);
     // TODO: Smarter cache eviction
     this.cache.clear();
     return batch => {

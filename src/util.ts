@@ -1,4 +1,5 @@
-import { generate } from 'short-uuid';
+import * as short from 'short-uuid';
+import { v5 as uuidv5 } from 'uuid';
 
 /**
  * Utility to normalise a property value according to **m-ld**
@@ -36,9 +37,12 @@ export function shortId(spec: number | string = 8) {
 }
 
 /**
- * Utility to generate a unique UUID for use in a MeldConfig
+ * Utility to generate a unique short UUID for use in a MeldConfig
  */
-export function uuid() {
-  // This is indirected for documentation (do not just re-export generate)
-  return generate();
+export function uuid(from?: Buffer) {
+  if (from == null)
+    return shortUuid.generate();
+  else
+    return shortUuid.fromUUID(uuidv5(from, uuidv5.URL));
 }
+const shortUuid = short();

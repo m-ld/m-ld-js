@@ -7,7 +7,6 @@ import { getLogger, getLoggers, LogLevelDesc } from 'loglevel';
 import * as performance from 'marky';
 import { decode as rawDecode, encode as rawEncode } from '@ably/msgpack-js';
 import { AsyncIterator } from 'asynciterator';
-import { createHash } from 'crypto';
 
 export const isArray = Array.isArray;
 
@@ -53,13 +52,6 @@ export function settled(result: PromiseLike<unknown>): Promise<unknown> {
 export function completed(observable: Observable<unknown>): Promise<void> {
   return new Promise((resolve, reject) =>
     observable.subscribe({ complete: resolve, error: reject }));
-}
-
-export function sha1Digest(items: Iterable<string | Buffer>) {
-  const hash = createHash('sha1'); // Fastest
-  for (let item of items)
-    hash.update(item);
-  return hash.digest('base64');
 }
 
 export class Future<T = void> implements PromiseLike<T> {

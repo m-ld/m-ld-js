@@ -1,4 +1,5 @@
-import { MsgPack, sha1Digest } from './util';
+import { MsgPack } from './util';
+import { uuid } from '../util';
 
 const inspect = Symbol.for('nodejs.util.inspect.custom');
 
@@ -35,6 +36,10 @@ export class Fork<T> {
 
 export abstract class TickTree<T = unknown> {
   private readonly _part: Fork<this> | T;
+  /**
+   * the sum of all ticks in the tree
+   */
+  readonly deepTicks: number;
 
   protected constructor(
     part: Fork<TickTree<T>> | T,
@@ -42,6 +47,8 @@ export abstract class TickTree<T = unknown> {
     if (localTicks < 0)
       throw new Error('Tree clock must have positive ticks');
     this._part = part as Fork<this> | T;
+    this.deepTicks = this.localTicks + (this.fork != null ?
+      this.fork.left.deepTicks + this.fork.right.deepTicks : 0);
   }
 
   get value() {
@@ -63,14 +70,6 @@ export abstract class TickTree<T = unknown> {
   }
 
   protected abstract bud(value?: T): this;
-
-  /**
-   * @returns the sum of all ticks in the tree
-   */
-  get deepTicks(): number {
-    return this.localTicks + (this.fork != null ?
-      this.fork.left.deepTicks + this.fork.right.deepTicks : 0);
-  }
 
   /**
    * Get the ticks for a different process ID in the same process group
@@ -145,6 +144,25 @@ export abstract class TickTree<T = unknown> {
  * one leaf node is marked as the identity at any time.
  */
 export class TreeClock extends TickTree<boolean> implements CausalClock {
+  /**
+   * Ticks for this clock. This includes only ticks for this clock's ID.
+   * @see getTicks(filter)
+   */
+  // NOTE this field can actually be undefined if this clock has no ID anywhere in it.
+  readonly ticks: number;
+
+  constructor(part: Fork<TreeClock> | boolean, localTicks = 0) {
+    super(part, localTicks);
+    // This duplicates the logic from getTicks(this) without deep recursion
+    if (this.isId) {
+      this.ticks = this.localTicks;
+    } else {
+      const left = this.fork?.left.ticks, right = this.fork?.right.ticks;
+      if (left != null || right != null)
+        this.ticks = this.localTicks + (left ?? 0) + (right ?? 0);
+    }
+  }
+
   get isId() {
     return this.value === true;
   }
@@ -166,17 +184,8 @@ export class TreeClock extends TickTree<boolean> implements CausalClock {
    */
   hash() {
     const buf = MsgPack.encode(this.toJSON('forHash'));
-    // If shorter than sha1 (20 bytes), do not hash
-    return buf.length > 20 ? sha1Digest([buf]) : buf.toString('base64');
-  }
-
-  /**
-   * @returns the ticks for this clock. This includes only ticks for this clock's ID
-   * @see getTicks(forId)
-   */
-  get ticks(): number {
-    // ticks for this clock's embedded ID (should never return null)
-    return this.getTicks(this);
+    // Hash if longer than a short UUID (22 characters = 16 bytes in base64)
+    return buf.length > 16 ? uuid(buf) : buf.toString('base64');
   }
 
   /**
@@ -216,7 +225,7 @@ export class TreeClock extends TickTree<boolean> implements CausalClock {
     } else if (this.fork) {
       if (ticks != null && ticks < this.localTicks) {
         // If ticks < localTicks and we have a buried ID, we can drop the fork
-        if (this.hasId)
+        if (this.ticks != null)
           return new TreeClock(true, ticks);
       } else {
         const forkTicks = ticks == null ? null : ticks - this.localTicks;
@@ -278,10 +287,6 @@ export class TreeClock extends TickTree<boolean> implements CausalClock {
       return new TreeClock(...this.updateFromOther(other,
         (tree, time) => tree.update(time) as this));
     }
-  }
-
-  get hasId(): boolean {
-    return this.isId || (this.fork != null && (this.fork.left.hasId || this.fork.right.hasId));
   }
 
   anyNonIdLt(other: TreeClock): boolean {
