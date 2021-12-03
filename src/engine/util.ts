@@ -6,7 +6,6 @@ import { mergeMap, publish, switchAll, tap } from 'rxjs/operators';
 import { getLogger, getLoggers, LogLevelDesc } from 'loglevel';
 import * as performance from 'marky';
 import { decode as rawDecode, encode as rawEncode } from '@ably/msgpack-js';
-import { AsyncIterator } from 'asynciterator';
 
 export const isArray = Array.isArray;
 
@@ -155,35 +154,6 @@ export function delayUntil<T>(notifier: ObservableInput<unknown>): OperatorFunct
 
 export function onErrorNever<T>(v: ObservableInput<T>): Observable<T> {
   return onErrorResumeNext(v, NEVER);
-}
-
-export function observeAsyncIterator<T>(iterator: AsyncIterator<T>): Observable<T> {
-  return new Observable<T>(subs => {
-    if (iterator.done) {
-      subs.complete();
-    } else {
-      const dataHandler = (datum: T) => {
-        if (!subs.closed)
-          subs.next(datum);
-      };
-      const errorHandler = (err: any) => subs.error(err);
-      const endHandler = () => subs.complete();
-      iterator
-        .on('end', endHandler)
-        .on('close', endHandler)
-        .on('error', errorHandler)
-        .on('data', dataHandler);
-      subs.add(() => {
-        iterator
-          .off('end', endHandler)
-          .off('close', endHandler)
-          .off('error', errorHandler)
-          .off('data', dataHandler);
-        if (!iterator.ended)
-          iterator.close();
-      });
-    }
-  });
 }
 
 export class HotSwitch<T> extends Observable<T> {

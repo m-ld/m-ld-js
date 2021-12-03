@@ -12,7 +12,7 @@ import { TreeClockMessageService } from '../messages';
 import { Dataset } from '.';
 import {
   debounceTime, delayWhen, distinctUntilChanged, expand, filter, finalize, ignoreElements, map,
-  mergeMap, publishReplay, refCount, share, skipWhile, takeUntil, tap, toArray
+  mergeMap, share, skipWhile, takeUntil, tap, toArray
 } from 'rxjs/operators';
 import { delayUntil, Future, inflateArray, poisson, tapComplete } from '../util';
 import { LockManager } from '../locks';
@@ -24,6 +24,7 @@ import { CloneEngine } from '../StateEngine';
 import { MeldError, MeldErrorStatus } from '../MeldError';
 import { AsyncIterator, TransformIterator, wrap } from 'asynciterator';
 import { BaseStream } from '../../rdfjs-support';
+import { Bite, Consumable } from '../../flowable';
 
 enum ConnectStyle {
   SOFT, HARD
@@ -64,7 +65,8 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
     context?: Context;
   }) {
     super(config);
-    this.dataset = new SuSetDataset(dataset, context ?? {}, constraints ?? [], config);
+    this.dataset = new SuSetDataset(
+      dataset, context ?? {}, constraints ?? [], config);
     this.subs.add(this.dataUpdates
       .pipe(map(update => update['@ticks']))
       .subscribe(this.latestTicks));
@@ -89,11 +91,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
    */
   @AbstractMeld.checkNotClosed.async
   async initialise(): Promise<void> {
-    await this.dataset.initialise();
-    // Raw RDF methods just pass through to the dataset when its initialised
-    this.match = this.wrapStreamFn(this.dataset.match.bind(this.dataset));
-    // @ts-ignore - TS can't cope with overloaded query method
-    this.query = this.wrapStreamFn(this.dataset.query.bind(this.dataset));
+    await this.initDataset();
 
     this.remotes.setLocal(this);
     // Establish a clock for this clone
@@ -138,6 +136,15 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
     if (this.newClone)
       // For a new non-genesis clone, the first connect is essential.
       await comesAlive(this);
+  }
+
+  private async initDataset() {
+    await this.dataset.initialise();
+    const rdfSrc = this.dataset.queryableRdfSource;
+    // Raw RDF methods just pass through to the dataset when its initialised
+    this.match = this.wrapStreamFn(rdfSrc.match.bind(rdfSrc));
+    // @ts-ignore - TS can't cope with overloaded query method
+    this.query = this.wrapStreamFn(rdfSrc.query.bind(rdfSrc));
   }
 
   private reconnectDelayer = (style: ConnectStyle): Observable<number> => {
@@ -204,33 +211,35 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
       try {
         const startTime = this.localTime;
         // Synchronously gather ticks for transaction applications
-        const applys: [OperationMessage, TreeClock, TreeClock][] = [];
-        const accepted = this.messageService.receive(op, this.orderingBuffer, (msg, prevTime) => {
-          // Check that we have the previous message from this clock ID
-          const ticksSeen = prevTime.getTicks(msg.time);
-          if (msg.time.ticks <= ticksSeen) {
-            // Already had this message.
-            this.log.debug('Ignoring outdated', logBody);
-          } else if (msg.prev > ticksSeen) {
-            // We're missing a message. Reset the clock and trigger a re-connect.
-            this.messageService.push(startTime);
-            throw new MeldError('Update out of order', `
+        const applications: [OperationMessage, TreeClock, TreeClock][] = [];
+        const accepted = this.messageService.receive(op, this.orderingBuffer,
+          (msg, prevTime) => {
+            // Check that we have the previous message from this clock ID
+            const ticksSeen = prevTime.getTicks(msg.time);
+            if (msg.time.ticks <= ticksSeen) {
+              // Already had this message.
+              this.log.debug('Ignoring outdated', logBody);
+            } else if (msg.prev > ticksSeen) {
+              // We're missing a message. Reset the clock and trigger a re-connect.
+              this.messageService.push(startTime);
+              throw new MeldError('Update out of order', `
               Update claims prev is ${msg.prev} (${msg.time}),
               but local clock was ${ticksSeen} (${prevTime})`);
-          } else {
-            this.log.debug('Accepting', logBody);
-            // Get the event time just before transacting the change, making an
-            // extra clock tick available for constraints.
-            applys.push([msg, this.messageService.event(), this.messageService.event()]);
-          }
-        });
-        // The applys will enqueue in order on the dataset's transaction lock
-        await Promise.all(applys.map(async ([msg, localTime, cxnTime]) => {
-          const cxOp = await this.dataset.apply(msg, localTime, cxnTime);
-          if (cxOp != null)
-            this.nextOperation(cxOp);
-          msg.delivered.resolve();
-        }));
+            } else {
+              this.log.debug('Accepting', logBody);
+              // Get the event time just before transacting the change, making an
+              // extra clock tick available for constraints.
+              applications.push([msg, this.messageService.event(), this.messageService.event()]);
+            }
+          });
+        // The applications will enqueue in order on the dataset's transaction lock
+        await Promise.all(applications.map(
+          async ([msg, localTime, cxnTime]) => {
+            const cxOp = await this.dataset.apply(msg, localTime, cxnTime);
+            if (cxOp != null)
+              this.nextOperation(cxOp);
+            msg.delivered.resolve();
+          }));
         return accepted ? OperationOutcome.ACCEPTED : OperationOutcome.BUFFERED;
       } catch (err) {
         if (err instanceof MeldError && err.status === MeldErrorStatus['Update out of order']) {
@@ -418,8 +427,8 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
       const snapshot = await this.dataset.takeSnapshot();
       return {
         ...snapshot, updates,
-        // Buffer/replay triples to not overload the messaging layer
-        data: snapshot.data.pipe(publishReplay(), refCount(), tapComplete(sentSnapshot))
+        // Snapshot data is a flowable, so no need to buffer it
+        data: snapshot.data.pipe(tapComplete(sentSnapshot))
       };
     });
   }
@@ -458,10 +467,11 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
 
   @AbstractMeld.checkNotClosed.async
   countQuads(...args: Parameters<CloneEngine['match']>): Promise<number> {
-    return this.dataset.countQuads(...args);
+    return this.dataset.queryableRdfSource.countQuads(...args);
   }
 
-  private wrapStreamFn<P extends any[], T>(fn: (...args: P) => BaseStream<T>): ((...args: P) => AsyncIterator<T>) {
+  private wrapStreamFn<P extends any[], T>(
+    fn: (...args: P) => BaseStream<T>): ((...args: P) => AsyncIterator<T>) {
     return (...args) => {
       return new TransformIterator<T>(this.closed ?
         Promise.reject(new MeldError('Clone has closed')) :
@@ -470,8 +480,8 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
   }
 
   @AbstractMeld.checkNotClosed.rx
-  read(request: Read): Observable<GraphSubject> {
-    return new Observable<GraphSubject>(subs => {
+  read(request: Read): Consumable<GraphSubject> {
+    return new Observable<Bite<GraphSubject>>(subs => {
       this.lock.share('live', () => new Promise<void>(resolve => {
         this.logRequest('read', request);
         // Only leave the live-lock when the results have been fully streamed
@@ -533,7 +543,8 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
       map(toStatus),
       distinctUntilChanged<MeldStatus>(matchStatus));
     const becomes = async (match?: Partial<MeldStatus>) => firstValueFrom(
-      values.pipe(filter(status => matchStatus(status, match)), defaultIfEmpty(undefined)));
+      values.pipe(filter(status => matchStatus(status, match)),
+        defaultIfEmpty(undefined)));
     return Object.defineProperties(values, {
       becomes: { value: becomes },
       value: { get: () => toStatus(stateRollup.value) }

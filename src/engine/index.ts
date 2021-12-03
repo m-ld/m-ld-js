@@ -160,11 +160,27 @@ export interface Revup extends Recovery {
  */
 export interface Snapshot extends Recovery {
   /**
-   * All data in the snapshot. Data is either reified triples with their
-   * observed TIDs (sender decides how many triples per emission) as JSON-LD, or
+   * All data in the snapshot.
+   * @see Snapshot.Datum
+   */
+  readonly data: Observable<Snapshot.Datum>;
+}
+
+export namespace Snapshot {
+  /**
+   * Reified triples with their observed TIDs
+   * (sender decides how many triples per emission)
+   */
+  export type Inserts = { inserts: JsonBuffer };
+  /**
+   * A latest operation from a remote clone
+   */
+  export type Operation = { operation: EncodedOperation };
+  /**
+   * Data is either reified triples with their observed TIDs as JSON-LD, or
    * a latest operation from a remote clone.
    */
-  readonly data: Observable<{ inserts: JsonBuffer } | { operation: EncodedOperation }>;
+  export type Datum = Inserts | Operation;
 }
 
 /**

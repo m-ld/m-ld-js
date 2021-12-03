@@ -4,44 +4,56 @@ import {
   isSubject, isUpdate, operators, Read, Result, Subject, Update, Variable, VariableExpression, Write
 } from '../../jrql-support';
 import { Graph, PatchQuads } from '.';
-import { groupBy, map, mergeMap, reduce, toArray } from 'rxjs/operators';
-import { defaultIfEmpty, EMPTY, firstValueFrom, merge, Observable, of, throwError } from 'rxjs';
-import {
-  canPosition, inPosition, NamedNode, Quad, QueryableRdfSourceProxy, Term, TriplePos
-} from '../quads';
+import { map, mergeMap, reduce } from 'rxjs/operators';
+import { concat, EMPTY, throwError } from 'rxjs';
+import { canPosition, NamedNode, Quad, QueryableRdfSourceProxy, Term, TriplePos } from '../quads';
 import { ActiveContext, expandTerm, initialCtx, nextCtx } from '../jsonld';
 import { Algebra, Factory as SparqlFactory } from 'sparqlalgebrajs';
 import { JRQL } from '../../ns';
 import { JrqlQuads } from './JrqlQuads';
 import { MeldError } from '../MeldError';
-import { anyName, array, GraphSubject, ReadResult, readResult } from '../..';
-import { binaryFold, flatten, inflate, isArray, observeAsyncIterator } from '../util';
+import { array, GraphSubject, MeldReadState, ReadResult, readResult } from '../..';
+import { binaryFold, flatten, inflate, isArray } from '../util';
 import { ConstructTemplate } from './ConstructTemplate';
 import { Binding } from '../../rdfjs-support';
+import { Consumable, each } from '../../flowable';
+import { ignoreIf } from '../../flowable/operators/ignoreIf';
+import { flatMap } from '../../flowable/operators/flatMap';
+import { consume } from '../../flowable/consume';
 
 /**
  * A graph wrapper that provides low-level json-rql handling for queries. The
  * write methods don't actually make changes but produce Patches which can then
  * be applied to a Dataset.
  */
-export class JrqlGraph extends QueryableRdfSourceProxy {
+export class JrqlGraph {
   readonly sparql: SparqlFactory;
   readonly jrql: JrqlQuads;
+  readonly asReadState: MeldReadState;
 
   /**
    * @param graph a quads graph to operate on
-   * @param defaultCtx
    */
   constructor(
-    readonly graph: Graph,
-    readonly defaultCtx = initialCtx()) {
-    super(graph);
+    readonly graph: Graph) {
     this.sparql = new SparqlFactory(graph);
     this.jrql = new JrqlQuads(graph);
+    // Map ourselves to a top-level read state, used for constraints
+    const self = this;
+    this.asReadState = new (class extends QueryableRdfSourceProxy implements MeldReadState {
+      // This uses the default initial context, so no prefix mappings
+      ctx = initialCtx();
+      get(id: string): Promise<GraphSubject | undefined> {
+        return self.get(id, this.ctx);
+      }
+      read<R extends Read>(request: R): ReadResult {
+        return readResult(self.read(request, this.ctx));
+      }
+    })(graph);
   }
 
-  read(query: Read, ctx = this.defaultCtx): ReadResult {
-    return readResult(inflate(nextCtx(ctx, query['@context']), ctx => {
+  read(query: Read, ctx: ActiveContext): Consumable<GraphSubject> {
+    return inflate(nextCtx(ctx, query['@context']), ctx => {
       if (isDescribe(query))
         return this.describe(array(query['@describe']), query['@where'], ctx);
       else if (isSelect(query) && query['@where'] != null)
@@ -49,11 +61,13 @@ export class JrqlGraph extends QueryableRdfSourceProxy {
       else if (isConstruct(query))
         return this.construct(query['@construct'], query['@where'], ctx);
       else
-        return throwError(() => new MeldError('Unsupported pattern', 'Read type not supported.'));
-    }));
+        return throwError(() => new MeldError(
+          'Unsupported pattern', 'Read type not supported.'));
+    });
   }
 
-  async write(query: Write, ctx = this.defaultCtx): Promise<PatchQuads> {
+  async write(query: Write,
+    ctx: ActiveContext): Promise<PatchQuads> {
     ctx = await nextCtx(ctx, query['@context']);
     // @unions not supported unless in a where clause
     if (isGroup(query) && query['@graph'] != null && query['@union'] == null)
@@ -68,98 +82,72 @@ export class JrqlGraph extends QueryableRdfSourceProxy {
 
   select(select: Result,
     where: Subject | Subject[] | Group,
-    ctx = this.defaultCtx): Observable<GraphSubject> {
+    ctx: ActiveContext): Consumable<GraphSubject> {
     return this.solutions(where, this.project, ctx).pipe(
-      map(solution => this.jrql.solutionSubject(select, solution, ctx)));
+      map(({ value: solution, next }) =>
+        ({ value: this.jrql.solutionSubject(select, solution, ctx), next: next })));
   }
 
   describe(describes: (Iri | Variable)[],
-    where?: Subject | Subject[] | Group,
-    ctx = this.defaultCtx): Observable<GraphSubject> {
-    return merge(...describes.map(describe => {
+    where: Subject | Subject[] | Group | undefined,
+    ctx: ActiveContext): Consumable<GraphSubject> {
+    return concat(...describes.map(describe => {
+      // noinspection TypeScriptValidateJSTypes
       const describedVarName = JRQL.matchVar(describe);
       if (describedVarName) {
-        const vars = {
-          subject: this.any(), property: this.any(),
-          value: this.any(), item: this.any(),
-          described: this.graph.variable(describedVarName)
-        };
-        return this.solutions(where ?? {}, op =>
-          observeAsyncIterator(this.graph.query(this.sparql.createProject(
-            this.sparql.createJoin(
-              // Sub-select DISTINCT to fetch subject ids
-              this.sparql.createDistinct(
-                this.sparql.createProject(
-                  this.sparql.createExtend(op, vars.subject,
-                    this.sparql.createTermExpression(vars.described)),
-                  [vars.subject])),
-              this.gatherSubjectData(vars)),
-            [vars.subject, vars.property, vars.value, vars.item]))), ctx).pipe(
-          // TODO: Ordering annoyance: sometimes subjects interleave, so
-          // cannot use toArrays(quad => quad.subject.value),
-          groupBy(binding => this.bound(binding, vars.subject)),
-          mergeMap(subjectBindings => subjectBindings.pipe(toArray())),
-          map(subjectBindings => this.toSubject(subjectBindings, vars, ctx)));
+        const described = this.graph.variable(describedVarName);
+        return this.solutions(where || {}, op =>
+          consume(this.graph.query(this.sparql.createDistinct(
+            // Project out the subject
+            this.sparql.createProject(op, [described])))), ctx).pipe(
+          // For each found subject Id, describe it
+          flatMap(binding => consume(this.describe1(this.bound(binding, described)!, ctx))
+            .pipe(ignoreIf(null))));
       } else {
-        return this.describe1(describe, ctx);
+        const source = this.get(describe, ctx);
+        return consume(source).pipe(ignoreIf(null));
       }
     }));
   }
 
-  describe1(describe: Iri, ctx = this.defaultCtx): Observable<GraphSubject> {
-    const vars = {
-      subject: this.resolve(describe, ctx),
-      property: this.any(), value: this.any(), item: this.any()
-    };
-    const projection = this.sparql.createProject(
-      this.gatherSubjectData(vars), [vars.property, vars.value, vars.item]);
-    return observeAsyncIterator(this.graph.query(projection)).pipe(toArray(), mergeMap(bindings =>
-      bindings.length ? of(this.toSubject(bindings, vars, ctx)) : EMPTY));
+  get(id: Iri, ctx: ActiveContext) {
+    return this.describe1(this.resolve(id, ctx), ctx);
   }
 
-  get(id: string) {
-    return firstValueFrom(this.describe1(id).pipe(defaultIfEmpty(undefined)));
+  private async describe1(subjectId: Term, ctx: ActiveContext) {
+    const propertyQuads: Quad[] = [], listItemQuads: Quad[] = [];
+    await each(consume(this.graph.query(subjectId)), async propertyQuad => {
+      let isSlot = false;
+      if (propertyQuad.object.termType === 'NamedNode') {
+        await each(consume(this.graph.query(
+          propertyQuad.object, this.graph.namedNode(JRQL.item))), listItemQuad => {
+          listItemQuads.push(this.graph.quad(
+            propertyQuad.subject, propertyQuad.predicate, listItemQuad.object, this.graph.name));
+          isSlot = true;
+        });
+      }
+      if (!isSlot)
+        propertyQuads.push(propertyQuad);
+    });
+    if (propertyQuads.length || listItemQuads.length)
+      return this.jrql.toApiSubject(propertyQuads, listItemQuads, ctx);
   }
 
   construct(construct: Subject | Subject[],
-    where?: Subject | Subject[] | Group,
-    ctx = this.defaultCtx): Observable<GraphSubject> {
+    where: Subject | Subject[] | Group | undefined,
+    ctx: ActiveContext): Consumable<GraphSubject> {
     const template = new ConstructTemplate(construct, ctx);
     // If no where, use the construct as the pattern
     // TODO: Add ordering to allow streaming results
     return this.solutions(where ?? template.asPattern, this.project, ctx).pipe(
-      reduce((template, solution) => template.addSolution(solution), template),
-      mergeMap(template => template.results));
-  }
-
-  private toSubject(bindings: Binding[], terms: SubjectTerms, ctx: ActiveContext): GraphSubject {
-    // Partition the bindings into plain properties and list items
-    return this.jrql.toApiSubject(...bindings.reduce<[Quad[], Quad[]]>((quads, binding) => {
-      const [propertyQuads, listItemQuads] = quads, item = this.bound(binding, terms.item);
-      (item == null ? propertyQuads : listItemQuads).push(this.graph.quad(
-        inPosition('subject', this.bound(binding, terms.subject)),
-        inPosition('predicate', this.bound(binding, terms.property)),
-        inPosition('object', this.bound(binding, item == null ? terms.value : item)),
-        this.graph.name));
-      return quads;
-    }, [[], []]), ctx);
-  }
-
-  private gatherSubjectData({ subject, property, value, item }: SubjectTerms): Algebra.Operation {
-    /* {
-      ?subject ?prop ?value
-      optional { ?value <http://json-rql.org/#item> ?item }
-    } */
-    return this.sparql.createLeftJoin(
-      // BGP to pick up all subject properties
-      this.sparql.createBgp([this.sparql.createPattern(
-        subject, property, value, this.graph.name)]),
-      this.sparql.createBgp([this.sparql.createPattern(
-        value, this.graph.namedNode(JRQL.item), item, this.graph.name)]));
-  }
-
-  findQuads(id: Iri, ctx = this.defaultCtx): Observable<Quad> {
-    return observeAsyncIterator(this.graph.query(this.resolve(id, ctx)));
+      reduce((template, { value: solution, next }) => {
+        try {
+          return template.addSolution(solution);
+        } finally {
+          next(); // We are reading into the template
+        }
+      }, template),
+      mergeMap(template => consume(template.results())));
   }
 
   private async update(query: Update, ctx: ActiveContext): Promise<PatchQuads> {
@@ -171,7 +159,7 @@ export class JrqlGraph extends QueryableRdfSourceProxy {
     const inserts = query['@insert'] != null ?
       this.jrql.quads(query['@insert'], { mode: 'load' }, ctx) : undefined;
 
-    let solutions: Observable<Binding> | null = null;
+    let solutions: Consumable<Binding> | null = null;
     const where = query['@where'];
     if (where != null) {
       // If there is a @where clause, use variable substitutions per solution
@@ -182,11 +170,11 @@ export class JrqlGraph extends QueryableRdfSourceProxy {
         this.sparql.createBgp(deletes.map(this.toPattern)), vars);
     }
     if (solutions != null) {
-      await solutions.forEach(solution => {
+      await each(solutions, solution => {
         // If there are variables in the update for which there is no value in the
         // solution, or if the solution value is not compatible with the quad
         // position, then this is treated as no-match, even if this is a
-        // @delete (i.e. DELETEWHERE does not apply if @where exists).
+        // @delete (i.e. DELETE WHERE does not apply if @where exists).
         const matchingQuads = (template?: Quad[]) => template == null ? [] :
           this.fillTemplate(template, solution).filter(quad => !anyVarTerm(quad));
         patch.append(new PatchQuads({
@@ -206,7 +194,7 @@ export class JrqlGraph extends QueryableRdfSourceProxy {
     return patch;
   }
 
-  graphQuads(pattern: Subject | Subject[], ctx = this.defaultCtx) {
+  graphQuads(pattern: Subject | Subject[], ctx: ActiveContext) {
     const vars = new Set<string>();
     const quads = this.jrql.quads(pattern, { mode: 'graph', vars }, ctx);
     if (vars.size > 0)
@@ -220,8 +208,8 @@ export class JrqlGraph extends QueryableRdfSourceProxy {
   };
 
   private solutions<T>(where: Subject | Subject[] | Group,
-    exec: (op: Algebra.Operation, vars: Iterable<string>) => Observable<T>,
-    ctx: ActiveContext): Observable<T> {
+    exec: (op: Algebra.Operation, vars: Iterable<string>) => Consumable<T>,
+    ctx: ActiveContext): Consumable<T> {
     const vars = new Set<string>();
     const op = this.operation(asGroup(where), vars, ctx);
     return op == null ? EMPTY : exec(op, vars);
@@ -280,7 +268,8 @@ export class JrqlGraph extends QueryableRdfSourceProxy {
       // Every constraint and every entry in a constraint is ANDed
       flatten(constraints.map(constraint => Object.entries(constraint))),
       ([operator, expr]) => this.operatorExpr(operator, expr, ctx),
-      (left, right) => this.sparql.createOperatorExpression('and', [left, right]));
+      (left, right) =>
+        this.sparql.createOperatorExpression('and', [left, right]));
     if (expression == null)
       throw new Error('Missing expression');
     return expression;
@@ -309,8 +298,8 @@ export class JrqlGraph extends QueryableRdfSourceProxy {
     }
   }
 
-  private project = (op: Algebra.Operation, vars: Iterable<string>): Observable<Binding> => {
-    return observeAsyncIterator(this.graph.query(this.sparql.createProject(op,
+  private project = (op: Algebra.Operation, vars: Iterable<string>): Consumable<Binding> => {
+    return consume(this.graph.query(this.sparql.createProject(op,
       [...vars].map(varName => this.graph.variable(varName)))));
   };
 
@@ -331,7 +320,7 @@ export class JrqlGraph extends QueryableRdfSourceProxy {
     return term;
   }
 
-  private resolve(iri: Iri, ctx = this.defaultCtx): NamedNode {
+  private resolve(iri: Iri, ctx: ActiveContext): NamedNode {
     return this.graph.namedNode(expandTerm(iri, ctx));
   }
 
@@ -355,17 +344,6 @@ export class JrqlGraph extends QueryableRdfSourceProxy {
         return term;
     }
   }
-
-  private any() {
-    return this.graph.variable(anyName());
-  }
-}
-
-interface SubjectTerms {
-  subject: Term;
-  property: Term;
-  value: Term;
-  item: Term;
 }
 
 function anyVarTerm(quad: Quad) {

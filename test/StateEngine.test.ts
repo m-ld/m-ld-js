@@ -1,10 +1,12 @@
-import { firstValueFrom, of, Subject as Source } from 'rxjs';
+import { firstValueFrom, Subject as Source } from 'rxjs';
 import { MeldUpdate } from '../src';
 import { LockManager } from '../src/engine/locks';
 import { CloneEngine, StateEngine } from '../src/engine/StateEngine';
 import { SubjectGraph } from '../src/engine/SubjectGraph';
 import { single } from 'asynciterator';
 import { DataFactory as RdfDataFactory, Quad } from 'rdf-data-factory';
+import { drain } from '../src/flowable/drain';
+import { consume } from '../src/flowable/consume';
 
 describe('State Engine', () => {
   class MockCloneEngine implements CloneEngine {
@@ -17,8 +19,10 @@ describe('State Engine', () => {
         rdf.namedNode('tick'),
         rdf.literal(this.tick.toString())));
     countQuads = async () => 1;
-    query = () => { throw undefined; };
-    read = () => of({ '@id': 'state', tick: this.tick });
+    query = () => {
+      throw undefined;
+    };
+    read = () => consume([{ '@id': 'state', tick: this.tick }]);
     write = async () => {
       this.dataUpdates.next({
         '@delete': new SubjectGraph([]),
@@ -43,7 +47,7 @@ describe('State Engine', () => {
 
   test('can read initial state', done => {
     states.read(async state => {
-      await expect(firstValueFrom(state.read({}))).resolves.toMatchObject({ tick: 0 });
+      await expect(drain(state.read({}))).resolves.toMatchObject([{ tick: 0 }]);
       done();
     });
   });
@@ -66,7 +70,8 @@ describe('State Engine', () => {
   test('can read initial state and follow', done => {
     states.read(async state => {
       await expect(firstValueFrom(state.read({})))
-        .resolves.toMatchObject({ tick: 0 }).catch(err => done.fail(err));
+        .resolves.toMatchObject({ value: { tick: 0 } })
+        .catch(err => done(err));
     }, async update => {
       expect(update).toMatchObject({ '@ticks': 1 });
       done();

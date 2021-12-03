@@ -77,9 +77,9 @@ describe('Dataset engine', () => {
         '@id': 'http://test.m-ld.org/fred',
         'http://test.m-ld.org/#name': 'Fred'
       } as Subject);
-      const fred = await firstValueFrom(silo.read({
+      const fred = (await firstValueFrom(silo.read({
         '@describe': 'http://test.m-ld.org/fred'
-      } as Describe));
+      } as Describe))).value;
       expect(fred['@id']).toBe('http://test.m-ld.org/fred');
       expect(fred['http://test.m-ld.org/#name']).toBe('Fred');
     });

@@ -6,14 +6,13 @@ import {
 import { TreeClock } from '../clocks';
 import { generate as uuid } from 'short-uuid';
 import { Request, Response } from '../ControlMessage';
-import { completed, Future, MsgPack, Stopwatch, toJSON } from '../util';
-import {
-  concatMap, delay, finalize, first, map, materialize, reduce, tap, timeout, toArray
-} from 'rxjs/operators';
+import { Future, MsgPack, Stopwatch, toJSON } from '../util';
+import { delay, first, map, reduce, tap, timeout, toArray } from 'rxjs/operators';
 import { MeldError, MeldErrorStatus } from '../MeldError';
 import { AbstractMeld } from '../AbstractMeld';
 import { MeldConfig, shortId } from '../../index';
 import { JsonNotification, NotifyParams, ReplyParams, SendParams } from './PubsubParams';
+import { consume } from '../../flowable/consume';
 
 /**
  * A sub-publisher, used to temporarily address unicast messages to one peer clone. Sub-publishers
@@ -563,20 +562,15 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
         // out from the network so here we make best efforts to notify an error
         // and then give up.
         .catch(err => notifyError(err));
-    return completed(data.pipe(
-      map(datumToPayload),
-      materialize(),
-      concatMap(notification => {
-        switch (notification.kind) {
-          case 'N':
-            return notify({ next: notification.value });
-          case 'E':
-            return notifyError(notification.error);
-          case 'C':
-            return notifyComplete();
-        }
-      }),
-      finalize(() => notifier.close?.())));
+    return new Promise<void>((resolve, reject) => {
+      // Convert the input into a consumable to get backpressure, if available
+      consume(data).subscribe({
+        next: ({ value, next }) =>
+          notify({ next: datumToPayload(value) }).then(next),
+        error: err => notifyError(err).then(() => reject(err)),
+        complete: () => notifyComplete().then(resolve)
+      });
+    }).finally(() => notifier.close?.());
   }
 
   private async reply(

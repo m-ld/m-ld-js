@@ -8,6 +8,7 @@ import { Describe, MeldConstraint } from '../src';
 import { jsonify } from './testUtil';
 import { MeldEncoder } from '../src/engine/MeldEncoding';
 import { OperationMessage } from '../src/engine';
+import { drain } from '../src/flowable/drain';
 
 const fred = {
   '@id': 'http://test.m-ld.org/fred',
@@ -116,9 +117,9 @@ describe('SU-Set Dataset', () => {
           local.tick().time);
         await expect(willUpdate).resolves.toHaveProperty('@insert', [fred]);
 
-        await expect(firstValueFrom(ssd.read<Describe>({
+        await expect(drain(ssd.read<Describe>({
           '@describe': 'http://test.m-ld.org/fred'
-        }).pipe(toArray()))).resolves.toEqual([fred]);
+        }))).resolves.toEqual([fred]);
       });
 
       test('applies a no-op operation', async () => {
@@ -208,9 +209,9 @@ describe('SU-Set Dataset', () => {
           const snapshot = await ssd.takeSnapshot();
           const staticData = await firstValueFrom(snapshot.data.pipe(toArray()));
           await ssd.applySnapshot({ gwc: local.gwc, data: from(staticData) }, local.tick().time);
-          await expect(firstValueFrom(ssd.read<Describe>({
+          await expect(drain(ssd.read<Describe>({
             '@describe': 'http://test.m-ld.org/fred'
-          }).pipe(toArray()))).resolves.toEqual([fred]);
+          }))).resolves.toEqual([fred]);
         });
 
         test('does not answer operations since before snapshot start', async () => {
@@ -250,9 +251,9 @@ describe('SU-Set Dataset', () => {
             local.tick().time);
           await expect(willUpdate).resolves.toHaveProperty('@delete', [fred]);
 
-          await expect(firstValueFrom(ssd.read<Describe>({
+          await expect(drain(ssd.read<Describe>({
             '@describe': 'http://test.m-ld.org/fred'
-          }).pipe(toArray()))).resolves.toEqual([]);
+          }))).resolves.toEqual([]);
         });
 
         test('applies a concurrent delete', async () => {
@@ -274,21 +275,21 @@ describe('SU-Set Dataset', () => {
             local.tick().time);
           // Expect Fred to still exist and Wilma to be deleted
           await expect(willUpdate).resolves.toHaveProperty('@delete', [wilma]);
-          await expect(firstValueFrom(ssd.read<Describe>({
+          await expect(drain(ssd.read<Describe>({
             '@describe': 'http://test.m-ld.org/fred'
-          }).pipe(toArray()))).resolves.toEqual([fred]);
-          await expect(firstValueFrom(ssd.read<Describe>({
+          }))).resolves.toEqual([fred]);
+          await expect(drain(ssd.read<Describe>({
             '@describe': 'http://test.m-ld.org/wilma'
-          }).pipe(toArray()))).resolves.toEqual([]);
+          }))).resolves.toEqual([]);
           // Delete the locally-inserted Fred
           await ssd.apply(
             remote.sentOperation(`{"tid":"${firstTid}","o":"Fred","p":"#name", "s":"fred"}`, '{}'),
             local.join(remote.time).tick().time,
             local.tick().time);
           // Expect Fred to be deleted
-          await expect(firstValueFrom(ssd.read<Describe>({
+          await expect(drain(ssd.read<Describe>({
             '@describe': 'http://test.m-ld.org/fred'
-          }).pipe(toArray()))).resolves.toEqual([]);
+          }))).resolves.toEqual([]);
         });
 
         test('transacts another insert', async () => {
@@ -298,9 +299,9 @@ describe('SU-Set Dataset', () => {
           ]);
           expect(msg!.time.equals(local.time)).toBe(true);
 
-          await expect(firstValueFrom(ssd.read<Describe>({
+          await expect(drain(ssd.read<Describe>({
             '@describe': 'http://test.m-ld.org/barney'
-          }).pipe(toArray()))).resolves.toEqual([barney]);
+          }))).resolves.toEqual([barney]);
         });
 
         test('transacts a duplicating insert', async () => {
@@ -312,18 +313,18 @@ describe('SU-Set Dataset', () => {
           ]);
           // The update includes the repeat value
           await expect(willUpdate).resolves.toHaveProperty('@insert', [moreFred]);
-          await expect(firstValueFrom(ssd.read<Describe>({
+          await expect(drain(ssd.read<Describe>({
             '@describe': 'http://test.m-ld.org/fred'
-          }).pipe(toArray()))).resolves.toEqual([moreFred]);
+          }))).resolves.toEqual([moreFred]);
           // Pretend the remotes have seen only the first Fred name, and delete it
           await ssd.apply(
             remote.sentOperation(`{"tid":"${firstTid}","o":"Fred","p":"#name", "s":"fred"}`, '{}'),
             local.join(remote.time).tick().time,
             local.tick().time);
           // Expect the second Fred name to persist
-          await expect(firstValueFrom(ssd.read<Describe>({
+          await expect(drain(ssd.read<Describe>({
             '@describe': 'http://test.m-ld.org/fred'
-          }).pipe(toArray()))).resolves.toEqual([moreFred]);
+          }))).resolves.toEqual([moreFred]);
         });
 
         test('answers local op since first', async () => {
@@ -410,9 +411,9 @@ describe('SU-Set Dataset', () => {
             local.time,
             local.tick().time);
 
-          await expect(firstValueFrom(ssd.read<Describe>({
+          await expect(drain(ssd.read<Describe>({
             '@describe': 'http://test.m-ld.org/wilma'
-          }).pipe(toArray()))).resolves.toEqual([wilma]);
+          }))).resolves.toEqual([wilma]);
         });
 
         // @see https://github.com/m-ld/m-ld-js/issues/29
@@ -453,9 +454,9 @@ describe('SU-Set Dataset', () => {
               {"tid":"${remote.time.hash()}","o":"Barney","p":"#name","s":"barney"}]`]),
             local.time, local.tick().time);
           // Result should not include wilma because of the third-party delete
-          await expect(firstValueFrom(ssd.read<Describe>({
+          await expect(drain(ssd.read<Describe>({
             '@describe': 'http://test.m-ld.org/wilma'
-          }).pipe(toArray()))).resolves.toEqual([]);
+          }))).resolves.toEqual([]);
         });
 
         test('cuts stale fusion from incoming fusion', async () => {
@@ -477,9 +478,9 @@ describe('SU-Set Dataset', () => {
               {"tid":"${remote.time.hash()}","o":"Barney","p":"#name","s":"barney"}]`]),
             local.time, local.tick().time);
           // Result should not include betty because the fusion omits it
-          await expect(firstValueFrom(ssd.read<Describe>({
+          await expect(drain(ssd.read<Describe>({
             '@describe': 'http://test.m-ld.org/betty'
-          }).pipe(toArray()))).resolves.toEqual([]);
+          }))).resolves.toEqual([]);
         });
 
         test('cuts snapshot last-seen message from incoming fusion', async () => {
@@ -504,9 +505,9 @@ describe('SU-Set Dataset', () => {
               {"tid":"${local.time.hash()}","o":"Barney","p":"#name","s":"barney"}]`]),
             newLocal.time, newLocal.tick().time);
           // Result should not include fred because of the remote delete
-          await expect(firstValueFrom(ssd.read<Describe>({
+          await expect(drain(ssd.read<Describe>({
             '@describe': 'http://test.m-ld.org/fred'
-          }).pipe(toArray()))).resolves.toEqual([]);
+          }))).resolves.toEqual([]);
         });
       });
     });
@@ -564,8 +565,8 @@ describe('SU-Set Dataset', () => {
         local.tick().time,
         await ssd.write({ '@insert': fred })
       ])).resolves.toBeDefined();
-      await expect(firstValueFrom(ssd.read(<Describe>{ '@describe': wilma['@id'] })))
-        .resolves.toEqual(wilma);
+      await expect(drain(ssd.read(<Describe>{ '@describe': wilma['@id'] })))
+        .resolves.toEqual([wilma]);
     });
 
     test('applies an inserting constraint', async () => {
@@ -587,9 +588,9 @@ describe('SU-Set Dataset', () => {
         expect(del).toBe('{}');
         expect(ins).toBe('{"@id":"wilma","name":"Wilma"}');
       }
-      await expect(firstValueFrom(ssd.read<Describe>({
+      await expect(drain(ssd.read<Describe>({
         '@describe': 'http://test.m-ld.org/wilma'
-      }).pipe(toArray()))).resolves.toEqual([wilma]);
+      }))).resolves.toEqual([wilma]);
 
       const newLocalTime = (<TreeClock>await ssd.loadClock());
       expect(newLocalTime.equals(local.time)).toBe(true);
@@ -621,9 +622,9 @@ describe('SU-Set Dataset', () => {
       expect(willUpdate).resolves.toEqual(
         { '@insert': [fred], '@delete': [wilma], '@ticks': local.time.ticks });
 
-      await expect(firstValueFrom(ssd.read<Describe>({
+      await expect(drain(ssd.read<Describe>({
         '@describe': 'http://test.m-ld.org/wilma'
-      }).pipe(toArray()))).resolves.toEqual([]);
+      }))).resolves.toEqual([]);
     });
 
     test('applies a self-deleting constraint', async () => {
@@ -636,9 +637,9 @@ describe('SU-Set Dataset', () => {
         local.join(remote.time).tick().time,
         local.tick().time);
 
-      await expect(firstValueFrom(ssd.read<Describe>({
+      await expect(drain(ssd.read<Describe>({
         '@describe': 'http://test.m-ld.org/wilma'
-      }).pipe(toArray()))).resolves.toEqual([]);
+      }))).resolves.toEqual([]);
 
       // The inserted data was deleted, but Wilma may have existed before
       await expect(willUpdate).resolves.toEqual(
@@ -660,9 +661,9 @@ describe('SU-Set Dataset', () => {
         local.join(remote.time).tick().time,
         local.tick().time);
 
-      await expect(firstValueFrom(ssd.read<Describe>({
+      await expect(drain(ssd.read<Describe>({
         '@describe': 'http://test.m-ld.org/wilma'
-      }).pipe(toArray()))).resolves.toEqual([wilma]);
+      }))).resolves.toEqual([wilma]);
 
       // The deleted data was re-inserted, but Wilma may not have existed before
       await expect(willUpdate).resolves.toEqual(

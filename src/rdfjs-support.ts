@@ -29,6 +29,7 @@ export interface QueryableRdf<Q extends BaseQuad = Quad> {
   query(query: Algebra.Construct): Stream<Q>;
   query(query: Algebra.Describe): Stream<Q>;
   query(query: Algebra.Project): BaseStream<Binding>;
+  query(query: Algebra.Distinct): BaseStream<Binding>;
 }
 
 /**

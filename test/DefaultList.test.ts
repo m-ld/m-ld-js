@@ -5,16 +5,19 @@ import { JrqlGraph } from '../src/engine/dataset/JrqlGraph';
 import { Dataset } from '../src/engine/dataset';
 import { mock } from 'jest-mock-extended';
 import { SubjectGraph } from '../src/engine/SubjectGraph';
+import { ActiveContext, initialCtx } from '../src/engine/jsonld';
 
 // Note that DefaultList is quite heavily tested by MeldState.test.ts but not
 // for apply mode
 describe('Default list constraint', () => {
   let data: Dataset;
   let graph: JrqlGraph;
+  let ctx: ActiveContext;
 
   beforeEach(async () => {
     data = await memStore();
     graph = new JrqlGraph(data.graph());
+    ctx = initialCtx();
   });
 
   test('Passes an empty update', async () => {
@@ -25,7 +28,7 @@ describe('Default list constraint', () => {
       '@insert': new SubjectGraph([])
     });
     // @ts-ignore 'Type instantiation is excessively deep and possibly infinite.ts(2589)'
-    await expect(constraint.check(graph, update)).resolves.toBeUndefined();
+    await expect(constraint.check(graph.asReadState, update)).resolves.toBeUndefined();
   });
 
   test('Rewrites a list insert', async () => {
@@ -39,12 +42,12 @@ describe('Default list constraint', () => {
           0: { '@id': 'http://test.m-ld.org/.well-known/genid/slot0' }
         }
       },
-      {
-        '@id': 'http://test.m-ld.org/.well-known/genid/slot0',
-        '@item': 'Bread'
-      }])
+        {
+          '@id': 'http://test.m-ld.org/.well-known/genid/slot0',
+          '@item': 'Bread'
+        }])
     });
-    await expect(constraint.check(graph, update)).resolves.toBeUndefined();
+    await expect(constraint.check(graph.asReadState, update)).resolves.toBeUndefined();
     expect(update.remove).toBeCalledWith('@insert', {
       '@id': 'http://test.m-ld.org/shopping',
       '@list': {
@@ -93,7 +96,7 @@ describe('Default list constraint', () => {
               '@index': 0
             }
           }
-        })
+        }, ctx)
       })
     });
     const constraint = new DefaultList('test');
@@ -107,7 +110,7 @@ describe('Default list constraint', () => {
         }
       }])
     });
-    await expect(constraint.apply(graph, update)).resolves.toBeDefined();
+    await expect(constraint.apply(graph.asReadState, update)).resolves.toBeDefined();
     expect(update.remove).not.toHaveBeenCalled();
     expect(update.assert).toBeCalledWith({
       '@delete': {
@@ -134,7 +137,7 @@ describe('Default list constraint', () => {
               '@index': 0
             }
           }
-        })
+        }, ctx)
       })
     });
     const constraint = new DefaultList('test');
@@ -148,7 +151,7 @@ describe('Default list constraint', () => {
         }
       }])
     });
-    await expect(constraint.apply(graph, update)).resolves.toBeDefined();
+    await expect(constraint.apply(graph.asReadState, update)).resolves.toBeDefined();
     expect(update.remove).not.toHaveBeenCalled();
     expect(update.assert).toBeCalledWith({
       '@delete': {
@@ -180,7 +183,7 @@ describe('Default list constraint', () => {
               '@index': 1
             }
           }
-        })
+        }, ctx)
       })
     });
     const constraint = new DefaultList('test');
@@ -195,7 +198,7 @@ describe('Default list constraint', () => {
         }
       }])
     });
-    await expect(constraint.apply(graph, update)).resolves.toBeDefined();
+    await expect(constraint.apply(graph.asReadState, update)).resolves.toBeDefined();
     expect(update.remove).not.toHaveBeenCalled();
     expect(update.assert).toBeCalledWith({
       '@delete': {

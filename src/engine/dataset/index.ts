@@ -116,6 +116,7 @@ export interface Graph extends RdfFactory, QueryableRdfSource {
   query(query: Algebra.Construct): AsyncIterator<Quad>;
   query(query: Algebra.Describe): AsyncIterator<Quad>;
   query(query: Algebra.Project): AsyncIterator<Binding>;
+  query(query: Algebra.Distinct): AsyncIterator<Binding>;
 }
 
 /**
@@ -351,8 +352,9 @@ class QuadStoreGraph implements Graph {
   query(query: Algebra.Construct): AsyncIterator<Quad>;
   query(query: Algebra.Describe): AsyncIterator<Quad>;
   query(query: Algebra.Project): AsyncIterator<Binding>;
+  query(query: Algebra.Distinct): AsyncIterator<Binding>;
   query(...args: Parameters<QuadSource['match']> |
-    [Algebra.Construct | Algebra.Describe | Algebra.Project]): AsyncIterator<Binding | Quad> {
+    [Algebra.Single]): AsyncIterator<Binding | Quad> {
     return new TransformIterator<Binding | Quad>(async () => {
       try {
         const [query] = args;

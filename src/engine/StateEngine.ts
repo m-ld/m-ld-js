@@ -3,6 +3,7 @@ import { GraphSubject, MeldUpdate } from '../api';
 import { LockManager } from './locks';
 import { Observable, Subscription } from 'rxjs';
 import { QueryableRdfSource } from '../rdfjs-support';
+import { Consumable } from '../flowable';
 
 /** Simplified clone engine with only the basic requirements of an engine */
 export interface CloneEngine extends EngineState {
@@ -12,7 +13,7 @@ export interface CloneEngine extends EngineState {
 }
 
 export interface EngineState extends QueryableRdfSource {
-  read(request: Read): Observable<GraphSubject>;
+  read(request: Read): Consumable<GraphSubject>;
   write(request: Write): Promise<this>;
 }
 
@@ -65,6 +66,7 @@ export class StateEngine implements QueryableRdfSource {
     // TODO: Assert that the lock is currently exclusive
     const state = this.newState();
     // Run all the handlers for the new state, ensuring lock coverage
+    // noinspection ES6MissingAwait
     this.engine.lock.extend('state',
       this.handling = Promise.all(Object.values(this.handlers)
         .map(handler => handler(update, state))));

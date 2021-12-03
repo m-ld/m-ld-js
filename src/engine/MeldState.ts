@@ -5,6 +5,7 @@ import {
 } from '../api';
 import { CloneEngine, EngineState, EngineUpdateProc, StateEngine } from './StateEngine';
 import { QueryableRdfSourceProxy } from './quads';
+import { Consumable } from '../flowable';
 
 abstract class ApiState extends QueryableRdfSourceProxy implements MeldState {
   constructor(
@@ -50,25 +51,29 @@ export class ApiStateMachine extends ApiState implements MeldStateMachine {
 
   constructor(engine: CloneEngine) {
     const stateEngine = new StateEngine(engine);
-    super(Object.assign(new QueryableRdfSourceProxy(stateEngine), {
-      read: (request: Read): Observable<GraphSubject> => {
+    // The API state machine also pretends to be a state
+    const asEngineState = new (class extends QueryableRdfSourceProxy implements EngineState {
+      read (request: Read): Consumable<GraphSubject> {
         return new Observable(subs => {
           const subscription = new Subscription;
           // This does not wait for results before returning control
-          stateEngine.read(async state => subscription.add(state.read(request).subscribe(subs)));
+          stateEngine.read(async state =>
+            subscription.add(state.read(request).subscribe(subs)));
           return subscription;
         });
-      },
-      write: async (request: Write): Promise<EngineState> => {
+      }
+      async write(request: Write): Promise<this> {
         await stateEngine.write(state => state.write(request));
         return this;
       }
-    }));
+    })(stateEngine);
+    super(asEngineState);
     this.engine = stateEngine;
   }
 
   private updateHandler(handler: UpdateProc): EngineUpdateProc {
-    return async (update, state) => handler(update, new ImmutableState(state));
+    return async (update, state) =>
+      handler(update, new ImmutableState(state));
   }
 
   follow(handler: UpdateProc): Subscription {

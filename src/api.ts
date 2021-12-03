@@ -8,6 +8,8 @@ import { shortId } from './util';
 import { Iri } from 'jsonld/jsonld-spec';
 import { SubjectGraph } from './engine/SubjectGraph';
 import { QueryableRdfSource } from './rdfjs-support';
+import { Consumable, flow, Flowable } from './flowable';
+import { Future, tapComplete } from './engine/util';
 
 /**
  * A convenience type for a struct with a `@insert` and `@delete` property, like
@@ -27,7 +29,7 @@ export function isDeleteInsert(o: any): o is DeleteInsert<unknown> {
  * A utility to generate a variable with a unique Id. Convenient to use when
  * generating query patterns in code.
  */
-export const any = (): Variable => `?${anyName()}`
+export const any = (): Variable => `?${anyName()}`;
 /**
  * A utility to generate a unique blank node.
  */
@@ -35,7 +37,7 @@ export const blank = () => '_:' + anyName();
 /** @internal */
 let nextAny = 0x1111;
 /** @internal */
-export const anyName = (): string => shortId((nextAny++).toString(16))
+export const anyName = (): string => shortId((nextAny++).toString(16));
 
 // Unchanged from m-ld-spec
 /** @see m-ld [specification](http://spec.m-ld.org/interfaces/livestatus.html) */
@@ -45,25 +47,42 @@ export type MeldStatus = spec.MeldStatus;
 
 /**
  * Convenience return type for reading data from a clone. Use as a
- * [Promise](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise)
+ * [Promise](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Using_promises)
  * with `.then` or `await` to obtain the results as an array of identified
- * {@link Subject}s. Use as an
+ * {@link Subject}s (with a {@link GraphSubjects.graph graph} mode). Use as an
  * [Observable](https://rxjs.dev/api/index/class/Observable) with `.subscribe`
  * (or other RxJS methods) to be notified of individual Subjects as they arrive.
+ * Or consume the results one-by-one with backpressure using {@link Flowable.consume}.
  *
- * Note that all reads operate on a data snapshot, so results will not be
- * affected by concurrent writes, even outside the scope of a read procedure.
+ * If results are consumed outside the scope of a read procedure, they may be
+ * affected by concurrent writes (this is equivalent to a
+ * [monotonic atomic view](https://jepsen.io/consistency/models/monotonic-atomic-view)).
+ * If the results are being used to strictly maintain a downstream data model,
+ * use a read procedure and hold it open by returning {@link completed}.
+ * TODO: Example
  *
  * @see {@link MeldStateMachine.read}
  */
-export type ReadResult = Observable<GraphSubject> & PromiseLike<GraphSubjects>;
+export interface ReadResult extends Flowable<GraphSubject>, PromiseLike<GraphSubjects> {
+  completed: PromiseLike<unknown>;
+}
 
 /** @internal */
-export function readResult(result: Observable<GraphSubject>): ReadResult {
-  const then: PromiseLike<GraphSubjects>['then'] =
-    (onfulfilled, onrejected) => firstValueFrom(result.pipe(toArray<GraphSubject>()))
-      .then(onfulfilled == null ? null : graph => onfulfilled(new SubjectGraph(graph)), onrejected);
-  return Object.assign(result, { then });
+export function readResult(result: Consumable<GraphSubject>): ReadResult {
+  return new class extends Observable<GraphSubject> implements ReadResult {
+    readonly completed = new Future;
+    // Everything should flow through this consumable so that completed is fired
+    readonly consume = result.pipe(tapComplete(this.completed));
+
+    constructor() {
+      super(subs => flow(this.consume, subs));
+    }
+
+    then: PromiseLike<GraphSubjects>['then'] =
+      (onfulfilled, onrejected) =>
+        firstValueFrom(this.pipe(toArray<GraphSubject>())).then(onfulfilled == null ?
+          null : graph => onfulfilled(new SubjectGraph(graph)), onrejected);
+  };
 }
 
 /**
@@ -93,7 +112,7 @@ export interface MeldReadState extends QueryableRdfSource {
   read<R extends Read = Read>(request: R): ReadResult;
   /**
    * Shorthand method for retrieving a single Subject by its `@id`, if it exists.
-   * 
+   *
    * @param id the Subject `@id`
    * @returns a promise resolving to the requested Subject, or `undefined` if not found
    */

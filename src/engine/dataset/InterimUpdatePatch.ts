@@ -22,22 +22,23 @@ export class InterimUpdatePatch implements InterimUpdate {
 
   /**
    * @param graph
+   * @param ctx
    * @param time
-   * @param mutable
    * @param patch the starting app patch (will not be mutated unless 'mutable')
+   * @param mutable?
    */
   constructor(
     private readonly graph: JrqlGraph,
+    private readonly ctx: ActiveContext,
     private readonly time: TreeClock,
-    private readonly patch: PatchQuads,
-    private readonly mutable?: 'mutable') {
+    private readonly patch: PatchQuads, private readonly mutable?: 'mutable') {
     // If mutable, we treat the app patch as assertions
     this.assertions = mutable ? patch : new PatchQuads();
     this.needsUpdate = Promise.resolve(true);
   }
 
   /** @returns the final update to be presented to the app */
-  async finalise(ctx: ActiveContext) {
+  async finalise() {
     await this.needsUpdate; // Ensure up-to-date with any changes
     this.needsUpdate = {
       then: () => {
@@ -46,7 +47,7 @@ export class InterimUpdatePatch implements InterimUpdate {
     };
     // The final update to the app includes all assertions and entailments
     const update = this.createUpdate(
-      new PatchQuads(this.allAssertions).append(this.entailments), ctx);
+      new PatchQuads(this.allAssertions).append(this.entailments), this.ctx);
     const { assertions, entailments } = this;
     return { update, assertions, entailments };
   }
@@ -63,20 +64,20 @@ export class InterimUpdatePatch implements InterimUpdate {
   }
 
   assert = (update: Update) => this.mutate(async () => {
-    const patch = await this.graph.write(update);
+    const patch = await this.graph.write(update, this.ctx);
     this.assertions.append(patch);
     return !patch.isEmpty;
   });
 
   entail = (update: Update) => this.mutate(async () => {
-    const patch = await this.graph.write(update);
+    const patch = await this.graph.write(update, this.ctx);
     this.entailments.append(patch);
     return false;
   });
 
   remove = (key: keyof DeleteInsert<any>, pattern: Subject | Subject[]) =>
     this.mutate(() => {
-      const toRemove = this.graph.graphQuads(pattern);
+      const toRemove = this.graph.graphQuads(pattern, this.ctx);
       const removed = this.assertions.remove(
         key == '@delete' ? 'deletes' : 'inserts', toRemove);
       return removed.length !== 0;

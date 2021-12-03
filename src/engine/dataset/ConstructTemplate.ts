@@ -1,6 +1,5 @@
 import { Iri } from 'jsonld/jsonld-spec';
 import { Binding } from 'quadstore';
-import { Observable } from 'rxjs';
 import { blank, GraphSubject } from '../..';
 import { anyName } from '../../api';
 import {
@@ -12,7 +11,6 @@ import { array } from '../../util';
 import { addPropertyObject, listItems } from '../jrql-util';
 import { ActiveContext, compactIri } from '../jsonld';
 import { jrqlProperty, jrqlValue } from '../SubjectGraph';
-import { inflate } from '../util';
 
 export class ConstructTemplate {
   private templates: SubjectTemplate[];
@@ -25,14 +23,16 @@ export class ConstructTemplate {
     return this.templates.map(t => t.pattern);
   }
 
+  // noinspection JSUnusedGlobalSymbols used in JrqlGraph
   addSolution(solution: Binding): ConstructTemplate {
     // For each matched binding, populate the template, merging previous
     this.templates.forEach(template => template.addSolution(solution));
     return this;
   }
 
-  get results(): Observable<GraphSubject> {
-    return inflate(this.templates,template => template.results.values());
+  *results(): Iterable<GraphSubject> {
+    for (let template of this.templates)
+      yield* template.results.values();
   }
 }
 
@@ -107,6 +107,7 @@ class SubjectTemplate {
       this.nestedSubjects.push([property, nested]);
     } else {
       // Register a value variable if present
+      // noinspection SuspiciousTypeOfGuard
       withNamedVar(typeof object == 'string' && matchVar(object),
         variable => this.variableValues.push([property, variable]),
         () => this.literalValues.push([property, object]));

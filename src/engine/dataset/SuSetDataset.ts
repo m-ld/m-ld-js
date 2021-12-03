@@ -5,11 +5,9 @@ import { Context, Write } from '../../jrql-support';
 import { Dataset, PatchQuads, PatchResult } from '.';
 import { JrqlGraph } from './JrqlGraph';
 import { MeldEncoder, MeldOperation, TriplesTids, unreify, UUID } from '../MeldEncoding';
-import { EMPTY, merge, Observable, of, Subject as Source } from 'rxjs';
-import { bufferCount, expand, filter, map, mergeMap, takeWhile } from 'rxjs/operators';
-import {
-  check, completed, Future, getIdLogger, inflate, inflateArray, observeAsyncIterator
-} from '../util';
+import { EMPTY, merge, mergeMap, Observable, of, Subject as Source } from 'rxjs';
+import { expand, filter, map, takeWhile } from 'rxjs/operators';
+import { check, completed, Future, getIdLogger, inflate } from '../util';
 import { Logger } from 'loglevel';
 import { MeldError } from '../MeldError';
 import { LocalLock } from '../local';
@@ -26,6 +24,9 @@ import { QueryableRdfSource } from '../../rdfjs-support';
 import { PatchTids, TidsStore } from './TidsStore';
 import { flattenItemTids } from '../ops';
 import { EntryBuilder } from '../journal/JournalState';
+import { Consumable, flowable } from '../../flowable';
+import { batch } from '../../flowable/operators/batch';
+import { consume } from '../../flowable/consume';
 
 type DatasetSnapshot = Omit<Snapshot, 'updates'>;
 
@@ -36,20 +37,13 @@ type DatasetConfig = Pick<MeldConfig,
  * Writeable Graph, similar to a Dataset, but with a slightly different transaction API.
  * Journals every transaction and creates m-ld compliant operations.
  */
-export class SuSetDataset extends MeldEncoder implements QueryableRdfSource {
+export class SuSetDataset extends MeldEncoder {
   private static checkNotClosed =
     check((d: SuSetDataset) => !d.dataset.closed, () => new MeldError('Clone has closed'));
 
   /** External context used for reads, writes and updates, but not for constraints. */
   /*readonly*/
   userCtx: ActiveContext;
-
-  /*readonly*/
-  match: QueryableRdfSource['match'];
-  /*readonly*/
-  query: QueryableRdfSource['query'];
-  /*readonly*/
-  countQuads: QueryableRdfSource['countQuads'];
 
   private /*readonly*/ userGraph: JrqlGraph;
   private readonly tidsStore: TidsStore;
@@ -88,17 +82,17 @@ export class SuSetDataset extends MeldEncoder implements QueryableRdfSource {
     } catch (err) {
       throw new MeldError('Clone data is locked', err);
     }
-    // Raw RDF methods just pass through to the user graph
-    this.match = this.userGraph.match.bind(this.userGraph);
-    this.query = this.userGraph.query.bind(this.userGraph);
-    this.countQuads = this.userGraph.countQuads.bind(this.userGraph);
+  }
+
+  get queryableRdfSource(): QueryableRdfSource {
+    return this.userGraph.asReadState;
   }
 
   get updates(): Observable<MeldUpdate> {
     return this.updateSource;
   }
 
-  read<R extends Read>(request: R): Observable<GraphSubject> {
+  read<R extends Read>(request: R): Consumable<GraphSubject> {
     return this.userGraph.read(request, this.userCtx);
   }
 
@@ -201,9 +195,10 @@ export class SuSetDataset extends MeldEncoder implements QueryableRdfSource {
           return { return: null };
 
         txc.sw.next('check-constraints');
-        const interim = new InterimUpdatePatch(this.userGraph, time, patch, 'mutable');
-        await this.constraint.check(this.userGraph, interim);
-        const { update, entailments } = await interim.finalise(this.userCtx);
+        const interim = new InterimUpdatePatch(
+          this.userGraph, this.userCtx, time, patch, 'mutable');
+        await this.constraint.check(this.userGraph.asReadState, interim);
+        const { update, entailments } = await interim.finalise();
 
         txc.sw.next('find-tids');
         const deletedTriplesTids = await this.tidsStore.findTriplesTids(patch.deletes);
@@ -306,9 +301,9 @@ export class SuSetDataset extends MeldEncoder implements QueryableRdfSource {
         patch.append({ inserts: op.inserts.map(([triple]) => this.toUserQuad(triple)) });
 
         txc.sw.next('apply-cx'); // "cx" = constraint
-        const interim = new InterimUpdatePatch(this.userGraph, cxnTime, patch);
-        await this.constraint.apply(this.userGraph, interim);
-        const { update, assertions, entailments } = await interim.finalise(this.userCtx);
+        const interim = new InterimUpdatePatch(this.userGraph, this.userCtx, cxnTime, patch);
+        await this.constraint.apply(this.userGraph.asReadState, interim);
+        const { update, assertions, entailments } = await interim.finalise();
         const cxn = await this.constraintTxn(assertions, patch, insertTids, cxnTime);
         // After applying the constraint, some new quads might have been removed
         tidPatch.append(new PatchTids({
@@ -425,18 +420,19 @@ export class SuSetDataset extends MeldEncoder implements QueryableRdfSource {
   @SuSetDataset.checkNotClosed.async
   async takeSnapshot(): Promise<DatasetSnapshot> {
     const journal = await this.journal.state();
+    const insData = consume(this.userGraph.graph.query()).pipe(
+      batch(10), // TODO batch size config
+      mergeMap(async ({ value: quads, next }) => {
+        const tidQuads = await this.tidsStore.findTriplesTids(quads, 'includeEmpty');
+        const reified = this.reifyTriplesTids([...tidQuads]);
+        return { value: { inserts: this.bufferFromTriples(reified) }, next };
+      }));
+    const opData = inflate(journal.latestOperations(),operations => {
+      return consume(operations.map(operation => ({ operation })));
+    });
     return {
       gwc: journal.gwc,
-      data: merge(
-        observeAsyncIterator(this.userGraph.graph.query()).pipe(
-          bufferCount(10), // TODO batch size config
-          mergeMap(async batch => {
-            const tidQuads = await this.tidsStore.findTriplesTids(batch, 'includeEmpty');
-            const reified = this.reifyTriplesTids([...tidQuads]);
-            return { inserts: this.bufferFromTriples(reified) };
-          })),
-        inflateArray(journal.latestOperations()).pipe(
-          map(operation => ({ operation }))))
+      data: flowable<Snapshot.Datum>(merge(insData, opData))
     };
   }
 }
