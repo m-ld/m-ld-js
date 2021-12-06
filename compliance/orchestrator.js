@@ -13,8 +13,7 @@ const clones = {/* cloneId: { process, tmpDir, mqtt: { client, server, port } } 
 const requests = {/* requestId: [res, next] */ };
 
 // Arguments expected
-const [, , httpUrl, nextDebugPort, logLevel] = process.argv;
-const port = new URL(httpUrl).port;
+const [, , nextDebugPort, logLevel] = process.argv;
 
 LOG.setLevel(Number(logLevel));
 LOG.getLogger('aedes').setLevel(LOG.levels.WARN);
@@ -26,9 +25,10 @@ http.use(restify.plugins.bodyParser());
 Object.entries({ start, transact, stop, kill, destroy, partition })
   .forEach(([path, route]) => http.post('/' + path, route));
 http.on('after', req => delete requests[req.id()]);
-http.listen(port, () => {
-  LOG.info(`Orchestrator listening on ${httpUrl}`);
-  process.send('listening', err => err && LOG.warn('Orchestrator orphaned', err));
+http.listen(0, () => {
+  const url = `http://localhost:${http.address().port}`;
+  LOG.info(`Orchestrator listening on ${url}`);
+  process.send({ '@type': 'listening', url }, err => err && LOG.warn('Orchestrator orphaned', err));
   process.on('exit', () => {
     LOG.info(`Orchestrator shutting down`);
     Object.values(clones).forEach(

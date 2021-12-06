@@ -3,7 +3,6 @@ const { createWriteStream } = require('fs');
 const { join } = require('path');
 const inspector = require('inspector');
 const LOG = require('loglevel');
-const httpUrl = new URL('http://localhost:3000');
 
 const COMPLIANCE_DIR = '../node_modules/@m-ld/m-ld-spec/compliance'.split('/');
 const COMPLIANCE_PATH = join(__dirname, ...COMPLIANCE_DIR);
@@ -54,7 +53,7 @@ if (inspector.url() != null) {
 
 // Fork the orchestrator
 const orchestrator = fork(join(__dirname, 'orchestrator.js'),
-  [httpUrl, firstCloneDebugPort, LOG.getLevel()],
+  [firstCloneDebugPort, LOG.getLevel()],
   { execArgv: inspector.url() ? [`--inspect-brk=${orchestratorDebugPort}`] : [], silent: true });
 // Direct orchestrator output to file
 const logFile = createWriteStream(join(__dirname, '.log'));
@@ -62,10 +61,10 @@ orchestrator.stdout.pipe(logFile);
 orchestrator.stderr.pipe(logFile);
 
 orchestrator.on('message', message => {
-  switch (message) {
+  switch (message['@type']) {
     case 'listening':
       try {
-        process.env.MELD_ORCHESTRATOR_URL = httpUrl.toString();
+        process.env.MELD_ORCHESTRATOR_URL = message.url;
         jasmine.loadConfig(jasmineConfig);
         // Try to shut down normally when done
         jasmine.onComplete(() => orchestrator.kill());
