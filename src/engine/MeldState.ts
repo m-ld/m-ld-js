@@ -1,16 +1,22 @@
 import { Describe, Read, Subject, Update, Write } from '../jrql-support';
-import { defaultIfEmpty, firstValueFrom, Observable, Subscription } from 'rxjs';
+import { defaultIfEmpty, firstValueFrom, Subscription } from 'rxjs';
 import {
   any, GraphSubject, MeldState, MeldStateMachine, readResult, ReadResult, StateProc, UpdateProc
 } from '../api';
 import { CloneEngine, EngineState, EngineUpdateProc, StateEngine } from './StateEngine';
 import { QueryableRdfSourceProxy } from './quads';
 import { Consumable } from '../flowable';
+import { Future, inflateFrom } from './util';
+import { QueryableRdfSource } from '../rdfjs-support';
 
 abstract class ApiState extends QueryableRdfSourceProxy implements MeldState {
   constructor(
     private readonly state: EngineState) {
-    super(state);
+    super();
+  }
+
+  protected get src(): QueryableRdfSource {
+    return this.state;
   }
 
   read<R extends Read = Read>(request: R): ReadResult {
@@ -31,7 +37,8 @@ abstract class ApiState extends QueryableRdfSourceProxy implements MeldState {
   }
 
   get(id: string): Promise<GraphSubject | undefined> {
-    return firstValueFrom(this.read<Describe>({ '@describe': id }).pipe(defaultIfEmpty(undefined)));
+    return firstValueFrom(this.read<Describe>({ '@describe': id })
+      .pipe(defaultIfEmpty(undefined)));
   }
 
   protected abstract construct(state: EngineState): MeldState;
@@ -53,20 +60,20 @@ export class ApiStateMachine extends ApiState implements MeldStateMachine {
     const stateEngine = new StateEngine(engine);
     // The API state machine also pretends to be a state
     const asEngineState = new (class extends QueryableRdfSourceProxy implements EngineState {
-      read (request: Read): Consumable<GraphSubject> {
-        return new Observable(subs => {
-          const subscription = new Subscription;
-          // This does not wait for results before returning control
-          stateEngine.read(async state =>
-            subscription.add(state.read(request).subscribe(subs)));
-          return subscription;
-        });
+      get src(): QueryableRdfSource {
+        return stateEngine;
+      }
+      read(request: Read): Consumable<GraphSubject> {
+        // The read itself must be in a state procedure, so indirect
+        const result = new Future<Consumable<GraphSubject>>();
+        stateEngine.read(state => result.resolve(state.read(request)));
+        return inflateFrom(result);
       }
       async write(request: Write): Promise<this> {
         await stateEngine.write(state => state.write(request));
         return this;
       }
-    })(stateEngine);
+    });
     super(asEngineState);
     this.engine = stateEngine;
   }

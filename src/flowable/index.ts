@@ -9,6 +9,12 @@ import { Observable, Subscriber, Subscription } from 'rxjs';
  * like `EMPTY`. However note that some (e.g. `from` and `merge`)
  * may create misbehaving consumables that flow with incorrect backpressure.
  *
+ * Note that a consumable is generally more prone to resource leaks than a
+ * typical observable, because resources may be held open while waiting for
+ * backpressure to be relieved by a call to {@link Bite.next()}. Such leaks
+ * can even occur if the consumable is never subscribed, because of pre-emptive
+ * actions taken when it was created, prior to the first consumer/subscriber.
+ *
  * @see Bite
  */
 export interface Consumable<T> extends Observable<Bite<T>> {

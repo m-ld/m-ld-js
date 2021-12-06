@@ -9,15 +9,19 @@ import { ActiveContext } from 'jsonld/lib/context';
 import { initialCtx } from '../src/engine/jsonld';
 
 describe('Single-valued constraint', () => {
-  let data: Dataset;
+  let dataset: Dataset;
+  let unlock: () => void;
   let graph: JrqlGraph;
   let ctx: ActiveContext;
 
   beforeEach(async () => {
-    data = await memStore();
-    graph = new JrqlGraph(data.graph());
+    dataset = await memStore();
+    unlock = await dataset.lock.acquire('state', 'share');
+    graph = new JrqlGraph(dataset.graph());
     ctx = initialCtx();
   });
+
+  afterEach(() => unlock());
 
   test('Passes an empty update', async () => {
     const constraint = new SingleValued('http://test.m-ld.org/#name');
@@ -62,7 +66,7 @@ describe('Single-valued constraint', () => {
   });
 
   test('Fails a single-valued additive property update', async () => {
-    await data.transact({
+    await dataset.transact({
       prepare: async () => ({
         patch: await graph.write({
           '@insert': { '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Fred' }
@@ -109,7 +113,7 @@ describe('Single-valued constraint', () => {
   });
 
   test('applies to a single-valued additive property update', async () => {
-    await data.transact({
+    await dataset.transact({
       prepare: async () => ({
         patch: await graph.write({
           '@insert': { '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Fred' }
@@ -132,7 +136,7 @@ describe('Single-valued constraint', () => {
 
   test('applies selectively to existing data', async () => {
     // Test case arose from compliance tests
-    await data.transact({
+    await dataset.transact({
       prepare: async () => ({
         patch: await graph.write({
           '@insert': [

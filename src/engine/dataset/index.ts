@@ -68,6 +68,7 @@ export interface KvpStore {
 export interface Dataset extends KvpStore {
   readonly location: string;
   readonly rdf: Required<DataFactory>;
+  readonly lock: LockManager<'state' | 'txn' | string>;
 
   graph(name?: GraphName): Graph;
 
@@ -111,6 +112,7 @@ const notClosed = check((d: Dataset) => !d.closed,
  */
 export interface Graph extends RdfFactory, QueryableRdfSource {
   readonly name: GraphName;
+  readonly lock: LockManager<'state'>;
 
   query(...args: Parameters<QuadSource['match']>): AsyncIterator<Quad>;
   query(query: Algebra.Construct): AsyncIterator<Quad>;
@@ -135,9 +137,9 @@ export class QuadStoreDataset implements Dataset {
   /* readonly */
   store: Quadstore;
   private readonly activeCtx?: Promise<ActiveContext>;
-  private readonly lock = new LockManager;
+  readonly lock = new LockManager;
   private isClosed: boolean = false;
-  base: Iri | undefined;
+  readonly base: Iri | undefined;
 
   constructor(
     private readonly backend: AbstractLevelDOWN,
@@ -332,6 +334,10 @@ class QuadStoreGraph implements Graph {
     readonly name: GraphName) {
   }
 
+  get lock() {
+    return this.dataset.lock;
+  }
+
   match: Graph['match'] = (subject, predicate, object, graph) => {
     if (graph != null && !graph.equals(this.name))
       return empty();
@@ -354,12 +360,12 @@ class QuadStoreGraph implements Graph {
   query(query: Algebra.Project): AsyncIterator<Binding>;
   query(query: Algebra.Distinct): AsyncIterator<Binding>;
   query(...args: Parameters<QuadSource['match']> |
-    [Algebra.Single]): AsyncIterator<Binding | Quad> {
-    return new TransformIterator<Binding | Quad>(async () => {
+    [Algebra.Operation]): AsyncIterator<Binding | Quad> {
+    const source = (async () => {
       try {
         const [query] = args;
         if (query != null && 'type' in query) {
-          const stream = await this.dataset.store.sparqlStream(<Algebra.Operation>query);
+          const stream = await this.dataset.store.sparqlStream(query);
           if (stream.type === ResultType.BINDINGS || stream.type === ResultType.QUADS)
             return stream.iterator;
         } else {
@@ -368,11 +374,13 @@ class QuadStoreGraph implements Graph {
       } catch (err) {
         // TODO: Comunica bug? Cannot read property 'close' of undefined, if stream empty
         if (err instanceof TypeError)
-          return new EmptyIterator();
+          return new EmptyIterator<Quad | Binding>();
         throw err;
       }
       throw new Error('Expected bindings or quads');
-    });
+    })();
+    return new TransformIterator<Binding | Quad>(
+      this.dataset.lock.extend('state', source));
   }
 
   skolem = () => this.dataset.rdf.namedNode(

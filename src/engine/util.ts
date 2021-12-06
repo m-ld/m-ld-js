@@ -29,8 +29,8 @@ export function inflate<T extends ObservableInput<any>, O extends ObservableInpu
   return from(input).pipe(mergeMap(pump));
 }
 
-export function inflateArray<T>(promise: Promise<T[]>): Observable<T> {
-  return inflate(promise, from);
+export function inflateFrom<T>(inputOfInput: ObservableInput<ObservableInput<T>>): Observable<T> {
+  return inflate(inputOfInput, from);
 }
 
 export function toJSON(thing: any): any {
@@ -56,8 +56,10 @@ export function completed(observable: Observable<unknown>): Promise<void> {
 export class Future<T = void> implements PromiseLike<T> {
   private readonly subject = new AsyncSubject<T>();
   private _pending = true;
+  private _promise: Promise<T>;
 
   constructor(value?: T) {
+    this._promise = firstValueFrom(this.subject);
     if (value !== undefined) {
       this.subject.next(value);
       this.subject.complete();
@@ -84,7 +86,7 @@ export class Future<T = void> implements PromiseLike<T> {
   };
 
   then: PromiseLike<T>['then'] = (onfulfilled, onrejected) => {
-    return firstValueFrom(this.subject).then(onfulfilled, onrejected);
+    return this._promise.then(onfulfilled, onrejected);
   };
 }
 

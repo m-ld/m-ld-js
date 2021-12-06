@@ -10,15 +10,19 @@ import { ActiveContext, initialCtx } from '../src/engine/jsonld';
 // Note that DefaultList is quite heavily tested by MeldState.test.ts but not
 // for apply mode
 describe('Default list constraint', () => {
-  let data: Dataset;
+  let dataset: Dataset;
+  let unlock: () => void;
   let graph: JrqlGraph;
   let ctx: ActiveContext;
 
   beforeEach(async () => {
-    data = await memStore();
-    graph = new JrqlGraph(data.graph());
+    dataset = await memStore();
+    unlock = await dataset.lock.acquire('state', 'share');
+    graph = new JrqlGraph(dataset.graph());
     ctx = initialCtx();
   });
+
+  afterEach(() => unlock());
 
   test('Passes an empty update', async () => {
     const constraint = new DefaultList('test');
@@ -84,7 +88,7 @@ describe('Default list constraint', () => {
 
   test('Resolves a slot conflict with rejected remote', async () => {
     // Create a well-formed list with one slot containing 'Bread'
-    await data.transact({
+    await dataset.transact({
       prepare: async () => ({
         patch: await graph.write({
           '@insert': {
@@ -125,7 +129,7 @@ describe('Default list constraint', () => {
 
   test('Resolves a slot conflict with replace current and no index move', async () => {
     // Create a well-formed list with one slot containing 'Bread'
-    await data.transact({
+    await dataset.transact({
       prepare: async () => ({
         patch: await graph.write({
           '@insert': {
@@ -166,7 +170,7 @@ describe('Default list constraint', () => {
 
   test('Resolves a slot conflict with a moved index', async () => {
     // Create a well-formed list with two slots 'Bread', 'Milk'
-    await data.transact({
+    await dataset.transact({
       prepare: async () => ({
         patch: await graph.write({
           '@insert': {

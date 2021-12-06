@@ -27,7 +27,10 @@ describe('Consuming readable', () => {
     const rc = consume<true>(r);
     rc.subscribe({
       next: done /* will error on mystery item */,
-      error: () => done(),
+      error(err) {
+        expect(err.message).toBe('bang');
+        done();
+      },
       complete: () => done('Unexpected complete')
     });
     r.destroy(new Error('bang'));
@@ -181,6 +184,19 @@ describe('Consuming readable', () => {
         done(error);
       }
     })).subscribe(() => setImmediate(() => subs.unsubscribe()));
+  });
+
+  test('errors if the readable is prematurely destroyed', done => {
+    const source = Readable.from([0, 1]);
+    consume(source).subscribe({
+      next() {
+        source.destroy();
+      },
+      error(err) {
+        expect(err instanceof Error).toBe(true)
+        done();
+      }
+    });
   });
 });
 

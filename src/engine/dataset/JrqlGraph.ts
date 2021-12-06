@@ -13,9 +13,9 @@ import { JRQL } from '../../ns';
 import { JrqlQuads } from './JrqlQuads';
 import { MeldError } from '../MeldError';
 import { array, GraphSubject, MeldReadState, ReadResult, readResult } from '../..';
-import { binaryFold, flatten, inflate, isArray } from '../util';
+import { binaryFold, flatten, Future, inflate, isArray, tapComplete } from '../util';
 import { ConstructTemplate } from './ConstructTemplate';
-import { Binding } from '../../rdfjs-support';
+import { Binding, QueryableRdfSource } from '../../rdfjs-support';
 import { Consumable, each } from '../../flowable';
 import { ignoreIf } from '../../flowable/operators/ignoreIf';
 import { flatMap } from '../../flowable/operators/flatMap';
@@ -39,21 +39,24 @@ export class JrqlGraph {
     this.sparql = new SparqlFactory(graph);
     this.jrql = new JrqlQuads(graph);
     // Map ourselves to a top-level read state, used for constraints
-    const self = this;
+    const jrqlGraph = this;
     this.asReadState = new (class extends QueryableRdfSourceProxy implements MeldReadState {
       // This uses the default initial context, so no prefix mappings
       ctx = initialCtx();
+      get src(): QueryableRdfSource {
+        return graph;
+      }
       get(id: string): Promise<GraphSubject | undefined> {
-        return self.get(id, this.ctx);
+        return jrqlGraph.get(id, this.ctx);
       }
       read<R extends Read>(request: R): ReadResult {
-        return readResult(self.read(request, this.ctx));
+        return readResult(jrqlGraph.read(request, this.ctx));
       }
-    })(graph);
+    });
   }
 
   read(query: Read, ctx: ActiveContext): Consumable<GraphSubject> {
-    return inflate(nextCtx(ctx, query['@context']), ctx => {
+    return inflate(this.graph.lock.extend('state', nextCtx(ctx, query['@context'])), ctx => {
       if (isDescribe(query))
         return this.describe(array(query['@describe']), query['@where'], ctx);
       else if (isSelect(query) && query['@where'] != null)
@@ -66,8 +69,7 @@ export class JrqlGraph {
     });
   }
 
-  async write(query: Write,
-    ctx: ActiveContext): Promise<PatchQuads> {
+  async write(query: Write, ctx: ActiveContext): Promise<PatchQuads> {
     ctx = await nextCtx(ctx, query['@context']);
     // @unions not supported unless in a where clause
     if (isGroup(query) && query['@graph'] != null && query['@union'] == null)
@@ -91,6 +93,8 @@ export class JrqlGraph {
   describe(describes: (Iri | Variable)[],
     where: Subject | Subject[] | Group | undefined,
     ctx: ActiveContext): Consumable<GraphSubject> {
+    // For describe, we have to extend the state lock for all sub-queries
+    const finished = this.graph.lock.extend('state', new Future);
     return concat(...describes.map(describe => {
       // noinspection TypeScriptValidateJSTypes
       const describedVarName = JRQL.matchVar(describe);
@@ -101,20 +105,20 @@ export class JrqlGraph {
             // Project out the subject
             this.sparql.createProject(op, [described])))), ctx).pipe(
           // For each found subject Id, describe it
-          flatMap(binding => consume(this.describe1(this.bound(binding, described)!, ctx))
-            .pipe(ignoreIf(null))));
+          flatMap(binding =>
+            consume(this.describe1(this.bound(binding, described)!, ctx)).pipe(
+              ignoreIf(null))));
       } else {
-        const source = this.get(describe, ctx);
-        return consume(source).pipe(ignoreIf(null));
+        return consume(this.get(describe, ctx)).pipe(ignoreIf(null));
       }
-    }));
+    })).pipe(tapComplete(finished));
   }
 
   get(id: Iri, ctx: ActiveContext) {
-    return this.describe1(this.resolve(id, ctx), ctx);
+    return this.graph.lock.extend('state', this.describe1(this.resolve(id, ctx), ctx));
   }
 
-  private async describe1(subjectId: Term, ctx: ActiveContext) {
+  private async describe1(subjectId: Term, ctx: ActiveContext): Promise<GraphSubject | undefined> {
     const propertyQuads: Quad[] = [], listItemQuads: Quad[] = [];
     await each(consume(this.graph.query(subjectId)), async propertyQuad => {
       let isSlot = false;

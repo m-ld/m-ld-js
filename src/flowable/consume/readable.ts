@@ -13,10 +13,12 @@ export interface MinimalReadable<T> {
   destroy(error?: Error): void;
 
   on(event: 'end', listener: () => void): MinimalReadable<T>;
+  on(event: 'close', listener: () => void): MinimalReadable<T>;
   on(event: 'readable', listener: () => void): MinimalReadable<T>;
   on(event: 'error', listener: (err: Error) => void): MinimalReadable<T>;
 
   removeListener(event: 'end', listener: () => void): MinimalReadable<T>;
+  removeListener(event: 'close', listener: () => void): MinimalReadable<T>;
   removeListener(event: 'readable', listener: () => void): MinimalReadable<T>;
   removeListener(event: 'error', listener: (err: Error) => void): MinimalReadable<T>;
 }
@@ -35,7 +37,8 @@ class ReadableConsumable<T> extends IteratingConsumable<T> {
     // AsyncIterators with autoStart can emit 'end' before having a 'readable' listener
     readable
       .on('end', this.end)
-      .on('error', this.error);
+      .on('error', this.error)
+      .on('close', this.close);
   }
 
   private onReadable = () => {
@@ -65,6 +68,11 @@ class ReadableConsumable<T> extends IteratingConsumable<T> {
       this.complete();
   };
 
+  private close = () => {
+    if (!this.ended)
+      this.error(new Error('Stream closed'));
+  };
+
   protected start() {
     this.readable.on('readable', this.onReadable);
     // AsyncIterators do not auto-emit readable on adding the listener
@@ -76,6 +84,7 @@ class ReadableConsumable<T> extends IteratingConsumable<T> {
     this.readable
       .removeListener('end', this.end)
       .removeListener('error', this.error)
+      .removeListener('close', this.close)
       .removeListener('readable', this.onReadable);
     if (!this.readable.destroyed)
       this.readable.destroy();

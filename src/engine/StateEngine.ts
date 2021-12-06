@@ -4,11 +4,16 @@ import { LockManager } from './locks';
 import { Observable, Subscription } from 'rxjs';
 import { QueryableRdfSource } from '../rdfjs-support';
 import { Consumable } from '../flowable';
+import { QueryableRdfSourceProxy } from './quads';
 
 /** Simplified clone engine with only the basic requirements of an engine */
 export interface CloneEngine extends EngineState {
+  /**
+   * The state lock **must** be held as a precondition for both {@link
+   * EngineState.read} and {@link EngineState.write}.
+   */
   readonly lock: LockManager<'state'>;
-  /** An update MUST happen during a write OR when 'state' is exclusively locked */
+  /** An update MUST happen when 'state' is exclusively locked */
   readonly dataUpdates: Observable<MeldUpdate>;
 }
 
@@ -17,28 +22,30 @@ export interface EngineState extends QueryableRdfSource {
   write(request: Write): Promise<this>;
 }
 
-export type EngineUpdateProc = (update: MeldUpdate, state: EngineState) => PromiseLike<unknown> | void;
-export type EngineStateProc = (state: EngineState) => PromiseLike<unknown> | void;
+export type EngineUpdateProc =
+  (update: MeldUpdate, state: EngineState) => PromiseLike<unknown> | void;
+export type EngineStateProc =
+  (state: EngineState) => PromiseLike<unknown> | void;
 
 /**
  * Gates access to a {@link CloneEngine} such that its state is immutable during
  * read and write procedures
  */
-export class StateEngine implements QueryableRdfSource {
+export class StateEngine extends QueryableRdfSourceProxy {
   private state: EngineState;
   private readonly handlers: EngineUpdateProc[] = [];
   private handling: Promise<unknown>;
 
   constructor(
     private readonly engine: CloneEngine) {
+    super();
     this.newState();
     this.engine.dataUpdates.subscribe(this.nextState);
   }
 
-  match: QueryableRdfSource['match'] = (...args) => this.state.match(...args);
-  // @ts-ignore - TS can't cope with overloaded query method
-  query: QueryableRdfSource['query'] = (...args) => this.state.query(...args);
-  countQuads: QueryableRdfSource['countQuads'] = (...args) => this.state.countQuads(...args);
+  protected get src(): QueryableRdfSource {
+    return this.state;
+  }
 
   follow(handler: EngineUpdateProc): Subscription {
     const key = this.handlers.push(handler) - 1;
@@ -48,11 +55,13 @@ export class StateEngine implements QueryableRdfSource {
   /** procedure and handler must not reject */
   read(procedure: EngineStateProc, handler?: EngineUpdateProc): Subscription {
     const subs = new Subscription;
+    // noinspection JSIgnoredPromiseFromCall – return subscription synchronously
     this.engine.lock.share('state', async () => {
       if (!subs.closed) {
         if (handler != null)
           subs.add(this.follow(handler));
         await procedure(this.state);
+        // TODO destroy any unsubscribed queries?
       }
     });
     return subs;
@@ -62,11 +71,10 @@ export class StateEngine implements QueryableRdfSource {
     return this.engine.lock.exclusive('state', () => procedure(this.state));
   }
 
-  private nextState = async (update: MeldUpdate) => {
-    // TODO: Assert that the lock is currently exclusive
+  private nextState = (update: MeldUpdate) => {
     const state = this.newState();
     // Run all the handlers for the new state, ensuring lock coverage
-    // noinspection ES6MissingAwait
+    // noinspection JSIgnoredPromiseFromCall
     this.engine.lock.extend('state',
       this.handling = Promise.all(Object.values(this.handlers)
         .map(handler => handler(update, state))));

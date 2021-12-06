@@ -10,16 +10,13 @@ export type {
   Quad_Subject, Quad_Predicate, Quad_Object
 } from 'rdf-js';
 
-export class QueryableRdfSourceProxy implements QueryableRdfSource {
-  readonly match: QueryableRdfSource['match'];
-  readonly query: QueryableRdfSource['query'];
-  readonly countQuads: QueryableRdfSource['countQuads'];
+export abstract class QueryableRdfSourceProxy implements QueryableRdfSource {
+  match: QueryableRdfSource['match'] = (...args) => this.src.match(...args);
+  // @ts-ignore - TS can't cope with overloaded query method
+  query: QueryableRdfSource['query'] = (...args) => this.src.query(...args);
+  countQuads: QueryableRdfSource['countQuads'] = (...args) => this.src.countQuads(...args);
 
-  constructor(readonly src: QueryableRdfSource) {
-    this.match = src.match.bind(src);
-    this.query = src.query.bind(src);
-    this.countQuads = src.countQuads.bind(src);
-  }
+  protected abstract get src(): QueryableRdfSource;
 }
 
 export class QuadMap<T> extends IndexMap<Quad, T> {

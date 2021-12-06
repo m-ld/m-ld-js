@@ -12,7 +12,7 @@ import { Observable } from 'rxjs';
 import { filter, map } from 'rxjs/operators';
 import { AblyTraffic, AblyTrafficConfig } from './AblyTraffic';
 import type { PeerSignal, PeerSignaller, WrtcPeering } from '../wrtc/WrtcPeering';
-import { inflateArray } from '../engine/util';
+import { inflateFrom } from '../engine/util';
 
 export interface AblyMeldConfig extends
   Omit<Ably.Types.ClientOptions, 'echoMessages' | 'clientId'>,
@@ -116,7 +116,7 @@ export class AblyRemotes extends PubsubRemotes implements PeerSignaller {
   }
 
   protected present(): Observable<string> {
-    return inflateArray(this.opsChannel.presence.get()).pipe(
+    return inflateFrom(this.opsChannel.presence.get()).pipe(
       filter(present => present.data === '__live'),
       map(present => present.clientId));
   }

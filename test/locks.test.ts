@@ -1,3 +1,5 @@
+// noinspection ES6MissingAwait
+
 import { LockManager } from '../src/engine/locks';
 
 describe('Sharable lock', () => {
@@ -11,10 +13,14 @@ describe('Sharable lock', () => {
   test('exclusive ops execute immediately', async () => {
     const lock = new LockManager<'it'>();
     await lock.exclusive('it', async () => {
+      expect(lock.state('it')).toBe('exclusive');
       await pushOp(1);
       await pushOp(2);
+      expect(lock.state('it')).toBe('exclusive');
     });
     expect(ops).toEqual([1, 2]);
+    await lock.open('it');
+    expect(lock.state('it')).toBe('open');
     await lock.exclusive('it', async () => {
       await pushOp(3);
       await pushOp(4);
@@ -71,14 +77,40 @@ describe('Sharable lock', () => {
     expect(ops).toEqual([1, 2, 3, 4, 5, 6]);
   });
 
+  test('sync throw in exclusive lock rejects', async () => {
+    const lock = new LockManager<'it'>();
+    lock.exclusive('it', async () => {
+      await pushOp(1);
+      await pushOp(2);
+    });
+    await expect(lock.exclusive('it', () => {
+      throw 'bang';
+    })).rejects.toBe('bang');
+  });
+
+  test('async throw in exclusive lock rejects', async () => {
+    const lock = new LockManager<'it'>();
+    lock.exclusive('it', async () => {
+      await pushOp(1);
+      await pushOp(2);
+    });
+    await expect(lock.exclusive('it', () => {
+      return Promise.reject('bang');
+    })).rejects.toBe('bang');
+  });
+
   test('shared ops execute immediately', async () => {
     const lock = new LockManager<'it'>();
     await lock.share('it', async () => {
+      expect(lock.state('it')).toBe('shared');
       await pushOp(1);
       await pushOp(2);
     });
     expect(ops).toEqual([1, 2]);
+    await lock.open('it');
+    expect(lock.state('it')).toBe('open');
     await lock.share('it', async () => {
+      expect(lock.state('it')).toBe('shared');
       await pushOp(3);
       await pushOp(4);
     });
@@ -88,14 +120,59 @@ describe('Sharable lock', () => {
   test('shared ops do share', async () => {
     const lock = new LockManager<'it'>();
     lock.share('it', async () => {
+      expect(lock.state('it')).toBe('shared');
       await pushOp(1);
       await pushOp(2);
     });
     await lock.share('it', async () => {
+      expect(lock.state('it')).toBe('shared');
       await pushOp(3);
       await pushOp(4);
     });
     expect(ops).toEqual([1, 3, 2, 4]);
+  });
+
+  test('shared ops can recursively share (sync)', async () => {
+    const lock = new LockManager<'it'>();
+    await lock.share('it', async () => {
+      // NOTE this re-share is done immediately
+      await lock.share('it', async () => {
+        await pushOp(1);
+        await pushOp(2);
+      });
+      await pushOp(3);
+      await pushOp(4);
+    });
+    expect(ops).toEqual([1, 2, 3, 4]);
+  });
+
+  test('shared ops can recursively share (async)', async () => {
+    const lock = new LockManager<'it'>();
+    await lock.share('it', async () => {
+      await pushOp(1);
+      await pushOp(2);
+      // Re-share after awaits
+      await lock.share('it', async () => {
+        await pushOp(3);
+        await pushOp(4);
+      });
+    });
+    expect(ops).toEqual([1, 2, 3, 4]);
+  });
+
+  test('shared ops execute even if something rejects', async () => {
+    const lock = new LockManager<'it'>();
+    lock.share('it', async () => {
+      await pushOp(1);
+      throw 'bang';
+    }).catch(() => {
+    });
+    await lock.share('it', async () => {
+      await pushOp(2);
+      await pushOp(3);
+      expect(lock.state('it')).toBe('shared');
+    });
+    expect(ops).toEqual([1, 2, 3]);
   });
 
   test('shared ops resolve as soon as they can', async () => {
@@ -194,28 +271,43 @@ describe('Sharable lock', () => {
 
   test('shared ops can be extended', async () => {
     const lock = new LockManager<'it'>();
-    lock.share('it', async () => {
-      await pushOp(1);
-      await pushOp(2);
-    });
-    await lock.extend('it', Promise.resolve().then(async () => {
+    await lock.share('it', async () => {
+      await lock.extend('it', (async () => {
+        await pushOp(1);
+        await pushOp(2);
+      })());
       await pushOp(3);
       await pushOp(4);
-    }));
-    expect(ops).toEqual([1, 3, 2, 4]);
+    });
+    expect(ops).toEqual([1, 2, 3, 4]);
   });
 
   test('exclusive ops can be extended', async () => {
     const lock = new LockManager<'it'>();
-    lock.exclusive('it', async () => {
-      await pushOp(1);
-      await pushOp(2);
-    });
-    await lock.extend('it', Promise.resolve().then(async () => {
+    await lock.exclusive('it', async () => {
+      lock.extend('it', (async () => {
+        await pushOp(1);
+        await pushOp(2);
+      })());
       await pushOp(3);
       await pushOp(4);
-    }));
+    });
     expect(ops).toEqual([1, 3, 2, 4]);
+  });
+
+  test('running op is extended', async () => {
+    const lock = new LockManager<'it'>();
+    lock.exclusive('it', async () => {
+      await pushOp(1);
+      await lock.extend('it', (async () => {
+        await pushOp(2);
+      })());
+      await pushOp(3);
+    });
+    await lock.exclusive('it', async () => {
+      await pushOp(4);
+    });
+    expect(ops).toEqual([1, 2, 3, 4]);
   });
 
   test('cannot extend if no running op', async () => {
@@ -224,10 +316,11 @@ describe('Sharable lock', () => {
       await pushOp(1);
       await pushOp(2);
     });
-    await expect(lock.extend('it', Promise.resolve().then(async () => {
+    await lock.open('it');
+    expect(() => lock.extend('it', (async () => {
       await pushOp(3);
       await pushOp(4);
-    }))).rejects.toThrowError();
+    })())).toThrowError();
   });
 
   test('failed exclusive op is reported', async () => {

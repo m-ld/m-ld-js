@@ -69,14 +69,18 @@ export abstract class IteratingConsumable<T> extends Observable<Bite<T>> impleme
 
   /** Call from subclass when the source is exhausted */
   protected complete = () => {
-    this.final = true;
-    this.subscribers.forEach(subs => subs.complete());
+    if (this.final == null) {
+      this.final = true;
+      this.subscribers.forEach(subs => subs.complete());
+    }
   };
 
   /** Call from subclass when the source errors */
   protected error = (err: Error) => {
-    this.final = err;
-    this.subscribers.forEach(subs => subs.error(err));
+    if (this.final == null) {
+      this.final = err;
+      this.subscribers.forEach(subs => subs.error(err));
+    }
   };
 
   private addSubscriber = (subs: Subscriber<Bite<T>>) => {

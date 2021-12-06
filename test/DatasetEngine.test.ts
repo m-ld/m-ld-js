@@ -8,10 +8,13 @@ import { comesAlive } from '../src/engine/AbstractMeld';
 import { count, map, observeOn, take, toArray } from 'rxjs/operators';
 import { TreeClock } from '../src/engine/clocks';
 import { MeldRemotes, OperationMessage, Snapshot } from '../src/engine';
-import { Describe, MeldConfig, Subject, Update } from '../src';
+import { Describe, GraphSubject, MeldConfig, Read, Subject, Update } from '../src';
 import { AbstractLevelDOWN } from 'abstract-leveldown';
 import { jsonify } from './testUtil';
 import { MeldMemDown } from '../src/memdown';
+import { Write } from '../src/jrql-support';
+import { Consumable } from '../src/flowable';
+import { inflateFrom } from '../src/engine/util';
 
 describe('Dataset engine', () => {
   describe('as genesis', () => {
@@ -48,11 +51,23 @@ describe('Dataset engine', () => {
     });
   });
 
+  // Read and write methods on a clone require the state lock. These are
+  // normally put in place by a StateEngine.
+  class TestDatasetEngine extends DatasetEngine {
+    read(request: Read): Consumable<GraphSubject> {
+      return inflateFrom(this.lock.share('state', () => super.read(request)));
+    }
+
+    async write(request: Write): Promise<this> {
+      return this.lock.exclusive('state', () => super.write(request));
+    }
+  }
+
   describe('as silo genesis', () => {
     let silo: DatasetEngine;
 
     beforeEach(async () => {
-      silo = new DatasetEngine({
+      silo = new TestDatasetEngine({
         dataset: await memStore(), remotes: mockRemotes(), config: testConfig()
       });
       await silo.initialise();
@@ -89,6 +104,7 @@ describe('Dataset engine', () => {
     });
 
     test('has ticks after update', async () => {
+      // noinspection ES6MissingAwait
       silo.write({
         '@id': 'http://test.m-ld.org/fred',
         'http://test.m-ld.org/#name': 'Fred'
@@ -99,6 +115,7 @@ describe('Dataset engine', () => {
 
     test('follow after initial ticks', async () => {
       const firstUpdate = firstValueFrom(silo.dataUpdates);
+      // noinspection ES6MissingAwait
       silo.write({
         '@id': 'http://test.m-ld.org/fred',
         'http://test.m-ld.org/#name': 'Fred'
@@ -130,7 +147,9 @@ describe('Dataset engine', () => {
       const remotesLive = hotLive([false]);
       // Ensure that remote updates are async
       const remotes = mockRemotes(remoteUpdates.pipe(observeOn(asapScheduler)), remotesLive);
-      clone = new DatasetEngine({ dataset: await memStore(), remotes, config: testConfig() });
+      clone = new TestDatasetEngine({
+        dataset: await memStore(), remotes, config: testConfig()
+      });
       await clone.initialise();
       await comesAlive(clone); // genesis is alive
       remote = new MockProcess(await clone.newClock()); // no longer genesis
@@ -154,6 +173,7 @@ describe('Dataset engine', () => {
       // transaction could cause a clock reversal.
       const updates = firstValueFrom(clone.dataUpdates.pipe(map(next => next['@ticks']),
         take(2), toArray()));
+      // noinspection ES6MissingAwait
       clone.write({
         '@id': 'http://test.m-ld.org/fred',
         'http://test.m-ld.org/#name': 'Fred'
@@ -213,7 +233,8 @@ describe('Dataset engine', () => {
 
     test('initialises from snapshot', async () => {
       const clone = new DatasetEngine({
-        dataset: await memStore(), remotes, config: testConfig({ genesis: false })
+        dataset: await memStore(), remotes,
+        config: testConfig({ genesis: false })
       });
       await clone.initialise();
       await expect(clone.status.becomes({ outdated: false })).resolves.toBeDefined();
@@ -222,7 +243,8 @@ describe('Dataset engine', () => {
 
     test('can become a silo', async () => {
       const clone = new DatasetEngine({
-        dataset: await memStore(), remotes, config: testConfig({ genesis: false })
+        dataset: await memStore(), remotes,
+        config: testConfig({ genesis: false })
       });
       await clone.initialise();
       remotesLive.next(false);
@@ -230,8 +252,9 @@ describe('Dataset engine', () => {
     });
 
     test('ignores operation from before snapshot', async () => {
-      const clone = new DatasetEngine({
-        dataset: await memStore(), remotes, config: testConfig({ genesis: false })
+      const clone = new TestDatasetEngine({
+        dataset: await memStore(), remotes,
+        config: testConfig({ genesis: false })
       });
       await clone.initialise();
       const updates = firstValueFrom(clone.dataUpdates.pipe(count()));
@@ -324,7 +347,7 @@ describe('Dataset engine', () => {
 
     test('maintains fifo during rev-up', async () => {
       // We need local siloed update
-      let clone = new DatasetEngine({
+      let clone = new TestDatasetEngine({
         dataset: await memStore({ backend }), remotes: mockRemotes(), config
       });
       await clone.initialise();
@@ -384,7 +407,7 @@ describe('Dataset engine', () => {
       const remoteUpdates = new Source<OperationMessage>();
       const remotes = mockRemotes(remoteUpdates, [true]);
       remotes.revupFrom = async () => ({ gwc: remote.gwc, updates: EMPTY });
-      const clone = new DatasetEngine({
+      const clone = new TestDatasetEngine({
         dataset: await memStore({ backend }), remotes, config: testConfig()
       });
       await clone.initialise();

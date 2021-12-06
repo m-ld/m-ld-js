@@ -40,7 +40,9 @@ export async function memStore(opts?: {
   backend?: AbstractLevelDOWN,
   context?: Context
 }): Promise<Dataset> {
-  return new QuadStoreDataset(opts?.backend ?? new MeldMemDown, opts?.context).initialise();
+  return new QuadStoreDataset(
+    opts?.backend ?? new MeldMemDown,
+    opts?.context).initialise();
 }
 
 export function mockLocal(

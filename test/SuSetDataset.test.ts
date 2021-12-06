@@ -22,7 +22,16 @@ const fred = {
 };
 
 describe('SU-Set Dataset', () => {
+  let dataset: Dataset;
+  let unlock: () => void;
   let ssd: SuSetDataset;
+
+  beforeEach(async () => {
+    dataset = await memStore();
+    unlock = await dataset.lock.acquire('state', 'share');
+  });
+
+  afterEach(() => unlock());
 
   function captureUpdate() {
     // Convert the subject graphs to JSON for matching convenience
@@ -30,10 +39,7 @@ describe('SU-Set Dataset', () => {
   }
 
   describe('with basic config', () => {
-    let dataset: Dataset;
-
     beforeEach(async () => {
-      dataset = await memStore();
       ssd = new SuSetDataset(dataset, {}, [], { '@id': 'test', '@domain': 'test.m-ld.org' });
       await ssd.initialise();
     });
@@ -525,7 +531,7 @@ describe('SU-Set Dataset', () => {
         check: () => Promise.resolve(),
         apply: () => Promise.resolve()
       };
-      ssd = new SuSetDataset(await memStore(), {}, [constraint],
+      ssd = new SuSetDataset(dataset, {}, [constraint],
         { '@id': 'test', '@domain': 'test.m-ld.org' });
       await ssd.initialise();
       await ssd.resetClock(local.tick().time);

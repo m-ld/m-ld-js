@@ -14,7 +14,7 @@ import {
   debounceTime, delayWhen, distinctUntilChanged, expand, filter, finalize, ignoreElements, map,
   mergeMap, share, skipWhile, takeUntil, tap, toArray
 } from 'rxjs/operators';
-import { delayUntil, Future, inflateArray, poisson, tapComplete } from '../util';
+import { delayUntil, Future, inflateFrom, poisson, tapComplete } from '../util';
 import { LockManager } from '../locks';
 import { levels } from 'loglevel';
 import { AbstractMeld, comesAlive } from '../AbstractMeld';
@@ -24,7 +24,7 @@ import { CloneEngine } from '../StateEngine';
 import { MeldError, MeldErrorStatus } from '../MeldError';
 import { AsyncIterator, TransformIterator, wrap } from 'asynciterator';
 import { BaseStream } from '../../rdfjs-support';
-import { Bite, Consumable } from '../../flowable';
+import { Consumable } from '../../flowable';
 
 enum ConnectStyle {
   SOFT, HARD
@@ -46,7 +46,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
   private readonly remotes: Omit<MeldRemotes, 'operations'>;
   private readonly remoteOps: RemoteOperations;
   private subs = new Subscription;
-  readonly lock = new LockManager<'live' | 'state'>();
+  readonly lock: LockManager<'live' | 'state'>;
   // FIXME: New clone flag should be inferred from the journal (e.g. tail has no
   // operation) in case of crash between new clock and first snapshot
   private newClone: boolean = false;
@@ -67,6 +67,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
     super(config);
     this.dataset = new SuSetDataset(
       dataset, context ?? {}, constraints ?? [], config);
+    this.lock = dataset.lock;
     this.subs.add(this.dataUpdates
       .pipe(map(update => update['@ticks']))
       .subscribe(this.latestTicks));
@@ -363,7 +364,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
     // This is because a snapshot is applied in multiple transactions
     const updates = concat(
       snapshot.updates.pipe(delayUntil(snapshotApplied)),
-      inflateArray(reEmits));
+      inflateFrom(reEmits));
     this.acceptRecoveryUpdates(updates, retry);
     return snapshotApplied; // We can go live as soon as the snapshot is applied
   }
@@ -420,17 +421,18 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
 
   @AbstractMeld.checkLive.async
   async snapshot(): Promise<Snapshot> {
-    return this.lock.exclusive('live', async () => {
-      this.log.info('Compiling snapshot');
-      const sentSnapshot = new Future;
-      const updates = this.remoteUpdatesBeforeNow(sentSnapshot);
-      const snapshot = await this.dataset.takeSnapshot();
-      return {
-        ...snapshot, updates,
-        // Snapshot data is a flowable, so no need to buffer it
-        data: snapshot.data.pipe(tapComplete(sentSnapshot))
-      };
-    });
+    return this.lock.exclusive('live', () =>
+      this.lock.share('state', async () => {
+        this.log.info('Compiling snapshot');
+        const sentSnapshot = new Future;
+        const updates = this.remoteUpdatesBeforeNow(sentSnapshot);
+        const snapshot = await this.dataset.takeSnapshot();
+        return {
+          ...snapshot, updates,
+          // Snapshot data is a flowable, so no need to buffer it
+          data: snapshot.data.pipe(tapComplete(sentSnapshot))
+        };
+      }));
   }
 
   @AbstractMeld.checkLive.async
@@ -481,20 +483,22 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
 
   @AbstractMeld.checkNotClosed.rx
   read(request: Read): Consumable<GraphSubject> {
-    return new Observable<Bite<GraphSubject>>(subs => {
-      this.lock.share('live', () => new Promise<void>(resolve => {
-        this.logRequest('read', request);
-        // Only leave the live-lock when the results have been fully streamed
-        return this.dataset.read(request).pipe(finalize(resolve)).subscribe(subs);
-      })).then(
-        () => this.log.debug('read complete'),
-        err => subs.error(err)); // Only if lock fails
-    });
+    this.logRequest('read', request);
+    // Extend the 'state' lock until the read actually happens, which is when
+    // the 'live' lock is acquired. The read may also choose to extend the
+    // 'state' lock while results are streaming.
+    const results = new Future<Consumable<GraphSubject>>();
+    this.lock.share('live', () => new Promise<void>(exitLiveLock => {
+      // Only exit the live-lock when the results have been fully streamed
+      results.resolve(this.dataset.read(request).pipe(finalize(exitLiveLock)));
+    })).then(
+      () => this.log.debug('read complete'),
+      err => results.reject(err)); // Only if lock fails
+    return inflateFrom(this.lock.extend('state', results));
   }
 
   @AbstractMeld.checkNotClosed.async
   async write(request: Write): Promise<this> {
-    // For a write, execute immediately.
     await this.lock.share('live', async () => {
       this.logRequest('write', request);
       // Take the send timestamp just before enqueuing the transaction. This
