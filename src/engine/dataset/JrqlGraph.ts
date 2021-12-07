@@ -4,7 +4,7 @@ import {
   isSubject, isUpdate, operators, Read, Result, Subject, Update, Variable, VariableExpression, Write
 } from '../../jrql-support';
 import { Graph, PatchQuads } from '.';
-import { map, mergeMap, reduce } from 'rxjs/operators';
+import { finalize, map, mergeMap, reduce } from 'rxjs/operators';
 import { concat, EMPTY, throwError } from 'rxjs';
 import { canPosition, NamedNode, Quad, QueryableRdfSourceProxy, Term, TriplePos } from '../quads';
 import { ActiveContext, expandTerm, initialCtx, nextCtx } from '../jsonld';
@@ -13,7 +13,7 @@ import { JRQL } from '../../ns';
 import { JrqlQuads } from './JrqlQuads';
 import { MeldError } from '../MeldError';
 import { array, GraphSubject, MeldReadState, ReadResult, readResult } from '../..';
-import { binaryFold, flatten, Future, inflate, isArray, tapComplete } from '../util';
+import { binaryFold, flatten, Future, inflate, isArray } from '../util';
 import { ConstructTemplate } from './ConstructTemplate';
 import { Binding, QueryableRdfSource } from '../../rdfjs-support';
 import { Consumable, each } from '../../flowable';
@@ -87,7 +87,7 @@ export class JrqlGraph {
     ctx: ActiveContext): Consumable<GraphSubject> {
     return this.solutions(where, this.project, ctx).pipe(
       map(({ value: solution, next }) =>
-        ({ value: this.jrql.solutionSubject(select, solution, ctx), next: next })));
+        ({ value: this.jrql.solutionSubject(select, solution, ctx), next })));
   }
 
   describe(describes: (Iri | Variable)[],
@@ -111,7 +111,7 @@ export class JrqlGraph {
       } else {
         return consume(this.get(describe, ctx)).pipe(ignoreIf(null));
       }
-    })).pipe(tapComplete(finished));
+    })).pipe(finalize(finished.resolve));
   }
 
   get(id: Iri, ctx: ActiveContext) {

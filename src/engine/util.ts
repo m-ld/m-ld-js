@@ -110,6 +110,10 @@ export function tapLast<T>(done: Future<T | undefined>): OperatorFunction<T, T> 
   });
 }
 
+/**
+ * CAUTION: the future will not be resolved if the subscriber unsubscribes.
+ * To capture unsubscription, use the RxJS `finalize` operator.
+ */
 export function tapComplete<T>(done: Future): OperatorFunction<T, T> {
   return tap({ complete: () => done.resolve(), error: done.reject });
 }

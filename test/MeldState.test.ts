@@ -11,11 +11,11 @@ import { SubjectGraph } from '../src/engine/SubjectGraph';
 import { DataFactory as RdfDataFactory, Quad } from 'rdf-data-factory';
 import { Factory as SparqlFactory } from 'sparqlalgebrajs';
 import { Binding } from 'quadstore';
+import { Subscription } from 'rxjs';
 
 describe('Meld State API', () => {
   let api: ApiStateMachine;
   let captureUpdate: Future<MeldUpdate>;
-  const rdf = new RdfDataFactory();
 
   beforeEach(async () => {
     const context = new DomainContext('test.m-ld.org');
@@ -179,6 +179,7 @@ describe('Meld State API', () => {
   });
 
   describe('rdf/js support', () => {
+    const rdf = new RdfDataFactory();
     const sparql = new SparqlFactory(rdf);
 
     test('matches quad subject', done => {
@@ -1085,6 +1086,69 @@ describe('Meld State API', () => {
           '@insert': { '@id': 'wilma', age: 40 }
         });
       });
+    });
+
+    test('consumes from consistent snapshot', done => {
+      const writeDone = new Future;
+      const subjectsSeen = new Set<string>();
+      api.write(async state => {
+        state = await state.write<Group>({
+          '@graph': [
+            { '@id': 'fred', '@type': 'Flintstone', name: 'Fred' },
+            { '@id': 'wilma', '@type': 'Flintstone', name: 'Wilma' }
+          ]
+        });
+        // Don't await this state read, but consume it asynchronously
+        state.read<Describe>({
+          '@describe': '?f',
+          '@where': { '@id': '?f', '@type': 'Flintstone' }
+        }).consume.subscribe({
+          async next({ value, next }) {
+            subjectsSeen.add(value['@id']);
+            expect(value['@type']).toBe('Flintstone');
+            // Push the next until long after the `write` below has been
+            // requested and would have been processed if it were not waiting
+            await new Promise(resolve => setTimeout(resolve, 5));
+            next();
+          },
+          complete() {
+            expect(subjectsSeen.size).toBe(2);
+            expect(writeDone.pending).toBe(true);
+            writeDone.then(done);
+          },
+          error: done
+        });
+      });
+      // This checks that the test is working – we have not yet streamed
+      expect(subjectsSeen.size).toBeLessThan(2);
+      // Immediately write an update to change the flintstones, this should
+      // block until the query results have been consumed
+      api.write<Update>({
+        '@delete': { '@id': '?f', '@type': 'Flintstone' },
+        '@insert': { '@id': '?f', '@type': 'Jetson' }
+      }).then(() => writeDone.resolve());
+    });
+
+    test('abandoned read does not block write', done => {
+      api.write(async state => {
+        state = await state.write<Group>({
+          '@graph': [
+            { '@id': 'fred', '@type': 'Flintstone', name: 'Fred' },
+            { '@id': 'wilma', '@type': 'Flintstone', name: 'Wilma' }
+          ]
+        });
+        // Don't await this state read, but consume it asynchronously
+        const subs: Subscription = state.read<Describe>({
+          '@describe': '?f',
+          '@where': { '@id': '?f', '@type': 'Flintstone' }
+        }).consume.subscribe(() =>
+          // Push the abandonment out an unreasonable time
+          setTimeout(() => subs.unsubscribe(), 5));
+      });
+      api.write<Update>({
+        '@delete': { '@id': '?f', '@type': 'Flintstone' },
+        '@insert': { '@id': '?f', '@type': 'Jetson' }
+      }).then(() => done());
     });
   });
 });
