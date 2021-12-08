@@ -28,7 +28,7 @@ describe('SU-Set Dataset', () => {
 
   beforeEach(async () => {
     dataset = await memStore();
-    unlock = await dataset.lock.acquire('state', 'share');
+    unlock = await dataset.lock.acquire('state', 'test', 'share');
   });
 
   afterEach(() => unlock());

@@ -46,7 +46,11 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
   private readonly remotes: Omit<MeldRemotes, 'operations'>;
   private readonly remoteOps: RemoteOperations;
   private subs = new Subscription;
-  readonly lock: LockManager<'live' | 'state'>;
+  /**
+   * Lock ordering matters to prevent deadlock. If both keys are required,
+   * 'state' must be acquired first.
+   */
+  readonly lock: LockManager<'state' | 'live'>;
   // FIXME: New clone flag should be inferred from the journal (e.g. tail has no
   // operation) in case of crash between new clock and first snapshot
   private newClone: boolean = false;
@@ -208,7 +212,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
     this.log.debug('Receiving', logBody);
     // Grab the state lock, per CloneEngine contract and to ensure that all
     // clock ticks are immediately followed by their respective transactions.
-    return this.lock.exclusive('state', async () => {
+    return this.lock.exclusive('state', 'remote operation', async () => {
       try {
         const startTime = this.localTime;
         // Synchronously gather ticks for transaction applications
@@ -264,7 +268,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
       // operations to mitigate against breaking fifo with emitOpsSince().
       this.pauseOperations(
         // Also block transactions, revups and other connect attempts.
-        this.lock.exclusive('live', async () => {
+        this.lock.exclusive('live', 'decide live', async () => {
           const remotesLive = this.remotes.live.value;
           if (remotesLive === true) {
             if (this.isGenesis)
@@ -421,8 +425,8 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
 
   @AbstractMeld.checkLive.async
   async snapshot(): Promise<Snapshot> {
-    return this.lock.exclusive('live', () =>
-      this.lock.share('state', async () => {
+    return this.lock.share('state', 'snapshot', () =>
+      this.lock.exclusive('live', 'snapshot', async () => {
         this.log.info('Compiling snapshot');
         const sentSnapshot = new Future;
         const updates = this.remoteUpdatesBeforeNow(sentSnapshot);
@@ -437,7 +441,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
 
   @AbstractMeld.checkLive.async
   async revupFrom(time: TreeClock): Promise<Revup | undefined> {
-    return this.lock.exclusive('live', async () => {
+    return this.lock.exclusive('live', 'revup', async () => {
       const operationsSent = new Future;
       const maybeMissed = this.remoteUpdatesBeforeNow(operationsSent);
       const gwc = new Future<GlobalClock>();
@@ -477,7 +481,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
     return (...args) => {
       return new TransformIterator<T>(this.closed ?
         Promise.reject(new MeldError('Clone has closed')) :
-        this.lock.share('live', async () => wrap(fn(...args))));
+        this.lock.share('live', 'sparql', async () => wrap(fn(...args))));
     };
   }
 
@@ -488,18 +492,18 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
     // the 'live' lock is acquired. The read may also choose to extend the
     // 'state' lock while results are streaming.
     const results = new Future<Consumable<GraphSubject>>();
-    this.lock.share('live', () => new Promise<void>(exitLiveLock => {
+    this.lock.share('live', 'read', () => new Promise<void>(exitLiveLock => {
       // Only exit the live-lock when the results have been fully streamed
       results.resolve(this.dataset.read(request).pipe(finalize(exitLiveLock)));
     })).then(
       () => this.log.debug('read complete'),
       err => results.reject(err)); // Only if lock fails
-    return inflateFrom(this.lock.extend('state', results));
+    return inflateFrom(this.lock.extend('state', 'read', results));
   }
 
   @AbstractMeld.checkNotClosed.async
   async write(request: Write): Promise<this> {
-    await this.lock.share('live', async () => {
+    await this.lock.share('live', 'write', async () => {
       this.logRequest('write', request);
       // Take the send timestamp just before enqueuing the transaction. This
       // ensures that transaction stamps increase monotonically.

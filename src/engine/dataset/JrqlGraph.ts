@@ -56,7 +56,7 @@ export class JrqlGraph {
   }
 
   read(query: Read, ctx: ActiveContext): Consumable<GraphSubject> {
-    return inflate(this.graph.lock.extend('state', nextCtx(ctx, query['@context'])), ctx => {
+    return inflate(this.graph.lock.extend('state', 'read', nextCtx(ctx, query['@context'])), ctx => {
       if (isDescribe(query))
         return this.describe(array(query['@describe']), query['@where'], ctx);
       else if (isSelect(query) && query['@where'] != null)
@@ -94,7 +94,7 @@ export class JrqlGraph {
     where: Subject | Subject[] | Group | undefined,
     ctx: ActiveContext): Consumable<GraphSubject> {
     // For describe, we have to extend the state lock for all sub-queries
-    const finished = this.graph.lock.extend('state', new Future);
+    const finished = this.graph.lock.extend('state', 'describe', new Future);
     return concat(...describes.map(describe => {
       // noinspection TypeScriptValidateJSTypes
       const describedVarName = JRQL.matchVar(describe);
@@ -115,7 +115,7 @@ export class JrqlGraph {
   }
 
   get(id: Iri, ctx: ActiveContext) {
-    return this.graph.lock.extend('state', this.describe1(this.resolve(id, ctx), ctx));
+    return this.graph.lock.extend('state', 'get', this.describe1(this.resolve(id, ctx), ctx));
   }
 
   private async describe1(subjectId: Term, ctx: ActiveContext): Promise<GraphSubject | undefined> {

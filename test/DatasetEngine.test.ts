@@ -55,11 +55,11 @@ describe('Dataset engine', () => {
   // normally put in place by a StateEngine.
   class TestDatasetEngine extends DatasetEngine {
     read(request: Read): Consumable<GraphSubject> {
-      return inflateFrom(this.lock.share('state', () => super.read(request)));
+      return inflateFrom(this.lock.share('state', 'test', () => super.read(request)));
     }
 
     async write(request: Write): Promise<this> {
-      return this.lock.exclusive('state', () => super.write(request));
+      return this.lock.exclusive('state', 'test', () => super.write(request));
     }
   }
 

@@ -17,7 +17,7 @@ describe('Default list constraint', () => {
 
   beforeEach(async () => {
     dataset = await memStore();
-    unlock = await dataset.lock.acquire('state', 'share');
+    unlock = await dataset.lock.acquire('state', 'test', 'share');
     graph = new JrqlGraph(dataset.graph());
     ctx = initialCtx();
   });

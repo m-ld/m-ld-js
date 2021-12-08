@@ -9,8 +9,8 @@ import { QueryableRdfSourceProxy } from './quads';
 /** Simplified clone engine with only the basic requirements of an engine */
 export interface CloneEngine extends EngineState {
   /**
-   * The state lock **must** be held as a precondition for both {@link
-   * EngineState.read} and {@link EngineState.write}.
+   * The state lock **must** be held as a precondition for both
+   * {@link EngineState.read} and {@link EngineState.write}.
    */
   readonly lock: LockManager<'state'>;
   /** An update MUST happen when 'state' is exclusively locked */
@@ -19,7 +19,7 @@ export interface CloneEngine extends EngineState {
 
 export interface EngineState extends QueryableRdfSource {
   read(request: Read): Consumable<GraphSubject>;
-  write(request: Write): Promise<this>;
+  write(request: Write): Promise<EngineState>;
 }
 
 export type EngineUpdateProc =
@@ -37,10 +37,10 @@ export class StateEngine extends QueryableRdfSourceProxy {
   private handling: Promise<unknown>;
 
   constructor(
-    private readonly engine: CloneEngine) {
+    private readonly clone: CloneEngine) {
     super();
     this.newState();
-    this.engine.dataUpdates.subscribe(this.nextState);
+    this.clone.dataUpdates.subscribe(this.nextState);
   }
 
   protected get src(): QueryableRdfSource {
@@ -49,14 +49,16 @@ export class StateEngine extends QueryableRdfSourceProxy {
 
   follow(handler: EngineUpdateProc): Subscription {
     const key = this.handlers.push(handler) - 1;
-    return new Subscription(() => { delete this.handlers[key]; });
+    return new Subscription(() => {
+      delete this.handlers[key];
+    });
   }
 
   /** procedure and handler must not reject */
   read(procedure: EngineStateProc, handler?: EngineUpdateProc): Subscription {
     const subs = new Subscription;
     // noinspection JSIgnoredPromiseFromCall – return subscription synchronously
-    this.engine.lock.share('state', async () => {
+    this.clone.lock.share('state', 'read', async () => {
       if (!subs.closed) {
         if (handler != null)
           subs.add(this.follow(handler));
@@ -68,38 +70,36 @@ export class StateEngine extends QueryableRdfSourceProxy {
   }
 
   write(procedure: EngineStateProc): Promise<unknown> {
-    return this.engine.lock.exclusive('state', () => procedure(this.state));
+    return this.clone.lock.exclusive('state', 'write', () => procedure(this.state));
   }
 
   private nextState = (update: MeldUpdate) => {
     const state = this.newState();
     // Run all the handlers for the new state, ensuring lock coverage
     // noinspection JSIgnoredPromiseFromCall
-    this.engine.lock.extend('state',
-      this.handling = Promise.all(Object.values(this.handlers)
-        .map(handler => handler(update, state))));
+    this.clone.lock.extend('state', 'next', this.handling = Promise.all(Object.values(this.handlers)
+      .map(handler => handler(update, state))));
   };
 
   private newState() {
-    const state: EngineState = {
-      countQuads: (...args) => gateEngine().countQuads(...args),
-      // @ts-ignore - TS can't cope with overloaded query method
-      query: (...args) => gateEngine().query(...args),
-      match: (...args) => gateEngine().match(...args),
-      read: request => gateEngine().read(request),
-      write: async request => {
+    const engine = this;
+    const state = new class extends QueryableRdfSourceProxy implements EngineState {
+      protected get src(): CloneEngine {
+        if (engine.state !== state)
+          throw new Error('State has been de-scoped.');
+        return engine.clone;
+      }
+      read(request: Read) {
+        return this.src.read(request);
+      }
+      async write(request: Write) {
         // Ensure all read handlers are complete before changing state
-        await this.handling;
-        await gateEngine().write(request);
+        await engine.handling;
+        await this.src.write(request);
         // At this point, there should be a new state from the data update, but
         // not if the write was a no-op
-        return this.state;
+        return engine.state;
       }
-    };
-    const gateEngine = () => {
-      if (this.state !== state)
-        throw new Error('State has been de-scoped.');
-      return this.engine;
     };
     return this.state = state;
   }

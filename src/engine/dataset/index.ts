@@ -193,7 +193,7 @@ export class QuadStoreDataset implements Dataset {
     same event loop tick, see https://github.com/Level/leveldown/issues/486
     */
     sw.next('lock-wait');
-    return this.lock.exclusive(lockKey, async () => {
+    return this.lock.exclusive(lockKey, 'transaction', async () => {
       sw.next('prepare');
       const result = await txn.prepare({ id, sw: sw.lap });
       sw.next('apply');
@@ -313,7 +313,7 @@ export class QuadStoreDataset implements Dataset {
   @notClosed.async
   close(): Promise<void> {
     // Make efforts to ensure no transactions are running
-    return this.lock.exclusive('txn', () => {
+    return this.lock.exclusive('txn', 'closing', () => {
       this.isClosed = true;
       return this.store.close();
     });
@@ -380,7 +380,7 @@ class QuadStoreGraph implements Graph {
       throw new Error('Expected bindings or quads');
     })();
     return new TransformIterator<Binding | Quad>(
-      this.dataset.lock.extend('state', source));
+      this.dataset.lock.extend('state', 'query', source));
   }
 
   skolem = () => this.dataset.rdf.namedNode(
