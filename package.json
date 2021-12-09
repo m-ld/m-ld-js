@@ -76,7 +76,7 @@
   },
   "dependencies": {
     "@ably/msgpack-js": "^0.4.0",
-    "@m-ld/m-ld-spec": "^0.6.3",
+    "@m-ld/m-ld-spec": "^0.6.4",
     "@types/abstract-leveldown": "^5.0.1",
     "@types/detect-node": "^2.0.0",
     "@types/jsonld": "^1.5.2",
@@ -87,7 +87,7 @@
     "@types/valid-data-url": "^2.0.0",
     "asynciterator": "^3.2.0",
     "detect-node": "^2.0.4",
-    "json-rql": "^0.6.1",
+    "json-rql": "^0.6.2",
     "jsonld": "^3.3.0",
     "local-storage": "^2.0.0",
     "loglevel": "^1.7.1",

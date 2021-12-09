@@ -32,7 +32,6 @@ export type Reference = jrql.Reference;
  * - Any value for a property that has been defined as `@vocab` in the Context
  * @see https://www.w3.org/TR/json-ld/#default-vocabulary
  */
-// TODO: Push this down to json-rql
 export type VocabReference = { '@vocab': Iri };
 /**
  * A JSON-LD context for some JSON content such as a {@link Subject}. **m-ld**
@@ -84,7 +83,7 @@ export type Container = List | Set;
  * A stand-in for a Value used as a basis for filtering.
  * @see [json-rql expression](https://json-rql.org/globals.html#expression)
  */
-export type Expression = jrql.Atom | VocabReference | Constraint;
+export type Expression = jrql.Atom | Constraint;
 /** @internal */
 export { operators } from 'json-rql';
 
