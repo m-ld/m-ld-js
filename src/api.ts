@@ -10,6 +10,8 @@ import { SubjectGraph } from './engine/SubjectGraph';
 import { QueryableRdfSource } from './rdfjs-support';
 import { Consumable, flow, Flowable } from './flowable';
 import { Future, tapComplete } from './engine/util';
+import { MeldMessageType } from './ns/m-ld';
+import { AppPrincipal } from './index';
 
 /**
  * A convenience type for a struct with a `@insert` and `@delete` property, like
@@ -213,8 +215,8 @@ export interface MeldUpdate extends DeleteInsert<GraphSubjects> {
  * the latter, the state can be transitioned to another immutable state using
  * {@link MeldState.write}.
  */
-export type StateProc<S extends MeldReadState = MeldReadState> =
-  (state: S) => PromiseLike<unknown> | void;
+export type StateProc<S extends MeldReadState = MeldReadState, T = unknown> =
+  (state: S) => PromiseLike<T> | T;
 
 /**
  * A function type specifying a 'procedure' during which a clone state is
@@ -436,3 +438,31 @@ export interface InterimUpdate {
    */
   readonly update: Promise<MeldUpdate>;
 }
+
+export interface MeldTransportSecurity {
+  /**
+   * Sets the current application principal (user or machine)
+   */
+  setPrincipal(principal: AppPrincipal | undefined): void;
+  /**
+   * Check and/or transform wire data.
+   * @param data the data to operate on
+   * @param type the message purpose
+   * @param direction message direction relative to the local clone
+   * @param state the current state of the clone. This may be `null`, but only
+   * for bootstrap messages, i.e. `type` is
+   * `http://control.m-ld.org/request/clock` or
+   * `http://control.m-ld.org/request/snapshot` (and no prior state exists).
+   */
+  wire(
+    data: Buffer,
+    type: MeldMessageType,
+    direction: 'in' | 'out',
+    state: MeldReadState | null
+  ): Buffer | Promise<Buffer>;
+}
+
+export const noTransportSecurity: MeldTransportSecurity = {
+  setPrincipal: () => {},
+  wire: (data: Buffer) => data
+};

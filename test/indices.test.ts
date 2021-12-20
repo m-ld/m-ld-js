@@ -1,4 +1,3 @@
-import { DatasetEngine } from '../src/engine/dataset/DatasetEngine';
 import { IndexMap, IndexSet } from '../src/engine/indices';
 
 describe('Index set', () => {
@@ -96,7 +95,6 @@ describe('Index map', () => {
       [new Date(2017, 11, 30), '1'],
       [new Date(2018, 0, 1), '2']
     ]);
-    const dates2 = new DateMap<string>(dates);
     expect(dates.get(new Date(2017, 11, 30))).toBe('1');
     expect(dates.get(new Date(2018, 0, 1))).toBe('2');
   });

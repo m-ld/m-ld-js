@@ -5,7 +5,7 @@ import { LogLevelDesc } from 'loglevel';
 import { ConstraintConfig, constraintFromConfig } from './constraints';
 import { DomainContext } from './engine/MeldEncoding';
 import { Context } from './jrql-support';
-import { MeldClone, MeldConstraint } from './api';
+import { MeldClone, MeldConstraint, MeldTransportSecurity } from './api';
 import { LiveStatus, MeldStatus } from '@m-ld/m-ld-spec';
 import { MeldRemotes } from './engine';
 import type { AbstractLevelDOWN } from 'abstract-leveldown';
@@ -104,6 +104,73 @@ export interface JournalConfig {
 }
 
 /**
+ * An identified security principal (user or machine) that is responsible for
+ * data changes in the clone.
+ */
+export interface AppPrincipal {
+  /**
+   * The principal's identifier, resolved according to the configured context.
+   */
+  '@id': string;
+  /**
+   * Sign the given data with the principal's key. This function may be
+   * required by the implementation of the domain's access control.
+   *
+   * @param data the data to sign
+   * @see https://developer.mozilla.org/en-US/docs/Web/API/SubtleCrypto/sign#rsassa-pkcs1-v1_5_2
+   */
+  sign?(data: Buffer): Promise<Buffer>;
+}
+
+/**
+ * The runtime embedding environment for the **m-ld** clone. The clone calls
+ * back the app for specific behaviours; see the members of this class.
+ *
+ * In general, app behaviours should preferably be provided using plug-ins that
+ * are dynamically selected and loaded based on the clone's (meta)data content –
+ * this allows a domain to evolve without necessitating the redeployment of app
+ * code. Where applicable, the members of this interface document alternative
+ * means of providing behaviour.
+ */
+interface MeldApp {
+  /**
+   * This object must be provided if the domain declares an access control
+   * extension requiring an identified security principal (user or machine).
+   */
+  principal?: AppPrincipal;
+  /**
+   * An event emitter for receiving low-level backend transaction events. Use to
+   * debug or trigger offline save. Received events are:
+   *
+   * - `commit(id: string)`: a transaction batch with the given ID has committed
+   *   normally
+   * - `error(err: any)`: an error has occurred in the store (most such errors
+   *   will also manifest in the operation performed)
+   * - `clear()`: the store has been cleared, as when applying a new snapshot
+   */
+  backendEvents?: EventEmitter;
+  /**
+   * Constraints, in addition to those in the configuration or the data.
+   *
+   * @experimental use with caution
+   * @todo provide data-declared constraints
+   * @see https://github.com/m-ld/m-ld-spec/issues/73
+   */
+  constraints?: MeldConstraint[];
+  /**
+   * A transport security interceptor. This will initially be used prior to the
+   * clone joining the domain. After that, a different transport security may
+   * come into effect if so declared in the data. If the initial transport
+   * security is not compatible with the rest of the domain, this clone may not
+   * be able to join until the app is updated.
+   *
+   * @experimental use with caution
+   * @todo provide data-declared transport security
+   */
+  transportSecurity?: MeldTransportSecurity;
+}
+
+/**
  * Create or initialise a local clone, depending on whether the given LevelDB
  * database already exists. This function returns as soon as it is safe to begin
  * transactions against the clone; this may be before the clone has received all
@@ -115,39 +182,36 @@ export interface JournalConfig {
  * This can be a configured object (e.g. `new MqttRemotes(config)`) or just the
  * class (`MqttRemotes`).
  * @param config the clone configuration
- * @param options runtime options
- * @param options.constraints constraints in addition to those in the
- * configuration. 🚧 Experimental: use with caution.
- * @param options.backendEvents an event emitter receiving low-level backend
- * transaction events. Use to debug or trigger offline save. Received events
- * are:
- * - `commit(id: string)`: a transaction batch with the given ID has committed
- *   normally
- * - `error(err: any)`: an error has occurred in the store (most such errors
- *   will also manifest in the operation performed)
- * - `clear()`: the store has been cleared, as when applying a new snapshot
+ * @param [app] runtime options
  */
 export async function clone(
   backend: AbstractLevelDOWN,
   remotes: MeldRemotes | (new (config: MeldConfig) => MeldRemotes),
   config: MeldConfig,
-  options?: {
-    constraints?: MeldConstraint[],
-    backendEvents?: EventEmitter
-  }): Promise<MeldClone> {
+  { principal, backendEvents, constraints, transportSecurity }: MeldApp = {}
+): Promise<MeldClone> {
 
   const context = new DomainContext(config['@domain'], config['@context']);
   const dataset = await new QuadStoreDataset(
-    backend, context, options?.backendEvents).initialise();
+    backend, context, backendEvents).initialise();
 
   if (typeof remotes == 'function')
     remotes = new remotes(config);
 
-  const constraints = options?.constraints ??
-    await Promise.all((config.constraints ?? [])
+  if (constraints == null)
+    constraints = await Promise.all((config.constraints ?? [])
       .map(item => constraintFromConfig(item, context)));
 
-  const engine = new DatasetEngine({ dataset, remotes, config, constraints, context });
+  const engine = new DatasetEngine({
+    dataset, remotes, config, constraints, context
+  });
+
+  if (transportSecurity != null) {
+    // This indirection exists to support data-declared security
+    transportSecurity.setPrincipal(principal);
+    remotes.setTransportSecurity(transportSecurity);
+    engine.setTransportSecurity(transportSecurity);
+  }
   await engine.initialise();
   return new DatasetClone(engine);
 }

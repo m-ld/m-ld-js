@@ -1,5 +1,5 @@
 import { deepValues, Future, setAtPath } from '../src/engine/util';
-import { array, shortId, any } from '../src';
+import { any, array, shortId } from '../src';
 
 test('Future can be resolved', async () => {
   const f = new Future<string>();
@@ -15,6 +15,7 @@ test('Future can be rejected', async () => {
   } catch (e) {
     expect(e).toBe('no');
   }
+  expect.assertions(1);
 });
 
 test('Future ignores multiple resolutions', async () => {
@@ -40,9 +41,10 @@ test('Future ignores resolve after reject', async () => {
   } catch (e) {
     expect(e).toBe('AARGH');
   }
+  expect.assertions(1);
 });
 
-test('Unhandled future does not cause UnhandledPromiseRejectionWarning', () => {
+test('Unhandled future does not cause UnhandledPromiseRejection', () => {
   new Future().reject('oops');
 });
 

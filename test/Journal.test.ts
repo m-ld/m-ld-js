@@ -25,12 +25,13 @@ describe('Dataset Journal', () => {
    * @param process simulated operation source
    * @param content tuple of deletes and inserts , defaults to no-op
    */
-  function opAt(process: MockProcess, content: [any, any] = [{}, {}]) {
-    const [deletes, inserts] = content.map(c => JSON.stringify(c));
+  function opAt(process: MockProcess, content: [object, object] = [{}, {}]) {
+    const [deletes, inserts] = content;
     return MeldOperation.fromEncoded(encoder, process.operated(deletes, inserts));
   }
 
-  function addEntry(local: MockProcess, remote?: MockProcess, content: [any, any] = [{}, {}]) {
+  function addEntry(
+    local: MockProcess, remote?: MockProcess, content: [object, object] = [{}, {}]) {
     const op = opAt(remote ?? local, content);
     const localTime = remote ? local.join(op.time).tick().time : local.time;
     return store.transact({

@@ -8,6 +8,7 @@ import { ActiveContext, activeCtx } from '../src/engine/jsonld';
 
 describe('json-rql Quads translation', () => {
   const rdf = new RdfDataFactory();
+  // noinspection JSUnusedGlobalSymbols
   Object.assign(rdf, { skolem: () => rdf.namedNode(`http://test.m-ld.org/${uuid()}`) });
 
   let jrql: JrqlQuads;

@@ -9,9 +9,16 @@ import { MinimalReadable } from '../src/flowable/consume/readable';
 import { mergeMap } from 'rxjs/operators';
 import { Bite } from '../src/flowable';
 
+const readArrayAsync = (data: any[]) => new Readable({
+  objectMode: true,
+  read() {
+    setImmediate(() => this.push(data.shift() ?? null));
+  }
+});
+
 describe('Consuming readable', () => {
   test('completes with empty readable', done => {
-    const rc = consume<true>(Readable.from([]));
+    const rc = consume<true>(readArrayAsync([]));
     rc.subscribe({
       next: done /* will error on mystery item */,
       error: done,
@@ -37,7 +44,7 @@ describe('Consuming readable', () => {
   });
 
   test('completes after bites done', async () => {
-    const rc = consume<number>(Readable.from([0]));
+    const rc = consume<number>(readArrayAsync([0]));
     const willComplete = new Promise<void>((resolve, reject) => {
       rc.subscribe({
         next: async ({ next }) => {
@@ -52,7 +59,7 @@ describe('Consuming readable', () => {
   });
 
   test('flows at pace of slowest consumer', async () => {
-    const rc = consume<number>(Readable.from([0, 1]));
+    const rc = consume<number>(readArrayAsync([0, 1]));
     const trigger = new EventEmitter;
     const values: number[] = [];
     const willCompleteOne = new Promise<void>(resolve => {
@@ -76,7 +83,7 @@ describe('Consuming readable', () => {
   });
 
   test('unsubscribe does not stop flow', async () => {
-    const rc = consume<number>(Readable.from([0, 1]));
+    const rc = consume<number>(readArrayAsync([0, 1]));
     const values: number[] = [];
     const willCompleteOne = new Promise<void>(resolve => {
       rc.subscribe({
@@ -187,13 +194,13 @@ describe('Consuming readable', () => {
   });
 
   test('errors if the readable is prematurely destroyed', done => {
-    const source = Readable.from([0, 1]);
+    const source = readArrayAsync([0, 1]);
     consume(source).subscribe({
       next() {
         source.destroy();
       },
       error(err) {
-        expect(err instanceof Error).toBe(true)
+        expect(err instanceof Error).toBe(true);
         done();
       }
     });
@@ -309,7 +316,7 @@ describe('Utilities', () => {
   });
 
   test('batch, promise and merge', async () => {
-    const data1 = Readable.from([[0, 1]]);
+    const data1 = readArrayAsync([[0, 1]]);
     const data2 = new Promise<number[]>(resolve =>
       setImmediate(() => resolve([2, 3])));
     const rc1 = from(data1).pipe(mergeMap(data => consume(data)));

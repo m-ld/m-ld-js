@@ -3,11 +3,11 @@ import { mockDeep as mock, MockProxy } from 'jest-mock-extended';
 import { AblyRemotes, MeldAblyConfig } from '../src/ably';
 import { comesAlive } from '../src/engine/AbstractMeld';
 import { OperationMessage } from '../src/engine';
-import { mockLocal } from './testClones';
+import { mockLocal, testOp } from './testClones';
 import { BehaviorSubject, Subject as Source } from 'rxjs';
 import { Future, isArray, MsgPack } from '../src/engine/util';
 import { TreeClock } from '../src/engine/clocks';
-import { Request, Response } from '../src/engine/ControlMessage';
+import { NewClockRequest, NewClockResponse } from '../src/engine/remotes/ControlMessage';
 
 /**
  * These tests use a fully mocked Ably to avoid incurring costs. The behaviour
@@ -142,18 +142,18 @@ describe('Ably remotes', () => {
     otherPresent();
     await comesAlive(remotes);
     const prevTime = TreeClock.GENESIS.forked().left, time = prevTime.ticked();
-    const entry = new OperationMessage(prevTime.ticks,
-      [2, time.ticks, time.toJSON(), '{}', '{}']);
+    const entry = new OperationMessage(prevTime.ticks, testOp(time, {}, {}));
     const updates = new Source<OperationMessage>();
     remotes.setLocal(mockLocal({ operations: updates }));
     updates.next(entry);
-    expect(operations.publish).toHaveBeenCalledWith('__op', entry.encode());
+    expect(operations.publish).toHaveBeenCalledWith('__op', entry.encoded);
   });
 
   test('sends a new clock request', async () => {
     const newClock = TreeClock.GENESIS.forked().left;
     // Grab the control channel subscriber
     const remotes = new AblyRemotes(config, connect);
+    remotes.setLocal(mockLocal());
     connCallbacks.connected?.(mock<Ably.Types.ConnectionStateChange>());
     const [subscriber] = control.subscribe.mock.calls[0];
     if (typeof subscriber != 'function')
@@ -165,10 +165,10 @@ describe('Ably remotes', () => {
     other.publish.mockImplementation((name, data) => {
       const splitName = name.split(':');
       expect(splitName[0]).toBe('__send');
-      expect(MsgPack.decode(data)).toEqual(new Request.NewClock().toJSON());
+      expect(MsgPack.decode(data)).toEqual(new NewClockRequest().toJSON());
       setImmediate(() => subscriber(mock<Ably.Types.Message>({
         clientId: 'other',
-        data: MsgPack.encode(new Response.NewClock(newClock).toJSON()),
+        data: MsgPack.encode(new NewClockResponse(newClock).toJSON()),
         name: `__reply:reply1:${splitName[1]}`
       })));
       return Promise.resolve();

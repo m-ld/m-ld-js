@@ -8,13 +8,14 @@ import { comesAlive } from '../src/engine/AbstractMeld';
 import { count, map, observeOn, take, toArray } from 'rxjs/operators';
 import { TreeClock } from '../src/engine/clocks';
 import { MeldRemotes, OperationMessage, Snapshot } from '../src/engine';
-import { Describe, GraphSubject, MeldConfig, Read, Subject, Update } from '../src';
+import { Describe, GraphSubject, MeldConfig, MeldReadState, Read, Subject, Update } from '../src';
 import { AbstractLevelDOWN } from 'abstract-leveldown';
 import { jsonify } from './testUtil';
 import { MeldMemDown } from '../src/memdown';
 import { Write } from '../src/jrql-support';
 import { Consumable } from '../src/flowable';
 import { inflateFrom } from '../src/engine/util';
+import { MeldError } from '../src/engine/MeldError';
 
 describe('Dataset engine', () => {
   describe('as genesis', () => {
@@ -158,8 +159,12 @@ describe('Dataset engine', () => {
       await clone.status.becomes({ outdated: false });
     });
 
+    test('requires state lock for rev-up', async () => {
+      await expect(clone.revupFrom(remote.time)).rejects.toBeInstanceOf(MeldError);
+    });
+
     test('answers rev-up from the new clone', async () => {
-      const revup = await clone.revupFrom(remote.time);
+      const revup = await clone.withLocalState(() => clone.revupFrom(remote.time));
       expect(revup).toBeDefined();
       await expect(firstValueFrom(revup!.updates)).rejects.toBeInstanceOf(EmptyError);
     });
@@ -179,7 +184,7 @@ describe('Dataset engine', () => {
         'http://test.m-ld.org/#name': 'Fred'
       } as Subject);
       remoteUpdates.next(remote.sentOperation(
-        '{}', '{"@id":"http://test.m-ld.org/wilma","http://test.m-ld.org/#name":"Wilma"}'));
+        {}, { '@id': 'http://test.m-ld.org/wilma', 'http://test.m-ld.org/#name': 'Wilma' }));
       // Note extra tick for constraint application in remote update
       const received = await updates;
       expect(received.length).toBe(2);
@@ -187,39 +192,42 @@ describe('Dataset engine', () => {
     });
 
     // Edge cases from system testing: newClock exposes the current clock state
-    // even if it doesn't have a journalled entry. This can also happen due to:
+    // even if it doesn't have a journaled entry. This can also happen due to:
     // 1. a remote transaction, because of the clock space made for a constraint
     test('answers rev-up from next new clone after apply', async () => {
       const updated = firstValueFrom(clone.dataUpdates);
       remoteUpdates.next(remote.sentOperation(
-        '{}', '{"@id":"http://test.m-ld.org/wilma","http://test.m-ld.org/#name":"Wilma"}'));
+        {}, { '@id': 'http://test.m-ld.org/wilma', 'http://test.m-ld.org/#name': 'Wilma' }));
       await updated;
       const thirdTime = await clone.newClock();
-      await expect(clone.revupFrom(thirdTime)).resolves.toBeDefined();
+      await expect(clone.withLocalState(() => clone.revupFrom(thirdTime))).resolves.toBeDefined();
     });
     // 2. a failed transaction
     test('answers rev-up from next new clone after failure', async () => {
       // Insert with union is not valid
       await clone.write(<Update>{ '@union': [] })
-        .then(() => { throw 'Expecting error'; }, () => { });
+        .then(() => {
+          throw 'Expecting error';
+        }, () => {
+        });
       const thirdTime = await clone.newClock();
-      await expect(clone.revupFrom(thirdTime)).resolves.toBeDefined();
+      await expect(clone.withLocalState(() => clone.revupFrom(thirdTime))).resolves.toBeDefined();
     });
   });
 
   describe('as new clone', () => {
     let remotes: MeldRemotes;
     let remoteUpdates: Source<OperationMessage>;
-    let snapshot: jest.Mock<Promise<Snapshot>, void[]>;
+    let snapshot: jest.Mock<Promise<Snapshot>, [MeldReadState]>;
     let collaborator: MockProcess;
     let collabPrevOp: OperationMessage;
     let remotesLive: BehaviorSubject<boolean | null>;
 
     beforeEach(async () => {
-      const { left, right } = TreeClock.GENESIS.forked()
+      const { left, right } = TreeClock.GENESIS.forked();
       collaborator = new MockProcess(right);
       collabPrevOp = collaborator.sentOperation(
-        '{}', '{"@id":"http://test.m-ld.org/wilma","http://test.m-ld.org/#name":"Wilma"}');
+        {}, { '@id': 'http://test.m-ld.org/wilma', 'http://test.m-ld.org/#name': 'Wilma' });
       remoteUpdates = new Source<OperationMessage>();
       remotesLive = hotLive([true]);
       remotes = mockRemotes(remoteUpdates, remotesLive, left);
@@ -376,7 +384,7 @@ describe('Dataset engine', () => {
       });
       // Provide a rev-up that pre-dates the local siloed update
       revUps.next(remote.sentOperation(
-        '{}', '{"@id":"http://test.m-ld.org/wilma","http://test.m-ld.org/#name":"Wilma"}'));
+        {}, { '@id': 'http://test.m-ld.org/wilma', 'http://test.m-ld.org/#name': 'Wilma' }));
       revUps.complete();
       // Check that the updates are not out of order
       await expect(observedTicks).resolves.toEqual([1, 2]);
@@ -396,7 +404,7 @@ describe('Dataset engine', () => {
       // Push a operation claiming a missed public tick
       remote.tick();
       remoteUpdates.next(remote.sentOperation(
-        '{}', '{"@id":"http://test.m-ld.org/wilma","http://test.m-ld.org/#name":"Wilma"}'));
+        {}, { '@id': 'http://test.m-ld.org/wilma', 'http://test.m-ld.org/#name': 'Wilma' }));
 
       await expect(clone.status.becomes({ outdated: true })).resolves.toBeDefined();
       await expect(clone.status.becomes({ outdated: false })).resolves.toBeDefined();
@@ -415,7 +423,7 @@ describe('Dataset engine', () => {
 
       const updates = firstValueFrom(clone.dataUpdates.pipe(toArray()));
       const op = remote.sentOperation(
-        '{}', '{"@id":"http://test.m-ld.org/wilma","http://test.m-ld.org/#name":"Wilma"}');
+        {}, { '@id': 'http://test.m-ld.org/wilma', 'http://test.m-ld.org/#name': 'Wilma' });
       // Push a operation
       remoteUpdates.next(op);
       // Push the same operation again
@@ -425,7 +433,7 @@ describe('Dataset engine', () => {
       await clone.close(); // Will complete the updates
       const arrived = jsonify(await updates);
       expect(arrived.length).toBe(1);
-      expect(arrived[0]).toMatchObject({ '@insert': [{ "@id": "http://test.m-ld.org/wilma" }] })
+      expect(arrived[0]).toMatchObject({ '@insert': [{ '@id': 'http://test.m-ld.org/wilma' }] });
     });
   });
 });
