@@ -1,6 +1,6 @@
 import { Binding } from 'quadstore';
 import { Graph } from '.';
-import { blank, GraphSubject } from '../..';
+import { blank, GraphSubject } from '../../api';
 import { Atom, Result, Subject, Value, VocabReference } from '../../jrql-support';
 import { ActiveContext, compactIri } from '../jsonld';
 import { inPosition, Quad, Quad_Object, Term } from '../quads';

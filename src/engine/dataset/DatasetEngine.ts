@@ -1,5 +1,5 @@
 import {
-  LiveStatus, MeldConstraint, MeldReadState, MeldStatus, MeldTransportSecurity, StateProc
+  GraphSubject, LiveStatus, MeldExtensions, MeldReadState, MeldStatus, StateProc
 } from '../../api';
 import { MeldLocal, MeldRemotes, OperationMessage, Recovery, Revup, Snapshot } from '..';
 import { liveRollup } from '../LiveValue';
@@ -20,13 +20,13 @@ import { check, delayUntil, Future, inflateFrom, poisson, tapComplete } from '..
 import { LockManager } from '../locks';
 import { levels } from 'loglevel';
 import { AbstractMeld, comesAlive } from '../AbstractMeld';
-import { GraphSubject, MeldConfig } from '../..';
 import { RemoteOperations } from './RemoteOperations';
 import { CloneEngine } from '../StateEngine';
 import { MeldError, MeldErrorStatus } from '../MeldError';
 import { AsyncIterator, TransformIterator, wrap } from 'asynciterator';
 import { BaseStream } from '../../rdfjs-support';
 import { Consumable } from '../../flowable';
+import { MeldConfig } from '../../config';
 
 enum ConnectStyle {
   SOFT, HARD
@@ -67,16 +67,15 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
   /*readonly*/ match: CloneEngine['match'];
   /*readonly*/ query: CloneEngine['query'];
 
-  constructor({ dataset, remotes, constraints, config, context }: {
+  constructor({ dataset, remotes, extensions, config, context }: {
     dataset: Dataset;
     remotes: MeldRemotes;
-    constraints?: MeldConstraint[];
+    extensions: MeldExtensions;
     config: MeldConfig;
     context?: Context;
   }) {
     super(config);
-    this.dataset = new SuSetDataset(
-      dataset, context ?? {}, constraints ?? [], config);
+    this.dataset = new SuSetDataset(dataset, context ?? {}, extensions, config);
     this.lock = dataset.lock;
     this.subs.add(this.dataUpdates
       .pipe(map(update => update['@ticks']))
@@ -445,10 +444,6 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
         data: snapshot.data.pipe(tapComplete(sentSnapshot))
       };
     });
-  }
-
-  setTransportSecurity(transportSecurity: MeldTransportSecurity) {
-    this.dataset.transportSecurity = transportSecurity;
   }
 
   @DatasetEngine.checkLive.async

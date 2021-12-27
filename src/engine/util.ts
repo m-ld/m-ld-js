@@ -1,6 +1,7 @@
 import {
-  AsyncSubject, BehaviorSubject, concat, firstValueFrom, from, NEVER, Observable, ObservableInput,
-  ObservedValueOf, Observer, onErrorResumeNext, OperatorFunction, Subject, Subscription, throwError
+  AsyncSubject, BehaviorSubject, concat, defaultIfEmpty, firstValueFrom, from, NEVER, Observable,
+  ObservableInput, ObservedValueOf, Observer, onErrorResumeNext, OperatorFunction, Subject,
+  Subscription, throwError
 } from 'rxjs';
 import { mergeMap, publish, switchAll, tap } from 'rxjs/operators';
 import { getLogger, getLoggers, LogLevelDesc } from 'loglevel';
@@ -161,6 +162,10 @@ export function delayUntil<T>(notifier: ObservableInput<unknown>): OperatorFunct
 
 export function onErrorNever<T>(v: ObservableInput<T>): Observable<T> {
   return onErrorResumeNext(v, NEVER);
+}
+
+export function first<T>(src: Observable<T>): Promise<T | undefined> {
+  return firstValueFrom(src.pipe(defaultIfEmpty(undefined)));
 }
 
 export class HotSwitch<T> extends Observable<T> {

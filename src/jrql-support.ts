@@ -64,6 +64,10 @@ export type Variable = jrql.Variable;
  */
 export type Atom = jrql.Atom;
 /**
+ * @see [json-rql value object](https://json-rql.org/interfaces/valueobject.html)
+ */
+export type ValueObject = jrql.ValueObject;
+/**
  * @see [json-rql value](https://json-rql.org/#value)
  */
 export type Value = Atom | Subject | Reference;
@@ -162,7 +166,7 @@ export function isSet(object: SubjectPropertyObject): object is Set {
 
 // Utility functions
 /** @internal */
-export function isValueObject(value: SubjectPropertyObject): value is jrql.ValueObject {
+export function isValueObject(value: SubjectPropertyObject): value is ValueObject {
   return typeof value == 'object' && '@value' in value;
 }
 

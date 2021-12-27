@@ -2,7 +2,7 @@ import {
   any, Construct, Describe, Group, MeldUpdate, Reference, Select, Subject, Update
 } from '../src';
 import { ApiStateMachine } from '../src/engine/MeldState';
-import { memStore, mockRemotes, testConfig } from './testClones';
+import { memStore, mockRemotes, testConfig, testExtensions } from './testClones';
 import { DatasetEngine } from '../src/engine/dataset/DatasetEngine';
 import { DomainContext } from '../src/engine/MeldEncoding';
 import { Future } from '../src/engine/util';
@@ -12,6 +12,7 @@ import { DataFactory as RdfDataFactory, Quad } from 'rdf-data-factory';
 import { Factory as SparqlFactory } from 'sparqlalgebrajs';
 import { Binding } from 'quadstore';
 import { Subscription } from 'rxjs';
+import { DefaultList } from '../src/constraints/DefaultList';
 
 describe('Meld State API', () => {
   let api: ApiStateMachine;
@@ -22,6 +23,7 @@ describe('Meld State API', () => {
     let clone = new DatasetEngine({
       dataset: await memStore({ context }),
       remotes: mockRemotes(),
+      extensions: testExtensions({ constraints: [new DefaultList('test')] }),
       config: testConfig(),
       context
     });
@@ -195,7 +197,8 @@ describe('Meld State API', () => {
     test('counts subject quads', async () => {
       await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
       // memdown does not provide approximate size measurements, so infinity is expected
-      await expect(api.countQuads(rdf.namedNode('http://test.m-ld.org/fred'))).resolves.toBe(Infinity);
+      await expect(api.countQuads(rdf.namedNode('http://test.m-ld.org/fred')))
+        .resolves.toBe(Infinity);
     });
 
     test('selects quad', done => {
@@ -212,6 +215,24 @@ describe('Meld State API', () => {
   });
 
   describe('basic reads', () => {
+    test('gets a property', async () => {
+      await api.write<Subject>({ '@id': 'fred', name: 'Fred', age: 40 });
+      await expect(api.get('fred', 'name'))
+        .resolves.toEqual({ '@id': 'fred', name: 'Fred' });
+    });
+
+    test('gets two properties', async () => {
+      await api.write<Subject>({ '@id': 'fred', name: 'Fred', age: 40 });
+      await expect(api.get('fred', 'name', 'age'))
+        .resolves.toEqual({ '@id': 'fred', name: 'Fred', age: 40 });
+    });
+
+    test('does not get a missing property', async () => {
+      await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
+      await expect(api.get('fred', 'age'))
+        .resolves.toBeUndefined();
+    });
+
     test('selects where', async () => {
       await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
       await api.write<Subject>({ '@id': 'wilma', name: 'Wilma' });

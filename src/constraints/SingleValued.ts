@@ -1,12 +1,10 @@
-import {
-  asSubjectUpdates, GraphSubject, InterimUpdate, MeldConstraint, MeldReadState, updateSubject
-} from '..';
+import { DeleteInsert, GraphSubject, InterimUpdate, MeldConstraint, MeldReadState } from '../api';
 import { Iri } from 'jsonld/jsonld-spec';
-import { concatMap, filter, map } from 'rxjs/operators';
-import { isValueObject, Reference, Select, Subject, Value } from '../jrql-support';
+import { concatMap, filter, mergeMap } from 'rxjs/operators';
+import { isValueObject, Subject, Value } from '../jrql-support';
 import { concat, defaultIfEmpty, defer, EMPTY, firstValueFrom, from, Observable } from 'rxjs';
-import { DeleteInsert } from '../api';
 import { completed } from '../engine/util';
+import { asSubjectUpdates, updateSubject } from '../updates';
 
 /**
  * Configuration for a `SingleValued` constraint. The configured property should
@@ -66,7 +64,10 @@ export class SingleValued implements MeldConstraint {
       })));
   }
 
-  private affected(state: MeldReadState, update: DeleteInsert<GraphSubject[]>): Observable<Subject> {
+  private affected(
+    state: MeldReadState,
+    update: DeleteInsert<GraphSubject[]>
+  ): Observable<Subject> {
     const propertyInserts = update['@insert'].filter(this.hasProperty);
     // Fail earliest if there are no inserts for the property
     return !propertyInserts.length ? EMPTY :
@@ -78,20 +79,10 @@ export class SingleValued implements MeldConstraint {
           '@delete': update['@delete'].filter(this.hasProperty),
           '@insert': propertyInserts
         });
-        const sids = Object.keys(subjectUpdates);
-        return state.read<Select>({
-          '@select': ['?s', '?o'],
-          '@where': {
-            '@graph': { '@id': '?s', [this.property]: '?o' },
-            '@values': sids.map(sid => ({ '?s': { '@id': sid } }))
-          }
-        }).pipe(map(selectResult => {
-          const sid = (<Reference>selectResult['?s'])['@id'];
-          // Weirdness to construct a subject from the select result
-          // TODO: Support `@construct`
-          const subject = { '@id': sid, [this.property]: selectResult['?o'] };
-          return updateSubject(subject, subjectUpdates);
-        }));
+        return from(Object.keys(subjectUpdates)).pipe(mergeMap(async sid =>
+          updateSubject(
+            await state.get(sid, this.property) ?? { '@id': sid },
+            subjectUpdates)));
       }));
   }
 
@@ -100,5 +91,5 @@ export class SingleValued implements MeldConstraint {
     ${subject[this.property]}`;
   }
 
-  private hasProperty = (subject: Subject): boolean => subject[this.property] != null;
+  private hasProperty = (subject: Subject) => subject[this.property] != null;
 }

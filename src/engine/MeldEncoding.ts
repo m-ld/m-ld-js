@@ -6,8 +6,8 @@ import { RdfFactory, Triple, tripleIndexKey } from './quads';
 import { activeCtx } from './jsonld';
 import { M_LD, RDF } from '../ns';
 import { SubjectGraph } from './SubjectGraph';
-import { ActiveContext } from 'jsonld/lib/context';
 import { SubjectQuads } from './SubjectQuads';
+import { ActiveContext } from 'jsonld/lib/context';
 import { TreeClock } from './clocks';
 // TODO: Switch to fflate. Node.js zlib uses Pako in the browser
 import { gunzipSync, gzipSync } from 'zlib';

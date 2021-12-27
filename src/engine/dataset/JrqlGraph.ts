@@ -1,25 +1,28 @@
 import { Iri } from 'jsonld/jsonld-spec';
 import {
   Constraint, Expression, Group, isConstraint, isConstruct, isDescribe, isGroup, isSelect,
-  isSubject, isUpdate, operators, Read, Result, Subject, Update, Variable, VariableExpression, Write
+  isSubject, isUpdate, operators, Read, Result, Subject, SubjectProperty, Update, Variable,
+  VariableExpression, Write
 } from '../../jrql-support';
 import { Graph, PatchQuads } from '.';
 import { finalize, map, mergeMap, reduce } from 'rxjs/operators';
-import { concat, EMPTY, throwError } from 'rxjs';
+import { concat, EMPTY, Observable, throwError } from 'rxjs';
 import { canPosition, NamedNode, Quad, QueryableRdfSourceProxy, Term, TriplePos } from '../quads';
 import { ActiveContext, expandTerm, initialCtx, nextCtx } from '../jsonld';
 import { Algebra, Factory as SparqlFactory } from 'sparqlalgebrajs';
 import { JRQL } from '../../ns';
 import { JrqlQuads } from './JrqlQuads';
 import { MeldError } from '../MeldError';
-import { array, GraphSubject, MeldReadState, ReadResult, readResult } from '../..';
-import { binaryFold, flatten, Future, inflate, isArray } from '../util';
+import { GraphSubject, MeldReadState, ReadResult, readResult } from '../../api';
+import { binaryFold, first, flatten, Future, inflate, isArray } from '../util';
 import { ConstructTemplate } from './ConstructTemplate';
 import { Binding, QueryableRdfSource } from '../../rdfjs-support';
 import { Consumable, each } from '../../flowable';
 import { ignoreIf } from '../../flowable/operators/ignoreIf';
 import { flatMap } from '../../flowable/operators/flatMap';
 import { consume } from '../../flowable/consume';
+import { constructSubject } from '../jrql-util';
+import { array } from '../../util';
 
 /**
  * A graph wrapper that provides low-level json-rql handling for queries. The
@@ -46,11 +49,12 @@ export class JrqlGraph {
       get src(): QueryableRdfSource {
         return graph;
       }
-      get(id: string): Promise<GraphSubject | undefined> {
-        return jrqlGraph.get(id, this.ctx);
-      }
       read<R extends Read>(request: R): ReadResult {
         return readResult(jrqlGraph.read(request, this.ctx));
+      }
+      get(id: string, ...properties: SubjectProperty[]) {
+        return properties.length === 0 ?
+          jrqlGraph.get(id, this.ctx) : jrqlGraph.pick(id, properties, this.ctx);
       }
     });
   }
@@ -82,17 +86,21 @@ export class JrqlGraph {
       throw new MeldError('Unsupported pattern', 'Write type not supported.');
   }
 
-  select(select: Result,
+  select(
+    select: Result,
     where: Subject | Subject[] | Group,
-    ctx: ActiveContext): Consumable<GraphSubject> {
+    ctx: ActiveContext
+  ): Consumable<GraphSubject> {
     return this.solutions(where, this.project, ctx).pipe(
       map(({ value: solution, next }) =>
         ({ value: this.jrql.solutionSubject(select, solution, ctx), next })));
   }
 
-  describe(describes: (Iri | Variable)[],
+  describe(
+    describes: (Iri | Variable)[],
     where: Subject | Subject[] | Group | undefined,
-    ctx: ActiveContext): Consumable<GraphSubject> {
+    ctx: ActiveContext
+  ): Consumable<GraphSubject> {
     // For describe, we have to extend the state lock for all sub-queries
     const finished = this.graph.lock.extend('state', 'describe', new Future);
     return concat(...describes.map(describe => {
@@ -114,8 +122,19 @@ export class JrqlGraph {
     })).pipe(finalize(finished.resolve));
   }
 
-  get(id: Iri, ctx: ActiveContext) {
-    return this.graph.lock.extend('state', 'get', this.describe1(this.resolve(id, ctx), ctx));
+  get(id: Iri, ctx: ActiveContext): Promise<GraphSubject | undefined> {
+    return this.graph.lock.extend('state', 'get',
+      this.describe1(this.resolve(id, ctx), ctx));
+  }
+
+  pick(
+    id: Iri,
+    properties: SubjectProperty[],
+    ctx: ActiveContext
+  ): Promise<GraphSubject | undefined> {
+    return this.graph.lock.extend('state', 'pick',
+      first(this.constructResult(
+        constructSubject(id, properties), undefined, ctx)));
   }
 
   private async describe1(subjectId: Term, ctx: ActiveContext): Promise<GraphSubject | undefined> {
@@ -137,12 +156,22 @@ export class JrqlGraph {
       return this.jrql.toApiSubject(propertyQuads, listItemQuads, ctx);
   }
 
-  construct(construct: Subject | Subject[],
+  construct(
+    construct: Subject | Subject[],
     where: Subject | Subject[] | Group | undefined,
-    ctx: ActiveContext): Consumable<GraphSubject> {
+    ctx: ActiveContext
+  ): Consumable<GraphSubject> {
+    return consume(this.constructResult(construct, where, ctx));
+  }
+
+  // TODO: Add ordering to allow streaming results
+  constructResult(
+    construct: Subject | Subject[],
+    where: Subject | Subject[] | Group | undefined,
+    ctx: ActiveContext
+  ): Observable<GraphSubject> {
     const template = new ConstructTemplate(construct, ctx);
     // If no where, use the construct as the pattern
-    // TODO: Add ordering to allow streaming results
     return this.solutions(where ?? template.asPattern, this.project, ctx).pipe(
       reduce((template, { value: solution, next }) => {
         try {
@@ -151,7 +180,7 @@ export class JrqlGraph {
           next(); // We are reading into the template
         }
       }, template),
-      mergeMap(template => consume(template.results())));
+      mergeMap(template => template.results()));
   }
 
   private async update(query: Update, ctx: ActiveContext): Promise<PatchQuads> {
@@ -211,16 +240,19 @@ export class JrqlGraph {
       quad.subject, quad.predicate, quad.object, quad.graph);
   };
 
-  private solutions<T>(where: Subject | Subject[] | Group,
+  private solutions<T>(
+    where: Subject | Subject[] | Group,
     exec: (op: Algebra.Operation, vars: Iterable<string>) => Consumable<T>,
-    ctx: ActiveContext): Consumable<T> {
+    ctx: ActiveContext
+  ): Consumable<T> {
     const vars = new Set<string>();
     const op = this.operation(asGroup(where), vars, ctx);
     return op == null ? EMPTY : exec(op, vars);
   }
 
   private operation(where: Group | Subject,
-    vars: Set<string>, ctx: ActiveContext): Algebra.Operation {
+    vars: Set<string>, ctx: ActiveContext
+  ): Algebra.Operation {
     if (isSubject(where)) {
       const quads = this.jrql.quads(where, { mode: 'match', vars }, ctx);
       return this.sparql.createBgp(quads.map(this.toPattern));
@@ -282,7 +314,8 @@ export class JrqlGraph {
   private operatorExpr(
     operator: string,
     expr: Expression | Expression[],
-    ctx: ActiveContext): Algebra.Expression {
+    ctx: ActiveContext
+  ): Algebra.Expression {
     if (operator in operators)
       return this.sparql.createOperatorExpression(
         (<any>operators)[operator].sparql,

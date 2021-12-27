@@ -1,7 +1,22 @@
 export const $base = 'http://m-ld.org/';
 
-/** For serialisation of transaction IDs in operation messages */
-export const tid = `${$base}#tid`; // TID property
+/** Property for serialisation of transaction IDs in operation messages */
+export const tid = `${$base}#tid`;
+
+/** Property for secret known only to domain users */
+export const secret = `${$base}#secret`;
+
+/** Class of signed request envelope */
+export const signed = `${$base}Signed`;
+
+/** Class of encrypted operation envelope */
+export const encrypted = `${$base}Encrypted`;
+
+/** Security Principal class */
+export const principal = `${$base}Principal`;
+
+/** Property for asymmetric public key */
+export const publicKey = `${$base}#publicKey`;
 
 export const rdflseq = `${$base}RdfLseq`;
 

@@ -6,7 +6,8 @@ import { catchError, distinctUntilChanged, filter, observeOn, skip, tap } from '
 import { Logger } from 'loglevel';
 import { check, getIdLogger, PauseableSource } from './util';
 import { MeldError } from './MeldError';
-import { MeldConfig, MeldReadState, MeldTransportSecurity } from '..';
+import { MeldReadState } from '../api';
+import { MeldConfig } from '../config';
 
 export abstract class AbstractMeld implements Meld {
   protected static checkLive =
@@ -62,7 +63,6 @@ export abstract class AbstractMeld implements Meld {
   abstract newClock(): Promise<TreeClock>;
   abstract snapshot(state: MeldReadState): Promise<Snapshot>;
   abstract revupFrom(time: TreeClock, state: MeldReadState): Promise<Revup | undefined>;
-  abstract setTransportSecurity(transportSecurity: MeldTransportSecurity): void;
 
   close(err?: any) {
     this._closed = true;

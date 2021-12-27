@@ -97,3 +97,9 @@ export const idling = (opts?: IdleRequestOptions) => new Observable<IdleDeadline
   }, opts);
   return () => Idle.cancelCallback(handle);
 });
+
+// This oddness is to prevent Browserify from loading the crypto module
+const node_crypto = typeof Crypto == 'function' ? null : 'crypto';
+type CryptoType = { subtle: SubtleCrypto, getRandomValues: Crypto['getRandomValues'] };
+export const { subtle, getRandomValues } =
+  (node_crypto ? require(node_crypto).webcrypto : new Crypto) as CryptoType;

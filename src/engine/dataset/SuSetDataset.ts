@@ -1,7 +1,7 @@
-import { MeldConstraint, MeldUpdate, noTransportSecurity } from '../../api';
+import { GraphSubject, MeldConstraint, MeldExtensions, MeldUpdate } from '../../api';
 import { BufferEncoding, EncodedOperation, OperationMessage, Snapshot } from '..';
 import { GlobalClock, TickTree, TreeClock } from '../clocks';
-import { Context, Write } from '../../jrql-support';
+import { Context, Read, Write } from '../../jrql-support';
 import { Dataset, PatchQuads, PatchResult } from '.';
 import { JrqlGraph } from './JrqlGraph';
 import { MeldEncoder, MeldOperation, TriplesTids, unreify, UUID } from '../MeldEncoding';
@@ -11,10 +11,7 @@ import { check, completed, Future, getIdLogger, inflate } from '../util';
 import { Logger } from 'loglevel';
 import { MeldError } from '../MeldError';
 import { LocalLock } from '../local';
-import { GraphSubject, MeldConfig, Read } from '../..';
 import { Quad, Triple, tripleIndexKey, TripleMap } from '../quads';
-import { CheckList } from '../../constraints/CheckList';
-import { DefaultList } from '../../constraints/DefaultList';
 import { InterimUpdatePatch } from './InterimUpdatePatch';
 import { ActiveContext } from 'jsonld/lib/context';
 import { activeCtx } from '../jsonld';
@@ -27,6 +24,8 @@ import { Consumable, flowable } from '../../flowable';
 import { batch } from '../../flowable/operators/batch';
 import { consume } from '../../flowable/consume';
 import { MeldMessageType } from '../../ns/m-ld';
+import { CheckList } from '../../constraints/CheckList';
+import { MeldConfig } from '../../config';
 
 type DatasetSnapshot = Omit<Snapshot, 'updates'>;
 
@@ -42,10 +41,7 @@ export class SuSetDataset extends MeldEncoder {
     check((d: SuSetDataset) => !d.dataset.closed, () => new MeldError('Clone has closed'));
 
   /** External context used for reads, writes and updates, but not for constraints. */
-  /*readonly*/
-  userCtx: ActiveContext;
-
-  transportSecurity = noTransportSecurity;
+  /*readonly*/ userCtx: ActiveContext;
 
   private /*readonly*/ userGraph: JrqlGraph;
   private readonly tidsStore: TidsStore;
@@ -55,13 +51,13 @@ export class SuSetDataset extends MeldEncoder {
   private readonly datasetLock: LocalLock;
   private readonly maxOperationSize: number;
   private readonly log: Logger;
-  private readonly constraint: CheckList;
 
   constructor(
     private readonly dataset: Dataset,
     private readonly context: Context,
-    constraints: MeldConstraint[],
-    config: DatasetConfig) {
+    private readonly extensions: MeldExtensions,
+    config: DatasetConfig
+  ) {
     super(config['@domain'], dataset.rdf);
     this.log = getIdLogger(this.constructor, config['@id'], config.logLevel);
     this.journal = new Journal(dataset, this);
@@ -70,7 +66,6 @@ export class SuSetDataset extends MeldEncoder {
     // Update notifications are strictly ordered but don't hold up transactions
     this.datasetLock = new LocalLock(config['@id'], dataset.location);
     this.maxOperationSize = config.maxOperationSize ?? Infinity;
-    this.constraint = new CheckList(constraints.concat(new DefaultList(config['@id'])));
   }
 
   @SuSetDataset.checkNotClosed.async
@@ -84,6 +79,10 @@ export class SuSetDataset extends MeldEncoder {
     } catch (err) {
       throw new MeldError('Clone data is locked', err);
     }
+  }
+
+  private get constraint(): MeldConstraint {
+    return new CheckList(this.extensions.constraints);
   }
 
   get readState() {
@@ -260,7 +259,7 @@ export class SuSetDataset extends MeldEncoder {
     // Construct the operation message with the previous visible clock tick
     let [version, from, timeJson, update, encoding] = op.encoded;
     // Apply transport security to the encoded update
-    const wired = await this.transportSecurity.wire(
+    const wired = await this.extensions.transportSecurity.wire(
       update, MeldMessageType.operation, 'out', this.readState);
     if (wired !== update) {
       update = wired;
@@ -351,7 +350,7 @@ export class SuSetDataset extends MeldEncoder {
   private async unSecureOperation(msg: OperationMessage): Promise<EncodedOperation> {
     let [version, from, timeJson, updated, encoding] = msg.data;
     if (encoding[encoding.length - 1] === BufferEncoding.SECURE) {
-      updated = await this.transportSecurity.wire(
+      updated = await this.extensions.transportSecurity.wire(
         updated, MeldMessageType.operation, 'in', this.readState);
       encoding = encoding.slice(0, -1);
     }

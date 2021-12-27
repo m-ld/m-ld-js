@@ -1,6 +1,7 @@
 const leveldown = require('leveldown');
-const { clone, isRead } = require('../dist');
-const { MqttRemotes } = require('../dist/mqtt');
+const { clone, isRead } = require('@m-ld/m-ld');
+const { MqttRemotes } = require('@m-ld/m-ld/dist/mqtt');
+const { createSign } = require('crypto');
 const LOG = require('loglevel');
 
 Error.stackTraceLimit = Infinity;
@@ -9,7 +10,7 @@ const [, , configJson, tmpDirName, requestId] = process.argv;
 const config = JSON.parse(configJson);
 LOG.setLevel(config.logLevel);
 LOG.debug(config['@id'], 'config is', JSON.stringify(config));
-clone(leveldown(tmpDirName), new MqttRemotes(config), config).then(meld => {
+clone(leveldown(tmpDirName), MqttRemotes, config, createApp()).then(meld => {
   send(requestId, 'started', { cloneId: config['@id'] });
 
   const handlers = {
@@ -23,7 +24,7 @@ clone(leveldown(tmpDirName), new MqttRemotes(config), config).then(meld => {
       else
         meld.write(message.request)
           .then(() => send(message.id, 'complete'))
-          .catch(errorHandler(message))
+          .catch(errorHandler(message));
     },
     stop: message => meld.close()
       .then(() => send(message.id, 'stopped'))
@@ -46,11 +47,33 @@ clone(leveldown(tmpDirName), new MqttRemotes(config), config).then(meld => {
     next: status => send(requestId, 'status', { body: status }),
     complete: () => send(requestId, 'closed'),
     error: err => sendError(requestId, err)
-  })
+  });
 }).catch(err => {
   LOG.error(config['@id'], err);
   send(requestId, 'unstarted', { err: `${err}` });
 });
+
+function createApp() {
+  const app = {};
+  const { principal, transportSecurity } = config;
+  // 1. Create an app principal
+  if (principal) {
+    delete config.principal;
+    app.principal = {
+      '@id': principal['@id'],
+      // Assuming privateKeyEncoding: { type: 'pkcs1', format: 'pem' }
+      sign: data => createSign('RSA-SHA256')
+        .update(data).sign(principal.privateKey)
+    };
+  }
+  // 2. Create transport security
+  if (transportSecurity) {
+    delete config.transportSecurity;
+    app.transportSecurity =
+      new (require(transportSecurity.require)[transportSecurity.export])(config);
+  }
+  return app;
+}
 
 function send(requestId, type, params) {
   process.send({ requestId, '@type': type, ...params },

@@ -10,8 +10,9 @@ import {
 import { MqttTopic, REPLY_TOPIC, SEND_TOPIC, SendAddressParams } from './MqttTopic';
 import { TopicParams } from 'mqtt-pattern';
 import { MqttPresence } from './MqttPresence';
-import { MeldConfig } from '..';
+import { MeldExtensions } from '../api';
 import { NotifyParams, PubsubRemotes, ReplyParams, SendParams, SubPub } from '../engine/remotes';
+import { MeldConfig } from '../config';
 
 export interface MeldMqttConfig extends MeldConfig {
   mqtt?: Omit<IClientOptions, 'will' | 'clientId'> &
@@ -46,8 +47,8 @@ export class MqttRemotes extends PubsubRemotes {
   private readonly replyTopic: MqttTopic<ReplyParams & TopicParams>;
   private readonly presence: MqttPresence;
 
-  constructor(config: MeldMqttConfig, connect = defaultConnect) {
-    super(config);
+  constructor(config: MeldMqttConfig, extensions: MeldExtensions, connect = defaultConnect) {
+    super(config, extensions);
 
     const { id, domain } = this;
     this.operationsTopic = OPERATIONS_TOPIC.with({ domain });

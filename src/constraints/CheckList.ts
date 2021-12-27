@@ -1,4 +1,4 @@
-import { MeldConstraint, MeldReadState, InterimUpdate } from '..';
+import { InterimUpdate, MeldConstraint, MeldReadState } from '../api';
 
 /** @internal */
 export class CheckList implements MeldConstraint {

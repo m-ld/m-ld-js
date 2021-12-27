@@ -7,7 +7,7 @@ import { Message } from './messages';
 import { Future, MsgPack } from './util';
 import { LiveValue } from './LiveValue';
 import { MeldError } from './MeldError';
-import { MeldReadState, MeldTransportSecurity, StateProc } from '../api';
+import { MeldReadState, StateProc } from '../api';
 
 const inspect = Symbol.for('nodejs.util.inspect.custom');
 
@@ -110,11 +110,6 @@ export interface Meld {
    *   can legitimately happen if the implementer has truncated its journal, to save resources.
    */
   revupFrom(time: TreeClock, state: MeldReadState): Promise<Revup | undefined>;
-  /**
-   * Sets the current transport security interceptor. This is a data-declared
-   * extension and so can change at any time.
-   */
-  setTransportSecurity(transportSecurity: MeldTransportSecurity): void;
 }
 
 /**
@@ -246,3 +241,5 @@ export interface MeldLocal extends Meld {
    */
   withLocalState<T>(procedure: StateProc<MeldReadState, T>): Promise<T>;
 }
+
+export { CloneExtensions } from './CloneExtensions';

@@ -6,7 +6,7 @@ import { AsyncMqttClient } from 'async-mqtt';
 import { OperationMessage } from '../src/engine';
 import { GlobalClock, TreeClock } from '../src/engine/clocks';
 import { firstValueFrom, of, Subject as Source } from 'rxjs';
-import { mockLocal, MockMqtt, mockMqtt, MockProcess, testOp } from './testClones';
+import { mockLocal, MockMqtt, mockMqtt, MockProcess, testExtensions, testOp } from './testClones';
 import { take, toArray } from 'rxjs/operators';
 import { comesAlive } from '../src/engine/AbstractMeld';
 import { MeldErrorStatus } from '@m-ld/m-ld-spec';
@@ -28,7 +28,7 @@ describe('New MQTT remotes', () => {
       '@domain': 'test.m-ld.org',
       genesis: true, // Actually not used by MqttRemotes
       mqtt: { hostname: 'unused' }
-    }, () => mqtt);
+    }, testExtensions(), () => mqtt);
   });
 
   test('live starts unknown', async () => {

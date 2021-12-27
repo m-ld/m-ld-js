@@ -7,8 +7,9 @@ import type { NotifyParams, PeerParams, ReplyParams, SendParams } from '../engin
 import { PubsubRemotes, SubPub } from '../engine/remotes';
 import { Observable } from 'rxjs';
 import { io, ManagerOptions, Socket, SocketOptions } from 'socket.io-client';
-import type { MeldConfig } from '../index';
+import type { MeldExtensions } from '../api';
 import { inflateFrom } from '../engine/util';
+import { MeldConfig } from '../config';
 
 export interface MeldIoConfig extends MeldConfig {
   io?: {
@@ -20,8 +21,8 @@ export interface MeldIoConfig extends MeldConfig {
 export class IoRemotes extends PubsubRemotes {
   private readonly socket: Socket;
 
-  constructor(config: MeldIoConfig, connect = io) {
-    super(config);
+  constructor(config: MeldIoConfig, extensions: MeldExtensions, connect = io) {
+    super(config, extensions);
     const opts = config.io?.opts;
     const optsToUse: Partial<ManagerOptions> = {
       ...opts, query: {

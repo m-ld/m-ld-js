@@ -8,7 +8,7 @@ import { GlobalClock, TreeClock } from '../src/engine/clocks';
 import { AsyncMqttClient, IPublishPacket } from 'async-mqtt';
 import { EventEmitter } from 'events';
 import { observeOn } from 'rxjs/operators';
-import { MeldConfig, MeldReadState, StateProc } from '../src';
+import { MeldConfig, MeldExtensions, MeldReadState, noTransportSecurity, StateProc } from '../src';
 import { AbstractLevelDOWN } from 'abstract-leveldown';
 import { LiveValue } from '../src/engine/LiveValue';
 import { Context } from 'jsonld/jsonld-spec';
@@ -17,6 +17,10 @@ import { MsgPack } from '../src/engine/util';
 
 export function testConfig(config?: Partial<MeldConfig>): MeldConfig {
   return { '@id': 'test', '@domain': 'test.m-ld.org', genesis: true, ...config };
+}
+
+export function testExtensions(extensions?: Partial<MeldExtensions>): MeldExtensions {
+  return { constraints: [], transportSecurity: noTransportSecurity, ...extensions }
 }
 
 export function mockRemotes(

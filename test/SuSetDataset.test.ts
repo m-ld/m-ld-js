@@ -1,5 +1,5 @@
 import { SuSetDataset } from '../src/engine/dataset/SuSetDataset';
-import { memStore, MockProcess, testOp } from './testClones';
+import { memStore, MockProcess, testExtensions, testOp } from './testClones';
 import { TreeClock } from '../src/engine/clocks';
 import { toArray } from 'rxjs/operators';
 import { Dataset } from '../src/engine/dataset';
@@ -40,12 +40,15 @@ describe('SU-Set Dataset', () => {
 
   describe('with basic config', () => {
     beforeEach(async () => {
-      ssd = new SuSetDataset(dataset, {}, [], { '@id': 'test', '@domain': 'test.m-ld.org' });
+      ssd = new SuSetDataset(dataset, {}, testExtensions(), {
+        '@id': 'test',
+        '@domain': 'test.m-ld.org'
+      });
       await ssd.initialise();
     });
 
     test('cannot share a dataset', async () => {
-      const otherSsd = new SuSetDataset(dataset, {}, [], {
+      const otherSsd = new SuSetDataset(dataset, {}, testExtensions(), {
         '@id': 'boom',
         '@domain': 'test.m-ld.org'
       });
@@ -583,7 +586,8 @@ describe('SU-Set Dataset', () => {
         check: () => Promise.resolve(),
         apply: () => Promise.resolve()
       };
-      ssd = new SuSetDataset(dataset, {}, [constraint],
+      ssd = new SuSetDataset(dataset, {},
+        testExtensions({ constraints: [constraint] }),
         { '@id': 'test', '@domain': 'test.m-ld.org' });
       await ssd.initialise();
       await ssd.resetClock(local.tick().time);
@@ -734,8 +738,11 @@ describe('SU-Set Dataset', () => {
   });
 
   test('enforces operation size limit', async () => {
-    ssd = new SuSetDataset(await memStore(), {}, [],
-      { '@id': 'test', '@domain': 'test.m-ld.org', maxOperationSize: 1 });
+    ssd = new SuSetDataset(await memStore(), {}, testExtensions(), {
+      '@id': 'test',
+      '@domain': 'test.m-ld.org',
+      maxOperationSize: 1
+    });
     await ssd.initialise();
     await ssd.resetClock(TreeClock.GENESIS);
     await expect(ssd.transact(async () => [
