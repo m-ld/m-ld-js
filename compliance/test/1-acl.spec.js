@@ -1,4 +1,4 @@
-const { generateKeyPairSync, generateKeySync } = require('crypto');
+const { generateKeyPairSync, randomBytes } = require('crypto');
 const Clone = require('@m-ld/m-ld-spec/compliance/clone');
 
 /** @returns {{ publicKey: Buffer, privateKey: string }} */
@@ -13,8 +13,8 @@ const transportSecurity = {
   export: 'MeldAccessControlList'
 };
 
-const secret = generateKeySync('aes', { length: 128 })
-  .export({ format: 'buffer' }).toString('base64');
+// generateKeySync('aes') was only added in Node 15
+const secret = randomBytes(16).toString('base64');
 
 /**
  * Compliance tests for access control lists
