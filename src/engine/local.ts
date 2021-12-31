@@ -24,7 +24,8 @@ export const local: LocalStorage = isNode ? new NoStorage : ls;
 export class LocalLock {
   constructor(
     readonly id: string,
-    readonly key: string) {
+    readonly key: string
+  ) {
   }
 
   acquire(): Promise<void> {
@@ -75,7 +76,10 @@ export namespace Idle {
 
   const root: any = typeof window === 'undefined' ? global || {} : window;
 
-  export const requestCallback: (cb: (deadline: IdleDeadline) => void, opts?: IdleRequestOptions) => Handle =
+  export const requestCallback: (
+    cb: (deadline: IdleDeadline) => void,
+    opts?: IdleRequestOptions
+  ) => Handle =
     root.requestIdleCallback?.bind(root) ?? ((cb: (deadline: IdleDeadline) => void) =>
       // Not supporting timeout parameter to callback request for immediate fallback
       setImmediate((startTime: number) => cb({
@@ -98,8 +102,22 @@ export const idling = (opts?: IdleRequestOptions) => new Observable<IdleDeadline
   return () => Idle.cancelCallback(handle);
 });
 
-// This oddness is to prevent Browserify from loading the crypto module
-const node_crypto = typeof Crypto == 'function' ? null : 'crypto';
+let webcrypto: Crypto;
+if (typeof Crypto == 'function') {
+  webcrypto = new Crypto;
+} else {
+  // The use of a variable is to prevent Browserify from bundling the module
+  let cryptoModule = 'crypto';
+  webcrypto = require(cryptoModule).webcrypto;
+  if (webcrypto == null) {
+    // Fallback to polyfill peer dependency for Node v14 or lower
+    cryptoModule = '@peculiar/webcrypto';
+    webcrypto = new (require(cryptoModule).Crypto)();
+  }
+}
+if (webcrypto == null)
+  console.warn(`No Web Crypto implementation available. Please use a polyfill,
+  or add @peculiar/webcrypto as a peer dependency in NodeJS 14 or lower`);
+
 type CryptoType = { subtle: SubtleCrypto, getRandomValues: Crypto['getRandomValues'] };
-export const { subtle, getRandomValues } =
-  (node_crypto ? require(node_crypto).webcrypto : new Crypto) as CryptoType;
+export const { subtle, getRandomValues } = webcrypto as CryptoType;
