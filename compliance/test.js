@@ -72,13 +72,12 @@ orchestrator.on('message', async message => {
       try {
         process.env.MELD_ORCHESTRATOR_URL = message.url;
         jasmine.loadConfig(jasmineConfig);
-        // Try to shut down normally when done
-        jasmine.exitOnCompletion = false;
+        // This will exit the process when done
         await jasmine.execute(specs, filter);
       } catch (err) {
         LOG.error(err);
+        process.exit(1);
       }
-      orchestrator.kill();
   }
 });
 orchestrator.on('exit', code => {
