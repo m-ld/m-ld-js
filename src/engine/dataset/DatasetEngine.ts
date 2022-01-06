@@ -16,7 +16,7 @@ import {
   debounceTime, delayWhen, distinctUntilChanged, expand, filter, finalize, ignoreElements, map,
   mergeMap, share, skipWhile, takeUntil, tap, toArray
 } from 'rxjs/operators';
-import { check, delayUntil, Future, inflateFrom, poisson, tapComplete } from '../util';
+import { check, delayUntil, Future, inflateFrom, poisson, Stopwatch, tapComplete } from '../util';
 import { LockManager } from '../locks';
 import { levels } from 'loglevel';
 import { AbstractMeld, comesAlive } from '../AbstractMeld';
@@ -43,7 +43,7 @@ enum OperationOutcome {
 
 export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLocal {
   protected static checkStateLocked =
-    check((m: DatasetEngine) => m.lock.state('state') !== 'open',
+    check((m: DatasetEngine) => m.lock.state('state') !== null,
       () => new MeldError('Unknown error', 'Clone state not locked'));
 
   private readonly dataset: SuSetDataset;
@@ -63,9 +63,11 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
   private readonly latestTicks = new BehaviorSubject<number>(NaN);
   private readonly networkTimeout: number;
   private readonly genesisClaim: boolean;
-  readonly status: Observable<MeldStatus> & LiveStatus;
-  /*readonly*/ match: CloneEngine['match'];
-  /*readonly*/ query: CloneEngine['query'];
+  readonly status: LiveStatus;
+  /*readonly*/
+  match: CloneEngine['match'];
+  /*readonly*/
+  query: CloneEngine['query'];
 
   constructor({ dataset, remotes, extensions, config, context }: {
     dataset: Dataset;
@@ -100,52 +102,63 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
    * @return resolves when the clone can accept transactions
    */
   @DatasetEngine.checkNotClosed.async
-  async initialise(): Promise<void> {
-    await this.initDataset();
+  async initialise(sw?: Stopwatch): Promise<void> {
+    try {
+      sw?.next('init');
+      await this.initDataset();
 
-    this.remotes.setLocal(this);
-    // Establish a clock for this clone
-    let time = await this.dataset.loadClock();
-    if (!time) {
-      this.newClone = !this.genesisClaim; // New clone means non-genesis
-      time = this.genesisClaim ? TreeClock.GENESIS : await this.remotes.newClock();
-      await this.dataset.resetClock(time);
-    }
-    this.log.info('has time', time);
-    this.messageService = new TreeClockMessageService(time);
-    this.latestTicks.next(time.ticks);
-
-    // Revving-up will inject missed messages so the ordering buffer is
-    // redundant when outdated, even if the remotes were previously attached.
-    this.subs.add(this.remoteOps.outdated.subscribe(outdated => {
-      if (outdated && this.orderingBuffer.length > 0) {
-        this.log.info(`Discarding ${this.orderingBuffer.length} items from ordering buffer`);
-        this.orderingBuffer.length = 0;
+      this.remotes.setLocal(this);
+      // Establish a clock for this clone
+      sw?.next('load-clock');
+      let time = await this.dataset.loadClock();
+      if (!time) {
+        this.newClone = !this.genesisClaim; // New clone means non-genesis
+        sw?.next('reset-clock');
+        time = this.genesisClaim ? TreeClock.GENESIS : await this.remotes.newClock();
+        await this.dataset.resetClock(time);
       }
-    }));
+      this.log.info('has time', time);
+      this.messageService = new TreeClockMessageService(time);
+      this.latestTicks.next(time.ticks);
 
-    // Create a stream of 'opportunities' to decide our liveness, i.e.
-    // re-connect. The stream errors/completes with the remote updates.
-    this.subs.add(merge(
-      // 1. Changes to the liveness of the remotes. This emits the current
-      //    liveness, but we don't use it because the value might have changed
-      //    by the time we get the lock.
-      this.remotes.live,
-      // 2. Chronic buffering of operations
-      // 3. Disordered operations
-      this.operationProblems
-    ).pipe(
-      // 4. Last attempt to connect can generate more attempts (delay if soft)
-      expand(() => this.decideLive()
-        .pipe(delayWhen(this.reconnectDelayer)))
-    ).subscribe({
-      error: err => this.close(err),
-      complete: () => this.close()
-    }));
+      // Revving-up will inject missed messages so the ordering buffer is
+      // redundant when outdated, even if the remotes were previously attached.
+      this.subs.add(this.remoteOps.outdated.subscribe(outdated => {
+        if (outdated && this.orderingBuffer.length > 0) {
+          this.log.info(`Discarding ${this.orderingBuffer.length} items from ordering buffer`);
+          this.orderingBuffer.length = 0;
+        }
+      }));
 
-    if (this.newClone)
-      // For a new non-genesis clone, the first connect is essential.
-      await comesAlive(this);
+      // Create a stream of 'opportunities' to decide our liveness, i.e.
+      // re-connect. The stream errors/completes with the remote updates.
+      this.subs.add(merge(
+        // 1. Changes to the liveness of the remotes. This emits the current
+        //    liveness, but we don't use it because the value might have changed
+        //    by the time we get the lock.
+        this.remotes.live,
+        // 2. Chronic buffering of operations
+        // 3. Disordered operations
+        this.operationProblems
+      ).pipe(
+        // 4. Last attempt to connect can generate more attempts (delay if soft)
+        expand(() => this.decideLive()
+          .pipe(delayWhen(this.reconnectDelayer)))
+      ).subscribe({
+        error: err => this.close(err),
+        complete: () => this.close()
+      }));
+
+      if (this.newClone) {
+        sw?.next('comes-alive');
+        // For a new non-genesis clone, the first connect is essential.
+        await comesAlive(this);
+      }
+    } catch (e) {
+      // Failed to initialise somehow – this is fatal
+      await this.close(e);
+      throw e;
+    }
   }
 
   private async initDataset() {
@@ -272,46 +285,59 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
       // As soon as a decision on liveness needs to be made, pause output
       // operations to mitigate against breaking fifo with emitOpsSince().
       this.pauseOperations(
-        // Also block transactions, revups and other connect attempts.
-        this.lock.exclusive('live', 'decide live', async () => {
-          const remotesLive = this.remotes.live.value;
-          if (remotesLive === true) {
-            if (this.isGenesis)
-              throw new Error('Genesis clone trying to join a live domain.');
-            // Connect in the live lock
-            await this.connect(retry);
-            this.setLive(true);
-          } else {
-            // Stop receiving operations until re-connect, do not change outdated
-            this.remoteOps.detach();
-            if (remotesLive === false) {
-              // We are the silo, the last survivor.
-              if (this.newClone)
-                throw new Error('New clone is siloed.');
-              // Stay live for any newcomers to rev-up from us.
+        // Also block transactions, recovery requests and other connect attempts.
+        this.lock.acquire('state', 'decide live', 'share').then(release =>
+          this.lock.exclusive('live', 'decide live', async () => {
+            const remotesLive = this.remotes.live.value;
+            if (remotesLive === true) {
+              if (this.isGenesis)
+                throw new Error('Genesis clone trying to join a live domain.');
+              // Connect in the live lock
+              await this.connect(retry, release);
               this.setLive(true);
-              retry.complete();
-            } else if (remotesLive === null) {
-              // We are partitioned from the domain.
-              this.setLive(false);
-              retry.complete();
+            } else {
+              // Stop receiving operations until re-connect, do not change outdated
+              this.remoteOps.detach();
+              if (remotesLive === false) {
+                // We are the silo, the last survivor.
+                if (this.newClone)
+                  throw new Error('New clone is siloed.');
+                // Stay live for any newcomers to rev-up from us.
+                this.setLive(true);
+                retry.complete();
+              } else if (remotesLive === null) {
+                // We are partitioned from the domain.
+                this.setLive(false);
+                retry.complete();
+              }
             }
-          }
-        }).catch(err => retry.error(err)));
+          }).finally(release)).catch(err => retry.error(err)));
     });
   }
 
   /**
    * @param retry to be notified of collaboration completion
+   * @param releaseState to be called when the locked state is no longer needed
    * @see decideLive return value
    */
-  private async connect(retry: Subscriber<ConnectStyle>) {
+  @DatasetEngine.checkStateLocked.async
+  private async connect(retry: Subscriber<ConnectStyle>, releaseState: () => void) {
     this.log.info(this.newClone ? 'new clone' :
         this.live.value === true && this.remotes.live.value === false ? 'silo' : 'clone',
       'connecting to remotes');
     try {
-      if (this.newClone || !(await this.requestRevup(retry)))
-        await this.requestSnapshot(retry);
+      if (!this.newClone) {
+        const revup = await this.remotes.revupFrom(this.localTime, this.dataset.readState);
+        if (revup != null) {
+          releaseState();
+          await this.processRevup(revup, retry);
+          return;
+        }
+        // Otherwise fall through to snapshot recovery
+      }
+      const snapshot = await this.remotes.snapshot(this.dataset.readState);
+      releaseState();
+      await this.processSnapshot(snapshot, retry);
     } catch (err) {
       this.log.info('Cannot connect to remotes due to', err);
       /*
@@ -330,36 +356,30 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
   }
 
   /**
-   * This method returns async as soon as the revup has started. There may
-   * still be operations incoming from the collaborator.
+   * @param revup the revup recovery to process
    * @param retry to be notified of collaboration completion
    * @see decideLive return value
-   * @returns `true` if the rev-up request found a collaborator
    */
-  private async requestRevup(retry: Subscriber<ConnectStyle>): Promise<boolean> {
-    const revup = await this.withLocalState(
-      state => this.remotes.revupFrom(this.localTime, state));
-    if (revup != null) {
-      this.log.info('revving-up from collaborator');
-      // We don't wait until rev-ups have been completely delivered
-      this.acceptRecoveryUpdates(revup.updates, retry);
-      // Is there anything in our journal that post-dates the last revup?
-      // Wait until those have been delivered, to preserve fifo.
-      await this.emitOpsSince(revup);
-      return true;
-    }
-    return false;
+  @DatasetEngine.checkNotClosed.async
+  private async processRevup(revup: Revup, retry: Subscriber<ConnectStyle>) {
+    this.log.info('revving-up from collaborator');
+    // We don't wait until rev-ups have been completely delivered
+    this.acceptRecoveryUpdates(revup.updates, retry);
+    // Is there anything in our journal that post-dates the last revup?
+    // Wait until those have been delivered, to preserve fifo.
+    await this.emitOpsSince(revup);
   }
 
   /**
-   * This method returns async as soon as the snapshot is delivered. There may
-   * still be operations incoming from the collaborator.
+   * This method returns async when the snapshot is delivered. There may still
+   * be operations incoming from the collaborator.
+   *
+   * @param snapshot the snapshot to process
    * @param retry to be notified of collaboration completion
    * @see decideLive return value
    */
-  private async requestSnapshot(retry: Subscriber<ConnectStyle>): Promise<unknown> {
-    const snapshot = await this.withLocalState(
-      state => this.remotes.snapshot(state));
+  @DatasetEngine.checkNotClosed.async
+  private async processSnapshot(snapshot: Snapshot, retry: Subscriber<ConnectStyle>) {
     this.messageService.join(snapshot.gwc);
     // If we have any operations since the snapshot: re-emit them now and
     // re-apply them to our own dataset when the snapshot is applied.
@@ -380,8 +400,10 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
     return snapshotApplied; // We can go live as soon as the snapshot is applied
   }
 
-  private async emitOpsSince<T = never>(recovery: Recovery,
-    ret: OperatorFunction<OperationMessage, T[]> = ignoreElements()): Promise<T[]> {
+  private async emitOpsSince<T = never>(
+    recovery: Recovery,
+    ret: OperatorFunction<OperationMessage, T[]> = ignoreElements()
+  ): Promise<T[]> {
     const toReturn = (ops: Observable<OperationMessage>) =>
       firstValueFrom(ops.pipe(ret, defaultIfEmpty([])));
     if (this.newClone) {
@@ -459,7 +481,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
           gwc: await gwc,
           updates: merge(
             operations.pipe(tapComplete(operationsSent), tap(msg =>
-              this.log.debug('Sending rev-up', msg))),
+              this.log.debug('Sending rev-up', msg.toString(this.log.getLevel())))),
             maybeMissed.pipe(delayUntil(operationsSent)))
         };
     });
@@ -475,8 +497,10 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
       // #2 Anything that arrives stamped prior to now
       this.remoteOps.receiving.pipe(
         filter(message => message.time.anyLt(now)),
-        takeUntil(from(until)))).pipe(tap(msg =>
-      this.log.debug('Forwarding update', msg)));
+        takeUntil(from(until)))
+    ).pipe(tap((msg: OperationMessage) => {
+      this.log.debug('Forwarding update', msg.toString(this.log.getLevel()));
+    }));
   }
 
   @DatasetEngine.checkNotClosed.async
@@ -538,7 +562,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
       this.log.debug(type, 'request', JSON.stringify(request));
   }
 
-  private createStatus(): Observable<MeldStatus> & LiveStatus {
+  private createStatus(): LiveStatus {
     let remotesEverLive = false;
     const stateRollup = liveRollup({
       live: this.live,
@@ -572,7 +596,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
     return Object.defineProperties(values, {
       becomes: { value: becomes },
       value: { get: () => toStatus(stateRollup.value) }
-    }) as Observable<MeldStatus> & LiveStatus;
+    }) as unknown as LiveStatus;
   }
 
   @DatasetEngine.checkNotClosed.async

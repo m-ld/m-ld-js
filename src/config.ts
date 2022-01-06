@@ -108,6 +108,7 @@ export interface MeldApp extends Partial<MeldExtensions> {
    * - `error(err: any)`: an error has occurred in the store (most such errors
    *   will also manifest in the operation performed)
    * - `clear()`: the store has been cleared, as when applying a new snapshot
+   * - `timing(entry: PerformanceEntry)`: stopwatch timings for debugging
    */
   backendEvents?: EventEmitter;
 }

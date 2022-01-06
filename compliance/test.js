@@ -86,3 +86,4 @@ orchestrator.on('exit', code => {
     process.exit(code);
   }
 });
+process.on('exit', () => orchestrator.kill());

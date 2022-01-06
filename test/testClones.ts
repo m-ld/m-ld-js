@@ -144,7 +144,7 @@ export function mockMqtt(): MockMqtt & MockProxy<AsyncMqttClient> {
     mqtt.emit('close');
   };
   mqtt.mockPublish = (topic: string, payload: Buffer | string) => {
-    return new Promise<void>((resolve) => setImmediate(mqtt => {
+    return new Promise<void>(resolve => setImmediate(mqtt => {
       mqtt.emit('message', topic, payload);
       resolve();
     }, mqtt)); // Pass current mqtt in case of sync test
@@ -159,5 +159,6 @@ export function mockMqtt(): MockMqtt & MockProxy<AsyncMqttClient> {
   mqtt.unsubscribe.mockReturnValue(<any>Promise.resolve());
   mqtt.publish.mockImplementation(
     (topic, payload: Buffer | string) => <any>mqtt.mockPublish(topic, payload));
+  mqtt.end.mockImplementation(() => <any>mqtt.mockClose());
   return mqtt;
 }

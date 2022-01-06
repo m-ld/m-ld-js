@@ -48,6 +48,7 @@
     "async-mqtt": "^2.6.1",
     "browser-sync": "^2.26.14",
     "concurrently": "^6.0.1",
+    "generic-pool": "^3.8.2",
     "jest": "^27.0.6",
     "jest-mock-extended": "^1.0.11",
     "leveldown": "^6.0.0",
@@ -104,13 +105,13 @@
     "valid-data-url": "^4.0.0"
   },
   "peerDependencies": {
+    "@peculiar/webcrypto": "1",
     "ably": "1",
     "async-mqtt": "2",
     "memdown": "6",
     "simple-peer": "9",
     "socket.io": "4",
-    "socket.io-client": "4",
-    "@peculiar/webcrypto": "1"
+    "socket.io-client": "4"
   },
   "peerDependenciesMeta": {
     "socket.io": {

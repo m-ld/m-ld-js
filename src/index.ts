@@ -5,10 +5,10 @@ import { DomainContext } from './engine/MeldEncoding';
 import { Context } from './jrql-support';
 import { MeldClone, MeldExtensions } from './api';
 import { CloneExtensions, MeldRemotes } from './engine';
-import type { LiveStatus, MeldStatus } from '@m-ld/m-ld-spec';
+import type { LiveStatus } from '@m-ld/m-ld-spec';
 import type { MeldApp, MeldConfig } from './config';
 import type { AbstractLevelDOWN } from 'abstract-leveldown';
-import type { Observable } from 'rxjs';
+import { Stopwatch } from './engine/util';
 
 export {
   Pattern, Reference, Context, Variable, Value, Describe, Construct,
@@ -45,16 +45,26 @@ export async function clone(
   config: MeldConfig,
   app: MeldApp = {}
 ): Promise<MeldClone> {
+  const { backendEvents } = app;
+  if (backendEvents != null)
+    Stopwatch.timingEvents.on('timing', e => backendEvents.emit('timing', e));
+  const sw = new Stopwatch('clone', config['@id']);
+
+  sw.next('extensions');
   const context = new DomainContext(config['@domain'], config['@context']);
   const extensions = await CloneExtensions.initial(config, app, context);
   const remotes = new constructRemotes(config, extensions);
 
+  sw.next('dataset');
   const dataset = await new QuadStoreDataset(
-    backend, context, app.backendEvents).initialise();
+    backend, context, backendEvents).initialise(sw.lap);
   const engine = new DatasetEngine({
     dataset, remotes, extensions, config, context
   });
-  await engine.initialise();
+
+  sw.next('engine');
+  await engine.initialise(sw.lap);
+  sw.stop();
   return new DatasetClone(engine, extensions);
 }
 
@@ -67,7 +77,7 @@ class DatasetClone extends ApiStateMachine implements MeldClone {
     super(dataset);
   }
 
-  get status(): Observable<MeldStatus> & LiveStatus {
+  get status(): LiveStatus {
     return this.dataset.status;
   }
 

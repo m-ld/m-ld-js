@@ -32,7 +32,7 @@ describe('Dataset engine', () => {
 
     test('starts offline with unknown remotes', async () => {
       const clone = await genesis(mockRemotes(NEVER, [null]));
-      expect(clone.live.value).toBe(false);
+      await expect(comesAlive(clone, false)).resolves.toBe(false);
       expect(clone.status.value).toEqual({ online: false, outdated: false, silo: false, ticks: 0 });
     });
 
@@ -390,8 +390,11 @@ describe('Dataset engine', () => {
       // Need a remote with rev-ups to share
       const remotes = mockRemotes(NEVER, [true]);
       const revUps = new Source<OperationMessage>();
-      remotes.revupFrom = async () => ({
-        gwc: remote.gwc.update(remote.time.ticked()), updates: revUps
+      const revupCalled = new Promise<void>(resolve => {
+        remotes.revupFrom = async () => {
+          resolve();
+          return { gwc: remote.gwc.update(remote.time.ticked()), updates: revUps };
+        };
       });
       // The clone will initialise into a revving-up state, waiting for a revUp
       clone = new DatasetEngine({
@@ -400,17 +403,20 @@ describe('Dataset engine', () => {
         extensions: testExtensions(),
         config: testConfig()
       });
-      const observedTicks = firstValueFrom(clone.operations.pipe(map(next => next.time.ticks),
-        take(2), toArray()));
+      const observedTicks = firstValueFrom(clone.operations.pipe(
+        map(op => op.time.ticks), take(2), toArray()));
       await clone.initialise();
-      // Do a new update during rev-up, this will immediately produce an update
+      await revupCalled;
+      // Do a new update during the rev-up, this should be delayed
       await clone.write({
         '@id': 'http://test.m-ld.org/fred',
         'http://test.m-ld.org/#name': 'Flintstone'
       });
       // Provide a rev-up that pre-dates the local siloed update
-      revUps.next(remote.sentOperation(
-        {}, { '@id': 'http://test.m-ld.org/wilma', 'http://test.m-ld.org/#name': 'Wilma' }));
+      revUps.next(remote.sentOperation({}, {
+        '@id': 'http://test.m-ld.org/wilma',
+        'http://test.m-ld.org/#name': 'Wilma'
+      }));
       revUps.complete();
       // Check that the updates are not out of order
       await expect(observedTicks).resolves.toEqual([1, 2]);

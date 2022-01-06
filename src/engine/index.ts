@@ -8,6 +8,8 @@ import { Future, MsgPack } from './util';
 import { LiveValue } from './LiveValue';
 import { MeldError } from './MeldError';
 import { MeldReadState, StateProc } from '../api';
+import { levels } from 'loglevel';
+import { MeldEncoder } from './MeldEncoding';
 
 const inspect = Symbol.for('nodejs.util.inspect.custom');
 
@@ -25,7 +27,8 @@ export class OperationMessage implements Message<TreeClock, EncodedOperation> {
     /** Encoded update operation */
     readonly data: EncodedOperation,
     /** Message time if you happen to have it, otherwise read from data */
-    readonly time = TreeClock.fromJson(data[2])) {
+    readonly time = TreeClock.fromJson(data[2])
+  ) {
   }
 
   get encoded(): Buffer {
@@ -48,8 +51,13 @@ export class OperationMessage implements Message<TreeClock, EncodedOperation> {
     return this.encoded.length;
   }
 
-  toString() {
-    return `${JSON.stringify(this.data)}
+  toString(logLevel: number = levels.INFO) {
+    const [v, from, time, updateData, encoding] = this.data;
+    const update = logLevel <= levels.DEBUG ?
+      encoding.includes(BufferEncoding.SECURE) ? '---ENCRYPTED---' :
+      MeldEncoder.jsonFromBuffer(updateData, encoding) :
+      { length: updateData.length, encoding };
+    return `${JSON.stringify({ v, from, time, update })}
     @ ${this.time}, prev ${this.prev}`;
   }
 

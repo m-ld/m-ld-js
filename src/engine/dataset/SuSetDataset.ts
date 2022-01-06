@@ -111,9 +111,9 @@ export class SuSetDataset extends MeldEncoder {
       this.updateSource.complete();
     }
     this.journal.close();
-    await this.journalClerk.close();
+    await this.journalClerk.close().catch(err => this.log.warn(err));
     this.datasetLock.release();
-    return this.dataset.close();
+    return this.dataset.close().catch(err => this.log.warn(err));
   }
 
   @SuSetDataset.checkNotClosed.async

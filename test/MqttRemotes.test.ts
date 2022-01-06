@@ -13,6 +13,7 @@ import { MeldErrorStatus } from '@m-ld/m-ld-spec';
 import { Response, RevupRequest, RevupResponse } from '../src/engine/remotes/ControlMessage';
 import { Future, MsgPack } from '../src/engine/util';
 import { JsonNotification } from '../src/engine/remotes';
+import { once } from 'events';
 
 /**
  * These tests also test the abstract base class, PubsubRemotes
@@ -59,6 +60,16 @@ describe('New MQTT remotes', () => {
       '__presence/test.m-ld.org/client1',
       '{"client1":"test.m-ld.org/control"}',
       { qos: 1, retain: true });
+  });
+
+  test('closes when local clone removed', async () => {
+    remotes.setLocal(mockLocal());
+    mqtt.mockConnect();
+    // Presence is joined when the remotes' live status resolves
+    await comesAlive(remotes, false);
+
+    remotes.setLocal(null);
+    await once(mqtt, 'close');
   });
 
   describe('when genesis', () => {
@@ -138,7 +149,7 @@ describe('New MQTT remotes', () => {
       const operations = new Source<OperationMessage>();
       remotes.setLocal(mockLocal({ operations }));
 
-      mqtt.publish.mockReturnValue(<any>Promise.reject('Delivery failed'));
+      mqtt.publish.mockReturnValueOnce(<any>Promise.reject('Delivery failed'));
 
       operations.next(new MockProcess(TreeClock.GENESIS.forked().left).sentOperation({}, {}));
 
@@ -146,7 +157,7 @@ describe('New MQTT remotes', () => {
     });
 
     test('live goes unknown if mqtt closes', async () => {
-      mqtt.emit('close');
+      mqtt.mockClose();
       expect(remotes.live.value).toBe(null);
     });
 

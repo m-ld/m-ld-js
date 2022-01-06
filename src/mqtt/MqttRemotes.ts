@@ -82,7 +82,7 @@ export class MqttRemotes extends PubsubRemotes {
 
   async close(err?: any) {
     await super.close(err);
-    await this.mqtt.end();
+    await this.mqtt.end().catch(this.warnError);
   }
 
   protected async onConnect() {

@@ -323,7 +323,7 @@ export interface MeldClone extends MeldStateMachine {
    * continuous, terminating when the clone closes (and can therefore be used to
    * detect closure).
    */
-  readonly status: Observable<MeldStatus> & LiveStatus;
+  readonly status: LiveStatus;
   /**
    * Active extensions
    */

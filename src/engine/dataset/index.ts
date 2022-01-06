@@ -151,8 +151,10 @@ export class QuadStoreDataset implements Dataset {
     this.base = context?.['@base'] ?? undefined;
   }
 
-  async initialise(): Promise<QuadStoreDataset> {
+  async initialise(sw?: Stopwatch): Promise<QuadStoreDataset> {
+    sw?.next('active-context');
     const activeCtx = await this.activeCtx;
+    sw?.next('open-store');
     this.store = new Quadstore({
       backend: this.backend,
       comunica: newEngine(),
@@ -278,19 +280,28 @@ export class QuadStoreDataset implements Dataset {
         ...range, keyAsBuffer: false, valueAsBuffer: true
       });
       const pull = () => {
-        it.next((err, key: string, value: Buffer) => {
-          if (err) {
-            subs.error(err);
-            this.end(it);
-            this.events?.emit('error', err);
-          } else if (key != null && value != null) {
-            subs.next([key, value]);
-            pull();
-          } else {
-            subs.complete();
-            this.end(it);
-          }
-        });
+        // In levelDown, calling next on an iterator that is already ended e.g.
+        // by closing the store, causes a truly evil exception which summarily
+        // kills the process
+        if (this.closed) {
+          const err = new MeldError('Clone has closed');
+          subs.error(err);
+          this.events?.emit('error', err);
+        } else {
+          it.next((err, key: string, value: Buffer) => {
+            if (err) {
+              subs.error(err);
+              this.end(it);
+              this.events?.emit('error', err);
+            } else if (key != null && value != null) {
+              subs.next([key, value]);
+              pull();
+            } else {
+              subs.complete();
+              this.end(it);
+            }
+          });
+        }
       };
       pull();
     });

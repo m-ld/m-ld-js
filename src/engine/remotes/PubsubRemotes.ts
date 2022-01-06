@@ -1,7 +1,7 @@
 import { MeldLocal, MeldRemotes, OperationMessage, Revup, Snapshot } from '../index';
 import {
-  BehaviorSubject, defer, EMPTY, firstValueFrom, from, identity, Observable, Observer, of,
-  onErrorResumeNext, Subject as Source, Subscription
+  BehaviorSubject, concatWith, defer, EMPTY, firstValueFrom, from, identity, NEVER, Observable,
+  Observer, of, onErrorResumeNext, race, Subject as Source, switchMapTo, throwError
 } from 'rxjs';
 import { TreeClock } from '../clocks';
 import { generate as uuid } from 'short-uuid';
@@ -10,7 +10,7 @@ import {
   RevupRequest, RevupResponse, SnapshotRequest, SnapshotResponse
 } from './ControlMessage';
 import { Future, MsgPack, Stopwatch, toJSON } from '../util';
-import { delay, first, map, reduce, tap, timeout, toArray } from 'rxjs/operators';
+import { delay, first, ignoreElements, map, reduce, tap, timeout, toArray } from 'rxjs/operators';
 import { MeldError, MeldErrorStatus } from '../MeldError';
 import { AbstractMeld } from '../AbstractMeld';
 import { MeldExtensions, MeldReadState, shortId } from '../../index';
@@ -65,7 +65,7 @@ type ACK = typeof ACK;
  * change happens, or a message arrives
  */
 export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes {
-  private readonly localClone = new BehaviorSubject<MeldLocal | null>(null);
+  private clone: MeldLocal | null = null;
   private readonly replyResolvers: {
     [messageId: string]: {
       resolve: (res: Response | ACK) => void,
@@ -76,7 +76,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
   private readonly recentlySentTo: Set<string> = new Set;
   private readonly consuming: { [subPubId: string]: Observer<Buffer> } = {};
   private readonly sendTimeout: number;
-  private readonly activity: Set<PromiseLike<void>> = new Set;
+  private readonly active = new BehaviorSubject<Promise<unknown> | undefined>(undefined);
   /**
    * This is separate to liveness because decided liveness requires presence,
    * which is discovered after connection. Connectedness is not equivalent to
@@ -92,12 +92,11 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     this.sendTimeout = config.networkTimeout ?? 5000;
   }
 
-  setLocal(clone: MeldLocal | null): void {
+  setLocal(clone: MeldLocal | null) {
     if (clone == null) {
       if (this.clone != null)
-        this.cloneLive(false)
-          .then(() => this.clone = null)
-          .catch(this.warnError);
+        this.closeSafely();
+      // Otherwise ignore re-set to null
     } else if (this.clone == null) {
       this.clone = clone;
       // Start sending updates from the local clone to the remotes
@@ -207,14 +206,22 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
       this.log.info('Shutting down due to', err);
     else
       this.log.info('Shutting down normally');
-    // This finalises the #updates, thereby notifying the clone
+    // This finalises the #updates, thereby notifying the clone (if present)
     super.close(err);
     // Wait until all activities have finalised
-    await Promise.all(this.activity); // TODO unit test this
+    try { // TODO unit test this
+      this.active.complete();
+      await this.active.value;
+    } catch (e) {
+      this.warnError(e);
+    }
   }
 
   private closeSafely(err?: any) {
-    this.close(err).catch(this.warnError);
+    this.cloneLive(false)
+      .then(() => this.clone = null)
+      .catch(this.warnError)
+      .finally(() => this.close(err).catch(this.warnError));
   }
 
   async newClock(): Promise<TreeClock> {
@@ -300,7 +307,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
    * presence set becomes available and {@link present} is callable without error.
    */
   protected onPresenceChange() {
-    // Don't process a presence change until connected
+    // Don't process a presence change until connected emits true
     this.connected.pipe(first(identity), tap(() => {
       // If there is more than just me present, we are live
       this.present()
@@ -333,7 +340,8 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     // Ignore control messages before we have a clone
     if (this.clone) {
       // Keep track of long-running activity so that we can shut down cleanly
-      const active = this.active(), clone = this.clone;
+      const done = new Future, clone = this.clone;
+      this.active.next(Promise.all([this.active.value, done]));
       const sw = new Stopwatch('reply', shortId(4));
       try {
         // The local state is required to prepare the response and to send it
@@ -372,7 +380,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
         this.log.warn(err);
       } finally {
         sw.stop();
-        active.resolve();
+        done.resolve();
       }
     }
   }
@@ -421,14 +429,6 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     }
   }
 
-  private get clone() {
-    return this.localClone.value;
-  }
-
-  private set clone(clone: MeldLocal | null) {
-    this.localClone.next(clone);
-  }
-
   private async cloneLive(live: boolean): Promise<unknown> {
     if (this.connected.value)
       return this.setPresent(live);
@@ -439,6 +439,8 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
       MsgPack.encode(ctrlMsg.toJSON()), MeldMessageType.request, 'out', state);
   };
 
+  // Note this method is recursive and can be long-running, waiting for timeout
+  @PubsubRemotes.checkNotClosed.async
   private async send<T extends Response>(
     wireRequest: Buffer,
     params: {
@@ -482,50 +484,32 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
       allowTimeFor?: Promise<unknown>
     }
   ): Promise<T> {
-    return new Promise<T>((resolve, reject) => {
-      // Three possible outcomes:
-      // 1. Response times out
-      const timer = this.timeout(() => {
-        delete this.replyResolvers[messageId];
-        this.log.debug(`Message ${messageId} timed out.`);
-        reject(new Error('Send timeout exceeded.'));
-      }, allowTimeFor);
-      // 2. Send fails - abandon the response
-      sent.catch(err => {
-        delete this.replyResolvers[messageId];
-        timer.unsubscribe();
-        reject(err);
-      });
-      // 3. Response received
-      this.replyResolvers[messageId] = {
-        resolve: res => {
-          delete this.replyResolvers[messageId];
-          timer.unsubscribe();
-          if (res instanceof RejectedResponse)
-            reject(new MeldError(res.status));
-          else
-            resolve(res as T);
-        },
-        state,
-        readyToAck
-      };
-    });
-  }
-
-  protected timeout(
-    cb: () => void,
-    allowTimeFor = Promise.resolve<unknown>(null)
-  ): Subscription {
-    return from(allowTimeFor ?? of(0)).pipe(delay(this.sendTimeout)).subscribe(cb);
-  }
-
-  private active(): Future {
-    const active = new Future();
-    const done = active.then(() => {
-      this.activity.delete(done);
-    });
-    this.activity.add(done);
-    return active;
+    return firstValueFrom(race(
+      // Four possible outcomes:
+      // 1. Response times out after allowing time for prior work
+      from(allowTimeFor ?? of(0)).pipe(delay(this.sendTimeout),
+        switchMapTo(throwError(() => {
+          this.log.debug(`Message ${messageId} timed out.`);
+          return new Error('Send timeout exceeded.');
+        }))),
+      // 2. Send fails - abandon the response if it rejects
+      from(sent).pipe(switchMapTo(NEVER)),
+      // 3. Remotes have closed
+      this.active.pipe(ignoreElements(),
+        concatWith(throwError(() => new MeldError('Clone has closed')))),
+      // 4. Response received
+      new Observable<T>(subs => {
+        this.replyResolvers[messageId] = {
+          resolve: res => {
+            if (res instanceof RejectedResponse)
+              subs.error(new MeldError(res.status));
+            else
+              subs.next(res as T);
+          },
+          state, readyToAck
+        };
+        return () => { delete this.replyResolvers[messageId]; };
+      })));
   }
 
   private async replyClock(sentParams: SendParams, state: MeldReadState, clock: TreeClock) {
