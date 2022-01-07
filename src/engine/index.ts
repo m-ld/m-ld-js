@@ -7,6 +7,9 @@ import { Message } from './messages';
 import { Future, MsgPack } from './util';
 import { LiveValue } from './LiveValue';
 import { MeldError } from './MeldError';
+import { MeldReadState, StateProc } from '../api';
+import { levels } from 'loglevel';
+import { MeldEncoder } from './MeldEncoding';
 
 const inspect = Symbol.for('nodejs.util.inspect.custom');
 
@@ -16,7 +19,7 @@ const inspect = Symbol.for('nodejs.util.inspect.custom');
  */
 export class OperationMessage implements Message<TreeClock, EncodedOperation> {
   readonly delivered = new Future;
-  private _buffer: Buffer;
+  private _encoded: Buffer;
 
   constructor(
     /** Previous public tick from the operation source */
@@ -24,15 +27,16 @@ export class OperationMessage implements Message<TreeClock, EncodedOperation> {
     /** Encoded update operation */
     readonly data: EncodedOperation,
     /** Message time if you happen to have it, otherwise read from data */
-    readonly time = TreeClock.fromJson(data[2])) {
+    readonly time = TreeClock.fromJson(data[2])
+  ) {
   }
 
-  encode(): Buffer {
-    if (this._buffer == null) {
+  get encoded(): Buffer {
+    if (this._encoded == null) {
       const { prev, data } = this;
-      this._buffer = MsgPack.encode({ prev, data });
+      this._encoded = MsgPack.encode({ prev, data });
     }
-    return this._buffer;
+    return this._encoded;
   }
 
   static decode(enc: Buffer): OperationMessage {
@@ -44,11 +48,16 @@ export class OperationMessage implements Message<TreeClock, EncodedOperation> {
   }
 
   get size() {
-    return this.encode().length;
+    return this.encoded.length;
   }
 
-  toString() {
-    return `${JSON.stringify(this.data)}
+  toString(logLevel: number = levels.INFO) {
+    const [v, from, time, updateData, encoding] = this.data;
+    const update = logLevel <= levels.DEBUG ?
+      encoding.includes(BufferEncoding.SECURE) ? '---ENCRYPTED---' :
+      MeldEncoder.jsonFromBuffer(updateData, encoding) :
+      { length: updateData.length, encoding };
+    return `${JSON.stringify({ v, from, time, update })}
     @ ${this.time}, prev ${this.prev}`;
   }
 
@@ -80,49 +89,79 @@ export interface Meld {
    */
   readonly live: LiveValue<boolean | null>;
   /**
-   * Mint a new clock, with a unique identity in the domain. For a local clone, this method forks
-   * the clone's clock. For a set of remotes, the request is forwarded to one remote clone
-   * (decided by the implementation) which will call the method locally.
+   * Mint a new clock, with a unique identity in the domain. For a local clone,
+   * this method forks the clone's clock. For a set of remotes, the request is
+   * forwarded to one remote clone (decided by the implementation) which will
+   * call the method locally.
    */
   newClock(): Promise<TreeClock>;
   /**
-   * Get a snapshot of all the data in the domain. For a local clone, this method provides the
-   * local state. For a set of remotes, the request is forwarded to one remote clone
-   * (decided by the implementation) which will call the method locally.
+   * Get a snapshot of all the data in the domain. For a local clone, this
+   * method provides the local state. For a set of remotes, the request is
+   * forwarded to one remote clone (decided by the implementation) which will
+   * call the method locally.
+   *
+   * @param state readable prior state, used to inspect metadata
    */
-  snapshot(): Promise<Snapshot>;
+  snapshot(state: MeldReadState): Promise<Snapshot>;
   /**
-   * 'Rev-up' by obtaining recent operations for the domain. For a local clone, this method
-   * provides the operations from the local journal. For a set of remotes, the request is forwarded
-   * to one remote clone (decided by the implementation) which will call the method locally.
+   * 'Rev-up' by obtaining recent operations for the domain. For a local clone,
+   * this method provides the operations from the local journal. For a set of
+   * remotes, the request is forwarded to one remote clone (decided by the
+   * implementation) which will call the method locally.
+   *
    * @param time the time of the most recent message seen by the requester; no older messages will
    *   be provided by the implementer.
+   * @param state readable prior state, used to inspect metadata
    * @returns Revup containing the recent operations; or `undefined` if the implementer no longer
    *   has enough entries in its journal to ensure that all required operations are relayed. This
    *   can legitimately happen if the implementer has truncated its journal, to save resources.
    */
-  revupFrom(time: TreeClock): Promise<Revup | undefined>;
+  revupFrom(time: TreeClock, state: MeldReadState): Promise<Revup | undefined>;
 }
 
-/** A JSON string, which may be compressed into a buffer with gzip */
-export type JsonBuffer = string | Buffer;
+/**
+ * Encodings that take object or buffer input and produce a buffer.
+ */
+export enum BufferEncoding {
+  /** JSON string encoding, for testing only */
+  JSON,
+  /** MessagePack encoding from JSON object */
+  MSGPACK,
+  /** Gzip */
+  GZIP,
+  /** Processed by transport security */
+  SECURE
+}
 
 /**
  * A tuple containing encoding components of a {@link MeldOperation}. The delete
- * and insert components are UTF-8 encoded JSON-LD strings, which may be GZIP
- * compressed into a Buffer if bigger than a threshold. Intended to be
- * efficiently serialised with MessagePack.
+ * and insert components JSON-LD objects, encoded as required, which may include
+ * compression and encryption. Intended to be efficiently serialised with
+ * MessagePack.
  */
 export type EncodedOperation = [
-  version: 2,
-  /** first tick of causal time range */
+  version: 3,
+  /**
+   * First tick of causal time range
+   * @since 2
+   */
   from: number,
-  /** time as JSON */
+  /**
+   * Time as JSON
+   * @since 1
+   */
   time: TreeClockJson,
-  /** delete as gzip Buffer or JSON-LD string */
-  deletes: JsonBuffer,
-  /** insert as gzip Buffer or JSON-LD string */
-  inserts: JsonBuffer
+  /**
+   * A tuple `[delete: object, insert: object]` encoded as per `encoding`
+   * @since 3
+   */
+  update: Buffer,
+  /**
+   * Encodings applied to the update
+   * @since 3
+   */
+  encoding: BufferEncoding[]
 ];
 
 /**
@@ -171,7 +210,7 @@ export namespace Snapshot {
    * Reified triples with their observed TIDs
    * (sender decides how many triples per emission)
    */
-  export type Inserts = { inserts: JsonBuffer };
+  export type Inserts = { inserts: Buffer, encoding: BufferEncoding[] };
   /**
    * A latest operation from a remote clone
    */
@@ -189,9 +228,10 @@ export namespace Snapshot {
  */
 export interface MeldRemotes extends Meld {
   /**
-   * Bootstrap method, setting the current local clone so that the remotes can relay information to
-   * and from it, as necessary. For example, in the case that a remote clone wishes to recover from
-   * the local clone.
+   * Bootstrap method, setting the current local clone so that the remotes can
+   * relay information to and from it, as necessary. For example, in the case
+   * that a remote clone wishes to recover from the local clone.
+   *
    * @param clone the local clone; `null` indicates that the local clone has gone away (probably
    *   closed).
    */
@@ -203,10 +243,11 @@ export interface MeldRemotes extends Meld {
  */
 export interface MeldLocal extends Meld {
   /**
-   * The local identity of the m-ld clone session, used for message bus identity and logging. This
-   * identity may not be the same across re-starts of a clone with persistent data. It will be
-   * unique among the clones for the domain. This identity is not directly relatable to the clock
-   * identity.
+   * Make a bounded read-only use of the state of the local clone. This is used
+   * in the implementation of the m-ld protocol to inspect metadata, for example
+   * for transport security, when external events happen.
    */
-  readonly id: string;
+  withLocalState<T>(procedure: StateProc<MeldReadState, T>): Promise<T>;
 }
+
+export { CloneExtensions } from './CloneExtensions';

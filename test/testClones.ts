@@ -1,4 +1,6 @@
-import { EncodedOperation, MeldLocal, MeldRemotes, OperationMessage } from '../src/engine';
+import {
+  BufferEncoding, EncodedOperation, MeldLocal, MeldRemotes, OperationMessage
+} from '../src/engine';
 import { mock, MockProxy } from 'jest-mock-extended';
 import { asapScheduler, BehaviorSubject, from, NEVER, Observable, Observer } from 'rxjs';
 import { Dataset, QuadStoreDataset } from '../src/engine/dataset';
@@ -6,14 +8,19 @@ import { GlobalClock, TreeClock } from '../src/engine/clocks';
 import { AsyncMqttClient, IPublishPacket } from 'async-mqtt';
 import { EventEmitter } from 'events';
 import { observeOn } from 'rxjs/operators';
-import { MeldConfig } from '../src';
+import { MeldConfig, MeldExtensions, MeldReadState, noTransportSecurity, StateProc } from '../src';
 import { AbstractLevelDOWN } from 'abstract-leveldown';
 import { LiveValue } from '../src/engine/LiveValue';
 import { Context } from 'jsonld/jsonld-spec';
 import { MeldMemDown } from '../src/memdown';
+import { MsgPack } from '../src/engine/util';
 
 export function testConfig(config?: Partial<MeldConfig>): MeldConfig {
   return { '@id': 'test', '@domain': 'test.m-ld.org', genesis: true, ...config };
+}
+
+export function testExtensions(extensions?: Partial<MeldExtensions>): MeldExtensions {
+  return { constraints: [], transportSecurity: noTransportSecurity, ...extensions }
 }
 
 export function mockRemotes(
@@ -50,7 +57,28 @@ export function mockLocal(
   MeldLocal & { liveSource: Observer<boolean | null> } {
   const live = hotLive(lives);
   // This weirdness is due to jest-mock-extended trying to mock arrays
-  return { ...mock<MeldLocal>(), operations: NEVER, live, liveSource: live, ...impl };
+  return {
+    ...mock<MeldLocal>(),
+    operations: NEVER,
+    live,
+    liveSource: live,
+    withLocalState: async <T>(procedure: StateProc<MeldReadState, T>) => procedure(mock()),
+    ...impl
+  };
+}
+
+export function testOp(
+  time: TreeClock,
+  deletes: object = {},
+  inserts: object = {},
+  from = time.ticks): EncodedOperation {
+  return [
+    3,
+    from,
+    time.toJSON(),
+    MsgPack.encode([deletes, inserts]),
+    [BufferEncoding.MSGPACK]
+  ];
 }
 
 /**
@@ -85,15 +113,15 @@ export class MockProcess {
     return new MockProcess(right);
   }
 
-  sentOperation(deletes: string, inserts: string) {
+  sentOperation(deletes: object, inserts: object) {
     // Do not inline: this sets prev
     const op = this.operated(deletes, inserts);
     return new OperationMessage(this.prev, op);
   }
 
-  operated(deletes: string, inserts: string): EncodedOperation {
+  operated(deletes: object, inserts: object): EncodedOperation {
     this.tick();
-    return [2, this.time.ticks, this.time.toJSON(), deletes, inserts];
+    return testOp(this.time, deletes, inserts);
   }
 }
 
@@ -116,7 +144,7 @@ export function mockMqtt(): MockMqtt & MockProxy<AsyncMqttClient> {
     mqtt.emit('close');
   };
   mqtt.mockPublish = (topic: string, payload: Buffer | string) => {
-    return new Promise<void>((resolve) => setImmediate(mqtt => {
+    return new Promise<void>(resolve => setImmediate(mqtt => {
       mqtt.emit('message', topic, payload);
       resolve();
     }, mqtt)); // Pass current mqtt in case of sync test
@@ -131,5 +159,6 @@ export function mockMqtt(): MockMqtt & MockProxy<AsyncMqttClient> {
   mqtt.unsubscribe.mockReturnValue(<any>Promise.resolve());
   mqtt.publish.mockImplementation(
     (topic, payload: Buffer | string) => <any>mqtt.mockPublish(topic, payload));
+  mqtt.end.mockImplementation(() => <any>mqtt.mockClose());
   return mqtt;
 }

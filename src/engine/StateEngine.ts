@@ -25,7 +25,7 @@ export interface EngineState extends QueryableRdfSource {
 export type EngineUpdateProc =
   (update: MeldUpdate, state: EngineState) => PromiseLike<unknown> | void;
 export type EngineStateProc =
-  (state: EngineState) => PromiseLike<unknown> | void;
+  (state: EngineState) => PromiseLike<unknown> | unknown;
 
 /**
  * Gates access to a {@link CloneEngine} such that its state is immutable during

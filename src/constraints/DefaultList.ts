@@ -1,16 +1,15 @@
 import { Iri } from 'jsonld/jsonld-spec';
-import {
-  MeldConstraint, MeldReadState, InterimUpdate, Reference, Select, GraphSubject
-} from '..';
+import { GraphSubject, InterimUpdate, MeldConstraint, MeldReadState } from '../api';
 import { LseqDef, LseqIndexRewriter, PosItem } from '../engine/lseq';
 import * as meld from '../ns/m-ld';
 import { lazy } from '../engine/util';
 import {
-  isList, isPropertyObject, isReference, isSlot, isSubjectObject, List, SubjectProperty
+  isList, isPropertyObject, isReference, isSlot, isSubjectObject, List, Reference, Select,
+  SubjectProperty
 } from '../jrql-support';
-import { includesValue } from '../updates';
 import { SingleValued } from './SingleValued';
 import { addPropertyObject, listItems } from '../engine/jrql-util';
+import { includesValue } from '../subjects';
 
 /** @internal */
 export class DefaultList implements MeldConstraint {
@@ -40,7 +39,8 @@ export class DefaultList implements MeldConstraint {
   }
 
   private async doListRewrites(mode: keyof MeldConstraint,
-    interim: InterimUpdate, state: MeldReadState) {
+    interim: InterimUpdate, state: MeldReadState
+  ) {
     const update = await interim.update;
     // Look for list slots being inserted (only used for check rewrite)
     // TODO: replace with by-Subject indexing
@@ -48,80 +48,89 @@ export class DefaultList implements MeldConstraint {
       new ListRewriter(mode, listId, this.lseq, this.site));
     // Go through the inserts looking for lists with inserted slots
     for (let subject of update['@insert'].graph.values())
-      this.findListInserts(mode, subject, rewriters);
+      findListInserts(mode, subject, rewriters);
     // Go though the deletes looking for lists with deleted positions
     for (let subject of update['@delete'])
-      this.findListDeletes(subject, rewriters);
+      findListDeletes(subject, rewriters);
     return Promise.all([...rewriters].map(
       rewriter => rewriter.doRewrite(state, interim)));
   }
+}
 
-  private findListInserts(mode: keyof MeldConstraint, subject: GraphSubject,
-    rewriter: (listId: string) => ListRewriter) {
-    if (mode == 'check') {
-      // In 'check' mode, ignore non-default lists
-      if (!includesValue(subject, '@type') ||
-        includesValue(subject, '@type', { '@id': meld.rdflseq })) {
-        /**
-         * In 'check' mode (initial transaction), a list key might be:
-         * - `@list` with intended index and sub-index; will generate a new
-         *   rdflseq position ID
-         * - an existing rdflseq position ID IRI from a #property binding; we
-         *   don't re-use this even if the index turns out to be correct
-         * - anything else is treated as a normal property of the list (not an
-         *   index)
-         */
-        if (isList(subject))
-          this.addItems(subject, rewriter);
-        for (let property in subject)
-          this.addItemIfPosId(subject, property, rewriter);
-      }
-    } else {
+function findListInserts(
+  mode: keyof MeldConstraint,
+  subject: GraphSubject,
+  rewriter: (listId: string) => ListRewriter
+) {
+  if (mode == 'check') {
+    // In 'check' mode, ignore non-default lists
+    if (!includesValue(subject, '@type') ||
+      includesValue(subject, '@type', { '@id': meld.rdflseq })) {
       /**
-       * In 'apply' mode, looking only for rdflseq position ID IRIs – the
-       * subject will not yet be interpreted as a List.
+       * In 'check' mode (initial transaction), a list key might be:
+       * - `@list` with intended index and sub-index; will generate a new
+       *   rdfLseq position ID
+       * - an existing rdfLseq position ID IRI from a #property binding; we
+       *   don't re-use this even if the index turns out to be correct
+       * - anything else is treated as a normal property of the list (not an
+       *   index)
        */
+      if (isList(subject))
+        addItems(subject, rewriter);
       for (let property in subject)
-        this.addItemIfPosId(subject, property, rewriter);
+        addItemIfPosId(subject, property, rewriter);
+    }
+  } else {
+    /**
+     * In 'apply' mode, looking only for rdfLseq position ID IRIs – the
+     * subject will not yet be interpreted as a List.
+     */
+    for (let property in subject)
+      addItemIfPosId(subject, property, rewriter);
+  }
+}
+
+function addItems(subject: List & Reference, rewriter: (listId: string) => ListRewriter) {
+  for (let [listIndex, item] of listItems(subject['@list'])) {
+    if (isSlot(item) && typeof listIndex != 'string') {
+      const slotInList: SlotInList = {
+        property: ['@list', ...listIndex], id: item['@id']
+      };
+      const [index, subIndex] = listIndex;
+      if (subIndex == null)
+        rewriter(subject['@id']).addInsert([slotInList], index);
+      else
+        // Multiple-item insertion index with insertion order
+        rewriter(subject['@id']).addInsert(
+          Object.assign([], { [subIndex]: slotInList }), index);
     }
   }
+}
 
-  private addItems(subject: List & Reference, rewriter: (listId: string) => ListRewriter) {
-    for (let [listIndex, item] of listItems(subject['@list'])) {
-      if (isSlot(item) && typeof listIndex != 'string') {
-        const slotInList: SlotInList = {
-          property: ['@list', ...listIndex], id: item['@id']
-        };
-        const [index, subIndex] = listIndex;
-        if (subIndex == null)
-          rewriter(subject['@id']).addInsert([slotInList], index);
-        else
-          // Multiple-item insertion index with insertion order
-          rewriter(subject['@id']).addInsert(
-            Object.assign([], { [subIndex]: slotInList }), index);
-      }
+function findListDeletes(
+  subject: GraphSubject,
+  rewriter: (listId: string) => ListRewriter
+) {
+  for (let [property, object] of Object.entries(subject)) {
+    if (isPropertyObject(property, object)) {
+      const posId = meld.matchRdflseqPosId(property);
+      if (posId != null && isReference(object))
+        rewriter(subject['@id']).addDelete(posId);
     }
   }
+}
 
-  private findListDeletes(subject: GraphSubject, rewriter: (listId: string) => ListRewriter) {
-    for (let [property, object] of Object.entries(subject)) {
-      if (isPropertyObject(property, object)) {
-        const posId = meld.matchRdflseqPosId(property);
-        if (posId != null && isReference(object))
-          rewriter(subject['@id']).addDelete(posId);
-      }
-    }
-  }
-
-  private addItemIfPosId(subject: GraphSubject, property: string,
-    rewriter: (listId: string) => ListRewriter) {
-    const posId = meld.matchRdflseqPosId(property), object = subject[property];
-    if (posId != null && isPropertyObject(property, object) &&
-      (isReference(object) || isSubjectObject(object))) {
-      const slotId = object['@id'];
-      if (slotId != null)
-        rewriter(subject['@id']).addInsert({ property: property, id: slotId }, posId);
-    }
+function addItemIfPosId(
+  subject: GraphSubject,
+  property: string,
+  rewriter: (listId: string) => ListRewriter
+) {
+  const posId = meld.matchRdflseqPosId(property), object = subject[property];
+  if (posId != null && isPropertyObject(property, object) &&
+    (isReference(object) || isSubjectObject(object))) {
+    const slotId = object['@id'];
+    if (slotId != null)
+      rewriter(subject['@id']).addInsert({ property: property, id: slotId }, posId);
   }
 }
 
@@ -141,7 +150,8 @@ class ListRewriter extends LseqIndexRewriter<SlotInList> {
     readonly mode: keyof MeldConstraint,
     readonly listId: Iri,
     lseq: LseqDef,
-    site: string) {
+    site: string
+  ) {
     super(lseq, site);
   }
 

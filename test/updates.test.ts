@@ -1,8 +1,9 @@
 import { mockFn } from 'jest-mock-extended';
 import {
-  asSubjectUpdates, includesValue, includeValues, Reference, Subject, updateSubject
+  asSubjectUpdates, includesValue, includeValues, propertyValue, Reference, Subject, updateSubject
 } from '../src';
 import { SubjectGraph } from '../src/engine/SubjectGraph';
+import { XS } from '../src/ns';
 
 describe('Update utilities', () => {
   test('converts simple group update to subject updates', () => {
@@ -95,13 +96,23 @@ describe('Update utilities', () => {
 
   test('adds a missing value', () => {
     const box: Box = { '@id': 'foo', size: 10 };
-    updateSubject(box, { foo: { '@insert': { '@id': 'foo', label: 'My box' }, '@delete': undefined } });
+    updateSubject(box, {
+      foo: {
+        '@insert': { '@id': 'foo', label: 'My box' },
+        '@delete': undefined
+      }
+    });
     expect(box).toEqual({ '@id': 'foo', size: 10, label: 'My box' });
   });
 
   test('adds an array value', () => {
     const box: Box = { '@id': 'foo', size: 10 };
-    updateSubject(box, { foo: { '@insert': { '@id': 'foo', size: [20, 30] }, '@delete': undefined } });
+    updateSubject(box, {
+      foo: {
+        '@insert': { '@id': 'foo', size: [20, 30] },
+        '@delete': undefined
+      }
+    });
     expect(box).toEqual({ '@id': 'foo', size: [10, 20, 30] });
   });
 
@@ -113,7 +124,12 @@ describe('Update utilities', () => {
 
   test('removes last array value to leave undefined', () => {
     const box = { '@id': 'foo', size: [10, 20] };
-    updateSubject(box, { foo: { '@insert': undefined, '@delete': { '@id': 'foo', size: [10, 20] } } });
+    updateSubject(box, {
+      foo: {
+        '@insert': undefined,
+        '@delete': { '@id': 'foo', size: [10, 20] }
+      }
+    });
     expect(box).toEqual({ '@id': 'foo' });
   });
 
@@ -371,7 +387,7 @@ describe('Update utilities', () => {
           '@list': ['made', 'soled', 'disposed']
         }
       });
-      expect(splice).toBeCalledWith(1, 2, 'soled')
+      expect(splice).toBeCalledWith(1, 2, 'soled');
     });
 
     test('updates nested list subject', () => {
@@ -397,6 +413,136 @@ describe('Update utilities', () => {
           }]
         }
       });
+    });
+  });
+
+  describe('property value casting', () => {
+    test('cast string', () => {
+      expect(propertyValue({
+        name: 'Fred'
+      }, 'name', String)).toBe('Fred');
+      expect(propertyValue({
+        name: ['Fred']
+      }, 'name', String)).toBe('Fred');
+      expect(propertyValue({
+        name: { '@type': XS.string, '@value': 'Fred' }
+      }, 'name', String)).toBe('Fred');
+      expect(propertyValue({
+        name: { '@language': 'en', '@value': 'Fred' }
+      }, 'name', String)).toBe('Fred');
+      expect(() => propertyValue({
+        name: []
+      }, 'name', String)).toThrow();
+      expect(() => propertyValue({
+        name: ['Fred', 'Flintstone']
+      }, 'name', String)).toThrow();
+      expect(() => propertyValue({
+        name: 10
+      }, 'name', String)).toThrow();
+      expect(() => propertyValue({
+        age: 10
+      }, 'name', String)).toThrow();
+      expect(() => propertyValue({
+        name: { '@type': XS.integer, '@value': 10 }
+      }, 'name', String)).toThrow();
+    });
+
+    test('cast number', () => {
+      expect(propertyValue({
+        age: 40
+      }, 'age', Number)).toBe(40);
+      expect(propertyValue({
+        age: { '@type': XS.integer, '@value': 40 }
+      }, 'age', Number)).toBe(40);
+      expect(propertyValue({
+        age: { '@type': XS.double, '@value': 40 }
+      }, 'age', Number)).toBe(40);
+      expect(() => propertyValue({
+        age: 'middle'
+      }, 'age', Number)).toThrow();
+      expect(() => propertyValue({
+        age: { '@type': XS.string, '@value': 'middle' }
+      }, 'age', Number)).toThrow();
+    });
+
+    test('cast boolean', () => {
+      expect(propertyValue({
+        married: true
+      }, 'married', Boolean)).toBe(true);
+      expect(propertyValue({
+        married: { '@type': XS.boolean, '@value': true }
+      }, 'married', Boolean)).toBe(true);
+      expect(() => propertyValue({
+        married: 'Wilma'
+      }, 'married', Boolean)).toThrow();
+    });
+
+    test('cast date', () => {
+      const now = new Date();
+      expect(propertyValue({
+        birthday: now.toISOString()
+      }, 'birthday', Date).getDate()).toBe(now.getDate());
+      expect(propertyValue({
+        birthday: { '@type': XS.dateTime, '@value': now.toISOString() }
+      }, 'birthday', Date).getDate()).toBe(now.getDate());
+      expect(() => propertyValue({
+        birthday: 'Pleistocene'
+      }, 'birthday', Date)).toThrow();
+    });
+
+    test('cast object', () => {
+      expect(propertyValue({
+        wife: { name: 'Wilma' }
+      }, 'wife', Object)).toEqual({ name: 'Wilma' });
+      expect(() => propertyValue({
+        wife: 'Wilma'
+      }, 'wife', Object)).toThrow();
+    });
+
+    test('cast buffer', () => {
+      const avatar = Buffer.of(0, 1);
+      expect(avatar.equals(propertyValue({
+        avatar: { '@type': XS.base64Binary, '@value': avatar.toString('base64') }
+      }, 'avatar', Uint8Array))).toBe(true);
+      expect(() => propertyValue({
+        avatar: avatar.toString('base64')
+      }, 'avatar', Uint8Array)).toThrow();
+    });
+
+    test('cast container', () => {
+      expect(propertyValue({
+        ears: ['left', 'right']
+      }, 'ears', Array)).toEqual(['left', 'right']);
+      expect(propertyValue({
+        nose: true
+      }, 'nose', Array)).toEqual([true]);
+      expect(propertyValue({
+        nose: { '@type': XS.boolean, '@value': true }
+      }, 'nose', Array, Boolean)).toEqual([true]);
+      expect(propertyValue({
+        ears: ['left', 'right']
+      }, 'ears', Set)).toEqual(new Set(['right', 'left']));
+      expect(propertyValue({
+        ears: [
+          { '@type': XS.string, '@value': 'left' },
+          { '@type': XS.string, '@value': 'right' }
+        ]
+      }, 'ears', Array)).toEqual([
+        { '@type': XS.string, '@value': 'left' },
+        { '@type': XS.string, '@value': 'right' }
+      ]);
+      expect(propertyValue({
+        ears: [
+          { '@type': XS.string, '@value': 'left' },
+          { '@type': XS.string, '@value': 'right' }
+        ]
+      }, 'ears', Array, String)).toEqual(['left', 'right']);
+      expect(propertyValue({
+        ears: { '@list': ['left', 'right'] }
+      }, 'ears', Array)).toEqual(['left', 'right']);
+      expect(propertyValue({
+        ears: { '@set': ['left', 'right'] }
+      }, 'ears', Array)).toEqual(['left', 'right']);
     });
   });
 });

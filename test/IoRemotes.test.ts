@@ -4,9 +4,10 @@ import { createServer } from 'http';
 import { Server as ServerIo } from 'socket.io';
 import { AddressInfo } from 'net';
 import { comesAlive } from '../src/engine/AbstractMeld';
-import { mockLocal, MockProcess } from './testClones';
+import { mockLocal, MockProcess, testExtensions } from './testClones';
 import { GlobalClock, TreeClock } from '../src/engine/clocks';
 import { lastValueFrom, of } from 'rxjs';
+import { mock } from 'jest-mock-extended';
 
 describe('Socket.io Remotes', () => {
   let serverIo: ServerIo;
@@ -33,7 +34,7 @@ describe('Socket.io Remotes', () => {
     remoteRemotes = new IoRemotes({
       '@id': 'remote-remotes', '@domain': domain, genesis: true,
       io: { uri: `http://localhost:${port}` }
-    });
+    }, testExtensions());
   });
 
   test('remote connects', async () => {
@@ -49,7 +50,7 @@ describe('Socket.io Remotes', () => {
     localRemotes = new IoRemotes({
       '@id': 'local-remotes', '@domain': domain, genesis: false,
       io: { uri: `http://localhost:${port}` }
-    });
+    }, testExtensions());
     const remoteClone = mockLocal();
     remoteRemotes.setLocal(remoteClone);
     await expect(comesAlive(localRemotes)).resolves.toBe(true);
@@ -63,11 +64,13 @@ describe('Socket.io Remotes', () => {
     localRemotes = new IoRemotes({
       '@id': 'local-remotes', '@domain': domain, genesis: false,
       io: { uri: `http://localhost:${port}` }
-    });
+    }, testExtensions());
+    localRemotes.setLocal(mockLocal());
     const clock = TreeClock.GENESIS.forked().left;
     remoteRemotes.setLocal(mockLocal({
       newClock: async () => clock
     }));
+    await comesAlive(localRemotes);
     const newClock = await localRemotes.newClock();
     expect(newClock.equals(clock)).toBe(true);
   });
@@ -77,16 +80,17 @@ describe('Socket.io Remotes', () => {
     localRemotes = new IoRemotes({
       '@id': 'local-remotes', '@domain': domain, genesis: false,
       io: { uri: `http://localhost:${port}` }
-    });
+    }, testExtensions());
+    localRemotes.setLocal(mockLocal());
     const remote = new MockProcess(TreeClock.GENESIS.forked().right);
     remoteRemotes.setLocal(mockLocal({
       revupFrom: async () => ({
         gwc: GlobalClock.GENESIS,
-        updates: of(remote.sentOperation('{}', '{}'))
+        updates: of(remote.sentOperation({}, {}))
       })
     }));
     await comesAlive(localRemotes); // Indicates that the remote is present
-    const revup = await localRemotes.revupFrom(TreeClock.GENESIS.forked().right);
+    const revup = await localRemotes.revupFrom(TreeClock.GENESIS.forked().right, mock());
     const op = await lastValueFrom(revup!.updates);
     expect(op.time.equals(remote.time)).toBe(true);
   });

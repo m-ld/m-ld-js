@@ -1,4 +1,4 @@
-import { mock, mockFn } from 'jest-mock-extended';
+import { mock } from 'jest-mock-extended';
 import { LseqDef, LseqIndexNotify, LseqIndexRewriter } from '../src/engine/lseq';
 
 describe('LSEQ', () => {
@@ -233,6 +233,7 @@ describe('LSEQ', () => {
   describe('CRDT', () => {
     // Naive example LSEQ class. Does not maintain items in order, so that
     // ordering is checked with every access.
+    // noinspection JSPotentiallyInvalidUsageOfThis
     class Lseq<T> {
       constructor(private site: string) { }
       // Position identifier-items
@@ -242,6 +243,7 @@ describe('LSEQ', () => {
         .sort((e1, e2) => e1[0].localeCompare(e2[0]))
         .map(e => ({ posId: e[0], value: e[1] }));
       // Ordered values
+      // @ts-ignore
       get values() { return this.ordered().map(i => i.value); }
       // Insert into list at given numeric index >=0, <= values.length
       // Returns an operation suitable for applying to another replica

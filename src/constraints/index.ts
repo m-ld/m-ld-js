@@ -1,6 +1,6 @@
 import { SingleValued, SingleValuedConfig } from './SingleValued';
 import { Context, Reference } from '../jrql-support';
-import { MeldConstraint } from '..';
+import { MeldConstraint } from '../api';
 import { compact } from 'jsonld';
 
 /**

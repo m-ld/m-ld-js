@@ -1,16 +1,18 @@
-import { EncodedOperation, JsonBuffer } from '.';
-import { flatten, lazy } from './util';
+import { BufferEncoding, EncodedOperation } from '.';
+import { flatten, lazy, MsgPack } from './util';
 import { Context, ExpandedTermDef } from '../jrql-support';
 import { Iri } from 'jsonld/jsonld-spec';
 import { RdfFactory, Triple, tripleIndexKey } from './quads';
 import { activeCtx } from './jsonld';
 import { M_LD, RDF } from '../ns';
 import { SubjectGraph } from './SubjectGraph';
-import { ActiveContext } from 'jsonld/lib/context';
 import { SubjectQuads } from './SubjectQuads';
+import { ActiveContext } from 'jsonld/lib/context';
 import { TreeClock } from './clocks';
+// TODO: Switch to fflate. Node.js zlib uses Pako in the browser
 import { gunzipSync, gzipSync } from 'zlib';
 import { CausalOperation, FusableCausalOperation } from './ops';
+import { MeldError } from './MeldError';
 
 const COMPRESS_THRESHOLD_BYTES = 1024;
 
@@ -71,8 +73,8 @@ export class MeldOperation extends FusableCausalOperation<Triple, TreeClock> {
           return encoder.reifyTriplesTids([...triplesTids]);
       })
       .map(encoder.jsonFromTriples);
-    const [delEnc, insEnc] = jsons.map(json => MeldEncoder.bufferFromJson(json));
-    const encoded: EncodedOperation = [2, op.from, op.time.toJSON(), delEnc, insEnc];
+    const [update, encoding] = MeldEncoder.bufferFromJson(jsons);
+    const encoded: EncodedOperation = [3, op.from, op.time.toJSON(), update, encoding];
     return new MeldOperation(op, encoded, jsons);
   }
 
@@ -81,8 +83,8 @@ export class MeldOperation extends FusableCausalOperation<Triple, TreeClock> {
     const [ver] = encoded;
     if (ver < 2)
       throw new Error(`Encoded operation version ${ver} not supported`);
-    let [, from, timeJson, delEnc, insEnc] = encoded;
-    const jsons = [delEnc, insEnc].map(MeldEncoder.jsonFromBuffer);
+    let [, from, timeJson, update, encoding] = encoded;
+    const jsons: [object, object] = MeldEncoder.jsonFromBuffer(update, encoding);
     const [delTriples, insTriples] = jsons.map(encoder.triplesFromJson);
     const time = TreeClock.fromJson(timeJson);
     const deletes = unreify(delTriples);
@@ -105,7 +107,7 @@ export class MeldOperation extends FusableCausalOperation<Triple, TreeClock> {
      * serialisation with it, for journaling and hashing.
      */
     readonly encoded: EncodedOperation,
-    readonly jsons: any) {
+    readonly jsons: object) {
     super(op, tripleIndexKey);
   }
 
@@ -162,30 +164,45 @@ export class MeldEncoder {
     }));
   }
 
-  jsonFromTriples = (triples: Triple[]): any => {
+  jsonFromTriples = (triples: Triple[]): object => {
     const json = SubjectGraph.fromRDF(triples, { ctx: this.ctx });
     // Recreates JSON-LD compaction behaviour
     return json.length == 0 ? {} : json.length == 1 ? json[0] : json;
   }
 
-  triplesFromJson = (json: any): Triple[] =>
-    [...new SubjectQuads('graph', this.ctx, this.rdf).quads(json)];
+  triplesFromJson = (json: object): Triple[] =>
+    [...new SubjectQuads('graph', this.ctx, this.rdf).quads(<any>json)];
   
-  triplesFromBuffer = (enc: JsonBuffer): Triple[] =>
-    this.triplesFromJson(MeldEncoder.jsonFromBuffer(enc));
+  triplesFromBuffer = (encoded: Buffer, encoding: BufferEncoding[]): Triple[] =>
+    this.triplesFromJson(MeldEncoder.jsonFromBuffer(encoded, encoding));
   
-  bufferFromTriples = (triples: Triple[]): JsonBuffer =>
+  bufferFromTriples = (triples: Triple[]): [Buffer, BufferEncoding[]] =>
     MeldEncoder.bufferFromJson(this.jsonFromTriples(triples));
 
-  static bufferFromJson(json: any): JsonBuffer {
-    const stringified = JSON.stringify(json);
-    return stringified.length > COMPRESS_THRESHOLD_BYTES ?
-      gzipSync(stringified) : stringified;
+  static bufferFromJson(json: object): [Buffer, BufferEncoding[]] {
+    const packed = MsgPack.encode(json);
+    return packed.length > COMPRESS_THRESHOLD_BYTES ?
+      [gzipSync(packed), [BufferEncoding.MSGPACK, BufferEncoding.GZIP]] :
+      [packed, [BufferEncoding.MSGPACK]];
   }
 
-  static jsonFromBuffer(enc: JsonBuffer): any {
-    if (typeof enc != 'string')
-      enc = gunzipSync(enc).toString();
-    return JSON.parse(enc);
+  static jsonFromBuffer<T>(encoded: Buffer, encoding: BufferEncoding[]): T {
+    let result: any = encoded;
+    for (let i = encoding.length - 1; i >= 0; i--) {
+      switch (encoding[i]) {
+        case BufferEncoding.JSON:
+          result = JSON.parse(result.toString());
+          break;
+        case BufferEncoding.MSGPACK:
+          result = MsgPack.decode(result);
+          break;
+        case BufferEncoding.GZIP:
+          result = gunzipSync(result);
+          break;
+        default:
+          throw new MeldError('Bad update', `Unrecognised encoding ${encoding[i]}`);
+      }
+    }
+    return result;
   }
 }

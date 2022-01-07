@@ -11,7 +11,8 @@
     "./dist/socket.io-server": "./dist/socket.io/server/index.js",
     "./dist/ably": "./dist/ably/index.js",
     "./dist/wrtc": "./dist/wrtc/index.js",
-    "./dist/memdown": "./dist/memdown/index.js"
+    "./dist/memdown": "./dist/memdown/index.js",
+    "./dist/security": "./dist/security/index.js"
   },
   "scripts": {
     "link-locals": "npm link ../m-ld-spec ../json-rql ../typedoc-theme",
@@ -36,6 +37,7 @@
   "homepage": "https://js.m-ld.org/",
   "devDependencies": {
     "@m-ld/typedoc-theme": "^0.1.4",
+    "@peculiar/webcrypto": "^1.2.3",
     "@types/jest": "^26.0.20",
     "@types/memdown": "^3.0.0",
     "@types/n3": "^1.4.4",
@@ -46,6 +48,7 @@
     "async-mqtt": "^2.6.1",
     "browser-sync": "^2.26.14",
     "concurrently": "^6.0.1",
+    "generic-pool": "^3.8.2",
     "jest": "^27.0.6",
     "jest-mock-extended": "^1.0.11",
     "leveldown": "^6.0.0",
@@ -76,7 +79,7 @@
   },
   "dependencies": {
     "@ably/msgpack-js": "^0.4.0",
-    "@m-ld/m-ld-spec": "^0.6.4",
+    "@m-ld/m-ld-spec": "^0.6.5-0",
     "@types/abstract-leveldown": "^5.0.1",
     "@types/detect-node": "^2.0.0",
     "@types/jsonld": "^1.5.2",
@@ -102,6 +105,7 @@
     "valid-data-url": "^4.0.0"
   },
   "peerDependencies": {
+    "@peculiar/webcrypto": "1",
     "ably": "1",
     "async-mqtt": "2",
     "memdown": "6",
@@ -126,6 +130,9 @@
       "optional": true
     },
     "memdown": {
+      "optional": true
+    },
+    "@peculiar/webcrypto": {
       "optional": true
     }
   }

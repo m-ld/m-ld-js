@@ -5,9 +5,11 @@
  */
 import type { NotifyParams, PeerParams, ReplyParams, SendParams } from '../engine/remotes';
 import { PubsubRemotes, SubPub } from '../engine/remotes';
-import { from, Observable } from 'rxjs';
+import { Observable } from 'rxjs';
 import { io, ManagerOptions, Socket, SocketOptions } from 'socket.io-client';
-import type { MeldConfig } from '../index';
+import type { MeldExtensions } from '../api';
+import { inflateFrom } from '../engine/util';
+import { MeldConfig } from '../config';
 
 export interface MeldIoConfig extends MeldConfig {
   io?: {
@@ -19,8 +21,8 @@ export interface MeldIoConfig extends MeldConfig {
 export class IoRemotes extends PubsubRemotes {
   private readonly socket: Socket;
 
-  constructor(config: MeldIoConfig, connect = io) {
-    super(config);
+  constructor(config: MeldIoConfig, extensions: MeldExtensions, connect = io) {
+    super(config, extensions);
     const opts = config.io?.opts;
     const optsToUse: Partial<ManagerOptions> = {
       ...opts, query: {
@@ -47,14 +49,14 @@ export class IoRemotes extends PubsubRemotes {
   }
 
   protected present(): Observable<string> {
-    return new Observable(subs => {
+    return inflateFrom(new Promise<string[]>((resolve, reject) => {
       this.socket.emit('presence', (err: string | null, present: string[]) => {
         if (err)
-          subs.error(err);
-        else if (!subs.closed)
-          from(present).subscribe(subs);
+          reject(err);
+        else
+          resolve(present);
       });
-    });
+    }));
   }
 
   protected async setPresent(present: boolean): Promise<void> {

@@ -16,7 +16,7 @@ class SharedPromise extends Future {
 
   /** Not currently used; for debugging deadlocks */
   toString(): string {
-    return `[${this.tasks.map(({ name }) => ({ name }))}]${this.running ? '...' : ''}`;
+    return `[${this.tasks.map(({ name }) => name).join(', ')}]${this.running ? '...' : ''}`;
   }
 
   share<T>(name: string, proc: () => (PromiseLike<T> | T)): Promise<T> {
@@ -78,7 +78,7 @@ export class LockManager<K extends string = string> {
   private locks: {
     [key: string]: {
       /** Currently running task, may be extended */
-      running: SharedPromise,
+      running?: SharedPromise,
       /** Head task, may be shared if not exclusive */
       head: SharedPromise,
       /** Whether the head task is exclusive */
@@ -88,14 +88,19 @@ export class LockManager<K extends string = string> {
 
   /**
    * Get the current state of the given lock.
-   * - `'open'` means the lock is immediately available
-   * - `'exclusive'` means newly scheduled tasks will execute when the lock opens
-   * - `'shared'` means tasks will be shared when any scheduled exclusive tasks complete
+   * - `null` means the lock is immediately available
+   * - `{ ... exclusive: true }` means newly scheduled tasks will execute when
+   * the lock opens
+   * - `{ ... exclusive: false }` means tasks will be shared when any scheduled
+   * exclusive tasks complete
    */
   state(key: K) {
     const lock = this.locks[key];
-    return lock == null ? 'open' :
-      lock.exclusive ? 'exclusive' : 'shared';
+    return lock == null ? null : {
+      running: lock.running?.toString(),
+      head: lock.head.toString(),
+      exclusive: lock.exclusive
+    }
   }
 
   /**
@@ -110,11 +115,11 @@ export class LockManager<K extends string = string> {
 
   /**
    * Acquires the lock. Note that this method requires the caller to handle
-   * errors to ensure the lock is not permanently stuck. If possible, prefer the
-   * use of {@link share} or {@link exclusive}.
+   * errors to ensure the lock is not permanently closed. If possible, prefer
+   * the use of {@link share} or {@link exclusive}.
    *
-   * @returns a promise that resolves when the lock is acquired,
-   * providing a function to release it.
+   * @returns a promise that resolves when the lock is acquired, providing a
+   * function to release it. This function can safely be called multiple times.
    */
   async acquire(key: K, purpose: string, mode: 'share' | 'exclusive'): Promise<() => void> {
     const running = new Future<() => void>();

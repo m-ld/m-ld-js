@@ -2,7 +2,9 @@ import { defer, Observable } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { inflate } from './util';
 
-export type LiveValue<T> = Observable<T> & { readonly value: T; };
+export interface LiveValue<T> extends Observable<T> {
+  readonly value: T;
+}
 
 export function liveRollup<R extends { [key: string]: unknown }>(
   liveValues: { [K in keyof R]: LiveValue<R[K]> }): LiveValue<R> {

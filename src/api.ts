@@ -10,6 +10,7 @@ import { SubjectGraph } from './engine/SubjectGraph';
 import { QueryableRdfSource } from './rdfjs-support';
 import { Consumable, flow, Flowable } from './flowable';
 import { Future, tapComplete } from './engine/util';
+import { MeldMessageType } from './ns/m-ld';
 
 /**
  * A convenience type for a struct with a `@insert` and `@delete` property, like
@@ -79,9 +80,9 @@ export function readResult(result: Consumable<GraphSubject>): ReadResult {
     }
 
     then: PromiseLike<GraphSubjects>['then'] =
-      (onfulfilled, onrejected) =>
-        firstValueFrom(this.pipe(toArray<GraphSubject>())).then(onfulfilled == null ?
-          null : graph => onfulfilled(new SubjectGraph(graph)), onrejected);
+      (onFulfilled, onRejected) =>
+        firstValueFrom(this.pipe(toArray<GraphSubject>())).then(onFulfilled == null ?
+          null : graph => onFulfilled(new SubjectGraph(graph)), onRejected);
   };
 }
 
@@ -111,12 +112,16 @@ export interface MeldReadState extends QueryableRdfSource {
    */
   read<R extends Read = Read>(request: R): ReadResult;
   /**
-   * Shorthand method for retrieving a single Subject by its `@id`, if it exists.
+   * Shorthand method for retrieving a single Subject and its properties by
+   * its `@id`, if it exists.
    *
    * @param id the Subject `@id`
-   * @returns a promise resolving to the requested Subject, or `undefined` if not found
+   * @param properties the properties to retrieve. If no properties are
+   * specified, all available properties of the subject will be returned.
+   * @returns a promise resolving to the requested Subject with the requested
+   * properties, or `undefined` if not found
    */
-  get(id: string): Promise<GraphSubject | undefined>;
+  get(id: string, ...properties: SubjectProperty[]): Promise<GraphSubject | undefined>;
 }
 
 /**
@@ -213,8 +218,8 @@ export interface MeldUpdate extends DeleteInsert<GraphSubjects> {
  * the latter, the state can be transitioned to another immutable state using
  * {@link MeldState.write}.
  */
-export type StateProc<S extends MeldReadState = MeldReadState> =
-  (state: S) => PromiseLike<unknown> | void;
+export type StateProc<S extends MeldReadState = MeldReadState, T = unknown> =
+  (state: S) => PromiseLike<T> | T;
 
 /**
  * A function type specifying a 'procedure' during which a clone state is
@@ -318,7 +323,11 @@ export interface MeldClone extends MeldStateMachine {
    * continuous, terminating when the clone closes (and can therefore be used to
    * detect closure).
    */
-  readonly status: Observable<MeldStatus> & LiveStatus;
+  readonly status: LiveStatus;
+  /**
+   * Active extensions
+   */
+  readonly extensions: MeldExtensions;
   /**
    * Closes this clone engine gracefully. Using this method ensures that data
    * has been fully flushed to storage and all transactions have been notified
@@ -327,6 +336,38 @@ export interface MeldClone extends MeldStateMachine {
    * application failure, for problem diagnosis.
    */
   close(err?: any): Promise<unknown>;
+}
+
+/**
+ * Extensions applied to a **m-ld** clone.
+ *
+ * In general, extensions should be dynamically selected and loaded based on the
+ * clone's (meta)data content – this allows a domain to evolve without
+ * necessitating the redeployment of app code. Where applicable, the members of
+ * this interface document alternative means of providing behaviour.
+ *
+ * > ⚠ Changing extensions at runtime may require coordination between clones,
+ * to prevent outdated clones from acting incorrectly in ways that could cause
+ * data corruption. Consult the extension's documentation for safe operation.
+ */
+export interface MeldExtensions {
+  /**
+   * Constraints declared in the configuration or the data.
+   *
+   * @experimental use with caution
+   * @todo provide data-declared constraints
+   * @see https://github.com/m-ld/m-ld-spec/issues/73
+   */
+  constraints: MeldConstraint[];
+  /**
+   * A transport security interceptor. If the initial transport security is not
+   * compatible with the rest of the domain, this clone may not be able to join
+   * until the app is updated.
+   *
+   * @experimental use with caution
+   * @todo provide data-declared transport security
+   */
+  transportSecurity: MeldTransportSecurity;
 }
 
 /**
@@ -436,3 +477,53 @@ export interface InterimUpdate {
    */
   readonly update: Promise<MeldUpdate>;
 }
+
+/**
+ * An identified security principal (user or machine) that is responsible for
+ * data changes in the clone.
+ */
+export interface AppPrincipal {
+  /**
+   * The principal's identifier, resolved according to the configured context.
+   */
+  '@id': string;
+  /**
+   * Sign the given data with the principal's key. This function may be
+   * required by the implementation of the domain's access control.
+   *
+   * @param data the data to sign
+   * @see https://developer.mozilla.org/en-US/docs/Web/API/SubtleCrypto/sign#rsassa-pkcs1-v1_5_2
+   */
+  sign?(data: Buffer): Buffer | Promise<Buffer>;
+}
+
+export interface MeldTransportSecurity {
+  /**
+   * Initialises this extension with the application security principal. This
+   * method will only be called once.
+   *
+   * @param principal the current application principal (user or machine)
+   */
+  setPrincipal?(principal: AppPrincipal | undefined): void;
+  /**
+   * Check and/or transform wire data.
+   *
+   * @param data the data to operate on
+   * @param type the message purpose
+   * @param direction message direction relative to the local clone
+   * @param state the current state of the clone. This may be `null`, but only
+   * for bootstrap messages, i.e. `type` is
+   * `http://control.m-ld.org/request/clock` or
+   * `http://control.m-ld.org/request/snapshot` (and no prior state exists).
+   */
+  wire(
+    data: Buffer,
+    type: MeldMessageType,
+    direction: 'in' | 'out',
+    state: MeldReadState | null
+  ): Buffer | Promise<Buffer>;
+}
+
+export const noTransportSecurity: MeldTransportSecurity = {
+  wire: (data: Buffer) => data
+};

@@ -1,7 +1,6 @@
 import { Iri } from 'jsonld/jsonld-spec';
 import { Binding } from 'quadstore';
-import { blank, GraphSubject } from '../..';
-import { anyName } from '../../api';
+import { anyName, blank, GraphSubject } from '../../api';
 import {
   isList, isPropertyObject, isSet, isSubjectObject, Subject, SubjectProperty, SubjectPropertyObject,
   Value, Variable

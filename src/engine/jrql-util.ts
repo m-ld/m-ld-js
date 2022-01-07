@@ -1,8 +1,10 @@
 import { Url } from 'jsonld/jsonld-spec';
-import { Subject, SubjectProperty, SubjectPropertyObject, Value } from '../jrql-support';
+import {
+  Construct, Describe, Subject, SubjectProperty, SubjectPropertyObject, Value
+} from '../jrql-support';
 import { JRQL } from '../ns';
 import { isArray, isNaturalNumber, setAtPath, trimTail } from './util';
-import { includeValues } from '../updates';
+import { includeValues } from '../subjects';
 import validDataUrl = require('valid-data-url');
 
 /**
@@ -30,14 +32,14 @@ export type JrqlMode = 'match' | 'load' | 'graph';
  * multiple-item inserts) if mode is `match`. If the list index is a string, it
  * is the variable name.
  */
-export function* listItems(
+export function *listItems(
   list: SubjectPropertyObject, mode: JrqlMode = 'graph'):
   IterableIterator<[ListIndex | string, SubjectPropertyObject]> {
   if (typeof list === 'object') {
     // This handles arrays as well as hashes
     for (let [indexKey, item] of Object.entries(list)) {
       if (mode === 'graph') {
-        yield* subItems(list, toIndexNumber(indexKey, 'strict'), item);
+        yield *subItems(list, toIndexNumber(indexKey, 'strict'), item);
       } else {
         // Provided index is either a variable (string) or an index number
         const index = JRQL.matchVar(indexKey) ?? toIndexNumber(indexKey, 'strict');
@@ -46,7 +48,7 @@ export function* listItems(
           yield [index, item];
         else
           // Check for inserting multiple sub-items at one index
-          yield* subItems(list, index, item);
+          yield *subItems(list, index, item);
       }
     }
   } else {
@@ -55,7 +57,7 @@ export function* listItems(
   }
 }
 
-function* subItems(
+function *subItems(
   list: SubjectPropertyObject, index: ListIndex, item: SubjectPropertyObject):
   IterableIterator<[ListIndex, SubjectPropertyObject]> {
   const [topIndex, subIndex] = index;
@@ -68,12 +70,16 @@ function* subItems(
 }
 
 /**
+ * @param subject
+ * @param property
+ * @param object
  * @param createList subject['@list'] is an object by default (in case sparse),
  * sub-index is always an array if present
  */
 export function addPropertyObject(
   subject: Subject, property: SubjectProperty, object: Value,
-  createList: () => object = () => ({})): Subject {
+  createList: () => object = () => ({})
+): Subject {
   if (typeof property == 'string') {
     includeValues(subject, property, object);
   } else {
@@ -128,4 +134,17 @@ export function toIndexDataUrl(index: ListIndex | string): Url {
   if (typeof index == 'string')
     throw new Error('Cannot generate a variable data URL');
   return `data:application/mld-li,${trimTail(index).map(i => i?.toFixed(0)).join(',')}`;
+}
+
+export function constructSubject(id: string, properties: SubjectProperty[]) {
+  return properties.reduce<Subject>((construct, property) =>
+    addPropertyObject(construct, property, '?'), { '@id': id });
+}
+
+export function constructProperties(id: string, properties: SubjectProperty[]): Construct {
+  return { '@construct': constructSubject(id, properties) };
+}
+
+export function describeId(id: string): Describe {
+  return { '@describe': id };
 }

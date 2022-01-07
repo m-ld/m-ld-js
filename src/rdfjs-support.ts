@@ -1,6 +1,6 @@
-import { BaseQuad, Quad, Source, Stream, Term } from 'rdf-js';
-import { Algebra } from 'sparqlalgebrajs';
-import { EventEmitter } from 'events';
+import type { BaseQuad, Quad, Source, Stream, Term } from 'rdf-js';
+import type { Algebra } from 'sparqlalgebrajs';
+import type { EventEmitter } from 'events';
 
 /**
  * This module defines the RDF/JS and other extended RDF JS community style methods supported by

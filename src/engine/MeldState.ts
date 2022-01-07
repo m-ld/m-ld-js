@@ -1,13 +1,14 @@
-import { Describe, Read, Subject, Update, Write } from '../jrql-support';
-import { defaultIfEmpty, firstValueFrom, Subscription } from 'rxjs';
+import { Read, Subject, SubjectProperty, Update, Write } from '../jrql-support';
+import { Subscription } from 'rxjs';
 import {
   any, GraphSubject, MeldState, MeldStateMachine, readResult, ReadResult, StateProc, UpdateProc
 } from '../api';
 import { CloneEngine, EngineState, EngineUpdateProc, StateEngine } from './StateEngine';
 import { QueryableRdfSourceProxy } from './quads';
 import { Consumable } from '../flowable';
-import { Future, inflateFrom } from './util';
+import { first, Future, inflateFrom } from './util';
 import { QueryableRdfSource } from '../rdfjs-support';
+import { constructProperties, describeId } from './jrql-util';
 
 abstract class ApiState extends QueryableRdfSourceProxy implements MeldState {
   constructor(
@@ -36,9 +37,9 @@ abstract class ApiState extends QueryableRdfSourceProxy implements MeldState {
     });
   }
 
-  get(id: string): Promise<GraphSubject | undefined> {
-    return firstValueFrom(this.read<Describe>({ '@describe': id })
-      .pipe(defaultIfEmpty(undefined)));
+  async get(id: string, ...properties: SubjectProperty[]) {
+    return first(this.read(properties.length === 0 ?
+      describeId(id) : constructProperties(id, properties)));
   }
 
   protected abstract construct(state: EngineState): MeldState;
@@ -50,9 +51,6 @@ class ImmutableState extends ApiState {
   }
 }
 
-/**
- * Applies a context to all state
- */
 export class ApiStateMachine extends ApiState implements MeldStateMachine {
   private readonly engine: StateEngine;
 

@@ -6,20 +6,23 @@ import { catchError, distinctUntilChanged, filter, observeOn, skip, tap } from '
 import { Logger } from 'loglevel';
 import { check, getIdLogger, PauseableSource } from './util';
 import { MeldError } from './MeldError';
-import { MeldConfig } from '..';
+import { MeldReadState } from '../api';
+import { MeldConfig } from '../config';
 
 export abstract class AbstractMeld implements Meld {
   protected static checkLive =
-    check((m: AbstractMeld) => m.live.value === true, () => new MeldError('Meld is offline'));
+    check((m: AbstractMeld) => m.live.value === true,
+      () => new MeldError('Meld is offline'));
   protected static checkNotClosed =
-    check((m: AbstractMeld) => !m._closed, () => new MeldError('Clone has closed'));
+    check((m: AbstractMeld) => !m.closed,
+      () => new MeldError('Clone has closed'));
 
   readonly operations: Observable<OperationMessage>;
   readonly live: LiveValue<boolean | null>;
 
   private readonly operationSource = new PauseableSource<OperationMessage>();
   private readonly liveSource: BehaviorSubject<boolean | null> = new BehaviorSubject(null);
-  
+
   private _closed = false;
   protected readonly log: Logger;
 
@@ -32,8 +35,9 @@ export abstract class AbstractMeld implements Meld {
     this.log = getIdLogger(this.constructor, this.id, config.logLevel ?? 'info');
 
     // Operation notifications are delayed to ensure internal processing has priority
-    this.operations = this.operationSource.pipe(observeOn(asapScheduler),
-      tap(msg => this.log.debug('has operation', msg)));
+    this.operations = this.operationSource.pipe(observeOn(asapScheduler), tap(msg => {
+      this.log.debug('has operation', msg.toString(this.log.getLevel()));
+    }));
 
     // Live notifications are distinct, only transitions are notified; an error
     // indicates a return to undecided liveness followed by completion.
@@ -60,8 +64,8 @@ export abstract class AbstractMeld implements Meld {
   }
 
   abstract newClock(): Promise<TreeClock>;
-  abstract snapshot(): Promise<Snapshot>;
-  abstract revupFrom(time: TreeClock): Promise<Revup | undefined>;
+  abstract snapshot(state: MeldReadState): Promise<Snapshot>;
+  abstract revupFrom(time: TreeClock, state: MeldReadState): Promise<Revup | undefined>;
 
   close(err?: any) {
     this._closed = true;

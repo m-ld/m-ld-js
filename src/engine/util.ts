@@ -1,11 +1,13 @@
 import {
-  AsyncSubject, BehaviorSubject, concat, firstValueFrom, from, NEVER, Observable, ObservableInput,
-  ObservedValueOf, Observer, onErrorResumeNext, OperatorFunction, Subject, Subscription, throwError
+  AsyncSubject, BehaviorSubject, concat, defaultIfEmpty, firstValueFrom, from, NEVER, Observable,
+  ObservableInput, ObservedValueOf, Observer, onErrorResumeNext, OperatorFunction, Subject,
+  Subscription, throwError
 } from 'rxjs';
 import { mergeMap, publish, switchAll, tap } from 'rxjs/operators';
 import { getLogger, getLoggers, LogLevelDesc } from 'loglevel';
 import * as performance from 'marky';
 import { decode as rawDecode, encode as rawEncode } from '@ably/msgpack-js';
+import { EventEmitter } from 'events';
 
 export const isArray = Array.isArray;
 
@@ -60,6 +62,7 @@ export class Future<T = void> implements PromiseLike<T> {
 
   constructor(value?: T) {
     this._promise = firstValueFrom(this.subject);
+    this._promise.catch(() => {}); // Suppress UnhandledPromiseRejection
     if (value !== undefined) {
       this.subject.next(value);
       this.subject.complete();
@@ -162,6 +165,10 @@ export function onErrorNever<T>(v: ObservableInput<T>): Observable<T> {
   return onErrorResumeNext(v, NEVER);
 }
 
+export function first<T>(src: Observable<T>): Promise<T | undefined> {
+  return firstValueFrom(src.pipe(defaultIfEmpty(undefined)));
+}
+
 export class HotSwitch<T> extends Observable<T> {
   private readonly in: BehaviorSubject<Observable<T>>;
 
@@ -217,9 +224,7 @@ type RxMethod<T> = (this: T, ...args: any[]) => Observable<any>;
 
 export function check<T>(assertion: (t: T) => boolean, otherwise: () => Error) {
   return {
-    sync: checkWith<T, SyncMethod<T>>(assertion, otherwise, err => {
-      throw err;
-    }),
+    sync: checkWith<T, SyncMethod<T>>(assertion, otherwise, err => { throw err; }),
     async: checkWith<T, AsyncMethod<T>>(assertion, otherwise, Promise.reject.bind(Promise)),
     rx: checkWith<T, RxMethod<T>>(assertion, otherwise, throwError)
   };
@@ -242,7 +247,7 @@ export class Stopwatch {
   readonly name: string;
   lap: Stopwatch;
   laps: { [name: string]: Stopwatch } = {};
-  entry: PerformanceEntry | undefined;
+  static timingEvents = new EventEmitter();
 
   constructor(
     scope: string, name: string) {
@@ -259,7 +264,9 @@ export class Stopwatch {
   stop(): PerformanceEntry {
     if (this.lap !== this)
       this.lap.stop();
-    return this.entry = performance.stop(this.name);
+    const event = performance.stop(this.name);
+    Stopwatch.timingEvents.emit('timing', event);
+    return event;
   }
 }
 
@@ -289,7 +296,8 @@ export function minIndexOfSparse<T>(arr: T[]) {
 export function binaryFold<T, R>(
   input: T[],
   map: (t: T) => R,
-  fold: (r1: R, r2: R) => R): R | null {
+  fold: (r1: R, r2: R) => R
+): R | null {
   return input.reduce<R | null>((r1, t) => {
     const r2 = map(t);
     return r1 == null ? r2 : fold(r1, r2);
@@ -301,9 +309,11 @@ export function mapObject(
   return Object.assign({}, ...Object.entries(o).map(([k, v]) => fn(k, v)));
 }
 
-export function *deepValues(o: any,
+export function *deepValues(
+  o: any,
   filter: (o: any, path: string[]) => boolean = o => typeof o != 'object',
-  path: string[] = []): IterableIterator<[string[], any]> {
+  path: string[] = []
+): IterableIterator<[string[], any]> {
   if (filter(o, path))
     yield [path, o];
   else if (typeof o == 'object')
@@ -315,7 +325,8 @@ export function setAtPath<T>(o: any, path: string[], value: T,
   createAt: (path: string[]) => any = path => {
     throw `nothing at ${path}`;
   },
-  start = 0): T {
+  start = 0
+): T {
   if (path.length > start)
     if (path.length - start === 1)
       o[path[start]] = value; // no-op for primitives, throws for null/undefined

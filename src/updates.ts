@@ -1,11 +1,10 @@
-import {
-  isList, isPropertyObject, isSet, List, Reference, Slot, Subject, Value
-} from './jrql-support';
+import { isList, List, Reference, Slot, Subject } from './jrql-support';
 import { DeleteInsert, GraphSubject, GraphSubjects, isDeleteInsert } from './api';
-import { compareValues, getValues, hasProperty, hasValue } from './engine/jsonld';
-import { deepValues, isArray, isNaturalNumber, setAtPath } from './engine/util';
+import { getValues } from './engine/jsonld';
+import { deepValues, isNaturalNumber, setAtPath } from './engine/util';
 import { array } from './util';
 import { isReference } from 'json-rql';
+import { SubjectPropertyValues } from './subjects';
 
 /**
  * An update to a single graph Subject.
@@ -53,13 +52,15 @@ export function asSubjectUpdates(update: DeleteInsert<GraphSubject[]>): SubjectU
 }
 
 /** @internal */
-function bySubject(update: DeleteInsert<GraphSubject[]>,
+function bySubject(
+  update: DeleteInsert<GraphSubject[]>,
   key: keyof DeleteInsert<GraphSubject[]>,
-  bySubject: SubjectUpdates = {}): SubjectUpdates {
+  bySubject: SubjectUpdates = {}
+): SubjectUpdates {
   for (let subject of update[key])
     Object.assign(
       // @id should never be empty
-      bySubject[subject['@id'] ?? '*'] ??= { '@delete': undefined, '@insert': undefined },
+      bySubject[subject['@id']] ??= { '@delete': undefined, '@insert': undefined },
       { [key]: unReifyRefs({ ...subject }) });
   return bySubject;
 }
@@ -130,7 +131,7 @@ export class SubjectUpdater {
 
   /**
    * Applies an update to the given subject in-place.
-   * 
+   *
    * @returns the given subject, for convenience
    * @see {@link updateSubject}
    */
@@ -141,12 +142,13 @@ export class SubjectUpdater {
       const inserts = this.delOrInsForSubject(subject, '@insert');
       for (let property of new Set(Object.keys(subject).concat(Object.keys(inserts ?? {})))) {
         switch (property) {
-          case '@id': break;
+          case '@id':
+            break;
           case '@list':
             this.updateList(subject, deletes, inserts);
             break;
           default:
-            const subjectProperty = new SubjectPropertyUpdater(subject, property, this);
+            const subjectProperty = new SubjectPropertyValues(subject, property, this.updateValues);
             subjectProperty.delete(...getValues(deletes ?? {}, property));
             subjectProperty.insert(...getValues(inserts ?? {}, property));
         }
@@ -156,7 +158,7 @@ export class SubjectUpdater {
   }
 
   /** @internal */
-  updateValues(values: Iterable<any>) {
+  updateValues = (values: Iterable<any>) => {
     for (let value of values)
       if (typeof value == 'object' && '@id' in value && !isReference(value))
         this.update(value);
@@ -203,92 +205,4 @@ export class SubjectUpdater {
 /** @internal */
 function isListUpdate(updatePart?: Subject): updatePart is List {
   return updatePart != null && isList(updatePart);
-}
-
-/** @internal */
-class SubjectPropertyUpdater {
-  private readonly wasArray: boolean;
-  private readonly configurable: boolean;
-
-  constructor(
-    readonly subject: Subject,
-    readonly property: string,
-    readonly subjectUpdater?: SubjectUpdater) {
-    this.wasArray = isArray(this.subject[this.property]);
-    this.configurable = Object.getOwnPropertyDescriptor(subject, property)?.configurable ?? false;
-  }
-
-  get values() {
-    return getValues(this.subject, this.property);
-  }
-
-  set values(values: any[]) {
-    // Apply deep updates to the final values
-    this.subjectUpdater?.updateValues(values);
-    // Per contract of updateSubject, this always L-value assigns (no pushing)
-    this.subject[this.property] = values.length === 0 ? [] : // See next
-      // Properties which were not an array before get collapsed
-      values.length === 1 && !this.wasArray ? values[0] : values;
-    if (values.length === 0 && this.configurable)
-      delete this.subject[this.property];
-  }
-
-  delete(...values: any[]) {
-    this.values = SubjectPropertyUpdater.minus(this.values, values);
-  }
-
-  insert(...values: any[]) {
-    const object = this.subject[this.property];
-    if (isPropertyObject(this.property, object) && isSet(object))
-      object['@set'] = SubjectPropertyUpdater.union(array(object['@set']), values);
-    else
-      this.values = SubjectPropertyUpdater.union(this.values, values);
-  }
-
-  exists(value?: any) {
-    if (value != null) {
-      const object = this.subject[this.property];
-      if (!isPropertyObject(this.property, object))
-        return false;
-      else if (isSet(object))
-        return hasValue(object, '@set', value);
-      else
-        return hasValue(this.subject, this.property, value);
-    } else {
-      return hasProperty(this.subject, this.property)
-    }
-  }
-
-  private static union(values: any[], unionValues: any[]): any[] {
-    return values.concat(SubjectPropertyUpdater.minus(unionValues, values));
-  }
-
-  private static minus(values: any[], minusValues: any[]): any[] {
-    return values.filter(value => !minusValues.some(
-      minusValue => compareValues(value, minusValue)));
-  }
-}
-
-/**
- * Includes the given value in the Subject property, respecting **m-ld** data
- * semantics by expanding the property to an array, if necessary.
- * @param subject the subject to add the value to.
- * @param property the property that relates the value to the subject.
- * @param values the value to add.
- */
-export function includeValues(subject: Subject, property: string, ...values: Value[]) {
-  new SubjectPropertyUpdater(subject, property).insert(...values);
-}
-
-/**
- * Determines whether the given set of values contains the given value. This
- * method accounts for the identity semantics of {@link Reference}s and
- * {@link Subject}s.
- * @param subject the subject to inspect
- * @param property the property to inspect
- * @param value the value to find in the set. If `undefined`, then wildcard
- * checks for any value at all.
- */
-export function includesValue(subject: Subject, property: string, value?: Value): boolean {
-  return new SubjectPropertyUpdater(subject, property).exists(value);
 }

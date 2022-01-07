@@ -6,8 +6,9 @@ import { CausalOperator, CausalTimeRange } from '../ops';
 import { Triple } from '../quads';
 import { TreeClock } from '../clocks';
 import { completed, getIdLogger, inflate } from '../util';
-import { array, MeldConfig } from '../../index';
+import { array } from '../../util';
 import { TickTid } from './JournalOperation';
+import { MeldConfig } from '../../config';
 
 export type JournalClerkConfig = Pick<MeldConfig, '@id' | 'logLevel' | 'journal'>;
 

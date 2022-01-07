@@ -4,7 +4,7 @@
  * @internal
  */
 import * as Ably from 'ably';
-import { MeldConfig } from '..';
+import { MeldExtensions } from '../api';
 import {
   NotifyParams, PeerParams, PubsubRemotes, ReplyParams, SendParams, SubPub
 } from '../engine/remotes';
@@ -13,6 +13,7 @@ import { filter, map } from 'rxjs/operators';
 import { AblyTraffic, AblyTrafficConfig } from './AblyTraffic';
 import type { PeerSignal, PeerSignaller, WrtcPeering } from '../wrtc/WrtcPeering';
 import { inflateFrom } from '../engine/util';
+import { MeldConfig } from '../config';
 
 export interface AblyMeldConfig extends
   Omit<Ably.Types.ClientOptions, 'echoMessages' | 'clientId'>,
@@ -40,9 +41,9 @@ export class AblyRemotes extends PubsubRemotes implements PeerSignaller {
   private readonly subscribed: Promise<unknown>;
   private readonly peering?: WrtcPeering;
 
-  constructor(config: MeldAblyConfig,
+  constructor(config: MeldAblyConfig, extensions: MeldExtensions,
     impl: typeof ablyConnect | { connect?: typeof ablyConnect, peering: WrtcPeering } = ablyConnect) {
-    super(config);
+    super(config, extensions);
     if (typeof impl != 'function') {
       this.peering = impl.peering;
       this.peering.signaller = this;

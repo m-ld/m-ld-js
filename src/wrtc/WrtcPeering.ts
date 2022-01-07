@@ -3,8 +3,8 @@ import type { Instance as Peer, Options as PeerOpts, SignalData } from 'simple-p
 import * as SimplePeer from 'simple-peer';
 import { getIdLogger } from '../engine/util';
 import { timer } from 'rxjs';
-import type { MeldConfig } from '..';
 import type { NotifyParams, SubPub } from '../engine/remotes';
+import { MeldConfig } from '../config';
 
 export interface MeldWrtcConfig extends MeldConfig {
   wrtc?: RTCConfiguration;

@@ -1,7 +1,7 @@
-import { MeldConstraint, MeldUpdate } from '../../api';
-import { OperationMessage, Snapshot } from '..';
+import { GraphSubject, MeldConstraint, MeldExtensions, MeldUpdate } from '../../api';
+import { BufferEncoding, EncodedOperation, OperationMessage, Snapshot } from '..';
 import { GlobalClock, TickTree, TreeClock } from '../clocks';
-import { Context, Write } from '../../jrql-support';
+import { Context, Read, Write } from '../../jrql-support';
 import { Dataset, PatchQuads, PatchResult } from '.';
 import { JrqlGraph } from './JrqlGraph';
 import { MeldEncoder, MeldOperation, TriplesTids, unreify, UUID } from '../MeldEncoding';
@@ -11,22 +11,21 @@ import { check, completed, Future, getIdLogger, inflate } from '../util';
 import { Logger } from 'loglevel';
 import { MeldError } from '../MeldError';
 import { LocalLock } from '../local';
-import { GraphSubject, MeldConfig, Read } from '../..';
 import { Quad, Triple, tripleIndexKey, TripleMap } from '../quads';
-import { CheckList } from '../../constraints/CheckList';
-import { DefaultList } from '../../constraints/DefaultList';
 import { InterimUpdatePatch } from './InterimUpdatePatch';
 import { ActiveContext } from 'jsonld/lib/context';
 import { activeCtx } from '../jsonld';
 import { Journal, JournalEntry, JournalState } from '../journal';
 import { JournalClerk } from '../journal/JournalClerk';
-import { QueryableRdfSource } from '../../rdfjs-support';
 import { PatchTids, TidsStore } from './TidsStore';
 import { flattenItemTids } from '../ops';
 import { EntryBuilder } from '../journal/JournalState';
 import { Consumable, flowable } from '../../flowable';
 import { batch } from '../../flowable/operators/batch';
 import { consume } from '../../flowable/consume';
+import { MeldMessageType } from '../../ns/m-ld';
+import { CheckList } from '../../constraints/CheckList';
+import { MeldConfig } from '../../config';
 
 type DatasetSnapshot = Omit<Snapshot, 'updates'>;
 
@@ -42,8 +41,7 @@ export class SuSetDataset extends MeldEncoder {
     check((d: SuSetDataset) => !d.dataset.closed, () => new MeldError('Clone has closed'));
 
   /** External context used for reads, writes and updates, but not for constraints. */
-  /*readonly*/
-  userCtx: ActiveContext;
+  /*readonly*/ userCtx: ActiveContext;
 
   private /*readonly*/ userGraph: JrqlGraph;
   private readonly tidsStore: TidsStore;
@@ -53,13 +51,13 @@ export class SuSetDataset extends MeldEncoder {
   private readonly datasetLock: LocalLock;
   private readonly maxOperationSize: number;
   private readonly log: Logger;
-  private readonly constraint: CheckList;
 
   constructor(
     private readonly dataset: Dataset,
     private readonly context: Context,
-    constraints: MeldConstraint[],
-    config: DatasetConfig) {
+    private readonly extensions: MeldExtensions,
+    config: DatasetConfig
+  ) {
     super(config['@domain'], dataset.rdf);
     this.log = getIdLogger(this.constructor, config['@id'], config.logLevel);
     this.journal = new Journal(dataset, this);
@@ -68,7 +66,6 @@ export class SuSetDataset extends MeldEncoder {
     // Update notifications are strictly ordered but don't hold up transactions
     this.datasetLock = new LocalLock(config['@id'], dataset.location);
     this.maxOperationSize = config.maxOperationSize ?? Infinity;
-    this.constraint = new CheckList(constraints.concat(new DefaultList(config['@id'])));
   }
 
   @SuSetDataset.checkNotClosed.async
@@ -84,7 +81,11 @@ export class SuSetDataset extends MeldEncoder {
     }
   }
 
-  get queryableRdfSource(): QueryableRdfSource {
+  private get constraint(): MeldConstraint {
+    return new CheckList(this.extensions.constraints);
+  }
+
+  get readState() {
     return this.userGraph.asReadState;
   }
 
@@ -110,9 +111,9 @@ export class SuSetDataset extends MeldEncoder {
       this.updateSource.complete();
     }
     this.journal.close();
-    await this.journalClerk.close();
+    await this.journalClerk.close().catch(err => this.log.warn(err));
     this.datasetLock.release();
-    return this.dataset.close();
+    return this.dataset.close().catch(err => this.log.warn(err));
   }
 
   @SuSetDataset.checkNotClosed.async
@@ -197,7 +198,7 @@ export class SuSetDataset extends MeldEncoder {
         txc.sw.next('check-constraints');
         const interim = new InterimUpdatePatch(
           this.userGraph, this.userCtx, time, patch, 'mutable');
-        await this.constraint.check(this.userGraph.asReadState, interim);
+        await this.constraint.check(this.readState, interim);
         const { update, entailments } = await interim.finalise();
 
         txc.sw.next('find-tids');
@@ -231,7 +232,7 @@ export class SuSetDataset extends MeldEncoder {
     entailments: PatchQuads,
     tidPatch: PatchTids,
     journaling: EntryBuilder,
-    op: OperationMessage | null,
+    opMessage: OperationMessage | null,
     update: MeldUpdate): Promise<PatchResult<OperationMessage | null>> {
     const commitTids = await this.tidsStore.commit(tidPatch);
     this.log.debug(`patch ${journaling.entries.map(e => e.operation.time)}:
@@ -243,7 +244,7 @@ export class SuSetDataset extends MeldEncoder {
         commitTids(batch);
         journaling.commit(batch);
       },
-      return: op,
+      return: opMessage,
       after: () => this.emitUpdate(update)
     };
   }
@@ -253,10 +254,19 @@ export class SuSetDataset extends MeldEncoder {
       this.updateSource.next(update);
   }
 
-  private operationMessage(journal: JournalState, time: TreeClock, op: MeldOperation) {
+  private async operationMessage(journal: JournalState, time: TreeClock, op: MeldOperation) {
     const prev = journal.gwc.getTicks(time);
     // Construct the operation message with the previous visible clock tick
-    const operationMsg = new OperationMessage(prev, op.encoded, time);
+    let [version, from, timeJson, update, encoding] = op.encoded;
+    // Apply transport security to the encoded update
+    const wired = await this.extensions.transportSecurity.wire(
+      update, MeldMessageType.operation, 'out', this.readState);
+    if (wired !== update) {
+      update = wired;
+      encoding = encoding.concat(BufferEncoding.SECURE);
+    }
+    const operationMsg = new OperationMessage(
+      prev, [version, from, timeJson, update, encoding], time);
     if (operationMsg.size > this.maxOperationSize)
       throw new MeldError('Delta too big');
     return operationMsg;
@@ -291,7 +301,8 @@ export class SuSetDataset extends MeldEncoder {
         txc.sw.next('decode-op');
         const journal = await this.journal.state();
         this.log.debug(`Applying operation: ${msg.time} @ ${localTime}`);
-        const op = await journal.applicableOperation(MeldOperation.fromEncoded(this, msg.data));
+        const op = await journal.applicableOperation(
+          MeldOperation.fromEncoded(this, await this.unSecureOperation(msg)));
 
         txc.sw.next('apply-txn');
         const patch = new PatchQuads();
@@ -302,7 +313,7 @@ export class SuSetDataset extends MeldEncoder {
 
         txc.sw.next('apply-cx'); // "cx" = constraint
         const interim = new InterimUpdatePatch(this.userGraph, this.userCtx, cxnTime, patch);
-        await this.constraint.apply(this.userGraph.asReadState, interim);
+        await this.constraint.apply(this.readState, interim);
         const { update, assertions, entailments } = await interim.finalise();
         const cxn = await this.constraintTxn(assertions, patch, insertTids, cxnTime);
         // After applying the constraint, some new quads might have been removed
@@ -327,10 +338,23 @@ export class SuSetDataset extends MeldEncoder {
         }
         // FIXME: If this operation message exceeds max size, what to do?
         const opMsg = cxn != null && cxn.operation != null ?
-          this.operationMessage(journal, cxnTime, cxn.operation) : null;
+          await this.operationMessage(journal, cxnTime, cxn.operation) : null;
         return this.txnResult(patch, entailments, tidPatch, journaling, opMsg, update);
       }
     });
+  }
+
+  /**
+   * Up-applies transport security from the encoded operation in the message
+   */
+  private async unSecureOperation(msg: OperationMessage): Promise<EncodedOperation> {
+    let [version, from, timeJson, updated, encoding] = msg.data;
+    if (encoding[encoding.length - 1] === BufferEncoding.SECURE) {
+      updated = await this.extensions.transportSecurity.wire(
+        updated, MeldMessageType.operation, 'in', this.readState);
+      encoding = encoding.slice(0, -1);
+    }
+    return [version, from, timeJson, updated, encoding];
   }
 
   /**
@@ -398,7 +422,7 @@ export class SuSetDataset extends MeldEncoder {
       id: 'snapshot-batch',
       prepare: async () => {
         if ('inserts' in batch) {
-          const triplesTids = unreify(this.triplesFromBuffer(batch.inserts));
+          const triplesTids = unreify(this.triplesFromBuffer(batch.inserts, batch.encoding));
           // For each triple in the batch, insert the TIDs into the tids graph
           const tidPatch = new PatchTids({ inserts: flattenItemTids(triplesTids) });
           // And include the triples themselves
@@ -425,9 +449,10 @@ export class SuSetDataset extends MeldEncoder {
       mergeMap(async ({ value: quads, next }) => {
         const tidQuads = await this.tidsStore.findTriplesTids(quads, 'includeEmpty');
         const reified = this.reifyTriplesTids([...tidQuads]);
-        return { value: { inserts: this.bufferFromTriples(reified) }, next };
+        const [inserts, encoding] = this.bufferFromTriples(reified);
+        return { value: { inserts, encoding }, next };
       }));
-    const opData = inflate(journal.latestOperations(),operations => {
+    const opData = inflate(journal.latestOperations(), operations => {
       return consume(operations.map(operation => ({ operation })));
     });
     return {
