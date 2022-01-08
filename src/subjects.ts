@@ -74,6 +74,7 @@ export class SubjectPropertyValues {
 /**
  * Includes the given value in the Subject property, respecting **m-ld** data
  * semantics by expanding the property to an array, if necessary.
+ *
  * @param subject the subject to add the value to.
  * @param property the property that relates the value to the subject.
  * @param values the value to add.
@@ -82,9 +83,10 @@ export function includeValues(subject: Subject, property: string, ...values: Val
   new SubjectPropertyValues(subject, property).insert(...values);
 }
 /**
- * Determines whether the given set of values contains the given value. This
- * method accounts for the identity semantics of {@link Reference}s and
+ * Determines whether the given set of subject property has the given value.
+ * This method accounts for the identity semantics of {@link Reference}s and
  * {@link Subject}s.
+ *
  * @param subject the subject to inspect
  * @param property the property to inspect
  * @param value the value to find in the set. If `undefined`, then wildcard
@@ -112,6 +114,28 @@ export type NativeValueConstructor = NativeAtomConstructor | NativeContainerCons
  * Extracts a property value from the given subject with the given type. This is
  * a typesafe cast which will not perform type coercion e.g. strings to numbers.
  *
+ * Per **m-ld** [data&nbsp;semantics](https://spec.m-ld.org/#data-semantics), a
+ * single value in a field is equivalent to a singleton set (see example), and
+ * will also cast successfully to a singleton array.
+ *
+ * ## Examples:
+ *
+ * ```js
+ * propertyValue({ name: 'Fred' }, 'name', String); // => 'Fred'
+ * propertyValue({ name: 'Fred' }, 'name', Number); // => throws TypeError
+ * propertyValue({ name: 'Fred' }, 'name', Set, String); // => Set(['Fred'])
+ * propertyValue({ name: 'Fred' }, 'age', Set); // => Set([])
+ * propertyValue({
+ *   shopping: { '@list': ['Bread', 'Milk'] }
+ * }, 'shopping', Array, String); // => ['Bread', 'Milk']
+ * propertyValue({
+ *   birthday: {
+ *     '@value': '2022-01-08T16:49:43.572Z',
+ *     '@type': 'http://www.w3.org/2001/XMLSchema#dateTime'
+ *   }
+ * }, 'birthday', Date); // => Javascript Date
+ * ```
+ *
  * @param subject the subject to inspect
  * @param property the property to inspect
  * @param type the expected type for the returned value
@@ -126,7 +150,16 @@ export function propertyValue<T>(
   subType?: NativeAtomConstructor
 ): T {
   const value = subject[property];
-  if (isPropertyObject(property, value)) {
+  if (value == null) {
+    switch (type) {
+      case Set:
+        return <any>new Set;
+      case Array:
+        return <any>[];
+      default:
+        throw new TypeError(`${value} is not a ${type.name}`);
+    }
+  } else if (isPropertyObject(property, value)) {
     return castPropertyValue(value, type, subType);
   } else {
     throw new TypeError(`${property} is not a property`);

@@ -10,9 +10,10 @@ Specific compliance specs by glob (see [m-ld-spec/compliance](https://github.com
 - `npm run compliance -- "2-*/2-*"` or just `npm run compliance -- "2/2"`
 
 For IDE integration, `compliance/test.js` can also be run with the Jasmine 
-command line options `reporter` and `filter`.
-
-e.g.
+command line options `reporter` and `filter` e.g.
 ```
 node compliance/test.js 2/2 "--filter=at least one" "--reporter=jasmine-ts-console-reporter"
 ```
+
+Experimental features in this engine may have tests in the `./test` folder. Run these using `.` as the root path, i.e.
+- `npm run compliance -- "./*"`

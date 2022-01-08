@@ -26,8 +26,16 @@
     "title": "Transactions"
   },
   {
+    "url": "#subjects",
+    "title": "Subjects"
+  },
+  {
     "url": "#concurrency",
     "title": "Concurrency"
+  },
+  {
+    "url": "#security",
+    "title": "Security"
   },
   {
     "url": "https://github.com/m-ld/m-ld-js",

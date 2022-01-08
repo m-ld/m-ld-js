@@ -20,7 +20,9 @@ recommended.
 ## ci & website
 The project and [documentation](./doc) are built using typedoc, and delivered to
 the engine documentation website at https://js.m-ld.org/ using
-[Vercel](https://vercel.com/m-ld/m-ld-js).
+[Vercel](https://vercel.com/m-ld/m-ld-js). This build includes unit testing.
+
+The [**m-ld** specification](https://github.com/m-ld/m-ld-spec) compliance tests are run on [CircleCI](https://app.circleci.com/pipelines/github/m-ld/m-ld-js).
 
 ## work in progress
 - Issues relating to this engine are logged on the Issues tab.

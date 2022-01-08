@@ -7,7 +7,7 @@ data write. See the **m-ld**
 Supported pattern types for this engine are (follow the links for examples):
 - [Describe](/interfaces/describe.html)
 - [Select](/interfaces/select.html)
-- [Construct](/interfaces/construct.html) (🚀new!)
+- [Construct](/interfaces/construct.html)
 - [Group](/interfaces/group.html) or [Subject](/interfaces/subject.html) (the shorthand way to insert data)
 - [Update](/interfaces/update.html) (the longhand way to insert or delete data)
 

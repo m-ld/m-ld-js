@@ -53,14 +53,34 @@ export type MeldStatus = spec.MeldStatus;
  * {@link Subject}s (with a {@link GraphSubjects.graph graph} mode). Use as an
  * [Observable](https://rxjs.dev/api/index/class/Observable) with `.subscribe`
  * (or other RxJS methods) to be notified of individual Subjects as they arrive.
- * Or consume the results one-by-one with backpressure using {@link Flowable.consume}.
+ * Or consume the results one-by-one with backpressure using
+ * [`Flowable.consume`](https://www.npmjs.com/package/rx-flowable).
  *
- * If results are consumed outside the scope of a read procedure, they may be
- * affected by concurrent writes (this is equivalent to a
- * [monotonic atomic view](https://jepsen.io/consistency/models/monotonic-atomic-view)).
- * If the results are being used to strictly maintain a downstream data model,
- * use a read procedure and hold it open by returning {@link completed}.
- * TODO: Example
+ * Read results (even if consumed outside the scope of a read procedure) will
+ * not be affected by concurrent writes (this is equivalent to
+ * [serialisability](https://jepsen.io/consistency/models/serializable)).
+ * Therefore, results can be safely used to strictly maintain a downstream data
+ * model. Care must still be taken to ensure that results do not interleave with
+ * the results of a prior read, if the downstream consumer is slow.
+ *
+ * ```js
+ * const query = {
+ *   '@describe': '?id',
+ *   '@where': {
+ *     '@graph': { '@id': '?id', age: '?age' },
+ *     '@filter': { '@lt': ['?age', 50] }
+ *   }
+ * };
+ * // Process the results as a single array
+ * meld.read(query).then(subjects => subjects.forEach(displayUi));
+ * // Traverse a graph of results
+ * meld.read(query).then(subjects => console.log(subjects.graph['fred']?.wife?.name));
+ * // Process the results one-by-one as fast as they arrive
+ * meld.read(query).subscribe(subject => displayUi(subject));
+ * // Process the results only as fast as expensive processing can go
+ * meld.read(query).consume.subscribe(({ value: subject, next }) =>
+ *   expensiveAsyncProcess(subject).finally(next));
+ * ```
  *
  * @see {@link MeldStateMachine.read}
  */

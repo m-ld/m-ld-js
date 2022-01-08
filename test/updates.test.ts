@@ -544,5 +544,17 @@ describe('Update utilities', () => {
         ears: { '@set': ['left', 'right'] }
       }, 'ears', Array)).toEqual(['left', 'right']);
     });
+
+    test('cast empty', () => {
+      expect(propertyValue({
+        ears: undefined
+      }, 'ears', Array)).toEqual([]);
+      expect(propertyValue({
+        name: 'Fred'
+      }, 'ears', Array)).toEqual([]);
+      expect(propertyValue({
+        name: 'Fred'
+      }, 'ears', Set)).toEqual(new Set([]));
+    });
   });
 });

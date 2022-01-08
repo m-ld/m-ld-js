@@ -33,12 +33,11 @@ There are two starter projects available:
 **m-ld** uses [levelup](https://github.com/level/levelup) to interface with a
 LevelDB-compatible storage backend.
 
-- For the fastest responses use [memdown](https://github.com/level/memdown)
-  (memory storage).
-- In the browser, use [level-js](https://github.com/Level/level-js)
-  (browser-local storage).
-- In a service or native application, use
-  [leveldown](https://github.com/level/leveldown/) (file system storage).
+For the fastest in-memory responses, this library provides `MeldMemDown`, an optimised variant of [memdown](https://github.com/level/memdown), which can be imported from `'@m-ld/m-ld/dist/memdown'` as shown in the example below. To use, you must also install the [`memdown`](https://www.npmjs.com/package/memdown) package as a peer of `@m-ld/m-ld`.
+
+In a service or native application, use [leveldown](https://github.com/level/leveldown/) (file system storage).
+
+In a browser, you can use [level-js](https://github.com/Level/level-js) (browser-local storage).
 
 ### Connecting to Other Clones
 
@@ -47,11 +46,9 @@ A **m-ld** clone uses a 'remotes' object to communicate with other clones.
 - With an MQTT broker, use [`MqttRemotes`](#mqtt-remotes).
 - For a scalable global managed service, use [`AblyRemotes`](#ably-remotes).
 - If you have a live web server (not just CDN or serverless), you can use
-  [`IoRemotes`](#socketio-remotes) (🚀new!).
+  [`IoRemotes`](#socketio-remotes).
 
-> 🚧 *If your architecture includes some other publish/subscribe service like
-> AMQP, or you would like to use a fully peer-to-peer protocol, please
-> [contact&nbsp;us](https://m-ld.org/hello/) to discuss your use-case.*
+> 🚧 *If your architecture includes some other publish/subscribe service like AMQP or Apache Kafka, or you would like to use a fully peer-to-peer protocol, please [contact&nbsp;us](https://m-ld.org/hello/) to discuss your use-case. Remotes can even utilise multiple transport protocols, for example WebRTC with a suitable signalling service.*
 
 ### Initialisation
 
@@ -59,8 +56,8 @@ The [clone](#clone) function initialises the m-ld engine with a leveldb back-end
 and the clone [configuration](interfaces/meldconfig.html).
 
 ```typescript
-import MemDown from 'memdown';
 import { clone, uuid } from '@m-ld/m-ld';
+import { MeldMemDown } from '@m-ld/m-ld/dist/memdown';
 import { MqttRemotes, MeldMqttConfig } from '@m-ld/m-ld/dist/mqtt';
 
 const config: MeldMqttConfig = {
@@ -93,4 +90,8 @@ await meld.status.becomes({ online: true, outdated: false });
 
 [[include:transactions.md]]
 
+[[include:subjects.md]]
+
 [[include:concurrency.md]]
+
+[[include:security.md]]

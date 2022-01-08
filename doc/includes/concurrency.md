@@ -56,20 +56,10 @@ ui.on('action', async () => {
 
 ### Example: UI Show Handler
 ```typescript
-ui.on('show', async () => {
-  clone.read((state: MeldReadState) => {
+ui.on('show', () => {
+  clone.read(async (state: MeldReadState) => {
     let currentData = await state.read(something);
     showTheNewUi(currentData);
   });
 });
 ```
-
-### Handling Updates
-Clone [updates](interfaces/meldupdate.html) obtained from a read handler specify
-the exact Subject property values that have been deleted or inserted during the
-update. Utilities are provided to help update app views of data based on updates
-notified via the {@link read} method:
-- [updateSubject](#updatesubject)
-- [SubjectUpdater](/classes/subjectupdater.html)
-- [asSubjectUpdates](#assubjectupdates)
-- [includesValue](#includesvalue)
