@@ -3,7 +3,7 @@ import { GraphSubject, MeldUpdate } from '../api';
 import { LockManager } from './locks';
 import { Observable, Subscription } from 'rxjs';
 import { QueryableRdfSource } from '../rdfjs-support';
-import { Consumable } from '../flowable';
+import { Consumable } from 'rx-flowable';
 import { QueryableRdfSourceProxy } from './quads';
 
 /** Simplified clone engine with only the basic requirements of an engine */

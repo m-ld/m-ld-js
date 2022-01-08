@@ -5,7 +5,7 @@ import {
 } from '../api';
 import { CloneEngine, EngineState, EngineUpdateProc, StateEngine } from './StateEngine';
 import { QueryableRdfSourceProxy } from './quads';
-import { Consumable } from '../flowable';
+import { Consumable } from 'rx-flowable';
 import { first, Future, inflateFrom } from './util';
 import { QueryableRdfSource } from '../rdfjs-support';
 import { constructProperties, describeId } from './jrql-util';

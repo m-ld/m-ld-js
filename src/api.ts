@@ -8,7 +8,7 @@ import { shortId } from './util';
 import { Iri } from 'jsonld/jsonld-spec';
 import { SubjectGraph } from './engine/SubjectGraph';
 import { QueryableRdfSource } from './rdfjs-support';
-import { Consumable, flow, Flowable } from './flowable';
+import { Consumable, flow, Flowable } from 'rx-flowable';
 import { Future, tapComplete } from './engine/util';
 import { MeldMessageType } from './ns/m-ld';
 

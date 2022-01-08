@@ -15,7 +15,7 @@ import { AbstractLevelDOWN } from 'abstract-leveldown';
 import { jsonify } from './testUtil';
 import { MeldMemDown } from '../src/memdown';
 import { Write } from '../src/jrql-support';
-import { Consumable } from '../src/flowable';
+import { Consumable } from 'rx-flowable';
 import { inflateFrom } from '../src/engine/util';
 import { MeldError } from '../src/engine/MeldError';
 
@@ -438,11 +438,13 @@ describe('Dataset engine', () => {
 
       // Push a operation claiming a missed public tick
       remote.tick();
-      remoteUpdates.next(remote.sentOperation(
-        {}, { '@id': 'http://test.m-ld.org/wilma', 'http://test.m-ld.org/#name': 'Wilma' }));
+      const outOfOrder = remote.sentOperation(
+        {}, { '@id': 'http://test.m-ld.org/wilma', 'http://test.m-ld.org/#name': 'Wilma' });
+      remoteUpdates.next(outOfOrder);
 
       await expect(clone.status.becomes({ outdated: true })).resolves.toBeDefined();
       await expect(clone.status.becomes({ outdated: false })).resolves.toBeDefined();
+      await expect(outOfOrder.delivered).rejects.toBeInstanceOf(MeldError);
     });
 
     test('ignores outdated operation', async () => {
@@ -460,12 +462,15 @@ describe('Dataset engine', () => {
       await clone.status.becomes({ outdated: false });
 
       const updates = firstValueFrom(clone.dataUpdates.pipe(toArray()));
-      const op = remote.sentOperation(
-        {}, { '@id': 'http://test.m-ld.org/wilma', 'http://test.m-ld.org/#name': 'Wilma' });
       // Push a operation
+      let op = remote.sentOperation(
+        {}, { '@id': 'http://test.m-ld.org/wilma', 'http://test.m-ld.org/#name': 'Wilma' });
       remoteUpdates.next(op);
       // Push the same operation again
+      op = new OperationMessage(op.prev, op.data, op.time);
       remoteUpdates.next(op);
+      // Delivered OK, but need additional check below to see ignored
+      await expect(op.delivered).resolves.toBeUndefined();
       // Also enqueue a no-op write, which we can wait for - relying on queue ordering
       await clone.write({ '@insert': [] } as Update);
       await clone.close(); // Will complete the updates

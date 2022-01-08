@@ -5,8 +5,8 @@ import { CloneEngine, StateEngine } from '../src/engine/StateEngine';
 import { SubjectGraph } from '../src/engine/SubjectGraph';
 import { single } from 'asynciterator';
 import { DataFactory as RdfDataFactory, Quad } from 'rdf-data-factory';
-import { drain } from '../src/flowable/drain';
-import { consume } from '../src/flowable/consume';
+import { drain } from 'rx-flowable';
+import { consume } from 'rx-flowable/consume';
 
 describe('State Engine', () => {
   class MockCloneEngine implements CloneEngine {

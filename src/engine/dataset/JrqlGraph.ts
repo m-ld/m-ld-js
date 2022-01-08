@@ -17,10 +17,9 @@ import { GraphSubject, MeldReadState, ReadResult, readResult } from '../../api';
 import { binaryFold, first, flatten, Future, inflate, isArray } from '../util';
 import { ConstructTemplate } from './ConstructTemplate';
 import { Binding, QueryableRdfSource } from '../../rdfjs-support';
-import { Consumable, each } from '../../flowable';
-import { ignoreIf } from '../../flowable/operators/ignoreIf';
-import { flatMap } from '../../flowable/operators/flatMap';
-import { consume } from '../../flowable/consume';
+import { Consumable, each } from 'rx-flowable';
+import { flatMap, ignoreIf } from 'rx-flowable/operators';
+import { consume } from 'rx-flowable/consume';
 import { constructSubject } from '../jrql-util';
 import { array } from '../../util';
 

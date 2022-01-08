@@ -8,7 +8,7 @@ import { Describe, MeldConstraint } from '../src';
 import { jsonify } from './testUtil';
 import { MeldEncoder } from '../src/engine/MeldEncoding';
 import { BufferEncoding, OperationMessage } from '../src/engine';
-import { drain } from '../src/flowable/drain';
+import { drain } from 'rx-flowable';
 
 const fred = {
   '@id': 'http://test.m-ld.org/fred',

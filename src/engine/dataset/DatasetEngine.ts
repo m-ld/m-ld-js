@@ -25,7 +25,7 @@ import { CloneEngine } from '../StateEngine';
 import { MeldError, MeldErrorStatus } from '../MeldError';
 import { AsyncIterator, TransformIterator, wrap } from 'asynciterator';
 import { BaseStream } from '../../rdfjs-support';
-import { Consumable } from '../../flowable';
+import { Consumable } from 'rx-flowable';
 import { MeldConfig } from '../../config';
 
 enum ConnectStyle {
@@ -242,12 +242,15 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
             if (msg.time.ticks <= ticksSeen) {
               // Already had this message.
               this.log.debug('Ignoring outdated', logBody);
+              msg.delivered.resolve();
             } else if (msg.prev > ticksSeen) {
               // We're missing a message. Reset the clock and trigger a re-connect.
               this.messageService.push(startTime);
-              throw new MeldError('Update out of order', `
+              const outOfOrder = new MeldError('Update out of order', `
               Update claims prev is ${msg.prev} (${msg.time}),
               but local clock was ${ticksSeen} (${prevTime})`);
+              msg.delivered.reject(outOfOrder);
+              throw outOfOrder;
             } else {
               this.log.debug('Accepting', logBody);
               // Get the event time just before transacting the change, making an

@@ -15,7 +15,7 @@ import { MeldError, MeldErrorStatus } from '../MeldError';
 import { AbstractMeld } from '../AbstractMeld';
 import { MeldExtensions, MeldReadState, shortId } from '../../index';
 import { JsonNotification, NotifyParams, ReplyParams, SendParams } from './PubsubParams';
-import { consume } from '../../flowable/consume';
+import { consume } from 'rx-flowable/consume';
 import { MeldMessageType } from '../../ns/m-ld';
 import { MeldConfig } from '../../config';
 
