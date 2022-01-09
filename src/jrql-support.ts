@@ -22,7 +22,12 @@ export type Pattern = jrql.Pattern;
  * A reference to a Subject. Used to disambiguate an IRI from a plain string.
  * Unless a custom [Context](#context) is used for the clone, all references
  * will use this format.
+ *
+ * This type is also used to distinguish identified subjects (with an `@id`
+ * field) from anonymous ones (without an `@id` field).
+ *
  * @see [json-rql reference](https://json-rql.org/#reference)
+ * @category json-rql
  */
 export type Reference = jrql.Reference;
 /**
@@ -31,6 +36,7 @@ export type Reference = jrql.Reference;
  * - Subject `@type`: the type value is a vocabulary reference
  * - Any value for a property that has been defined as `@vocab` in the Context
  * @see https://www.w3.org/TR/json-ld/#default-vocabulary
+ * @category json-rql
  */
 export type VocabReference = { '@vocab': Iri };
 /**
@@ -40,6 +46,7 @@ export type VocabReference = { '@vocab': Iri };
  * integration with existing systems, it may be useful to provide other context
  * for shared data.
  * @see [json-rql context](https://json-rql.org/interfaces/context.html)
+ * @category json-rql
  */
 export type Context = jrql.Context;
 /**
@@ -131,6 +138,7 @@ export { operators } from 'json-rql';
  *
  * @see [m-ld Lists specification](https://spec.m-ld.org/#lists)
  * @see [json-rql list](https://json-rql.org/interfaces/list.html)
+ * @category json-rql
  */
 export interface List extends Subject {
   /**
@@ -154,6 +162,7 @@ export function isList(object: SubjectPropertyObject): object is List {
  * Used to express an unordered set of data and to ensure that values are always
  * represented as arrays.
  * @see [json-rql set](https://json-rql.org/interfaces/set.html)
+ * @category json-rql
  */
 export interface Set {
   '@set': SubjectPropertyObject;
@@ -220,6 +229,7 @@ export type Result = '*' | Variable | Variable[];
  * ```
  *
  * @see [json-rql subject](https://json-rql.org/interfaces/subject.html)
+ * @category json-rql
  */
 export interface Subject extends Pattern {
   /**
@@ -256,8 +266,10 @@ export type SubjectProperty =
 /**
  * Determines whether the given property object from a well-formed Subject is a
  * graph edge; i.e. not a `@context` or the Subject `@id`.
+ *
  * @param property the Subject property in question
  * @param object the object (value) of the property
+ * @category json-rql
  */
 export function isPropertyObject(property: string, object: Subject['any']):
   object is SubjectPropertyObject {
@@ -363,6 +375,7 @@ export function isConstraint(value: Expression): value is Constraint {
  * > ```
  *
  * @see [json-rql group](https://json-rql.org/interfaces/group.html)
+ * @category json-rql
  */
 export interface Group extends Pattern {
   /**
@@ -479,6 +492,8 @@ export interface Read extends Query {
 
 /**
  * Determines if the given pattern will read data from the domain.
+ *
+ * @category json-rql
  */
 export function isRead(p: Pattern): p is Read {
   return isDescribe(p) || isSelect(p) || isConstruct(p);
@@ -509,6 +524,7 @@ export type Write = Subject | Group | Update;
  * `{ "@insert": {} }` or `{ "@graph": [] }`.
  *
  * @see {@link Write}
+ * @category json-rql
  */
 export function isWrite(p: Pattern): p is Write {
   return !isRead(p) && (isSubject(p) || isWriteGroup(p) || isUpdate(p));
@@ -561,6 +577,7 @@ export function isWrite(p: Pattern): p is Write {
  * clause.
  *
  * @see [json-rql describe](https://json-rql.org/interfaces/describe.html)
+ * @category json-rql
  */
 export interface Describe extends Read {
   /**
@@ -679,6 +696,7 @@ export function isDescribe(p: Pattern): p is Describe {
  * ```
  *
  * @see [json-rql construct](https://json-rql.org/interfaces/construct.html)
+ * @category json-rql
  */
 export interface Construct extends Read {
   /**
@@ -732,6 +750,7 @@ export function isConstruct(p: Pattern): p is Construct {
  * clause.
  *
  * @see [json-rql select](https://json-rql.org/interfaces/select.html)
+ * @category json-rql
  */
 export interface Select extends Read {
   /**
@@ -806,6 +825,7 @@ export function isSelect(p: Pattern): p is Select {
  * ```
  *
  * @see [json-rql update](https://json-rql.org/interfaces/update.html)
+ * @category json-rql
  */
 export interface Update extends Query {
   /**

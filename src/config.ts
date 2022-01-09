@@ -6,6 +6,8 @@ import type { EventEmitter } from 'events';
 
 /**
  * **m-ld** clone configuration, used to initialise a {@link clone} for use.
+ *
+ * @category Configuration
  */
 export interface MeldConfig {
   /**
@@ -60,6 +62,7 @@ export interface MeldConfig {
   maxOperationSize?: number;
   /**
    * Log level for the clone
+   * @see https://github.com/pimterry/loglevel#documentation
    */
   logLevel?: LogLevelDesc;
 }
@@ -89,11 +92,9 @@ export interface JournalConfig {
  * The runtime embedding environment for the **m-ld** clone. The clone calls
  * back the app for specific behaviours; see the members of this class.
  *
- * Extensions provided as members of the app object will be used for
- * bootstrapping, prior to the clone joining the domain. After that, different
- * extensions may come into effect if so declared in the data.
+ * @category Configuration
  */
-export interface MeldApp extends Partial<MeldExtensions> {
+export interface MeldApp {
   /**
    * This object must be provided if the domain declares an access control
    * extension requiring an identified security principal (user or machine).
@@ -112,3 +113,12 @@ export interface MeldApp extends Partial<MeldExtensions> {
    */
   backendEvents?: EventEmitter;
 }
+
+/**
+ * Initial definition of a **m-ld** app. Extensions provided will be used for
+ * bootstrapping, prior to the clone joining the domain. After that, different
+ * extensions may come into effect if so declared in the data.
+ *
+ * @category Configuration
+ */
+export type InitialApp = MeldApp & Partial<MeldExtensions>;

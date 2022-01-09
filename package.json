@@ -23,7 +23,7 @@
     "compliance": "tsc --incremental && node compliance/test.js",
     "prepublishOnly": "npm run build && npm version $VERSION && git push",
     "postpublish": "npm dist-tag add \"@m-ld/m-ld@\"${npm_package_version} $(git branch --no-color --show-current)",
-    "doc-dev": "typedoc && concurrently \"onchange 'src/**/*.ts' 'doc/**/*.*' 'typedoc.js' -- typedoc\" \"browser-sync start --server _site --files _site\""
+    "doc-dev": "typedoc && concurrently \"onchange -d 1000 'src/**/*.ts' 'doc/**/*.*' 'typedoc.js' -- typedoc\" \"browser-sync start --server _site --files _site\""
   },
   "repository": {
     "type": "git",
@@ -63,6 +63,7 @@
     "tmp": "^0.2.1",
     "ts-jest": "^27.0.3",
     "typedoc": "^0.19.2",
+    "typedoc-plugin-no-inherit": "^1.2.2",
     "typescript": "^4.1.3"
   },
   "jest": {

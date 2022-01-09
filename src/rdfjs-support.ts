@@ -3,8 +3,8 @@ import type { Algebra } from 'sparqlalgebrajs';
 import type { EventEmitter } from 'events';
 
 /**
- * This module defines the RDF/JS and other extended RDF JS community style methods supported by
- * JrqlGraph.
+ * This module defines the RDFJS and other extended RDF JS community style
+ * methods supported by JrqlGraph.
  */
 
 /**
@@ -16,10 +16,12 @@ export interface Binding {
 }
 
 /**
- * Abstract stream of any type; implicit supertype of an RDF/JS {@link Stream}
+ * Abstract stream of any type; implicit supertype of an RDFJS
+ * [Stream](https://rdf.js.org/stream-spec/#stream-interface)
  */
-export interface BaseStream<T> extends EventEmitter {
-  read(): T | null;
+// Using type not interface so typedoc does not document EventEmitter
+export type BaseStream<T> = EventEmitter & {
+  read: () => T | null;
 }
 
 /**
@@ -33,7 +35,9 @@ export interface QueryableRdf<Q extends BaseQuad = Quad> {
 }
 
 /**
- * A {@link Source} which is able to count quads, as an optimisation for query engines
+ * A [Source](https://rdf.js.org/stream-spec/#source-interface) which is able to
+ * count quads, as an optimisation for query engines
+ *
  * @see https://github.com/comunica/comunica/tree/master/packages/actor-init-sparql-rdfjs#optimization
  */
 export interface CountableRdf {
@@ -41,7 +45,8 @@ export interface CountableRdf {
 }
 
 /**
- * Rollup interface for an RDF source hat can answer SPARQL queries
+ * Rollup interface for an RDF source that can answer SPARQL queries
+ * @category RDFJS
  */
 export interface QueryableRdfSource<Q extends BaseQuad = Quad>
   extends Source<Q>, QueryableRdf<Q>, CountableRdf {

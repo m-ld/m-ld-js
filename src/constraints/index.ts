@@ -11,6 +11,8 @@ import { compact } from 'jsonld';
  *
  * > 🚧 *Please [contact&nbsp;us](https://m-ld.org/hello/) to discuss data
  * > constraints required for your use-case.*
+ *
+ * @category Configuration
  */
 export type ConstraintConfig = SingleValuedConfig;
 

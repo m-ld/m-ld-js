@@ -29,10 +29,14 @@ export function isDeleteInsert(o: any): o is DeleteInsert<unknown> {
 /**
  * A utility to generate a variable with a unique Id. Convenient to use when
  * generating query patterns in code.
+ *
+ * @category Utility
  */
 export const any = (): Variable => `?${anyName()}`;
 /**
  * A utility to generate a unique blank node.
+ *
+ * @category Utility
  */
 export const blank = () => '_:' + anyName();
 /** @internal */
@@ -53,7 +57,7 @@ export type MeldStatus = spec.MeldStatus;
  * {@link Subject}s (with a {@link GraphSubjects.graph graph} mode). Use as an
  * [Observable](https://rxjs.dev/api/index/class/Observable) with `.subscribe`
  * (or other RxJS methods) to be notified of individual Subjects as they arrive.
- * Or consume the results one-by-one with backpressure using
+ * Or consume the results one-by-one with back-pressure using
  * [`Flowable.consume`](https://www.npmjs.com/package/rx-flowable).
  *
  * Read results (even if consumed outside the scope of a read procedure) will
@@ -83,9 +87,21 @@ export type MeldStatus = spec.MeldStatus;
  * ```
  *
  * @see {@link MeldStateMachine.read}
+ * @category API
+ * @noInheritDoc
  */
 export interface ReadResult extends Flowable<GraphSubject>, PromiseLike<GraphSubjects> {
-  completed: PromiseLike<unknown>;
+  /**
+   * Allows the subscriber to exert back-pressure
+   *
+   * @see https://www.npmjs.com/package/rx-flowable
+   */
+  readonly consume: Consumable<GraphSubject>;
+  /**
+   * A promise that is resolved when all results have been consumed by
+   * subscribers (either to `this`, or to `this.consume`).
+   */
+  readonly completed: PromiseLike<unknown>;
 }
 
 /** @internal */
@@ -161,6 +177,7 @@ export interface MeldReadState extends QueryableRdfSource {
  * until either a write is performed in the procedure, or the procedure's
  * asynchronous return promise resolves or rejects.
  *
+ *
  * @see {@link MeldStateMachine.read}
  * @see {@link MeldStateMachine.write}
  * @see m-ld [specification](http://spec.m-ld.org/interfaces/meldupdate.html)
@@ -188,12 +205,17 @@ export interface MeldState extends MeldReadState {
 
 /**
  * A fully-identified Subject from the backend.
+ *
+ * @category API
  */
 export type GraphSubject = Readonly<Subject & Reference>;
 
 /**
  * Convenience for collections of identified Subjects, such as found in a
  * {@link MeldUpdate}. Extends `Array` and serialisable to JSON-LD as such.
+ *
+ * @noInheritDoc
+ * @category API
  */
 export interface GraphSubjects extends Array<GraphSubject> {
   /**
@@ -208,6 +230,8 @@ export interface GraphSubjects extends Array<GraphSubject> {
 
 /**
  * @see m-ld [specification](http://spec.m-ld.org/interfaces/meldupdate.html)
+ *
+ * @category API
  */
 export interface MeldUpdate extends DeleteInsert<GraphSubjects> {
   /**
@@ -336,6 +360,7 @@ export interface MeldStateMachine extends MeldState {
  * [Getting&nbsp;Started](/#getting-started)).
  *
  * @see [m-ld Specification](https://spec.m-ld.org/interfaces/meldclone.html)
+ * @category API
  */
 export interface MeldClone extends MeldStateMachine {
   /**
@@ -366,15 +391,19 @@ export interface MeldClone extends MeldStateMachine {
  * necessitating the redeployment of app code. Where applicable, the members of
  * this interface document alternative means of providing behaviour.
  *
- * > ⚠ Changing extensions at runtime may require coordination between clones,
+ * > ⚠️ Changing extensions at runtime may require coordination between clones,
  * to prevent outdated clones from acting incorrectly in ways that could cause
- * data corruption. Consult the extension's documentation for safe operation.
+ * data corruption or compromise security. Consult the extension's documentation
+ * for safe operation.
+ *
+ * @experimental
+ * @category Experimental
  */
 export interface MeldExtensions {
   /**
    * Constraints declared in the configuration or the data.
    *
-   * @experimental use with caution
+   * @experimental
    * @todo provide data-declared constraints
    * @see https://github.com/m-ld/m-ld-spec/issues/73
    */
@@ -384,7 +413,7 @@ export interface MeldExtensions {
    * compatible with the rest of the domain, this clone may not be able to join
    * until the app is updated.
    *
-   * @experimental use with caution
+   * @experimental
    * @todo provide data-declared transport security
    */
   transportSecurity: MeldTransportSecurity;
@@ -410,6 +439,8 @@ export interface MeldExtensions {
  * reader and the update.
  *
  * @see [m-ld concurrency](http://m-ld.org/doc/#concurrency)
+ * @experimental
+ * @category Experimental
  */
 export interface MeldConstraint {
   /**
@@ -432,6 +463,9 @@ export interface MeldConstraint {
 
 /**
  * An update to which further updates can be asserted or entailed.
+ *
+ * @experimental
+ * @category Experimental
  */
 export interface InterimUpdate {
   /**
@@ -445,7 +479,7 @@ export interface InterimUpdate {
    * - Rewrite a list index predicate to a CRDT-specific form
    *
    * @param update the update to assert into the domain
-   * @see {@link ready}
+   * @see {@link update}
    */
   assert(update: Update): void;
   /**
@@ -459,7 +493,7 @@ export interface InterimUpdate {
    * - Membership of a duck-type class
    *
    * @param update the update to entail into the domain
-   * @see {@link ready}
+   * @see {@link update}
    */
   entail(update: Update): void;
   /**
@@ -475,7 +509,7 @@ export interface InterimUpdate {
    *
    * @param key Whether to remove `@delete` or `@insert` components
    * @param pattern the Subject assertions to remove
-   * @see {@link ready}
+   * @see {@link update}
    */
   remove(key: keyof DeleteInsert<any>, pattern: Subject | Subject[]): void;
   /**
@@ -501,6 +535,14 @@ export interface InterimUpdate {
 /**
  * An identified security principal (user or machine) that is responsible for
  * data changes in the clone.
+ *
+ * > 🚧 Application security extensions using `AppPrincipal` are currently
+ * experimental. See the [discussion](https://m-ld.org/doc/#security) of general
+ * security principles for using **m-ld**, and the
+ * [recommendations](/#security) for this engine.
+ *
+ * @experimental
+ * @category Experimental
  */
 export interface AppPrincipal {
   /**
@@ -512,11 +554,20 @@ export interface AppPrincipal {
    * required by the implementation of the domain's access control.
    *
    * @param data the data to sign
-   * @see https://developer.mozilla.org/en-US/docs/Web/API/SubtleCrypto/sign#rsassa-pkcs1-v1_5_2
    */
   sign?(data: Buffer): Buffer | Promise<Buffer>;
 }
 
+/**
+ * A transport security interceptor extension. Modifies data buffers sent to
+ * other clones via remotes, typically by applying cryptography.
+ *
+ * Installed transport security can be independent of the actual remoting
+ * protocol, and therefore contribute to layered security.
+ *
+ * @experimental
+ * @category Experimental
+ */
 export interface MeldTransportSecurity {
   /**
    * Initialises this extension with the application security principal. This
@@ -544,6 +595,7 @@ export interface MeldTransportSecurity {
   ): Buffer | Promise<Buffer>;
 }
 
+/**@internal*/
 export const noTransportSecurity: MeldTransportSecurity = {
   wire: (data: Buffer) => data
 };

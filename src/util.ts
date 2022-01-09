@@ -7,7 +7,9 @@ import { v5 as uuidv5 } from 'uuid';
  * value (`null` or `undefined`), a single value, or an array of values, to an
  * array of values (empty for missing values). This can simplify processing of
  * property values in common cases.
+ *
  * @param value the value to normalise to an array
+ * @category Utility
  */
 export function array<T>(value?: T | T[] | null): T[] {
   return value == null ? [] : ([] as T[]).concat(value).filter(v => v != null);
@@ -15,10 +17,12 @@ export function array<T>(value?: T | T[] | null): T[] {
 
 /**
  * Utility to generate a short Id according to the given spec.
+ *
  * @param spec If a number, a random Id will be generated with the given length.
  * If a string, a stable obfuscated Id will be generated for the string with a
  * fast hash.
  * @return a string identifier that is safe to use as an HTML (& XML) element Id
+ * @category Utility
  */
 export function shortId(spec: number | string = 8) {
   if (typeof spec == 'number') {
@@ -38,6 +42,9 @@ export function shortId(spec: number | string = 8) {
 
 /**
  * Utility to generate a unique short UUID for use in a MeldConfig
+ *
+ * @param [from] if given, bases the UUID on a deterministic cryptographic hash of this data
+ * @category Utility
  */
 export function uuid(from?: Buffer) {
   if (from == null)
@@ -45,4 +52,5 @@ export function uuid(from?: Buffer) {
   else
     return shortUuid.fromUUID(uuidv5(from, uuidv5.URL));
 }
+/**@internal*/
 const shortUuid = short();

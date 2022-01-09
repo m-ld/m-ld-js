@@ -6,7 +6,8 @@ import { Context } from './jrql-support';
 import { MeldClone, MeldExtensions } from './api';
 import { CloneExtensions, MeldRemotes } from './engine';
 import type { LiveStatus } from '@m-ld/m-ld-spec';
-import type { MeldApp, MeldConfig } from './config';
+import type { MeldConfig } from './config';
+import { InitialApp } from './config';
 import type { AbstractLevelDOWN } from 'abstract-leveldown';
 import { Stopwatch } from './engine/util';
 
@@ -24,6 +25,7 @@ export * from './subjects';
 
 /**
  * Constructor for a driver for connecting to remote m-ld clones on the domain.
+ * @internal
  */
 type ConstructRemotes = new (config: MeldConfig, extensions: MeldExtensions) => MeldRemotes;
 
@@ -38,12 +40,13 @@ type ConstructRemotes = new (config: MeldConfig, extensions: MeldExtensions) => 
  * @param constructRemotes remotes constructor
  * @param config the clone configuration
  * @param [app] runtime options
+ * @category API
  */
 export async function clone(
   backend: AbstractLevelDOWN,
   constructRemotes: ConstructRemotes,
   config: MeldConfig,
-  app: MeldApp = {}
+  app: InitialApp = {}
 ): Promise<MeldClone> {
   const { backendEvents } = app;
   if (backendEvents != null)

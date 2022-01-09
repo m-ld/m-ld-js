@@ -4,13 +4,13 @@ import {
 import { Context } from '../jrql-support';
 import { constraintFromConfig } from '../constraints';
 import { DefaultList } from '../constraints/DefaultList';
-import { MeldApp, MeldConfig } from '../config';
+import { InitialApp, MeldConfig } from '../config';
 
 export class CloneExtensions implements MeldExtensions {
   private _transportSecurity: MeldTransportSecurity;
   private _constraints: MeldConstraint[];
 
-  static async initial(config: MeldConfig, app: MeldApp, context: Context) {
+  static async initial(config: MeldConfig, app: InitialApp, context: Context) {
     let constraints = app.constraints ?? [];
     const transportSecurity = app.transportSecurity ?? noTransportSecurity;
     if (app.constraints == null)

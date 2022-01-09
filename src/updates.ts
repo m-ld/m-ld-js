@@ -46,6 +46,8 @@ export type SubjectUpdates = { [id: string]: SubjectUpdate };
  *
  * Javascript references to other Subjects in a Subject's properties will always
  * be collapsed to json-rql Reference objects (e.g. `{ '@id': '<iri>' }`).
+ *
+ * @category Utility
  */
 export function asSubjectUpdates(update: DeleteInsert<GraphSubject[]>): SubjectUpdates {
   return bySubject(update, '@insert', bySubject(update, '@delete'));
@@ -104,6 +106,7 @@ function unReifyRefs(subject: Subject) {
  * {@link asSubjectUpdates}
  * @typeParam T the app-specific subject type of interest
  * @see [m-ld data semantics](http://spec.m-ld.org/#data-semantics)
+ * @category Utility
  */
 export function updateSubject<T extends Subject & Reference>(
   subject: T, update: SubjectUpdates | DeleteInsert<GraphSubjects>): T {
@@ -113,7 +116,9 @@ export function updateSubject<T extends Subject & Reference>(
 /**
  * Applies an update to more than one subject. Subjects (by Javascript
  * reference) will not be updated more than once, even if multiply-referenced.
+ *
  * @see {@link updateSubject}
+ * @category Utility
  */
 export class SubjectUpdater {
   private readonly delOrInsForSubject:

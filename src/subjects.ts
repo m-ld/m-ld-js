@@ -78,6 +78,7 @@ export class SubjectPropertyValues {
  * @param subject the subject to add the value to.
  * @param property the property that relates the value to the subject.
  * @param values the value to add.
+ * @category Utility
  */
 export function includeValues(subject: Subject, property: string, ...values: Value[]) {
   new SubjectPropertyValues(subject, property).insert(...values);
@@ -91,6 +92,7 @@ export function includeValues(subject: Subject, property: string, ...values: Val
  * @param property the property to inspect
  * @param value the value to find in the set. If `undefined`, then wildcard
  * checks for any value at all.
+ * @category Utility
  */
 export function includesValue(subject: Subject, property: string, value?: Value): boolean {
   return new SubjectPropertyValues(subject, property).exists(value);
@@ -142,6 +144,7 @@ export type NativeValueConstructor = NativeAtomConstructor | NativeContainerCons
  * @param subType if `type` is `Array` or `Set`, the expected item type. If not
  * provided, values in a multi-valued property will not be cast
  * @throws TypeError if the given property does not have the correct type
+ * @category Utility
  */
 export function propertyValue<T>(
   subject: Subject,
@@ -174,6 +177,7 @@ export function propertyValue<T>(
  * @param subType if `type` is `Array` or `Set`, the expected item type. If not
  * provided, values in a multi-valued property will not be cast
  * @throws TypeError if the given property does not have the correct type
+ * @category Utility
  */
 export function castPropertyValue<T>(
   value: SubjectPropertyObject,
@@ -204,6 +208,7 @@ export function castPropertyValue<T>(
   }
 }
 
+/**@internal*/
 function valueAsArray(value: SubjectPropertyObject) {
   if (isSet(value)) {
     return array(value['@set']);
@@ -217,6 +222,7 @@ function valueAsArray(value: SubjectPropertyObject) {
   }
 }
 
+/**@internal*/
 function castValue<T>(value: Value, type: NativeAtomConstructor & (new (v: any) => T)): T {
   if (isValueObject(value)) {
     switch (type) {

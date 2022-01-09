@@ -57,6 +57,7 @@ export class DefaultList implements MeldConstraint {
   }
 }
 
+/** @internal */
 function findListInserts(
   mode: keyof MeldConstraint,
   subject: GraphSubject,
@@ -90,6 +91,7 @@ function findListInserts(
   }
 }
 
+/** @internal */
 function addItems(subject: List & Reference, rewriter: (listId: string) => ListRewriter) {
   for (let [listIndex, item] of listItems(subject['@list'])) {
     if (isSlot(item) && typeof listIndex != 'string') {
@@ -107,6 +109,7 @@ function addItems(subject: List & Reference, rewriter: (listId: string) => ListR
   }
 }
 
+/** @internal */
 function findListDeletes(
   subject: GraphSubject,
   rewriter: (listId: string) => ListRewriter
@@ -120,6 +123,7 @@ function findListDeletes(
   }
 }
 
+/** @internal */
 function addItemIfPosId(
   subject: GraphSubject,
   property: string,
