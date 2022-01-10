@@ -26,8 +26,8 @@ export interface MeldAblyConfig extends MeldConfig {
 export const ablyConnect =
   (opts: Ably.Types.ClientOptions) => new Ably.Realtime.Promise(opts);
 
-interface SendTypeParams extends SendParams { type: '__send'; }
-interface ReplyTypeParams extends ReplyParams { type: '__reply'; }
+interface SendTypeParams extends SendParams {type: '__send';}
+interface ReplyTypeParams extends ReplyParams {type: '__reply';}
 interface NotifyTypeParams extends NotifyParams { type: '__notify' }
 interface SignalTypeParams extends PeerParams { type: '__signal'; channelId: string; }
 type PeerTypeParams = SendTypeParams | ReplyTypeParams | NotifyTypeParams | SignalTypeParams;
@@ -179,8 +179,11 @@ export class AblyRemotes extends PubsubRemotes {
     return this.traffic.publish(channel, name, msg);
   }
 
-  protected peerSubPub(params: NotifyParams): Promise<SubPub | undefined> {
-    return Promise.resolve(undefined);
+  protected async peerSubPub(params: NotifyParams): Promise<SubPub | undefined> {
+    // For outbound notifications, preempt a target who expects to peer
+    if (params.fromId === this.id)
+      await this.signal(params.toId, params.channelId, { unavailable: true });
+    return undefined;
   }
 
   protected signal(peerId: string, channelId: string, data: object) {
@@ -191,8 +194,10 @@ export class AblyRemotes extends PubsubRemotes {
   }
 
   protected onSignal(channelId: string, fromId: string, data: object) {
-    // Someone is trying to peer with us but we can't
-    this.signal(fromId, channelId, { unavailable: true }).catch(this.warnError);
+    // If someone is saying they are unavailable for peering, that's OK with us
+    if (!('unavailable' in data))
+      // Otherwise someone is trying to peer with us, but we can't
+      this.signal(fromId, channelId, { unavailable: true }).catch(this.warnError);
   }
 }
 
