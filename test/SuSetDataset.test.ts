@@ -47,14 +47,6 @@ describe('SU-Set Dataset', () => {
       await ssd.initialise();
     });
 
-    test('cannot share a dataset', async () => {
-      const otherSsd = new SuSetDataset(dataset, {}, testExtensions(), {
-        '@id': 'boom',
-        '@domain': 'test.m-ld.org'
-      });
-      await expect(otherSsd.initialise()).rejects.toThrow();
-    });
-
     test('does not have a time', async () => {
       expect(await ssd.loadClock()).toBeUndefined();
     });
