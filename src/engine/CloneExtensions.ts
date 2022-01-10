@@ -8,7 +8,6 @@ import { InitialApp, MeldConfig } from '../config';
 
 export class CloneExtensions implements MeldExtensions {
   private _transportSecurity: MeldTransportSecurity;
-  private _constraints: MeldConstraint[];
 
   static async initial(config: MeldConfig, app: InitialApp, context: Context) {
     let constraints = app.constraints ?? [];
@@ -22,7 +21,7 @@ export class CloneExtensions implements MeldExtensions {
   }
 
   private constructor(
-    constraints: MeldConstraint[],
+    public constraints: MeldConstraint[],
     transportSecurity: MeldTransportSecurity,
     private principal: AppPrincipal | undefined
   ) {
@@ -38,13 +37,5 @@ export class CloneExtensions implements MeldExtensions {
   set transportSecurity(transportSecurity: MeldTransportSecurity) {
     this._transportSecurity = transportSecurity;
     this._transportSecurity.setPrincipal?.(this.principal);
-  }
-
-  get constraints() {
-    return this._constraints;
-  }
-
-  set constraints(constraints: MeldConstraint[]) {
-    this._constraints = constraints;
   }
 }

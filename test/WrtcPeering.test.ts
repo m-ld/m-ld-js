@@ -29,8 +29,7 @@ describe('WebRTC peering', () => {
     beforeEach(() => {
       peering = new WrtcPeering({
         '@id': 'test', '@domain': 'test.m-ld.org', genesis: true, logLevel: 'debug'
-      }, () => peer, false);
-      peering.signaller = signaller;
+      }, signaller, () => peer, false);
     });
 
     test('does not create peer notifier', async () => {
@@ -52,8 +51,7 @@ describe('WebRTC peering', () => {
     beforeEach(() => {
       peering = new WrtcPeering({
         '@id': 'test', '@domain': 'test.m-ld.org', genesis: true, logLevel: 'debug'
-      }, () => peer, true);
-      peering.signaller = signaller;
+      }, signaller, () => peer, true);
     });
 
     test('creates peer notifier', async () => {
@@ -76,7 +74,7 @@ describe('WebRTC peering', () => {
       expect(notifier.id).toBe('channelId');
       // Can notify data
       const data = Buffer.from('hello');
-      notifier.publish(data);
+      await notifier.publish(data);
       expect(peer.send).lastCalledWith(data);
     });
 

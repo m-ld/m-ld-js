@@ -31,23 +31,21 @@ export class WrtcPeering {
   private readonly id: string;
   private readonly config: RTCConfiguration;
   private readonly networkTimeout: number;
-  private client: PeerSignaller;
   private readonly peers: {
     [channelId: string]: { connected?: Promise<unknown>, peer?: Peer }
   } = {};
   protected readonly log: Logger;
 
-  constructor(config: MeldWrtcConfig,
+  constructor(
+    config: MeldWrtcConfig,
+    private client: PeerSignaller,
     private readonly createPeer = (opts: PeerOpts) => new SimplePeer(opts),
-    readonly available = SimplePeer.WEBRTC_SUPPORT) {
+    readonly available = SimplePeer.WEBRTC_SUPPORT
+  ) {
     this.id = config['@id'];
     this.config = config.wrtc ?? {};
     this.networkTimeout = config.networkTimeout ?? 5000;
     this.log = getIdLogger(this.constructor, this.id, config.logLevel ?? 'info');
-  }
-
-  set signaller(signaller: PeerSignaller) {
-    this.client = signaller;
   }
 
   async pubSub({ toId, fromId, channelId }: NotifyParams): Promise<SubPub> {

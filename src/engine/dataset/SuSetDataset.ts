@@ -10,7 +10,6 @@ import { expand, filter, map, takeWhile } from 'rxjs/operators';
 import { check, completed, Future, getIdLogger, inflate } from '../util';
 import { Logger } from 'loglevel';
 import { MeldError } from '../MeldError';
-import { LocalLock } from '../local';
 import { Quad, Triple, tripleIndexKey, TripleMap } from '../quads';
 import { InterimUpdatePatch } from './InterimUpdatePatch';
 import { ActiveContext } from 'jsonld/lib/context';
@@ -48,7 +47,6 @@ export class SuSetDataset extends MeldEncoder {
   private readonly journal: Journal;
   private readonly journalClerk: JournalClerk;
   private readonly updateSource: Source<MeldUpdate> = new Source;
-  private readonly datasetLock: LocalLock;
   private readonly maxOperationSize: number;
   private readonly log: Logger;
 
@@ -63,8 +61,6 @@ export class SuSetDataset extends MeldEncoder {
     this.journal = new Journal(dataset, this);
     this.tidsStore = new TidsStore(dataset);
     this.journalClerk = new JournalClerk(this.journal, config);
-    // Update notifications are strictly ordered but don't hold up transactions
-    this.datasetLock = new LocalLock(config['@id'], dataset.location);
     this.maxOperationSize = config.maxOperationSize ?? Infinity;
   }
 
@@ -73,12 +69,6 @@ export class SuSetDataset extends MeldEncoder {
     await super.initialise();
     this.userCtx = await activeCtx(this.context);
     this.userGraph = new JrqlGraph(this.dataset.graph());
-    // Check for exclusive access to the dataset location
-    try {
-      await this.datasetLock.acquire();
-    } catch (err) {
-      throw new MeldError('Clone data is locked', err);
-    }
   }
 
   private get constraint(): MeldConstraint {
@@ -112,7 +102,6 @@ export class SuSetDataset extends MeldEncoder {
     }
     this.journal.close();
     await this.journalClerk.close().catch(err => this.log.warn(err));
-    this.datasetLock.release();
     return this.dataset.close().catch(err => this.log.warn(err));
   }
 
