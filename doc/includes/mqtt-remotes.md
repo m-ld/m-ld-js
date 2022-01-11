@@ -38,6 +38,6 @@ A good choice for local development is [Aedes](https://github.com/moscajs/aedes)
 MQTT remotes supports websockets for use in a browser environment. To configure,
 add `protocol: 'ws'` (or `'wss'`) to the `mqtt` configuration value. (Note that
 All the MQTT configuration goes through the `mqtt` key, even if it's actually
-using the websocket protocol.) This requires the MQTT broker to support
+using websockets for transport.) This requires the MQTT broker to support
 websocket connections, for example see the
 [Aedes&nbsp;documentation](https://github.com/moscajs/aedes/blob/main/docs/Examples.md#mqtt-server-over-websocket).
