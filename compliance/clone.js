@@ -83,7 +83,7 @@ function createApp(config) {
       new (require(transportSecurity.require)[transportSecurity.export])(config);
   }
   // 3. Performance timings
-  if (LOG.getLevel() <= LOG.levels.DEBUG) {
+  if (LOG.getLevel() <= LOG.levels.TRACE) {
     app.backendEvents = new EventEmitter();
     const outDir = join(__dirname, 'logs');
     if (!existsSync(outDir))

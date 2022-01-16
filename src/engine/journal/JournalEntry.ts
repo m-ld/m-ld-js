@@ -2,7 +2,7 @@ import { MeldOperation } from '../MeldEncoding';
 import { JournalOperation, TickTid } from './JournalOperation';
 import { OperationMessage } from '../index';
 import type { Journal, TickKey } from '.';
-import { EntryIndex, notFound } from '.';
+import { EntryIndex } from '.';
 
 /**
  * Lightweight encoding of a transaction operation reference (TID) and the previous public tick
@@ -20,24 +20,23 @@ export class JournalEntry {
   static async fromJson(journal: Journal, key: TickKey, json: JournalEntryJson) {
     // Destructuring fields for convenience
     const [prev, tid] = json;
-    const operation = await journal.operation(tid);
-    if (operation != null)
-      return new JournalEntry(journal, key, prev, operation);
-    else
-      throw notFound('operation', tid);
+    const operation = await journal.operation(tid, 'require');
+    return new JournalEntry(journal, key, prev, operation);
   }
 
   static fromOperation(journal: Journal,
-    key: TickKey, prev: TickTid, operation: MeldOperation) {
+    key: TickKey, prev: TickTid, operation: MeldOperation
+  ) {
     return new JournalEntry(journal, key, prev,
-      JournalOperation.fromOperation(journal, operation))
+      JournalOperation.fromOperation(journal, operation));
   }
 
   private constructor(
     private readonly journal: Journal,
     readonly key: TickKey,
     readonly prev: TickTid,
-    readonly operation: JournalOperation) {
+    readonly operation: JournalOperation
+  ) {
   }
 
   get index(): EntryIndex {

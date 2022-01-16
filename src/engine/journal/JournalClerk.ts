@@ -14,7 +14,7 @@ export type JournalClerkConfig = Pick<MeldConfig, '@id' | 'logLevel' | 'journal'
 
 export class ClerkAction {
   constructor(
-    readonly action: string,
+    readonly action: 'appended' | 'committed' | 'garbage collected',
     readonly body: { [key: string]: any }) {
   }
 
@@ -114,8 +114,9 @@ export class JournalClerk {
   }
 
   private disposePrevOperationIfIsolated(entry: JournalEntry): Observable<ClerkAction> {
-    // If the previous operation for the entry's time is not causally contiguous, AND does not
-    // have a corresponding journal entry, it is safe to garbage collect.
+    // Dispose the previous operation for the entry's time if it is safe to
+    // garbage collect. This happens for operations that arrived with a snapshot
+    // recovery, and exist only for cutting incoming rev-ups.
     const [tick, tid] = entry.prev;
     if (tick > 0 && tick < entry.operation.tick - 1)
       return inflate(this.journal.disposeOperationIfUnreferenced(tid),

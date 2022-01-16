@@ -58,14 +58,16 @@ export interface CausalTimeRange<C extends CausalClock> {
 
 export namespace CausalTimeRange {
   /**
-   * Does time range two continue immediately from time range one, with no intermediate causes from
-   * other processes?
+   * Does time range two continue immediately from time range one, with no
+   * intermediate causes from other processes?
    */
   export function contiguous<C extends CausalClock>(
     one: CausalTimeRange<C>, two: CausalTimeRange<C>) {
-    // Check ticks and ID.
+    // Are the tick ranges contiguous, and can I reach two just by ticking one?
+    // Note this approach precludes two being forked from one and so possibly
+    // having a different process identity.
     return one.time.ticks + 1 === two.from &&
-      one.time.hash() === two.time.ticked(one.time.ticks).hash();
+      one.time.ticked(two.from).equals(two.time.ticked(two.from));
   }
 
   /**
@@ -74,8 +76,8 @@ export namespace CausalTimeRange {
   export function overlaps<C extends CausalClock>(
     one: CausalTimeRange<C>, two: CausalTimeRange<C>) {
     return two.from >= one.from && two.from <= one.time.ticks &&
-      // Do both times rewound to our from-time have the same hash?
-      two.time.ticked(two.from).hash() === one.time.ticked(two.from).hash();
+      // Are the times the same if rewound to two's from-time?
+      two.time.ticked(two.from).equals(one.time.ticked(two.from));
   }
 }
 
@@ -192,14 +194,14 @@ export abstract class FusableCausalOperation<T, C extends CausalClock>
         // Remove any deletes where tid in exclusive-prev, unless inserted in prev
         for (let tick = prev.from; tick < this.from; tick++) {
           // Can use a hash after creation for external ticks as in fusions
-          const iTid = original.time.ticked(tick).hash();
+          const iTid = original.time.ticked(tick).hash;
           this.cut.deletes.deleteAll(deleted =>
             ItemTid.tid(deleted) === iTid && !prevFlatInserts.has(deleted));
         }
         // Add deletes for any inserts from prev where tid in intersection, unless
         // still inserted in cut, and remove all inserts from B where tid in i
         for (let tick = this.from; tick <= prev.time.ticks; tick++) {
-          const aTid = original.time.ticked(tick).hash();
+          const aTid = original.time.ticked(tick).hash;
           for (let inserted of prevFlatInserts)
             if (ItemTid.tid(inserted) === aTid)
               if (!this.cut.inserts.has(inserted))

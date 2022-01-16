@@ -5,8 +5,8 @@ import { MeldLocal, MeldRemotes, OperationMessage, Recovery, Revup, Snapshot } f
 import { liveRollup } from '../LiveValue';
 import { Context, Pattern, Read, Write } from '../../jrql-support';
 import {
-  BehaviorSubject, concat, defaultIfEmpty, EMPTY, firstValueFrom, from, interval, merge, Observable,
-  of, OperatorFunction, partition, Subscriber, Subscription
+  BehaviorSubject, concat, concatMap, defaultIfEmpty, EMPTY, firstValueFrom, from, interval, merge,
+  Observable, of, OperatorFunction, partition, Subscriber, Subscription
 } from 'rxjs';
 import { GlobalClock, TreeClock } from '../clocks';
 import { SuSetDataset } from './SuSetDataset';
@@ -14,7 +14,7 @@ import { TreeClockMessageService } from '../messages';
 import { Dataset } from '.';
 import {
   debounceTime, delayWhen, distinctUntilChanged, expand, filter, finalize, ignoreElements, map,
-  mergeMap, share, skipWhile, takeUntil, tap, toArray
+  share, skipWhile, takeUntil, tap, toArray
 } from 'rxjs/operators';
 import { check, delayUntil, Future, inflateFrom, poisson, Stopwatch, tapComplete } from '../util';
 import { LockManager } from '../locks';
@@ -202,8 +202,12 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
    * timeout. This observables are subscribed in the initialise() method.
    */
   private get operationProblems(): Observable<OperationOutcome> {
-    const [disordered, maybeBuffering] = partition(this.remoteOps.receiving.pipe(
-        mergeMap(op => this.acceptRemoteOperation(op)), share()),
+    const acceptOutcomes = this.remoteOps.receiving.pipe(
+      // Only try and accept one operation at a time
+      concatMap(op => this.acceptRemoteOperation(op)),
+      // Ensure that the merge below does not incur two subscribes
+      share());
+    const [disordered, maybeBuffering] = partition(acceptOutcomes,
       outcome => outcome === OperationOutcome.DISORDERED);
     // Disordered messages are an immediate problem, buffering only if chronic
     return merge(disordered, maybeBuffering.pipe(

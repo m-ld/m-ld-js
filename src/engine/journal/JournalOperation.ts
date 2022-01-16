@@ -24,13 +24,13 @@ export class JournalOperation implements CausalTimeRange<TreeClock> {
     // Destructuring fields for convenience
     const [, from, timeJson] = json;
     const time = TreeClock.fromJson(timeJson);
-    tid ??= time.hash();
+    tid ??= time.hash;
     return new JournalOperation(journal, tid, from, time, json);
   }
 
   static fromOperation(journal: Journal, operation: MeldOperation) {
     const { from, time, encoded } = operation;
-    return new JournalOperation(journal, time.hash(), from, time, encoded, operation);
+    return new JournalOperation(journal, time.hash, from, time, encoded, operation);
   }
 
   constructor(

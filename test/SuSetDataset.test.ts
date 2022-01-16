@@ -141,7 +141,7 @@ describe('SU-Set Dataset', () => {
           firstTid = (await ssd.transact(async () => [
             local.tick().time,
             await ssd.write({ '@insert': fred })
-          ]))!.time.hash();
+          ]))!.time.hash;
         });
 
         test('answers the new time', async () => {
@@ -185,7 +185,7 @@ describe('SU-Set Dataset', () => {
           expect(data.length).toBe(2);
           // noinspection LongLine
           const reifiedFlintstoneJson = new RegExp( // Not a great check but must have all properties
-            `(.+("s":"fred"|"s":"wilma"|"p":"#name"|"o":"Fred"|"o":"Wilma"|"tid":"${firstTid}|"tid":"${local.time.hash()}")){8}`);
+            `(.+("s":"fred"|"s":"wilma"|"p":"#name"|"o":"Fred"|"o":"Wilma"|"tid":"${firstTid}|"tid":"${local.time.hash}")){8}`);
           expect(data.every(v => {
             if ('operation' in v) {
               const [ver, from, time, upd, enc] = v.operation;
@@ -304,8 +304,8 @@ describe('SU-Set Dataset', () => {
           const willUpdate = captureUpdate();
           await ssd.apply(
             remote.sentOperation([
-              { 'tid': remoteOp.time.hash(), 'o': 'Fred', 'p': '#name', 's': 'fred' },
-              { 'tid': remoteOp.time.hash(), 'o': 'Wilma', 'p': '#name', 's': 'wilma' }
+              { 'tid': remoteOp.time.hash, 'o': 'Fred', 'p': '#name', 's': 'fred' },
+              { 'tid': remoteOp.time.hash, 'o': 'Wilma', 'p': '#name', 's': 'wilma' }
             ], {}),
             local.join(remote.time).tick().time,
             local.tick().time);
@@ -480,7 +480,7 @@ describe('SU-Set Dataset', () => {
           // The remote will have two transactions, which fuse in its journal.
           // The local sees the first, adding wilma...
           const one = remote.sentOperation({}, { '@id': 'wilma', 'name': 'Wilma' });
-          const oneTid = one.time.hash();
+          const oneTid = one.time.hash;
           await ssd.apply(one, local.time, local.tick().time);
           // ... and then get a third-party txn, deleting wilma
           await ssd.apply(third.sentOperation(
@@ -492,7 +492,7 @@ describe('SU-Set Dataset', () => {
           await ssd.apply(new OperationMessage(one.time.ticks, testOp(remote.time, {}, [
               { 'tid': oneTid, 'o': 'Wilma', 'p': '#name', 's': 'wilma' },
               {
-                'tid': remote.time.hash(),
+                'tid': remote.time.hash,
                 'o': 'Barney',
                 'p': '#name',
                 's': 'barney'
@@ -509,7 +509,7 @@ describe('SU-Set Dataset', () => {
           // The remote will have two transactions, which fuse in its journal.
           // The local sees the first, adding wilma...
           const one = remote.sentOperation({}, { '@id': 'wilma', 'name': 'Wilma' });
-          const oneTid = one.time.hash();
+          const oneTid = one.time.hash;
           await ssd.apply(one, local.time, local.tick().time);
           // ... and a second, adding betty (this will fuse with the first)
           await ssd.apply(remote.sentOperation({}, { '@id': 'betty', 'name': 'Betty' }),
@@ -520,7 +520,7 @@ describe('SU-Set Dataset', () => {
           await ssd.apply(new OperationMessage(one.time.ticks, testOp(remote.time, {}, [
               { 'tid': oneTid, 'o': 'Wilma', 'p': '#name', 's': 'wilma' },
               {
-                'tid': remote.time.hash(),
+                'tid': remote.time.hash,
                 'o': 'Barney',
                 'p': '#name',
                 's': 'barney'
@@ -551,7 +551,7 @@ describe('SU-Set Dataset', () => {
           await ssd.apply(new OperationMessage(0, testOp(local.time, {}, [
               { 'tid': firstTid, 'o': 'Fred', 'p': '#name', 's': 'fred' },
               {
-                'tid': local.time.hash(),
+                'tid': local.time.hash,
                 'o': 'Barney',
                 'p': '#name',
                 's': 'barney'

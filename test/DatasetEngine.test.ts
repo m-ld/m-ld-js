@@ -3,7 +3,7 @@ import {
   hotLive, memStore, MockProcess, mockRemotes, testConfig, testExtensions
 } from './testClones';
 import {
-  asapScheduler, BehaviorSubject, EMPTY, EmptyError, firstValueFrom, NEVER, Subject as Source,
+  asapScheduler, BehaviorSubject, EMPTY, EmptyError, firstValueFrom, NEVER, of, Subject as Source,
   throwError
 } from 'rxjs';
 import { comesAlive } from '../src/engine/AbstractMeld';
@@ -359,8 +359,35 @@ describe('Dataset engine', () => {
     test('immediately re-connects if rev-up fails', async () => {
       const remotes = mockRemotes(NEVER, [true]);
       const revupFrom = jest.fn()
-        .mockReturnValueOnce(Promise.resolve({ gwc: remote.gwc, updates: throwError('boom') }))
-        .mockReturnValueOnce(Promise.resolve({ gwc: remote.gwc, updates: EMPTY }));
+        .mockReturnValueOnce(Promise.resolve({
+          gwc: remote.gwc, updates: throwError(() => 'boom')
+        }))
+        .mockReturnValueOnce(Promise.resolve({
+          gwc: remote.gwc, updates: EMPTY
+        }));
+      remotes.revupFrom = revupFrom;
+      const clone = new DatasetEngine({
+        dataset: await memStore({ backend }),
+        remotes,
+        extensions: testExtensions(),
+        config: testConfig()
+      });
+      await clone.initialise();
+      await expect(clone.status.becomes({ outdated: false })).resolves.toBeDefined();
+      expect(revupFrom.mock.calls.length).toBe(2);
+    });
+
+    test('re-connects with disordered revup', async () => {
+      const remotes = mockRemotes(NEVER, [true]);
+      remote.tick(); // An operation we will never see
+      const disorderedOp = remote.sentOperation({}, {});
+      const revupFrom = jest.fn()
+        .mockReturnValueOnce(Promise.resolve({
+          gwc: remote.gwc, updates: of(disorderedOp)
+        }))
+        .mockReturnValueOnce(Promise.resolve({
+          gwc: remote.gwc, updates: EMPTY
+        }));
       remotes.revupFrom = revupFrom;
       const clone = new DatasetEngine({
         dataset: await memStore({ backend }),
