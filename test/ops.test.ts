@@ -12,7 +12,7 @@ function tuple<Args extends any[]>(...args: Args): Args { return args; }
 
 // Utilities for readability
 const time = (ticks: number) => TreeClock.GENESIS.ticked(ticks);
-const tid = (ticks: number) => time(ticks).hash();
+const tid = (ticks: number) => time(ticks).hash;
 
 describe('Fusable Causal Operations', () => {
   describe('preconditions', () => {
@@ -35,6 +35,17 @@ describe('Fusable Causal Operations', () => {
       });
       const two = new CausalIntegerOp({
         from: 2, time: right.ticked(2), deletes: [], inserts: []
+      });
+      expect(CausalTimeRange.contiguous(one, two)).toBe(false);
+    });
+
+    test('forked ID is not contiguous', () => {
+      const one = new CausalIntegerOp({
+        from: 1, time: time(0).ticked(1), deletes: [], inserts: []
+      });
+      const right = one.time.forked().right.ticked();
+      const two = new CausalIntegerOp({
+        from: right.ticks, time: right, deletes: [], inserts: []
       });
       expect(CausalTimeRange.contiguous(one, two)).toBe(false);
     });
@@ -66,7 +77,7 @@ describe('Fusable Causal Operations', () => {
 
     test('fuses after fork', () => {
       const { left } = time(0).forked();
-      const one = new CausalIntegerOp({ from: 0, time: time(0), deletes: [], inserts: [] });
+      const one = new CausalIntegerOp({ from: 0, time: left, deletes: [], inserts: [] });
       const two = new CausalIntegerOp({ from: 1, time: left.ticked(), deletes: [], inserts: [] });
       expect(CausalTimeRange.contiguous(one, two)).toBe(true);
       const result = one.fuse(two);

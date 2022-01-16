@@ -51,9 +51,10 @@ export class RemoteOperations {
           if (lastRevup != null)
             await lastRevup.delivered;
           this.outdatedState.next(false);
-        },
+        }).catch(() => {
         // Rev-up failed - detached and nothing-doing
-        () => this.operations.switch(NEVER));
+        this.operations.switch(NEVER);
+      });
     });
     return Promise.resolve(lastRevup);
   }

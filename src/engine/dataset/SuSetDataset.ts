@@ -192,7 +192,7 @@ export class SuSetDataset extends MeldEncoder {
 
         txc.sw.next('find-tids');
         const deletedTriplesTids = await this.tidsStore.findTriplesTids(patch.deletes);
-        const tid = time.hash();
+        const tid = time.hash;
         const op = this.txnOperation(tid, time, patch.inserts, deletedTriplesTids);
 
         // Include tid changes in final patch
@@ -385,7 +385,7 @@ export class SuSetDataset extends MeldEncoder {
       // Anything deleted by the constraint that did not exist before the
       // applied transaction can now be removed from the constraint patch
       assertions.remove('deletes', triple => deletedExistingTids.get(triple) == null);
-      const cxnId = cxnTime.hash();
+      const cxnId = cxnTime.hash;
       return {
         operation: this.txnOperation(cxnId, cxnTime, assertions.inserts, deletedTriplesTids),
         tidPatch: await this.txnTidPatch(cxnId, assertions.inserts, deletedExistingTids)

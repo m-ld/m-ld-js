@@ -69,9 +69,12 @@ describe('Dataset Journal', () => {
     let remote: MockProcess, local: MockProcess;
 
     beforeEach(async () => {
+      // The remote will be genesis
       remote = new MockProcess(TreeClock.GENESIS);
       pastOp = opAt(remote);
+      //  We are a new clone starting from after the pastOp
       local = remote.fork();
+      // Simulate a snapshot with the past operation
       await store.transact({
         prepare: () => ({
           kvps(batch) {
@@ -83,14 +86,28 @@ describe('Dataset Journal', () => {
     });
 
     test('has the past operation', async () => {
-      const op = await journal.operation(pastOp.time.hash());
+      const op = await journal.operation(pastOp.time.hash);
       expect(op).toBeDefined();
     });
 
+    test('does not dispose an operation in the GWC', async () => {
+      await expect(journal.disposeOperationIfUnreferenced(pastOp.time.hash)).resolves.toBe(false);
+    });
+
+    test('does not dispose a remote operation in the GWC', async () => {
+      // We have moved on, but the remote genesis clone is still at the fork
+      await addEntry(local);
+      await expect(journal.disposeOperationIfUnreferenced(pastOp.time.hash)).resolves.toBe(false);
+    });
+
     test('disposes an unreferenced operation', async () => {
-      await expect(journal.disposeOperationIfUnreferenced(pastOp.time.hash())).resolves.toBe(true);
+      // Both we and the remote genesis clone have moved on
+      const firstOpAfter = await addEntry(local);
+      await addEntry(local, remote);
+      await expect(journal.disposeOperationIfUnreferenced(pastOp.time.hash)).resolves.toBe(true);
       // No entry left in the journal
-      await expect(journal.entryAfter()).resolves.toBeUndefined();
+      const firstInJournal = (await journal.entryAfter())!;
+      expect(firstInJournal.operation.time.equals(firstOpAfter.time)).toBe(true);
     });
 
     test('clerk does not dispose contiguous op', async () => {
@@ -98,7 +115,7 @@ describe('Dataset Journal', () => {
       await addEntry(local, remote);
       // Close is the only way to ensure activity is processed
       await clerk.close();
-      const op = await journal.operation(pastOp.time.hash());
+      const op = await journal.operation(pastOp.time.hash);
       expect(op).toBeDefined();
     });
 
@@ -109,7 +126,7 @@ describe('Dataset Journal', () => {
       await addEntry(local, remote);
       // Close is the only way to ensure clerk activity is fully processed
       await clerk.close();
-      const op = await journal.operation(pastOp.time.hash());
+      const op = await journal.operation(pastOp.time.hash);
       expect(op).toBeUndefined();
     });
   });
@@ -150,10 +167,10 @@ describe('Dataset Journal', () => {
         const e = await entry;
         const op = await commitOp;
         expect(e).toBeDefined();
-        expect(e.prev).toEqual([0, TreeClock.GENESIS.hash()]);
+        expect(e.prev).toEqual([0, TreeClock.GENESIS.hash]);
         expect(e.operation.time.equals(local.time)).toBe(true);
         expect(e.operation.operation).toEqual(op.encoded);
-        expect(e.operation.tid).toEqual(op.time.hash());
+        expect(e.operation.tid).toEqual(op.time.hash);
         expect(e.operation.from).toBe(local.time.ticks);
         await expect(e.next()).resolves.toBeUndefined();
       });
@@ -167,43 +184,43 @@ describe('Dataset Journal', () => {
 
       test('has prev details for entry', async () => {
         const op = await commitOp;
-        const [prevTick, prevTid] = await journal.entryPrev(op.time.hash()) ?? [];
+        const [prevTick, prevTid] = await journal.entryPrev(op.time.hash) ?? [];
         expect(prevTick).toBe(0);
-        expect(prevTid).toBe(TreeClock.GENESIS.hash());
+        expect(prevTid).toBe(TreeClock.GENESIS.hash);
       });
 
       test('has saved the first entry', async () => {
         const entry = await commitOp.then(() => journal.entryAfter());
-        expect(entry!.prev).toEqual([local.prev, TreeClock.GENESIS.hash()]);
+        expect(entry!.prev).toEqual([local.prev, TreeClock.GENESIS.hash]);
       });
 
       test('has the operation', async () => {
         const op = await commitOp;
-        const saved = await journal.operation(op.time.hash());
+        const saved = await journal.operation(op.time.hash);
         expect(saved!.time.equals(local.time)).toBe(true);
         expect(saved!.operation).toEqual(op.encoded);
-        expect(saved!.tid).toEqual(op.time.hash());
+        expect(saved!.tid).toEqual(op.time.hash);
         expect(saved!.tick).toEqual(local.time.ticks);
         expect(saved!.from).toBe(local.time.ticks);
       });
 
       test('can get operation past', async () => {
         const op = await commitOp;
-        const saved = await journal.operation(op.time.hash());
+        const saved = await journal.operation(op.time.hash);
         // Fused past of a single op is just the op
         await expect(saved!.fusedPast()).resolves.toEqual(op.encoded);
       });
 
       test('reconstitutes the m-ld operation', async () => {
         const op = await commitOp;
-        const saved = await journal.meldOperation(op.time.hash());
+        const saved = await journal.meldOperation(op.time.hash);
         expect(saved.time.equals(op.time)).toBe(true);
         expect(saved.encoded).toEqual(op.encoded);
       });
 
       test('does not dispose the referenced operation', async () => {
         const op = await commitOp;
-        await expect(journal.disposeOperationIfUnreferenced(op.time.hash())).resolves.toBe(false);
+        await expect(journal.disposeOperationIfUnreferenced(op.time.hash)).resolves.toBe(false);
       });
     });
 
@@ -226,7 +243,7 @@ describe('Dataset Journal', () => {
         const state = await journal.state();
         // Hmm, this duplicates the code in SuSetDataset
         const seenTicks = state.gwc.getTicks(fused.time);
-        const seenTid = fused.time.ticked(seenTicks).hash();
+        const seenTid = fused.time.ticked(seenTicks).hash;
         const seenOp = await journal.operation(seenTid);
         const cut = await seenOp!.cutSeen(fused);
         expect(cut.encoded).toEqual(next.encoded);
@@ -235,7 +252,7 @@ describe('Dataset Journal', () => {
       test('can get fused operation past', async () => {
         await addEntry(local);
         const next = await addEntry(local, remote);
-        const saved = await journal.operation(next.time.hash());
+        const saved = await journal.operation(next.time.hash);
         const expectedFused = MeldOperation.fromOperation(encoder, remoteOp.fuse(next));
         await expect(saved!.fusedPast()).resolves.toEqual(expectedFused.encoded);
       });
@@ -250,7 +267,7 @@ describe('Dataset Journal', () => {
           [remoteEntry.index, nextEntry.index],
           JournalEntry.fromOperation(journal, nextEntry.key, remoteEntry.prev, fused));
 
-        const read = await journal.operation(nextOp.time.hash());
+        const read = await journal.operation(nextOp.time.hash);
         expect(read!.operation).toEqual(fused.encoded);
       });
     });
@@ -282,7 +299,7 @@ describe('Dataset Journal', () => {
         const entry = await journal.entryAfter(); // Gets first entry
         // Expect the entry to be a fusion of all three
         expect(entry!.operation.time.equals(local.time)).toBe(true);
-        expect(entry!.prev).toEqual([0, TreeClock.GENESIS.hash()]);
+        expect(entry!.prev).toEqual([0, TreeClock.GENESIS.hash]);
       });
 
       test('appends remote entries to fusion', async () => {
@@ -301,7 +318,28 @@ describe('Dataset Journal', () => {
         const entry = await journal.entryAfter(local.time.ticks - 1);
         // Expect the entry to be a fusion of the two remote entries
         expect(entry!.operation.time.equals(remote.time)).toBe(true);
-        expect(entry!.prev).toEqual([0, TreeClock.GENESIS.hash()]);
+        expect(entry!.prev).toEqual([0, TreeClock.GENESIS.hash]);
+      });
+
+      test('does not add remote entries to local fusion', async () => {
+        const clerk = new TestClerk();
+        const willBeActive = firstValueFrom(clerk.activity.pipe(toArray()));
+        const localOp = await addEntry(local);
+        const remote = local.fork();
+        // Add a remote entry immediately after the fork
+        await addEntry(local, remote);
+        // Close incurs a savepoint, hence expecting a commit
+        await clerk.close();
+        const activity = await willBeActive;
+        expect(activity).toHaveLength(0);
+
+        // Expect the local and remote ops to have independent entries
+        const localEntry = (await journal.entryAfter())!;
+        expect(localEntry!.operation.time.equals(localOp.time)).toBe(true);
+        expect(localEntry!.prev).toEqual([0, TreeClock.GENESIS.hash]);
+        const remoteEntry = await journal.entryAfter(localEntry.key);
+        expect(remoteEntry!.operation.time.equals(remote.time)).toBe(true);
+        expect(remoteEntry!.prev).toEqual([localOp.time.ticks, localOp.time.hash]);
       });
 
       test('follows one fusion with another', async () => {
@@ -325,11 +363,11 @@ describe('Dataset Journal', () => {
         let entry = await journal.entryAfter();
         // Expect the first entry to be a fusion of the two second entries
         expect(entry!.operation.time.equals(second.time)).toBe(true);
-        expect(entry!.prev).toEqual([0, TreeClock.GENESIS.hash()]);
+        expect(entry!.prev).toEqual([0, TreeClock.GENESIS.hash]);
         entry = await entry!.next();
         // Expect the second entry to be a fusion of the two third entries
         expect(entry!.operation.time.equals(third.time)).toBe(true);
-        expect(entry!.prev).toEqual([0, TreeClock.GENESIS.hash()]);
+        expect(entry!.prev).toEqual([0, TreeClock.GENESIS.hash]);
       });
 
       test('commits savepoint when instructed', async () => {
@@ -346,7 +384,7 @@ describe('Dataset Journal', () => {
         const entry = await journal.entryAfter(); // Gets first entry
         // Expect the entry to be a fusion of all three
         expect(entry!.operation.time.equals(local.time)).toBe(true);
-        expect(entry!.prev).toEqual([0, TreeClock.GENESIS.hash()]);
+        expect(entry!.prev).toEqual([0, TreeClock.GENESIS.hash]);
       });
 
       test('starts new fusion if previous single entry above threshold', async () => {

@@ -42,7 +42,7 @@ const secret = randomBytes(16).toString('base64');
  * Compliance tests for access control lists using the above transport security
  * extension and principal keys.
  */
-describe('Genesis clone with ACL', () => {
+describe('Domain access control', () => {
   let aliceClone, bobClone;
   let alice, bob;
 

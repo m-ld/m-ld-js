@@ -54,7 +54,8 @@ export class Journal {
 
   constructor(
     private readonly store: KvpStore,
-    private readonly encoder: MeldEncoder) {
+    private readonly encoder: MeldEncoder
+  ) {
   }
 
   async initialised() {
@@ -151,10 +152,14 @@ export class Journal {
     }));
   }
 
-  async operation(tid: string): Promise<JournalOperation | undefined> {
+  async operation(tid: string): Promise<JournalOperation | undefined>;
+  async operation(tid: string, require: 'require'): Promise<JournalOperation>;
+  async operation(tid: string, require?: 'require'): Promise<JournalOperation | undefined> {
     const value = await this.store.get(tidOpKey(tid));
     if (value != null)
       return JournalOperation.fromJson(this, MsgPack.decode(value), tid);
+    else if (require)
+      throw new Error(`Journal corrupted: operation ${tid} is missing`);
   }
 
   commitOperation(op: JournalOperation): Kvps {
@@ -162,38 +167,52 @@ export class Journal {
   }
 
   async meldOperation(tid: string): Promise<MeldOperation> {
-    const first = await this.operation(tid);
-    if (first == null)
-      throw notFound('operation', tid);
-    return this.decode(first.json);
+    return this.decode((await this.operation(tid, 'require')).json);
   }
 
   insertPastOperation(operation: EncodedOperation): Kvps {
     return this.commitOperation(JournalOperation.fromJson(this, operation));
   }
 
+  /**
+   * An operation is unreferenced if:
+   * - it has no journal entry
+   * - it is not in the GWC
+   */
   disposeOperationIfUnreferenced(tid: string) {
     return this.withLockedHistory(async () => {
-      // If the operation does not have a corresponding journal entry, it is safe to dispose.
-      const referenced = await this.store.has(tidEntryKey(tid));
-      return {
-        kvps: !referenced ? batch => batch.del(tidOpKey(tid)) : undefined,
-        return: !referenced
-      };
+      // If the operation has a corresponding journal entry, it is not safe to dispose.
+      if (await this.store.has(tidEntryKey(tid)))
+        return { return: false };
+      // If the operation is in the GWC, it is not safe to dispose.
+      for (let gwcTid of (await this.state()).gwc.tids()) {
+        if (tid === gwcTid)
+          return { return: false };
+      }
+      // Otherwise unreferenced, so dispose
+      return { kvps: batch => batch.del(tidOpKey(tid)), return: true };
     });
   }
 
   /**
+   * Find the first journal entry with an operation that is causally contiguous
+   * with the given operation, stopping if it reaches the `minFrom` tick for the
+   * operation's clock. If such an entry is found, creates the reduction
+   * operator from that entry and applies the reduction forwards.
+   *
    * MUST be called `withLockedHistory`.
+   *
    * @param op the operation whose causal history to operate on
    * @param createOperator creates a causal reduction operator from the given first operation
    * @param minFrom the least required value of the range of the operation with
-   * the returned identity
+   * the returned identity. Must not be <1 (genesis is never represented in the journal).
    * @returns found operations, up to and including this one
    */
-  async causalReduce(op: JournalOperation,
+  async causalReduce(
+    op: JournalOperation,
     createOperator: (first: MeldOperation) => CausalOperator<Triple, TreeClock>,
-    minFrom = 1): Promise<MeldOperation> {
+    minFrom = 1
+  ): Promise<MeldOperation> {
     // Work backward through the journal to find the first transaction ID (and associated tick)
     // that is causally contiguous with this one.
     const seekToFrom = async (tick: number, tid: string): Promise<TickTid> => {
@@ -208,7 +227,7 @@ export class Journal {
     // Begin the operation and fast-forward
     const operator = createOperator(await this.meldOperation(tid));
     while (tid !== op.tid) {
-      tid = op.time.ticked(++tick).hash();
+      tid = op.time.ticked(++tick).hash;
       operator.next(tid === op.tid ?
         op.asMeldOperation() : await this.meldOperation(tid));
     }
@@ -224,8 +243,4 @@ export class Journal {
     prepare: (txc: TxnContext) => KvpResult<T> | Promise<KvpResult<T>>) {
     return this.store.transact({ lock: 'journal-body', prepare });
   }
-}
-
-export function notFound(type: 'entry' | 'operation', tid: string) {
-  return new Error(`Journal corrupted: ${type} ${tid} is missing`);
 }

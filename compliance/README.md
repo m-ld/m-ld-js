@@ -6,6 +6,8 @@ DEBUG logging:
 
 Logs are output to `./compliance/.log`.
 
+If `LOG_LEVEL=trace`, per-clone performance timings will also be output to `./logs` as csv files.
+
 Specific compliance specs by glob (see [m-ld-spec/compliance](https://github.com/m-ld/m-ld-spec/tree/master/compliance)):
 - `npm run compliance -- "2-*/2-*"` or just `npm run compliance -- "2/2"`
 

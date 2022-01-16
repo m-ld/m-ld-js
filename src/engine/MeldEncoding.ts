@@ -90,7 +90,7 @@ export class MeldOperation extends FusableCausalOperation<Triple, TreeClock> {
     const deletes = unreify(delTriples);
     let inserts: MeldOperation['inserts'];
     if (from === time.ticks) {
-      const tid = time.hash();
+      const tid = time.hash;
       inserts = insTriples.map(triple => [triple, [tid]]);
     } else {
       // No need to calculate transaction ID if the encoding is fused

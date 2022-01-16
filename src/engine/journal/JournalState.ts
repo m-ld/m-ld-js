@@ -44,7 +44,8 @@ export class JournalState {
     private readonly journal: Journal,
     readonly start: number,
     readonly time: TreeClock,
-    readonly gwc: GlobalClock) {
+    readonly gwc: GlobalClock
+  ) {
   }
 
   get json(): JournalStateJson {
@@ -91,7 +92,7 @@ export class JournalState {
       if (op.from < op.time.ticks) {
         const seenTicks = this.gwc.getTicks(op.time);
         // Seen ticks >= op.from (otherwise we would not be here)
-        const seenTid = op.time.ticked(seenTicks).hash();
+        const seenTid = op.time.ticked(seenTicks).hash;
         const seenOp = await this.journal.operation(seenTid);
         if (seenOp != null)
           return { return: await seenOp.cutSeen(op) };
@@ -103,8 +104,13 @@ export class JournalState {
   latestOperations(): Promise<EncodedOperation[]> {
     return this.journal.withLockedHistory(async () => {
       // For each latest op, emit a fusion of all contiguous ops up to it
-      const ops = await Promise.all([...this.gwc.tids()].map(
-        async tid => (await this.journal.operation(tid))?.fusedPast()));
+      const ops = await Promise.all([...this.gwc.tids()].map(async tid => {
+        // Every TID in the GWC except genesis should be represented
+        if (tid !== TreeClock.GENESIS.hash) {
+          const op = await this.journal.operation(tid, 'require');
+          return op.fusedPast();
+        }
+      }));
       return { return: ops.filter((op): op is EncodedOperation => op != null) };
     });
   }

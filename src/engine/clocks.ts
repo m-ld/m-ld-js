@@ -9,6 +9,14 @@ export interface CausalClock {
    */
   readonly ticks: number;
   /**
+   * A practically conflict-free hash of the time, usable as a stable operation
+   * or message identifier. Because a clock fork does not constitute a
+   * transaction event, the left and right of a fork have identical hashes until
+   * either one is ticked, i.e. `[1]`, `[1,[],0]` and `[1,0,[]]` have the same
+   * hash.
+   */
+  readonly hash: string;
+  /**
    * Sets the clock to a causally contiguous time.
    * @param ticks ticks to set. If omitted, `this.ticks + 1`.
    * @returns a copy of the clock with the new time
@@ -21,10 +29,10 @@ export interface CausalClock {
    */
   anyNonIdLt(other: this): boolean;
   /**
-   * @return A hash of the time, usable as a stable operation or message
-   * identifier
+   * Strict equality check. Unlike {@link hash}, this distinguishes the left and
+   * right of a fork with no further ticks.
    */
-  hash(): string;
+  equals(that: this): boolean;
 }
 
 export class Fork<T> {
@@ -150,6 +158,7 @@ export class TreeClock extends TickTree<boolean> implements CausalClock {
    */
   // NOTE this field can actually be undefined if this clock has no ID anywhere in it.
   readonly ticks: number;
+  private _hash: string;
 
   constructor(part: Fork<TreeClock> | boolean, localTicks = 0) {
     super(part, localTicks);
@@ -182,10 +191,13 @@ export class TreeClock extends TickTree<boolean> implements CausalClock {
    * of reified operation deletes and inserts. Injective but not safely one-way
    * (do not use as a cryptographic hash).
    */
-  hash() {
-    const buf = MsgPack.encode(this.toJSON('forHash'));
-    // Hash if longer than a short UUID (22 characters = 16 bytes in base64)
-    return buf.length > 16 ? uuid(buf) : buf.toString('base64');
+  get hash() {
+    if (this._hash == null) {
+      const buf = MsgPack.encode(this.toJSON('forHash'));
+      // Hash if longer than a short UUID (22 characters = 16 bytes in base64)
+      this._hash = buf.length > 16 ? uuid(buf) : buf.toString('base64');
+    }
+    return this._hash;
   }
 
   /**
@@ -388,7 +400,7 @@ export class GlobalClock extends TickTree<string> {
   }
 
   update(time: TreeClock): GlobalClock {
-    return this._update(time, time.hash());
+    return this._update(time, time.hash);
   }
 
   private _update(time: TreeClock, tid: string): GlobalClock {
