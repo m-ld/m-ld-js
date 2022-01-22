@@ -1,7 +1,7 @@
 import { GraphSubject, MeldConstraint, MeldExtensions, MeldUpdate } from '../../api';
 import { BufferEncoding, EncodedOperation, OperationMessage, Snapshot } from '..';
 import { GlobalClock, TickTree, TreeClock } from '../clocks';
-import { Context, Read, Write } from '../../jrql-support';
+import { Context, Query, Read, Write } from '../../jrql-support';
 import { Dataset, PatchQuads, PatchResult } from '.';
 import { JrqlGraph } from './JrqlGraph';
 import { MeldEncoder, MeldOperation, TriplesTids, unreify, UUID } from '../MeldEncoding';
@@ -89,6 +89,10 @@ export class SuSetDataset extends MeldEncoder {
 
   write(request: Write): Promise<PatchQuads> {
     return this.userGraph.write(request, this.userCtx);
+  }
+
+  ask(pattern: Query): Promise<boolean> {
+    return this.userGraph.ask(pattern, this.userCtx);
   }
 
   @SuSetDataset.checkNotClosed.async

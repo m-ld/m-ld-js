@@ -1,7 +1,7 @@
 import { Iri } from 'jsonld/jsonld-spec';
 import {
   Constraint, Expression, Group, isConstraint, isConstruct, isDescribe, isGroup, isSelect,
-  isSubject, isUpdate, operators, Read, Result, Subject, SubjectProperty, Update, Variable,
+  isSubject, isUpdate, operators, Query, Read, Result, Subject, SubjectProperty, Update, Variable,
   VariableExpression, Write
 } from '../../jrql-support';
 import { Graph, PatchQuads } from '.';
@@ -55,21 +55,26 @@ export class JrqlGraph {
         return properties.length === 0 ?
           jrqlGraph.get(id, this.ctx) : jrqlGraph.pick(id, properties, this.ctx);
       }
+      ask(pattern: Query) {
+        return jrqlGraph.ask(pattern, this.ctx);
+      }
     });
   }
 
   read(query: Read, ctx: ActiveContext): Consumable<GraphSubject> {
-    return inflate(this.graph.lock.extend('state', 'read', nextCtx(ctx, query['@context'])), ctx => {
-      if (isDescribe(query))
-        return this.describe(array(query['@describe']), query['@where'], ctx);
-      else if (isSelect(query) && query['@where'] != null)
-        return this.select(query['@select'], query['@where'], ctx);
-      else if (isConstruct(query))
-        return this.construct(query['@construct'], query['@where'], ctx);
-      else
-        return throwError(() => new MeldError(
-          'Unsupported pattern', 'Read type not supported.'));
-    });
+    return inflate(
+      this.graph.lock.extend('state', 'read', nextCtx(ctx, query['@context'])),
+      ctx => {
+        if (isDescribe(query))
+          return this.describe(array(query['@describe']), query['@where'], ctx);
+        else if (isSelect(query) && query['@where'] != null)
+          return this.select(query['@select'], query['@where'], ctx);
+        else if (isConstruct(query))
+          return this.construct(query['@construct'], query['@where'], ctx);
+        else
+          return throwError(() => new MeldError(
+            'Unsupported pattern', 'Read type not supported.'));
+      });
   }
 
   async write(query: Write, ctx: ActiveContext): Promise<PatchQuads> {
@@ -83,6 +88,12 @@ export class JrqlGraph {
       return this.update(query, ctx);
     else
       throw new MeldError('Unsupported pattern', 'Write type not supported.');
+  }
+
+  async ask(query: Query, ctx: ActiveContext): Promise<boolean> {
+    return this.graph.lock.extend('state', 'ask',
+      nextCtx(ctx, query['@context']).then(activeCtx => this.graph.ask(this.sparql.createAsk(
+        this.operation(asGroup(query['@where'] ?? {}), new Set, activeCtx)))));
   }
 
   select(

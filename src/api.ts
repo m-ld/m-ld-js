@@ -1,6 +1,6 @@
 import * as spec from '@m-ld/m-ld-spec';
 import type {
-  Read, Reference, Subject, SubjectProperty, Update, Variable, Write
+  Query, Read, Reference, Subject, SubjectProperty, Update, Variable, Write
 } from './jrql-support';
 import { firstValueFrom, Observable, Subscription } from 'rxjs';
 import { toArray } from 'rxjs/operators';
@@ -158,6 +158,16 @@ export interface MeldReadState extends QueryableRdfSource {
    * properties, or `undefined` if not found
    */
   get(id: string, ...properties: SubjectProperty[]): Promise<GraphSubject | undefined>;
+  /**
+   * Shorthand method to test whether or not a query pattern has a solution. No
+   * information is returned about the possible query solutions, just whether or
+   * not a solution exists.
+   *
+   * @param pattern a query with a `@where` pattern to test
+   * @return resolves to `true` if the query's `@where` pattern matches data in the domain
+   * @see https://www.w3.org/TR/sparql11-query/#ask
+   */
+  ask(pattern: Query): Promise<boolean>;
 }
 
 /**

@@ -3,7 +3,7 @@ import {
 } from '../../api';
 import { MeldLocal, MeldRemotes, OperationMessage, Recovery, Revup, Snapshot } from '..';
 import { liveRollup } from '../LiveValue';
-import { Context, Pattern, Read, Write } from '../../jrql-support';
+import { Context, Pattern, Query, Read, Write } from '../../jrql-support';
 import {
   BehaviorSubject, concat, concatMap, defaultIfEmpty, EMPTY, firstValueFrom, from, interval, merge,
   Observable, of, OperatorFunction, partition, Subscriber, Subscription
@@ -556,6 +556,14 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
         this.nextOperation(update);
     });
     return this;
+  }
+
+  @DatasetEngine.checkNotClosed.async
+  @DatasetEngine.checkStateLocked.async
+  ask(pattern: Query): Promise<boolean> {
+    return this.lock.extend('state', 'ask',
+      this.lock.share('live', 'ask',
+        () => this.dataset.ask(pattern)));
   }
 
   @DatasetEngine.checkNotClosed.async

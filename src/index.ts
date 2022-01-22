@@ -30,11 +30,11 @@ export * from './subjects';
 type ConstructRemotes = new (config: MeldConfig, extensions: MeldExtensions) => MeldRemotes;
 
 /**
- * Create or initialise a local clone, depending on whether the given LevelDB
- * database already exists. This function returns as soon as it is safe to begin
- * transactions against the clone; this may be before the clone has received all
- * updates from the domain. You can wait until the clone is up-to-date using the
- * {@link MeldClone.status} property.
+ * Create or initialise a local clone, depending on whether the given backend
+ * already contains m-ld data. This function returns as soon as it is safe to
+ * begin transactions against the clone; this may be before the clone has
+ * received all updates from the domain. You can wait until the clone is
+ * up-to-date using the {@link MeldClone.status} property.
  *
  * @param backend an instance of a leveldb backend
  * @param constructRemotes remotes constructor

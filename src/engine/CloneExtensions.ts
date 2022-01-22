@@ -25,8 +25,7 @@ export class CloneExtensions implements MeldExtensions {
     transportSecurity: MeldTransportSecurity,
     private principal: AppPrincipal | undefined
   ) {
-    // Use setters to ensure initialisation
-    this.constraints = constraints;
+    // Use setter to ensure initialisation
     this.transportSecurity = transportSecurity;
   }
 

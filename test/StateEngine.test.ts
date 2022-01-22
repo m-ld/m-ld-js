@@ -31,6 +31,7 @@ describe('State Engine', () => {
       });
       return this;
     };
+    ask = () => Promise.resolve(false);
   }
 
   let clone: MockCloneEngine;
@@ -48,6 +49,13 @@ describe('State Engine', () => {
   test('can read initial state', done => {
     states.read(async state => {
       await expect(drain(state.read({}))).resolves.toMatchObject([{ tick: 0 }]);
+      done();
+    });
+  });
+
+  test('can ask initial state', done => {
+    states.read(async state => {
+      await expect(state.ask({})).resolves.toBe(false);
       done();
     });
   });

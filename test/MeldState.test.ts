@@ -233,6 +233,17 @@ describe('Meld State API', () => {
         .resolves.toBeUndefined();
     });
 
+    test('asks exists', async () => {
+      await api.write<Subject>({ '@id': 'fred', name: 'Fred', age: 40 });
+      await expect(api.ask({})).resolves.toBe(true);
+      await expect(api.ask({ '@where': { '@id': '?' } })).resolves.toBe(true);
+      await expect(api.ask({ '@where': { '@id': 'fred' } })).resolves.toBe(true);
+      await expect(api.ask({ '@where': { '@id': 'wilma' } })).resolves.toBe(false);
+      await expect(api.ask({ '@where': { '@id': 'fred', age: 100 } })).resolves.toBe(false);
+      await expect(api.ask({ '@where': { '@id': 'fred', name: '?' } })).resolves.toBe(true);
+      await expect(api.ask({ '@where': { '@id': 'fred', height: '?' } })).resolves.toBe(false);
+    });
+
     test('selects where', async () => {
       await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
       await api.write<Subject>({ '@id': 'wilma', name: 'Wilma' });
