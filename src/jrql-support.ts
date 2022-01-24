@@ -850,7 +850,7 @@ export interface Update extends Query {
    *
    * For example, assume this data exists:
    * ```json
-   * { "@id": "fred", "name": "Fred" }`
+   * { "@id": "fred", "name": "Fred" }
    * ```
    *
    * Compare the following update patterns:
