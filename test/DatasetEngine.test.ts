@@ -10,7 +10,9 @@ import { comesAlive } from '../src/engine/AbstractMeld';
 import { count, map, observeOn, take, toArray } from 'rxjs/operators';
 import { TreeClock } from '../src/engine/clocks';
 import { MeldRemotes, OperationMessage, Snapshot } from '../src/engine';
-import { Describe, GraphSubject, MeldConfig, MeldReadState, Read, Subject, Update } from '../src';
+import {
+  Describe, GraphSubject, MeldConfig, MeldReadState, Read, Subject, Update, WriteOptions
+} from '../src';
 import { AbstractLevelDOWN } from 'abstract-leveldown';
 import { jsonify } from './testUtil';
 import { MeldMemDown } from '../src/memdown';
@@ -61,8 +63,8 @@ describe('Dataset engine', () => {
       return inflateFrom(this.lock.share('state', 'test', () => super.read(request)));
     }
 
-    async write(request: Write): Promise<this> {
-      return this.lock.exclusive('state', 'test', () => super.write(request));
+    async write(request: Write, opts?: WriteOptions): Promise<this> {
+      return this.lock.exclusive('state', 'test', () => super.write(request, opts));
     }
   }
 
@@ -238,6 +240,7 @@ describe('Dataset engine', () => {
       remotes = mockRemotes(remoteUpdates, remotesLive, left);
       snapshot = jest.fn().mockReturnValueOnce(Promise.resolve<Snapshot>({
         gwc: collaborator.gwc,
+        agreed: TreeClock.GENESIS,
         data: EMPTY, // Cheating, should really contain Wilma (see op above)
         updates: EMPTY
       }));
@@ -420,7 +423,7 @@ describe('Dataset engine', () => {
       const revupCalled = new Promise<void>(resolve => {
         remotes.revupFrom = async () => {
           resolve();
-          return { gwc: remote.gwc.update(remote.time.ticked()), updates: revUps };
+          return { gwc: remote.gwc.set(remote.time.ticked()), updates: revUps };
         };
       });
       // The clone will initialise into a revving-up state, waiting for a revUp

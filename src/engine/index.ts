@@ -141,14 +141,19 @@ export enum BufferEncoding {
  * MessagePack.
  */
 export type EncodedOperation = [
-  version: 3,
   /**
-   * First tick of causal time range
+   * @since 1
+   */
+  version: 4,
+  /**
+   * First tick of causal time range. If this is less than `time.ticks`, this
+   * operation is a fusion of multiple operations.
    * @since 2
    */
   from: number,
   /**
-   * Time as JSON
+   * Time as JSON. If this operation is a fusion, this is the _last_ time in the
+   * fusion's range.
    * @since 1
    */
   time: TreeClockJson,
@@ -161,26 +166,33 @@ export type EncodedOperation = [
    * Encodings applied to the update
    * @since 3
    */
-  encoding: BufferEncoding[]
+  encoding: BufferEncoding[],
+  /**
+   * The _last_ tick in this operation's range that was an agreement.
+   * @since 4
+   */
+  agreed: number | undefined
 ];
 
 /**
- * Common components of a clone snapshot and rev-up – both of which provide a 'recovery' mechanism
- * for clones from a 'collaborator' clone. Recovery is required (non-exhaustively):
+ * Common components of a clone snapshot and rev-up – both of which provide a
+ * 'recovery' mechanism for clones from a 'collaborator' clone. Recovery is
+ * required (non-exhaustively):
  * - For a brand new clone (always a snapshot)
  * - If a clone has been partitioned from the network and is now back online
  * - If a clone has detected that it has missed an operation message
  */
 export interface Recovery {
   /**
-   * 'Global Wall Clock' (or 'Great Westminster Clock'), containing the most recent ticks and
-   * transaction IDs seen by the recovery collaborator.
+   * 'Global Wall Clock' (or 'Great Westminster Clock'), containing the most
+   * recent ticks and transaction IDs seen by the recovery collaborator.
    */
   readonly gwc: GlobalClock;
   /**
-   * Operation messages seen by the collaborator. For a rev-up, these include messages from the
-   * collaborator's journal. However for both rev-up and snapshot, a collaborator also relays
-   * relevant operation messages it observes during the recovery process.
+   * Operation messages seen by the collaborator. For a rev-up, these include
+   * messages from the collaborator's journal. However for both rev-up and
+   * snapshot, a collaborator also relays relevant operation messages it
+   * observes during the recovery process.
    */
   readonly updates: Observable<OperationMessage>;
 }
@@ -203,6 +215,10 @@ export interface Snapshot extends Recovery {
    * @see Snapshot.Datum
    */
   readonly data: Observable<Snapshot.Datum>;
+  /**
+   * Time of the last agreement to contribute to the snapshot.
+   */
+  readonly agreed: TreeClock;
 }
 
 export namespace Snapshot {

@@ -1,5 +1,7 @@
 import { PatchQuads } from '../src/engine/dataset';
 import { DataFactory as RdfDataFactory } from 'rdf-data-factory';
+import { Quad } from 'rdf-js';
+
 const rdf = new RdfDataFactory();
 
 describe('Patch quads', () => {
@@ -43,6 +45,18 @@ describe('Patch quads', () => {
   test('Append mutates', () => {
     const patch = new PatchQuads();
     patch.append({ deletes: [a], inserts: [b] });
+    expect([...patch.deletes].length).toBe(1);
+    expect([...patch.inserts].length).toBe(1);
+    expect([...patch.deletes][0].equals(a)).toBe(true);
+    expect([...patch.inserts][0].equals(b)).toBe(true);
+    expect(patch.isEmpty).toBe(false);
+  });
+
+  test('Append with iterable mutates', () => {
+    const patch = new PatchQuads();
+    function *deletes(quads: Quad[]) { for (let q of quads) yield q; }
+    function *inserts(quads: Quad[]) { for (let q of quads) yield q; }
+    patch.append({ deletes: deletes([a]), inserts: inserts([b]) });
     expect([...patch.deletes].length).toBe(1);
     expect([...patch.inserts].length).toBe(1);
     expect([...patch.deletes][0].equals(a)).toBe(true);

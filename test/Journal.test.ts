@@ -1,12 +1,14 @@
 import { Journal, JournalEntry } from '../src/engine/journal';
 import { memStore, MockProcess } from './testClones';
-import { MeldEncoder, MeldOperation } from '../src/engine/MeldEncoding';
+import { MeldEncoder } from '../src/engine/MeldEncoding';
 import { Dataset } from '../src/engine/dataset';
 import { TreeClock } from '../src/engine/clocks';
 import { delay, take, toArray } from 'rxjs/operators';
 import { EmptyError, firstValueFrom, Observer, of, Subject } from 'rxjs';
-import { CheckPoint, JournalClerk } from '../src/engine/journal/JournalClerk';
-import { JournalConfig } from '../src';
+import { JournalClerk } from '../src/engine/journal/JournalClerk';
+import { JournalAdmin, JournalCheckPoint, JournalConfig } from '../src';
+import { MeldOperation } from '../src/engine/MeldOperation';
+import { TripleMap } from '../src/engine/quads';
 
 describe('Dataset Journal', () => {
   let store: Dataset;
@@ -24,10 +26,11 @@ describe('Dataset Journal', () => {
    * Correct behaviour of e.g. fusions is covered in other tests.
    * @param process simulated operation source
    * @param content tuple of deletes and inserts , defaults to no-op
+   * @param agree whether this operation is an agreement
    */
-  function opAt(process: MockProcess, content: [object, object] = [{}, {}]) {
+  function opAt(process: MockProcess, content: [object, object] = [{}, {}], agree?: true) {
     const [deletes, inserts] = content;
-    return MeldOperation.fromEncoded(encoder, process.operated(deletes, inserts));
+    return MeldOperation.fromEncoded(encoder, process.operated(deletes, inserts, agree));
   }
 
   function addEntry(
@@ -38,7 +41,7 @@ describe('Dataset Journal', () => {
       prepare: () => ({
         async kvps(batch) {
           const state = await journal.state();
-          return state.builder().next(op, localTime).commit(batch);
+          return state.builder().next(op, new TripleMap, localTime).commit(batch);
         },
         return: op
       })
@@ -47,14 +50,21 @@ describe('Dataset Journal', () => {
 
   /** Utility for mixing-in journal clerk testing */
   class TestClerk extends JournalClerk {
-    checkpoints: Observer<CheckPoint>;
+    checkpoints: Observer<JournalCheckPoint>;
 
-    constructor(config: JournalConfig = {}) {
-      const checkpoints = new Subject<CheckPoint>();
-      super(journal, { '@id': 'test', logLevel: 'debug', journal: config }, {
+    constructor(config: JournalConfig = {}, admin: JournalAdmin = {}) {
+      const checkpoints = new Subject<JournalCheckPoint>();
+      super(journal, {
+        '@id': 'test',
+        logLevel: 'debug',
+        // Disable automatic admin, we use explicit checkpoints, unless override
+        journal: { adminDebounce: 0, ...config }
+      }, {
         checkpoints,
         // Respond immediately (async) to entries and checkpoints
-        schedule: of(0).pipe(delay(0))
+        schedule: of(0).pipe(delay(0)),
+        // Allow override in a test
+        ...admin
       });
       this.checkpoints = checkpoints;
     }
@@ -78,7 +88,7 @@ describe('Dataset Journal', () => {
       await store.transact({
         prepare: () => ({
           kvps(batch) {
-            journal.reset(remote.time, remote.gwc)(batch);
+            journal.reset(remote.time, remote.gwc, TreeClock.GENESIS)(batch);
             journal.insertPastOperation(pastOp.encoded)(batch);
           }
         })
@@ -137,7 +147,7 @@ describe('Dataset Journal', () => {
     beforeEach(async () => {
       local = new MockProcess(TreeClock.GENESIS);
       await store.transact({
-        prepare: () => ({ kvps: journal.reset(local.time, local.gwc) })
+        prepare: () => ({ kvps: journal.reset(local.time, local.gwc, TreeClock.GENESIS) })
       });
     });
 
@@ -169,7 +179,7 @@ describe('Dataset Journal', () => {
         expect(e).toBeDefined();
         expect(e.prev).toEqual([0, TreeClock.GENESIS.hash]);
         expect(e.operation.time.equals(local.time)).toBe(true);
-        expect(e.operation.operation).toEqual(op.encoded);
+        expect(e.operation.encoded).toEqual(op.encoded);
         expect(e.operation.tid).toEqual(op.time.hash);
         expect(e.operation.from).toBe(local.time.ticks);
         await expect(e.next()).resolves.toBeUndefined();
@@ -198,7 +208,7 @@ describe('Dataset Journal', () => {
         const op = await commitOp;
         const saved = await journal.operation(op.time.hash);
         expect(saved!.time.equals(local.time)).toBe(true);
-        expect(saved!.operation).toEqual(op.encoded);
+        expect(saved!.encoded).toEqual(op.encoded);
         expect(saved!.tid).toEqual(op.time.hash);
         expect(saved!.tick).toEqual(local.time.ticks);
         expect(saved!.from).toBe(local.time.ticks);
@@ -239,7 +249,8 @@ describe('Dataset Journal', () => {
 
       test('cuts from remote fused operation', async () => {
         const next = opAt(remote);
-        const fused = MeldOperation.fromOperation(encoder, remoteOp.fuse(next));
+        const fused = MeldOperation.fromOperation(
+          encoder, remoteOp.fusion().next(next).commit());
         const state = await journal.state();
         // Hmm, this duplicates the code in SuSetDataset
         const seenTicks = state.gwc.getTicks(fused.time);
@@ -253,7 +264,8 @@ describe('Dataset Journal', () => {
         await addEntry(local);
         const next = await addEntry(local, remote);
         const saved = await journal.operation(next.time.hash);
-        const expectedFused = MeldOperation.fromOperation(encoder, remoteOp.fuse(next));
+        const expectedFused = MeldOperation.fromOperation(
+          encoder, remoteOp.fusion().next(next).commit());
         await expect(saved!.fusedPast()).resolves.toEqual(expectedFused.encoded);
       });
 
@@ -261,14 +273,19 @@ describe('Dataset Journal', () => {
         const expectNext = firstValueFrom(journal.tail);
         const nextOp = await addEntry(local, remote);
         const nextEntry = await expectNext;
-        const fused = MeldOperation.fromOperation(encoder, remoteOp.fuse(nextOp));
-
-        await journal.spliceEntries(
-          [remoteEntry.index, nextEntry.index],
-          JournalEntry.fromOperation(journal, nextEntry.key, remoteEntry.prev, fused));
-
+        const fused = MeldOperation.fromOperation(
+          encoder, remoteOp.fusion().next(nextOp).commit());
+        await store.transact({
+          prepare: () => ({
+            kvps: journal.spliceEntries(
+              [remoteEntry.index, nextEntry.index],
+              [JournalEntry.fromOperation(
+                journal, nextEntry.key, remoteEntry.prev, fused, new TripleMap)],
+              { appending: false })
+          })
+        });
         const read = await journal.operation(nextOp.time.hash);
-        expect(read!.operation).toEqual(fused.encoded);
+        expect(read!.encoded).toEqual(fused.encoded);
       });
     });
 
@@ -375,7 +392,7 @@ describe('Dataset Journal', () => {
         const willBeActive = firstValueFrom(clerk.activity.pipe(take(2), toArray()));
         await addEntry(local);
         await addEntry(local);
-        clerk.checkpoints.next(CheckPoint.SAVEPOINT);
+        clerk.checkpoints.next(JournalCheckPoint.SAVEPOINT);
 
         const activity = await willBeActive;
         expect(activity[0].action).toBe('appended');
@@ -385,6 +402,18 @@ describe('Dataset Journal', () => {
         // Expect the entry to be a fusion of all three
         expect(entry!.operation.time.equals(local.time)).toBe(true);
         expect(entry!.prev).toEqual([0, TreeClock.GENESIS.hash]);
+      });
+
+      test('does nothing if disabled', async () => {
+        const clerk = new TestClerk({ adminDebounce: 0 }, { checkpoints: undefined });
+        const willBeActive = firstValueFrom(clerk.activity);
+        // Do some stuff that would normally prompt some activity
+        await addEntry(local);
+        await addEntry(local);
+        clerk.checkpoints.next(JournalCheckPoint.SAVEPOINT);
+        await clerk.close();
+        // No clerk operations happened
+        await expect(willBeActive).rejects.toBeInstanceOf(EmptyError);
       });
 
       test('starts new fusion if previous single entry above threshold', async () => {
@@ -422,7 +451,7 @@ describe('Dataset Journal', () => {
         const insertFred = { '@id': 'fred', 'name': 'Fred' };
         await addEntry(local);
         await addEntry(local, undefined, [{}, insertFred]);
-        clerk.checkpoints.next(CheckPoint.ADMIN);
+        clerk.checkpoints.next(JournalCheckPoint.ADMIN);
 
         const activity = await willBeActive;
         expect(activity[0].action).toBe('appended');

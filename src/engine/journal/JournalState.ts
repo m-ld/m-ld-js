@@ -1,9 +1,11 @@
 import { GlobalClock, GlobalClockJson, TreeClock, TreeClockJson } from '../clocks';
 import { Kvps } from '../dataset';
 import { JournalEntry } from './JournalEntry';
-import { MeldOperation } from '../MeldEncoding';
 import { EncodedOperation } from '../index';
-import { Journal, tickKey } from '.';
+import { EntryIndex, Journal, tickKey } from '.';
+import { MeldOperation } from '../MeldOperation';
+import { TripleMap } from '../quads';
+import { UUID } from '../MeldEncoding';
 
 interface JournalStateJson {
   /**
@@ -24,11 +26,18 @@ interface JournalStateJson {
    * for the local clone identity.
    */
   gwc: GlobalClockJson;
+  /**
+   * Time of the last _agreement_. An incoming operation with any process tick
+   * less than this time will be ignored by the dataset.
+   */
+  agreed: TreeClockJson;
 }
 
 export interface EntryBuilder {
-  next(operation: MeldOperation, localTime: TreeClock): this;
-  entries: JournalEntry[];
+  next(operation: MeldOperation, deleted: TripleMap<UUID[]>, localTime: TreeClock): this;
+  void(entry: JournalEntry): this;
+  appendEntries: JournalEntry[];
+  state: JournalState;
   commit: Kvps;
 }
 
@@ -37,55 +46,90 @@ export class JournalState {
   static fromJson(data: Journal, json: JournalStateJson) {
     const time = TreeClock.fromJson(json.time);
     const gwc = GlobalClock.fromJSON(json.gwc);
-    return new JournalState(data, json.start, time, gwc);
+    const agreed = TreeClock.fromJson(json.agreed);
+    return new JournalState(data, json.start, time, gwc, agreed);
   }
 
   constructor(
     private readonly journal: Journal,
     readonly start: number,
     readonly time: TreeClock,
-    readonly gwc: GlobalClock
+    readonly gwc: GlobalClock,
+    readonly agreed: TreeClock
   ) {
   }
 
   get json(): JournalStateJson {
-    return { start: this.start, time: this.time.toJSON(), gwc: this.gwc.toJSON() };
+    return {
+      start: this.start,
+      time: this.time.toJSON(),
+      gwc: this.gwc.toJSON(),
+      agreed: this.agreed.toJSON()
+    };
   }
 
   commit: Kvps = this.journal.saveState(this);
 
-  withTime(localTime: TreeClock, gwc?: GlobalClock): JournalState {
-    return new JournalState(this.journal, this.start, localTime, gwc ?? this.gwc);
+  withTime(localTime: TreeClock, gwc?: GlobalClock, agreed?: TreeClock): JournalState {
+    return new JournalState(
+      this.journal,
+      this.start,
+      localTime,
+      gwc ?? this.gwc,
+      agreed ?? this.agreed);
   }
 
   builder(): EntryBuilder {
-    const state = this;
-    return new class {
-      private localTime = state.time;
-      private gwc = state.gwc;
-      entries: JournalEntry[] = [];
+    return new (class implements EntryBuilder {
+      deleteEntries: EntryIndex[] = [];
+      appendEntries: JournalEntry[] = [];
 
-      next(operation: MeldOperation, localTime: TreeClock) {
-        const prevTicks = this.gwc.getTicks(operation.time);
-        const prevTid = this.gwc.tid(operation.time);
-        this.entries.push(JournalEntry.fromOperation(state.journal,
-          tickKey(localTime.ticks), [prevTicks, prevTid], operation));
-        this.gwc = this.gwc.update(operation.time);
-        this.localTime = localTime;
+      constructor(
+        public state: JournalState) {
+      }
+
+      next(operation: MeldOperation, deleted: TripleMap<UUID[]>, localTime: TreeClock) {
+        const prevTicks = this.state.gwc.getTicks(operation.time);
+        const prevTid = this.state.gwc.tid(operation.time);
+        this.appendEntries.push(JournalEntry.fromOperation(
+          this.state.journal,
+          tickKey(localTime.ticks),
+          [prevTicks, prevTid],
+          operation,
+          deleted));
+        this.state = this.state.withTime(localTime,
+          this.state.gwc.set(operation.time),
+          operation.agreed != null ? operation.time.ticked(operation.agreed) : undefined);
         return this;
       }
 
-      /** Commits the built journal entries to the journal */
-      commit: Kvps = async batch => {
-        for (let entry of this.entries)
-          entry.commitTail(batch);
+      void(entry: JournalEntry): this {
+        if (entry.operation.agreed != null)
+          throw new RangeError('Cannot void an agreement');
+        // The entry's tick is now internal to its process, so the GWC must be
+        // reset to the previous external tick and tid for the process.
+        const [prevTick, prevTid] = entry.prev;
+        const prevTime = entry.operation.time.ticked(prevTick);
+        this.deleteEntries.push(entry.index);
+        this.state = this.state.withTime(
+          this.state.time.ticked(prevTime),
+          this.state.gwc.set(prevTime, prevTid));
+        return this;
+      }
 
-        state.withTime(this.localTime, this.gwc).commit(batch);
+      /** Commits the changed journal */
+      commit: Kvps = async batch => {
+        this.state.journal.spliceEntries(
+          this.deleteEntries,
+          this.appendEntries,
+          { appending: true }
+        )(batch);
+        this.state.commit(batch);
       };
-    };
+    })(this);
   }
 
-  applicableOperation(op: MeldOperation): Promise<MeldOperation> {
+  applicableOperation(op: MeldOperation): Promise<MeldOperation | null> {
     return this.journal.withLockedHistory(async () => {
       // Cut away stale parts of an incoming fused operation.
       // Optimisation: no need to cut if incoming is not fused.
@@ -95,9 +139,10 @@ export class JournalState {
         const seenTid = op.time.ticked(seenTicks).hash;
         const seenOp = await this.journal.operation(seenTid);
         if (seenOp != null)
-          return { return: await seenOp.cutSeen(op) };
+          op = await seenOp.cutSeen(op);
       }
-      return { return: op };
+      // If anything in the op pre-dates the last agreement, ignore it
+      return { return: op.time.anyLt(this.agreed) ? null : op };
     });
   }
 

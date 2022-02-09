@@ -11,7 +11,7 @@ import { MsgPack } from '../util';
  * the same underlying store.
  */
 export class TidsStore {
-  private cache: TripleMap<Set<UUID>> = new TripleMap();
+  private cache: TripleMap<UUID[]> = new TripleMap();
 
   constructor(
     private store: KvpStore) {
@@ -40,7 +40,13 @@ export class TidsStore {
    * @param triple the triple to retrieve the TIDs for
    */
   async findTripleTids(triple: Triple): Promise<UUID[]> {
-    return [...await this.tripleTids(triple)];
+    let tids = this.cache.get(triple);
+    if (tids == null) { // Not found in cache
+      const encoded = await this.store.get(tripleTidsKey(triple));
+      tids = encoded != null ? MsgPack.decode(encoded) as UUID[] : [];
+      this.cache.set(triple, tids);
+    }
+    return tids;
   }
 
   /**
@@ -48,15 +54,7 @@ export class TidsStore {
    * @param patch the patch to be applied
    */
   async commit(patch: PatchTids): Promise<Kvps> {
-    const affected = new TripleMap<Set<UUID>>();
-    const affect = (tripleTids: Iterable<[Triple, UUID]>, effect: Set<UUID>['delete' | 'add']) =>
-      Promise.all([...tripleTids].map(async ([triple, tid]) => {
-        const tids = await this.tripleTids(triple);
-        affected.set(triple, tids);
-        effect.call(tids, tid);
-      }));
-    await affect(patch.deletes, Set.prototype.delete);
-    await affect(patch.inserts, Set.prototype.add);
+    const affected = await this.affected(patch);
     // TODO: Smarter cache eviction
     this.cache.clear();
     return batch => {
@@ -70,14 +68,26 @@ export class TidsStore {
   }
 
   /**
-   * @returns Set<UUID> mutable set in the cache
+   * Gathers the resultant TIDs after affecting the store with the given patch
    */
-  private async tripleTids(triple: Triple): Promise<Set<UUID>> {
-    let tids = this.cache.get(triple);
-    if (tids == null) { // Not found in cache
-      const encoded = await this.store.get(tripleTidsKey(triple));
-      tids = new Set<UUID>(encoded != null ? MsgPack.decode(encoded) : []);
-      this.cache.set(triple, tids);
+  async affected(patch: PatchTids): Promise<TripleMap<Set<UUID>>> {
+    const affected = new TripleMap<Set<UUID>>();
+    const affect = (tripleTids: Iterable<[Triple, UUID]>, effect: Set<UUID>['delete' | 'add']) =>
+      Promise.all([...tripleTids].map(async ([triple, tid]) =>
+        effect.call(await this.tripleTids(triple, affected), tid)));
+    await affect(patch.deletes, Set.prototype.delete);
+    await affect(patch.inserts, Set.prototype.add);
+    return affected;
+  }
+
+  /**
+   * @returns Set<UUID> mutable set in the `allAffected` map
+   */
+  private async tripleTids(triple: Triple, allAffected: TripleMap<Set<UUID>>): Promise<Set<UUID>> {
+    let tids = allAffected.get(triple);
+    if (tids == null) {
+      tids = new Set(await this.findTripleTids(triple));
+      allAffected.set(triple, tids);
     }
     return tids;
   }

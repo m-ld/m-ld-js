@@ -48,7 +48,7 @@ export async function clone(
   config: MeldConfig,
   app: InitialApp = {}
 ): Promise<MeldClone> {
-  const { backendEvents } = app;
+  const { backendEvents, journalAdmin } = app;
   if (backendEvents != null)
     Stopwatch.timingEvents.on('timing', e => backendEvents.emit('timing', e));
   const sw = new Stopwatch('clone', config['@id']);
@@ -62,7 +62,7 @@ export async function clone(
   const dataset = await new QuadStoreDataset(
     backend, context, backendEvents).initialise(sw.lap);
   const engine = new DatasetEngine({
-    dataset, remotes, extensions, config, context
+    dataset, remotes, extensions, config, journalAdmin, context
   });
 
   sw.next('engine');

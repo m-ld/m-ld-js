@@ -171,6 +171,32 @@ export interface MeldReadState extends QueryableRdfSource {
 }
 
 /**
+ * Options for writing to a **m-ld** clone.
+ * @see {@link MeldState.write}
+ */
+export interface WriteOptions {
+  /**
+   * Whether this write is an _agreement_. Agreements may cause concurrent
+   * operations on other clones to be _voided_, that is, reversed and removed
+   * from history.
+   *
+   * The use of an agreement usually requires either that some coordination has
+   * occurred in the app (externally to **m-ld**), or that the local user has
+   * the authority to unilaterally agree. Use of this flag may trigger an
+   * error if preconditions have not been met.
+   *
+   * A write without this flag may also be automatically upgraded to an
+   * agreement by a constraint.
+   *
+   * > 🚧 Agreements are an experimental feature. Please contact us to discuss
+   * your use-case.
+   *
+   * @experimental
+   */
+  agree?: true;
+}
+
+/**
  * A data state corresponding to a local clock tick. A state can be some initial
  * state (an new clone), or follow a write operation, which may have been
  * transacted locally in this clone, or remotely on another clone.
@@ -201,10 +227,11 @@ export interface MeldState extends MeldReadState {
    * new state.
    *
    * @param request the declarative write description
+   * @param opts write options to apply
    * @typeParam W one of the {@link Write} types
    * @returns the next state of the domain, changed by this write operation only
    */
-  write<W = Write>(request: W): Promise<MeldState>;
+  write<W = Write>(request: W, opts?: WriteOptions): Promise<MeldState>;
   /**
    * Shorthand method for deleting a single Subject by its `@id`. This will also
    * remove references to the given Subject from other Subjects.

@@ -3,12 +3,13 @@ import { memStore, MockProcess, testExtensions, testOp } from './testClones';
 import { TreeClock } from '../src/engine/clocks';
 import { toArray } from 'rxjs/operators';
 import { Dataset } from '../src/engine/dataset';
-import { EmptyError, firstValueFrom, from, lastValueFrom } from 'rxjs';
-import { Describe, MeldConstraint } from '../src';
+import { EmptyError, firstValueFrom, lastValueFrom, Subject } from 'rxjs';
+import { Describe, JournalCheckPoint, MeldConstraint, MeldUpdate } from '../src';
 import { jsonify } from './testUtil';
 import { MeldEncoder } from '../src/engine/MeldEncoding';
 import { BufferEncoding, OperationMessage } from '../src/engine';
 import { drain } from 'rx-flowable';
+import { MeldError } from '../src/engine/MeldError';
 
 const fred = {
   '@id': 'http://test.m-ld.org/fred',
@@ -33,9 +34,16 @@ describe('SU-Set Dataset', () => {
 
   afterEach(() => unlock());
 
-  function captureUpdate() {
+  function captureUpdate(): Promise<MeldUpdate> {
     // Convert the subject graphs to JSON for matching convenience
     return firstValueFrom(ssd.updates).then(jsonify);
+  }
+
+  function expectNoUpdate(willUpdate: Promise<MeldUpdate>) {
+    return expect(Promise.race([
+      // Give it a tick, just in case the update is async
+      willUpdate, new Promise(resolve => setImmediate(resolve))]
+    )).resolves.toBeUndefined();
   }
 
   describe('with basic config', () => {
@@ -84,8 +92,7 @@ describe('SU-Set Dataset', () => {
           await ssd.write({ '@insert': [] })
         ]);
         expect(msg).toBeNull();
-        await expect(Promise.race([willUpdate, Promise.resolve()]))
-          .resolves.toBeUndefined();
+        await expectNoUpdate(willUpdate);
       });
 
       test('transacts an insert', async () => {
@@ -100,7 +107,7 @@ describe('SU-Set Dataset', () => {
 
         expect(msg!.time.equals(local.time)).toBe(true);
         const [ver, from, time, upd, enc] = msg!.data;
-        expect(ver).toBe(3);
+        expect(ver).toBe(4);
 
         expect(from).toBe(local.time.ticks);
         expect(local.time.equals(TreeClock.fromJson(time) as TreeClock)).toBe(true);
@@ -113,8 +120,7 @@ describe('SU-Set Dataset', () => {
 
         await ssd.apply(
           remote.sentOperation({}, { '@id': 'fred', 'name': 'Fred' }),
-          local.join(remote.time).tick().time,
-          local.tick().time);
+          local.join(remote.time));
         await expect(willUpdate).resolves.toHaveProperty('@insert', [fred]);
 
         await expect(drain(ssd.read<Describe>({
@@ -126,12 +132,10 @@ describe('SU-Set Dataset', () => {
         const willUpdate = captureUpdate();
 
         const msg = await ssd.apply(remote.sentOperation({}, {}),
-          local.join(remote.time).tick().time,
-          local.tick().time);
+          local.join(remote.time));
 
         expect(msg).toBeNull();
-        await expect(Promise.race([willUpdate, Promise.resolve()]))
-          .resolves.toBeUndefined();
+        await expectNoUpdate(willUpdate);
       });
 
       describe('with an initial triple', () => {
@@ -159,7 +163,7 @@ describe('SU-Set Dataset', () => {
           expect(data.every(v => {
             if ('operation' in v) {
               const [ver, from, time, upd, enc] = v.operation;
-              expect(ver).toBe(3);
+              expect(ver).toBe(4);
               expect(from).toBe(local.time.ticks);
               expect(TreeClock.fromJson(time).equals(local.time)).toBe(true);
               expect(MeldEncoder.jsonFromBuffer(upd, enc))
@@ -189,7 +193,7 @@ describe('SU-Set Dataset', () => {
           expect(data.every(v => {
             if ('operation' in v) {
               const [ver, from, time, upd, enc] = v.operation;
-              expect(ver).toBe(3);
+              expect(ver).toBe(4);
               expect(from).toBe(firstTick);
               expect(TreeClock.fromJson(time).equals(local.time)).toBe(true);
               const [del, ins] = MeldEncoder.jsonFromBuffer(upd, enc);
@@ -227,7 +231,7 @@ describe('SU-Set Dataset', () => {
           expect(data.every(v => {
             if ('operation' in v) {
               const [ver, from, time, upd, enc] = v.operation;
-              expect(ver).toBe(3);
+              expect(ver).toBe(4);
               expect(from).toBe(local.time.ticks);
               expect(TreeClock.fromJson(time).equals(local.time)).toBe(true);
               expect(MeldEncoder.jsonFromBuffer(upd, enc))
@@ -245,7 +249,7 @@ describe('SU-Set Dataset', () => {
         test('applies a snapshot', async () => {
           const snapshot = await ssd.takeSnapshot();
           const staticData = await firstValueFrom(snapshot.data.pipe(toArray()));
-          await ssd.applySnapshot({ gwc: local.gwc, data: from(staticData) }, local.tick().time);
+          await ssd.applySnapshot(local.snapshot(staticData), local.tick().time);
           await expect(drain(ssd.read<Describe>({
             '@describe': 'http://test.m-ld.org/fred'
           }))).resolves.toEqual([fred]);
@@ -254,7 +258,7 @@ describe('SU-Set Dataset', () => {
         test('does not answer operations since before snapshot start', async () => {
           const snapshot = await ssd.takeSnapshot();
           const staticData = await firstValueFrom(snapshot.data.pipe(toArray()));
-          await ssd.applySnapshot({ gwc: local.gwc, data: from(staticData) }, local.tick().time);
+          await ssd.applySnapshot(local.snapshot(staticData), local.tick().time);
           await expect(ssd.operationsSince(remote.time)).resolves.toBeUndefined();
         });
 
@@ -283,8 +287,7 @@ describe('SU-Set Dataset', () => {
 
           await ssd.apply(
             remote.sentOperation({ 'tid': firstTid, 'o': 'Fred', 'p': '#name', 's': 'fred' }, {}),
-            local.join(remote.time).tick().time,
-            local.tick().time);
+            local.join(remote.time));
           await expect(willUpdate).resolves.toHaveProperty('@delete', [fred]);
 
           await expect(drain(ssd.read<Describe>({
@@ -296,10 +299,7 @@ describe('SU-Set Dataset', () => {
           // Insert Fred again, with Wilma and a new TID
           const remoteOp = remote.sentOperation({},
             [{ '@id': 'fred', 'name': 'Fred' }, { '@id': 'wilma', 'name': 'Wilma' }]);
-          await ssd.apply(
-            remoteOp,
-            local.join(remote.time).tick().time,
-            local.tick().time);
+          await ssd.apply(remoteOp, local.join(remote.time));
           // Delete the remotely-inserted Flintstones
           const willUpdate = captureUpdate();
           await ssd.apply(
@@ -307,8 +307,7 @@ describe('SU-Set Dataset', () => {
               { 'tid': remoteOp.time.hash, 'o': 'Fred', 'p': '#name', 's': 'fred' },
               { 'tid': remoteOp.time.hash, 'o': 'Wilma', 'p': '#name', 's': 'wilma' }
             ], {}),
-            local.join(remote.time).tick().time,
-            local.tick().time);
+            local.join(remote.time));
           // Expect Fred to still exist and Wilma to be deleted
           await expect(willUpdate).resolves.toHaveProperty('@delete', [wilma]);
           await expect(drain(ssd.read<Describe>({
@@ -320,8 +319,7 @@ describe('SU-Set Dataset', () => {
           // Delete the locally-inserted Fred
           await ssd.apply(
             remote.sentOperation({ 'tid': firstTid, 'o': 'Fred', 'p': '#name', 's': 'fred' }, {}),
-            local.join(remote.time).tick().time,
-            local.tick().time);
+            local.join(remote.time));
           // Expect Fred to be deleted
           await expect(drain(ssd.read<Describe>({
             '@describe': 'http://test.m-ld.org/fred'
@@ -355,8 +353,7 @@ describe('SU-Set Dataset', () => {
           // Pretend the remotes have seen only the first Fred name, and delete it
           await ssd.apply(
             remote.sentOperation({ 'tid': firstTid, 'o': 'Fred', 'p': '#name', 's': 'fred' }, {}),
-            local.join(remote.time).tick().time,
-            local.tick().time);
+            local.join(remote.time));
           // Expect the second Fred name to persist
           await expect(drain(ssd.read<Describe>({
             '@describe': 'http://test.m-ld.org/fred'
@@ -390,8 +387,7 @@ describe('SU-Set Dataset', () => {
               'p': '#name',
               's': 'fred'
             }, {}),
-            local.join(thirdClock.time).tick().time,
-            local.tick().time);
+            local.join(thirdClock.time));
 
           const ops = await ssd.operationsSince(remote.time);
           expect(ops).not.toBeUndefined();
@@ -410,8 +406,7 @@ describe('SU-Set Dataset', () => {
           // Don't update remote time from local
           await ssd.apply(
             remote.sentOperation({}, wilma),
-            local.join(remote.time).tick().time,
-            local.tick().time);
+            local.join(remote.time));
 
           const ops = await ssd.operationsSince(remote.time);
           expect(ops).not.toBeUndefined();
@@ -429,12 +424,10 @@ describe('SU-Set Dataset', () => {
           // Remote doesn't see third party op
           const thirdOp = third.sentOperation({}, wilma);
           await ssd.apply(thirdOp,
-            local.join(third.time).tick().time,
-            local.tick().time);
+            local.join(third.time));
           // Remote does see fourth party op
           await ssd.apply(fourth.sentOperation({}, barney),
-            local.join(fourth.time).tick().time,
-            local.tick().time);
+            local.join(fourth.time));
           remote.join(fourth.time).tick();
 
           const ops = await ssd.operationsSince(remote.time);
@@ -446,11 +439,10 @@ describe('SU-Set Dataset', () => {
         });
 
         // @see https://github.com/m-ld/m-ld-js/issues/29
-        test('accepts own unpersisted update', async () => {
+        test('accepts own un-persisted update', async () => {
           await ssd.apply(local.sentOperation(
               {}, { '@id': 'wilma', 'name': 'Wilma' }),
-            local.time,
-            local.tick().time);
+            local);
 
           await expect(drain(ssd.read<Describe>({
             '@describe': 'http://test.m-ld.org/wilma'
@@ -458,15 +450,14 @@ describe('SU-Set Dataset', () => {
         });
 
         // @see https://github.com/m-ld/m-ld-js/issues/29
-        test('answers unpersisted remote op', async () => {
+        test('answers un-persisted remote op', async () => {
           // Remote knows about first entry
           remote.join(local.time);
           const remoteTime = remote.time;
           // Create a remote entry that the remote fails to persist fully
           await ssd.apply(
             remote.sentOperation({ 'tid': firstTid, 'o': 'Fred', 'p': '#name', 's': 'fred' }, {}),
-            local.join(remote.time).tick().time,
-            local.tick().time);
+            local.join(remote.time));
           // The remote asks for its previous time
           const ops = await ssd.operationsSince(remoteTime);
           expect(ops).not.toBeUndefined();
@@ -481,11 +472,11 @@ describe('SU-Set Dataset', () => {
           // The local sees the first, adding wilma...
           const one = remote.sentOperation({}, { '@id': 'wilma', 'name': 'Wilma' });
           const oneTid = one.time.hash;
-          await ssd.apply(one, local.time, local.tick().time);
+          await ssd.apply(one, local);
           // ... and then get a third-party txn, deleting wilma
           await ssd.apply(third.sentOperation(
               { 'tid': oneTid, 'o': 'Wilma', 'p': '#name', 's': 'wilma' }, {}),
-            local.time, local.tick().time);
+            local);
           // Finally the local gets the remote fusion (as a rev-up), which still
           // includes the insert of wilma
           remote.tick();
@@ -496,8 +487,8 @@ describe('SU-Set Dataset', () => {
                 'o': 'Barney',
                 'p': '#name',
                 's': 'barney'
-              }], one.time.ticks)),
-            local.time, local.tick().time);
+              }], { from: one.time.ticks })),
+            local);
           // Result should not include wilma because of the third-party delete
           await expect(drain(ssd.read<Describe>({
             '@describe': 'http://test.m-ld.org/wilma'
@@ -510,10 +501,10 @@ describe('SU-Set Dataset', () => {
           // The local sees the first, adding wilma...
           const one = remote.sentOperation({}, { '@id': 'wilma', 'name': 'Wilma' });
           const oneTid = one.time.hash;
-          await ssd.apply(one, local.time, local.tick().time);
+          await ssd.apply(one, local);
           // ... and a second, adding betty (this will fuse with the first)
           await ssd.apply(remote.sentOperation({}, { '@id': 'betty', 'name': 'Betty' }),
-            local.time, local.tick().time);
+            local);
           // Finally the local gets the remote fusion (as a rev-up), which still
           // includes the insert of wilma but not betty
           remote.tick();
@@ -524,8 +515,8 @@ describe('SU-Set Dataset', () => {
                 'o': 'Barney',
                 'p': '#name',
                 's': 'barney'
-              }], one.time.ticks)),
-            local.time, local.tick().time);
+              }], { from: one.time.ticks })),
+            local);
           // Result should not include betty because the fusion omits it
           await expect(drain(ssd.read<Describe>({
             '@describe': 'http://test.m-ld.org/betty'
@@ -538,12 +529,12 @@ describe('SU-Set Dataset', () => {
           const staticData = await firstValueFrom(snapshot.data.pipe(toArray()));
           // Get a new clock for the rejuvenated clone
           const newLocal = remote.join(local.time).fork();
-          await ssd.applySnapshot({ gwc: remote.gwc, data: from(staticData) }, newLocal.time);
+          await ssd.applySnapshot(remote.snapshot(staticData), newLocal.time);
           // SSD should now have the 'fred' operation as a 'last operation'
           // The remote deletes fred...
           await ssd.apply(remote.sentOperation(
               { 'tid': firstTid, 'o': 'Fred', 'p': '#name', 's': 'fred' }, {}),
-            newLocal.time, newLocal.tick().time);
+            newLocal);
           // Finally the local gets its own data back in a rev-up, which still
           // includes the insert of fred, plus barney who it forgot about
           const firstTick = local.time.ticks;
@@ -555,8 +546,8 @@ describe('SU-Set Dataset', () => {
                 'o': 'Barney',
                 'p': '#name',
                 's': 'barney'
-              }], firstTick)),
-            newLocal.time, newLocal.tick().time);
+              }], { from: firstTick })),
+            newLocal);
           // Result should not include fred because of the remote delete
           await expect(drain(ssd.read<Describe>({
             '@describe': 'http://test.m-ld.org/fred'
@@ -629,8 +620,7 @@ describe('SU-Set Dataset', () => {
       remote.join(local.time);
       const msg = await ssd.apply(
         remote.sentOperation({}, { '@id': 'fred', 'name': 'Fred' }),
-        local.join(remote.time).tick().time,
-        local.tick().time);
+        local.join(remote.time));
       await expect(willUpdate).resolves.toEqual(
         { '@delete': [], '@insert': [fred, wilma], '@ticks': local.time.ticks });
 
@@ -675,8 +665,7 @@ describe('SU-Set Dataset', () => {
       const willUpdate = captureUpdate();
       await ssd.apply(
         remote.sentOperation({}, { '@id': 'fred', 'name': 'Fred' }),
-        local.join(remote.time).tick().time,
-        local.tick().time);
+        local.join(remote.time));
       await expect(willUpdate).resolves.toEqual(
         { '@insert': [fred], '@delete': [wilma], '@ticks': local.time.ticks });
 
@@ -692,8 +681,7 @@ describe('SU-Set Dataset', () => {
       const willUpdate = captureUpdate();
       await ssd.apply(
         remote.sentOperation({}, { '@id': 'wilma', 'name': 'Wilma' }),
-        local.join(remote.time).tick().time,
-        local.tick().time);
+        local.join(remote.time));
 
       await expect(drain(ssd.read<Describe>({
         '@describe': 'http://test.m-ld.org/wilma'
@@ -716,8 +704,7 @@ describe('SU-Set Dataset', () => {
       const willUpdate = captureUpdate();
       await ssd.apply(
         remote.sentOperation({ tid, o: 'Wilma', p: '#name', s: 'wilma' }, {}),
-        local.join(remote.time).tick().time,
-        local.tick().time);
+        local.join(remote.time));
 
       await expect(drain(ssd.read<Describe>({
         '@describe': 'http://test.m-ld.org/wilma'
@@ -726,6 +713,169 @@ describe('SU-Set Dataset', () => {
       // The deleted data was re-inserted, but Wilma may not have existed before
       await expect(willUpdate).resolves.toEqual(
         { '@insert': [wilma], '@delete': [], '@ticks': local.time.ticks });
+    });
+  });
+
+  describe('agreements', () => {
+    let local: MockProcess, remote: MockProcess;
+    let checkpoints: Subject<JournalCheckPoint>;
+
+    beforeEach(async () => {
+      let { left, right } = TreeClock.GENESIS.forked();
+      local = new MockProcess(left);
+      remote = new MockProcess(right);
+      checkpoints = new Subject<JournalCheckPoint>();
+      ssd = new SuSetDataset(dataset, {}, testExtensions(),
+        { '@id': 'test', '@domain': 'test.m-ld.org', journal: { adminDebounce: 0 } },
+        { checkpoints });
+      await ssd.initialise();
+      await ssd.resetClock(local.time);
+    });
+
+    test('emits a forced agreed operation', async () => {
+      const agreement = (await ssd.transact(async () => [
+        local.tick().time,
+        await ssd.write({ '@insert': fred })
+      ], { agree: true }))!;
+      const [, , , , , agreed] = agreement.data;
+      expect(agreed).toBe(local.time.ticks);
+    });
+
+    test('admits an agreed operation caused after a local write', async () => {
+      await ssd.transact(async () => [
+        local.tick().time,
+        await ssd.write({ '@insert': fred })
+      ]);
+      remote.join(local.time); // Remote has received the agreement
+      await expect(ssd.apply(
+        remote.sentOperation({}, { '@id': 'wilma', 'name': 'Wilma' }, true),
+        local.join(remote.time))).resolves.toBe(null);
+    });
+
+    test('ignores an operation concurrent with a local agreement', async () => {
+      await ssd.transact(async () => [
+        local.tick().time,
+        await ssd.write({ '@insert': fred })
+      ], { agree: true });
+      // Not joining with local time here
+      const willUpdate = captureUpdate();
+      await expect(ssd.apply(
+        remote.sentOperation({}, { '@id': 'wilma', 'name': 'Wilma' }),
+        local.join(remote.time))).resolves.toBe(null);
+      await expectNoUpdate(willUpdate);
+    });
+
+    test('voids a local operation concurrent with a remote agreement', async () => {
+      await ssd.transact(async () => [
+        local.tick().time,
+        await ssd.write({ '@insert': fred })
+      ]);
+      // Not joining with local time here
+      const willUpdate = captureUpdate();
+      await expect(ssd.apply(
+        remote.sentOperation({}, { '@id': 'wilma', 'name': 'Wilma' }, true),
+        local.join(remote.time))).resolves.toBe(null);
+      // Check fred gets voided out
+      await expect(willUpdate).resolves.toMatchObject({
+        '@delete': [fred],
+        '@insert': [wilma]
+      });
+      const snapshot = await ssd.takeSnapshot();
+      // Check GWT has been reset (to genesis, for the local process)
+      expect(snapshot.gwc.getTicks(local.time)).toBe(0);
+      expect(snapshot.gwc.getTicks(remote.time)).toBe(1);
+      // Snapshot data should have one operation and one triple
+      const data = await firstValueFrom(snapshot.data.pipe(toArray()));
+      expect(data.length).toBe(2);
+      expect(data.every(v => {
+        if ('operation' in v) {
+          const [, from, time] = v.operation;
+          expect(from).toBe(remote.time.ticks);
+          expect(TreeClock.fromJson(time).equals(remote.time)).toBe(true);
+          return true;
+        } else if ('inserts' in v) {
+          expect(MeldEncoder.jsonFromBuffer<any>(v.inserts, v.encoding).s).toBe('wilma');
+          return true;
+        }
+      })).toBe(true);
+    });
+
+    test('resets to the causes of an agreement', async () => {
+      // The local has seen another process
+      const third = local.fork();
+      // Which transacts
+      await ssd.apply(
+        third.sentOperation({}, { '@id': 'fred', 'name': 'Fred' }),
+        local.join(third.time));
+      // Local time should have ticks from the third process
+      expect(local.time.getTicks(third.time)).toBe(1);
+      // Now receive agreement, but not joining with local time
+      const willUpdate = captureUpdate();
+      await expect(ssd.apply(
+        remote.sentOperation({}, { '@id': 'wilma', 'name': 'Wilma' }, true),
+        local.join(remote.time))).resolves.toBe(null);
+      // Check fred gets voided out
+      await expect(willUpdate).resolves.toMatchObject({
+        '@delete': [fred],
+        '@insert': [wilma]
+      });
+      // Local time should no longer have ticks from the third process
+      expect(local.time.getTicks(third.time)).toBe(0);
+    });
+
+    test('voids an operation in which deleted triples not found', async () => {
+      const firstTid = (await ssd.transact(async () => [
+        local.tick().time,
+        await ssd.write({ '@insert': fred })
+      ]))!.time.hash;
+      remote.join(local.time); // Remote has received our insert
+      // Both we and a third process are going to delete Fred
+      const third = local.fork();
+      await ssd.transact(async () => [
+        local.tick().time,
+        await ssd.write({ '@delete': fred })
+      ]);
+      remote.join(local.time); // Remote has received our delete (but third has not)
+      // Third deletes Fred based on the first transaction - this will do nothing
+      await ssd.apply(
+        third.sentOperation({ 'tid': firstTid, 'o': 'Fred', 'p': '#name', 's': 'fred' }, {}),
+        local.join(third.time));
+      // Now the remote enacts an agreement, voiding third's operation
+      const willUpdate = captureUpdate();
+      await expect(ssd.apply(
+        remote.sentOperation({}, { '@id': 'wilma', 'name': 'Wilma' }, true),
+        local.join(remote.time))).resolves.toBe(null);
+      // Check fred does not get re-inserted
+      await expect(willUpdate).resolves.toMatchObject({ '@insert': [wilma] });
+      // Local time should no longer have ticks from the third process
+      expect(third.time.ticks).toBe(2);
+      expect(local.time.getTicks(third.time)).toBe(1);
+    });
+
+    test('voids a fused operation and re-connects', async () => {
+      await ssd.transact(async () => [
+        local.tick().time,
+        await ssd.write({ '@insert': fred })
+      ]);
+      remote.join(local.time); // Remote has received our first insert only
+      await ssd.transact(async () => [
+        local.tick().time,
+        await ssd.write({ '@insert': wilma })
+      ]);
+      // This should provoke an immediate fusion
+      checkpoints.next(JournalCheckPoint.SAVEPOINT);
+      // Not joining with local time here
+      const willUpdate = captureUpdate();
+      await expect(ssd.apply(
+        remote.sentOperation({}, { '@id': 'barney', 'name': 'Barney' }, true),
+        local.join(remote.time))).rejects.toBeInstanceOf(MeldError);
+      // Check fred & wilma got voided out but the agreement was not applied
+      await expect(willUpdate).resolves.toMatchObject({
+        '@delete': [fred, wilma],
+        '@insert': []
+      });
+      // Check we have rewound all the way to before the first fused op
+      expect(local.time.ticks).toBe(0);
     });
   });
 

@@ -249,7 +249,9 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     ]);
     sw.stop();
     return {
-      gwc: res.gwc, data: defer(() => {
+      gwc: res.gwc,
+      agreed: res.agreed,
+      data: defer(() => {
         // Ack the response to start the streams
         readyToAck.resolve();
         return data;
@@ -518,12 +520,12 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
 
   private async replySnapshot(
     sentParams: SendParams, state: MeldReadState, snapshot: Snapshot) {
-    const { gwc: gwc, data, updates } = snapshot;
+    const { gwc, agreed, data, updates } = snapshot;
     const dataAddress = uuid(), updatesAddress = uuid();
     // Send the reply in parallel with establishing notifiers
     const replyId = uuid();
     const replied = this.reply(sentParams, state,
-      new SnapshotResponse(gwc, dataAddress, updatesAddress), replyId);
+      new SnapshotResponse(gwc, agreed, dataAddress, updatesAddress), replyId);
     // Allow time for the notifiers to resolve while waiting for a reply
     const [dataNotifier, updatesNotifier] = await this.getAck(replied, replyId, state, Promise.all([
       this.notifier({ toId: sentParams.fromId, fromId: this.id, channelId: dataAddress }),

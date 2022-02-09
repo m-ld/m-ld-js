@@ -1,5 +1,5 @@
 import {
-  BufferEncoding, EncodedOperation, MeldLocal, MeldRemotes, OperationMessage
+  BufferEncoding, EncodedOperation, MeldLocal, MeldRemotes, OperationMessage, Snapshot
 } from '../src/engine';
 import { mock, MockProxy } from 'jest-mock-extended';
 import { asapScheduler, BehaviorSubject, from, NEVER, Observable, Observer } from 'rxjs';
@@ -14,19 +14,22 @@ import { LiveValue } from '../src/engine/LiveValue';
 import { Context } from 'jsonld/jsonld-spec';
 import { MeldMemDown } from '../src/memdown';
 import { MsgPack } from '../src/engine/util';
+import { DatasetSnapshot } from '../src/engine/dataset/SuSetDataset';
+import { ClockHolder } from '../src/engine/messages';
 
 export function testConfig(config?: Partial<MeldConfig>): MeldConfig {
   return { '@id': 'test', '@domain': 'test.m-ld.org', genesis: true, ...config };
 }
 
 export function testExtensions(extensions?: Partial<MeldExtensions>): MeldExtensions {
-  return { constraints: [], transportSecurity: noTransportSecurity, ...extensions }
+  return { constraints: [], transportSecurity: noTransportSecurity, ...extensions };
 }
 
 export function mockRemotes(
   updates: Observable<OperationMessage> = NEVER,
   lives: Array<boolean | null> | LiveValue<boolean | null> = [false],
-  newClock: TreeClock = TreeClock.GENESIS): MeldRemotes {
+  newClock: TreeClock = TreeClock.GENESIS
+): MeldRemotes {
   // This weirdness is due to jest-mock-extended trying to mock arrays
   return {
     ...mock<MeldRemotes>(),
@@ -71,57 +74,85 @@ export function testOp(
   time: TreeClock,
   deletes: object = {},
   inserts: object = {},
-  from = time.ticks): EncodedOperation {
+  { from, agreed }: { from?: number, agreed?: number } = {}
+): EncodedOperation {
   return [
-    3,
-    from,
+    4,
+    from ?? time.ticks,
     time.toJSON(),
     MsgPack.encode([deletes, inserts]),
-    [BufferEncoding.MSGPACK]
+    [BufferEncoding.MSGPACK],
+    agreed
   ];
 }
 
 /**
  * Wraps a clock and provides mock MessageService-like test mutations
  */
-export class MockProcess {
-  gwc: GlobalClock;
+export class MockProcess implements ClockHolder<TreeClock> {
+  agreed = TreeClock.GENESIS;
 
   constructor(
     public time: TreeClock,
-    public prev: number = time.ticks) {
-    this.gwc = GlobalClock.GENESIS.update(time);
+    public prev: number = time.ticks,
+    public gwc = GlobalClock.GENESIS.set(time)
+  ) {
+  }
+
+  event(): TreeClock {
+    // CAUTION: not necessarily internal
+    this.tick(true);
+    return this.time;
+  }
+
+  peek(): TreeClock {
+    return this.time;
+  }
+
+  push(time: TreeClock) {
+    this.time = time;
+    return this;
   }
 
   tick(internal = false) {
     if (!internal)
       this.prev = this.time.ticks;
     this.time = this.time.ticked();
-    this.gwc = this.gwc.update(this.time);
+    if (!internal)
+      this.gwc = this.gwc.set(this.time);
     return this;
   }
 
   join(clock: TreeClock) {
     this.time = this.time.update(clock);
-    this.gwc = this.gwc.update(this.time);
+    this.gwc = this.gwc.set(clock);
     return this;
   }
 
   fork() {
     const { left, right } = this.time.forked();
     this.time = left;
-    return new MockProcess(right);
+    return new MockProcess(right, this.prev, this.gwc);
   }
 
-  sentOperation(deletes: object, inserts: object) {
+  sentOperation(deletes: object, inserts: object, agree?: true) {
     // Do not inline: this sets prev
-    const op = this.operated(deletes, inserts);
+    const op = this.operated(deletes, inserts, agree);
     return new OperationMessage(this.prev, op);
   }
 
-  operated(deletes: object, inserts: object): EncodedOperation {
+  operated(deletes: object, inserts: object, agree?: true): EncodedOperation {
     this.tick();
-    return testOp(this.time, deletes, inserts);
+    let agreed: number | undefined;
+    if (agree) {
+      this.agreed = this.time;
+      agreed = this.time.ticks;
+    }
+    return testOp(this.time, deletes, inserts, { agreed });
+  }
+
+  snapshot(data: Snapshot.Datum[]): DatasetSnapshot {
+    return { gwc: this.gwc, agreed: this.agreed, data: from(data) };
   }
 }
 

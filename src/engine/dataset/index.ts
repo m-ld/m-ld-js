@@ -58,6 +58,8 @@ export interface KvpStore {
    * @param txn prepares a write operation to be performed
    */
   transact<T = unknown>(txn: TxnOptions<KvpResult<T>>): Promise<T>;
+  /** Transaction and state locking, can also be used for other locks */
+  readonly lock: LockManager<'state' | 'txn' | string>;
 }
 
 /**
@@ -68,7 +70,6 @@ export interface KvpStore {
 export interface Dataset extends KvpStore {
   readonly location: string;
   readonly rdf: Required<DataFactory>;
-  readonly lock: LockManager<'state' | 'txn' | string>;
 
   graph(name?: GraphName): Graph;
 

@@ -1,18 +1,16 @@
-import { BufferEncoding, EncodedOperation } from '.';
+import { BufferEncoding } from '.';
 import { flatten, lazy, MsgPack } from './util';
-import { Context, ExpandedTermDef } from '../jrql-support';
+import { Context, ExpandedTermDef, Reference } from '../jrql-support';
 import { Iri } from 'jsonld/jsonld-spec';
-import { RdfFactory, Triple, tripleIndexKey } from './quads';
+import { RdfFactory, Triple } from './quads';
 import { activeCtx } from './jsonld';
-import { M_LD, RDF } from '../ns';
+import { M_LD, RDF, XS } from '../ns';
 import { SubjectGraph } from './SubjectGraph';
 import { SubjectQuads } from './SubjectQuads';
 import { ActiveContext } from 'jsonld/lib/context';
-import { TreeClock } from './clocks';
+import { MeldError } from './MeldError';
 // TODO: Switch to fflate. Node.js zlib uses Pako in the browser
 import { gunzipSync, gzipSync } from 'zlib';
-import { CausalOperation, FusableCausalOperation } from './ops';
-import { MeldError } from './MeldError';
 
 const COMPRESS_THRESHOLD_BYTES = 1024;
 
@@ -30,93 +28,7 @@ export class DomainContext implements Context {
     if (this['@base'] == null)
       this['@base'] = `http://${domain}/`;
     if (this['@vocab'] == null)
-      this['@vocab'] = new URL('/#', this['@base']).href
-  }
-}
-
-export function unreify(reifications: Triple[]): [Triple, UUID[]][] {
-  return Object.values(reifications.reduce((rids, reification) => {
-    const rid = reification.subject.value;
-    let [triple, tids] = rids[rid] || [{}, []];
-    switch (reification.predicate.value) {
-      case RDF.subject:
-        if (reification.object.termType == 'NamedNode')
-          triple.subject = reification.object;
-        break;
-      case RDF.predicate:
-        if (reification.object.termType == 'NamedNode')
-          triple.predicate = reification.object;
-        break;
-      case RDF.object:
-        triple.object = reification.object;
-        break;
-      case M_LD.tid:
-        tids.push(reification.object.value);
-        break;
-    }
-    rids[rid] = [triple, tids];
-    return rids;
-  }, {} as { [rid: string]: [Triple, UUID[]] }));
-}
-
-export type TriplesTids = [Triple, UUID[]][];
-
-export class MeldOperation extends FusableCausalOperation<Triple, TreeClock> {
-  static fromOperation = (encoder: MeldEncoder,
-    op: CausalOperation<Triple, TreeClock>): MeldOperation => {
-    const jsons = [op.deletes, op.inserts]
-      .map((triplesTids, i) => {
-        // Encoded inserts are only reified if fused
-        if (i === 1 && op.from === op.time.ticks)
-          return [...triplesTids].map(([triple]) => triple);
-        else
-          return encoder.reifyTriplesTids([...triplesTids]);
-      })
-      .map(encoder.jsonFromTriples);
-    const [update, encoding] = MeldEncoder.bufferFromJson(jsons);
-    const encoded: EncodedOperation = [3, op.from, op.time.toJSON(), update, encoding];
-    return new MeldOperation(op, encoded, jsons);
-  }
-
-  static fromEncoded = (encoder: MeldEncoder,
-    encoded: EncodedOperation): MeldOperation => {
-    const [ver] = encoded;
-    if (ver < 2)
-      throw new Error(`Encoded operation version ${ver} not supported`);
-    let [, from, timeJson, update, encoding] = encoded;
-    const jsons: [object, object] = MeldEncoder.jsonFromBuffer(update, encoding);
-    const [delTriples, insTriples] = jsons.map(encoder.triplesFromJson);
-    const time = TreeClock.fromJson(timeJson);
-    const deletes = unreify(delTriples);
-    let inserts: MeldOperation['inserts'];
-    if (from === time.ticks) {
-      const tid = time.hash;
-      inserts = insTriples.map(triple => [triple, [tid]]);
-    } else {
-      // No need to calculate transaction ID if the encoding is fused
-      inserts = unreify(insTriples);
-    }
-    return new MeldOperation({ from, time, deletes, inserts }, encoded, jsons);
-  }
-
-  private constructor(
-    op: CausalOperation<Triple, TreeClock>,
-    /**
-     * Serialisation of triples is not required to be normalised. For any m-ld
-     * operation, there are many possible serialisations. An operation carries its
-     * serialisation with it, for journaling and hashing.
-     */
-    readonly encoded: EncodedOperation,
-    readonly jsons: object) {
-    super(op, tripleIndexKey);
-  }
-
-  toString() {
-    return `${JSON.stringify(this.jsons)}`;
-  }
-
-  protected sizeof(item: Triple): number {
-    return tripleIndexKey(item).length;
+      this['@vocab'] = new URL('/#', this['@base']).href;
   }
 }
 
@@ -126,12 +38,20 @@ export class MeldOperation extends FusableCausalOperation<Triple, TreeClock> {
  */
 const OPERATION_CONTEXT = {
   rdf: RDF.$base,
-  xs: 'http://www.w3.org/2001/XMLSchema#',
+  xs: XS.$base,
   tid: M_LD.tid,
   s: { '@type': '@id', '@id': 'rdf:subject' },
   p: { '@type': '@id', '@id': 'rdf:predicate' },
   o: 'rdf:object'
 };
+
+/**
+ * A reference triple carries a blank node identifier
+ */
+export interface RefTriple extends Triple, Reference {
+}
+
+export type RefTriplesTids = [RefTriple, UUID[]][];
 
 export class MeldEncoder {
   private /*readonly*/ ctx: ActiveContext;
@@ -139,7 +59,8 @@ export class MeldEncoder {
 
   constructor(
     readonly domain: string,
-    readonly rdf: RdfFactory) {
+    readonly rdf: RdfFactory
+  ) {
     this.ready = activeCtx(new DomainContext(domain, OPERATION_CONTEXT))
       .then(ctx => this.ctx = ctx);
   }
@@ -150,9 +71,17 @@ export class MeldEncoder {
 
   private name = lazy(name => this.rdf.namedNode(name));
 
-  reifyTriplesTids(triplesTids: [Triple, string[]][]): Triple[] {
+  identifyTriple = (triple: Triple): RefTriple =>
+    ({ '@id': `_:${this.rdf.blankNode().value}`, ...triple });
+
+  identifyTriplesTids = (triplesTids: Iterable<[Triple, UUID[]]>): RefTriplesTids =>
+    [...triplesTids].map(([triple, tids]) => [this.identifyTriple(triple), tids]);
+
+  reifyTriplesTids(triplesTids: RefTriplesTids): Triple[] {
     return flatten(triplesTids.map(([triple, tids]) => {
-      const rid = this.rdf.blankNode();
+      if (!triple['@id'].startsWith('_:'))
+        throw new TypeError('Triple is not a blank node');
+      const rid = this.rdf.blankNode(triple['@id'].slice(2));
       return [
         // Reification must be known, so Statement type is redundant
         // this.rdf.quad(rid, this.name(RDF.type), this.name(RDF.Statement)),
@@ -164,18 +93,44 @@ export class MeldEncoder {
     }));
   }
 
+  static unreifyTriplesTids(reifications: Triple[]): RefTriplesTids {
+    return Object.values(reifications.reduce((rids, reification) => {
+      const rid = reification.subject.value; // Blank node value
+      // Add the blank node IRI prefix to a new triple
+      let [triple, tids] = rids[rid] || [{ '@id': `_.${rid}` }, []];
+      switch (reification.predicate.value) {
+        case RDF.subject:
+          if (reification.object.termType == 'NamedNode')
+            triple.subject = reification.object;
+          break;
+        case RDF.predicate:
+          if (reification.object.termType == 'NamedNode')
+            triple.predicate = reification.object;
+          break;
+        case RDF.object:
+          triple.object = reification.object;
+          break;
+        case M_LD.tid:
+          tids.push(reification.object.value);
+          break;
+      }
+      rids[rid] = [triple, tids];
+      return rids;
+    }, {} as { [rid: string]: [RefTriple, UUID[]] }));
+  }
+
   jsonFromTriples = (triples: Triple[]): object => {
     const json = SubjectGraph.fromRDF(triples, { ctx: this.ctx });
     // Recreates JSON-LD compaction behaviour
     return json.length == 0 ? {} : json.length == 1 ? json[0] : json;
-  }
+  };
 
   triplesFromJson = (json: object): Triple[] =>
     [...new SubjectQuads('graph', this.ctx, this.rdf).quads(<any>json)];
-  
+
   triplesFromBuffer = (encoded: Buffer, encoding: BufferEncoding[]): Triple[] =>
     this.triplesFromJson(MeldEncoder.jsonFromBuffer(encoded, encoding));
-  
+
   bufferFromTriples = (triples: Triple[]): [Buffer, BufferEncoding[]] =>
     MeldEncoder.bufferFromJson(this.jsonFromTriples(triples));
 

@@ -1,41 +1,69 @@
-import { MeldOperation } from '../MeldEncoding';
-import { JournalOperation, TickTid } from './JournalOperation';
+import { JournalOperation } from './JournalOperation';
 import { OperationMessage } from '../index';
 import type { Journal, TickKey } from '.';
 import { EntryIndex } from '.';
+import { MeldOperation } from '../MeldOperation';
+import { UUID } from '../MeldEncoding';
+import { TripleMap } from '../quads';
+import { Iri } from 'jsonld/jsonld-spec';
 
 /**
- * Lightweight encoding of a transaction operation reference (TID) and the previous public tick
- * from the entry's process clock.
+ * Identifies an entry or operation by both tick and TID.
+ *
+ * CAUTION: the tick is that of the operation process clock, not necessarily the
+ * local clock.
+ */
+export type TickTid = [
+  tick: number,
+  tid: string
+];
+
+/**
+ * TIDs keyed by reference triple identifier as recorded in an operation
+ */
+export type EntryDeleted = { [key: Iri]: UUID[] };
+
+/**
+ * Lightweight encoding of a transaction operation reference (TID) and the
+ * previous public tick from the entry's process clock.
  */
 type JournalEntryJson = [
   /** Previous public tick and TID for this entry's clock (may be remote) */
   prev: TickTid,
   /** Operation transaction ID */
-  tid: string
+  tid: string,
+  /** Triple TIDs that were actually removed when this entry was applied */
+  deleted: EntryDeleted
 ];
 
 /** Immutable expansion of JournalEntryJson, with the referenced operation */
 export class JournalEntry {
   static async fromJson(journal: Journal, key: TickKey, json: JournalEntryJson) {
     // Destructuring fields for convenience
-    const [prev, tid] = json;
+    const [prev, tid, deleted] = json;
     const operation = await journal.operation(tid, 'require');
-    return new JournalEntry(journal, key, prev, operation);
+    return new JournalEntry(journal, key, prev, operation, deleted);
   }
 
-  static fromOperation(journal: Journal,
-    key: TickKey, prev: TickTid, operation: MeldOperation
+  static fromOperation(
+    journal: Journal,
+    key: TickKey,
+    prev: TickTid,
+    operation: MeldOperation,
+    deleted: TripleMap<UUID[]>
   ) {
-    return new JournalEntry(journal, key, prev,
-      JournalOperation.fromOperation(journal, operation));
+    return new JournalEntry(
+      journal, key, prev,
+      JournalOperation.fromOperation(journal, operation),
+      operation.byRef('deletes', deleted));
   }
 
   private constructor(
     private readonly journal: Journal,
     readonly key: TickKey,
     readonly prev: TickTid,
-    readonly operation: JournalOperation
+    readonly operation: JournalOperation,
+    readonly deleted: EntryDeleted
   ) {
   }
 
@@ -44,14 +72,7 @@ export class JournalEntry {
   }
 
   get json(): JournalEntryJson {
-    return [this.prev, this.operation.tid];
-  }
-
-  commitTail = this.journal.commitEntry(this);
-
-  static prev(json: JournalEntryJson) {
-    const [prev] = json;
-    return prev;
+    return [this.prev, this.operation.tid, this.deleted];
   }
 
   async next(): Promise<JournalEntry | undefined> {
@@ -60,6 +81,6 @@ export class JournalEntry {
 
   asMessage(): OperationMessage {
     const [prevTick] = this.prev;
-    return new OperationMessage(prevTick, this.operation.json, this.operation.time);
+    return new OperationMessage(prevTick, this.operation.encoded, this.operation.time);
   }
 }

@@ -24,10 +24,12 @@ export abstract class MutableOperation<T> implements Operation<T> {
   }
 
   append(patch: Partial<Operation<T>>) {
+    // Iterate the deletes only once
+    const patchDeletes = [...patch.deletes ?? []];
     // ins(a), del(a) == del(a)
-    this.inserts.deleteAll(patch.deletes);
+    this.inserts.deleteAll(patchDeletes);
 
-    this.deletes.addAll(patch.deletes);
+    this.deletes.addAll(patchDeletes);
     this.inserts.addAll(patch.inserts);
     // del(a), ins(a) == ins(a)
     this.deletes.deleteAll(this.inserts);
@@ -98,9 +100,9 @@ namespace ItemTid {
   export const tid = (itemTid: ItemTid<unknown>) => itemTid[1];
 }
 
-export interface CausalOperator<T, C extends CausalClock> {
-  next(op: CausalOperation<T, C>): CausalOperator<T, C>;
-  commit(): CausalOperation<T, C>;
+export interface CausalOperator<T> {
+  next(op: T): this;
+  commit(): T;
   readonly footprint: number;
 }
 
@@ -114,7 +116,8 @@ export abstract class FusableCausalOperation<T, C extends CausalClock>
 
   constructor(
     { from, time, deletes, inserts }: CausalOperation<T, C>,
-    readonly getIndex: (item: T) => string = item => `${item}`) {
+    readonly getIndex: (item: T) => string = item => `${item}`
+  ) {
     this.from = from;
     this.time = time;
     this.deletes = [...deletes];
@@ -132,7 +135,8 @@ export abstract class FusableCausalOperation<T, C extends CausalClock>
 
   protected abstract sizeof(item: T): number;
 
-  fusion(): CausalOperator<T, C> {
+  /** Pre: We can fuse iff we are causally contiguous with the next operation */
+  fusion(): CausalOperator<CausalOperation<T, C>> {
     // Not using mutable append, our semantics are different!
     const original = this;
     return new class {
@@ -140,7 +144,7 @@ export abstract class FusableCausalOperation<T, C extends CausalClock>
       private fused: MutableOperation<ItemTid<T>> | undefined;
       private time: C | undefined;
 
-      next(next: CausalOperation<T, C>): CausalOperator<T, C> {
+      next(next: CausalOperation<T, C>) {
         // 0. Lazily create the fusion
         this.fused ??= original.mutable();
         // 1. Fuse all deletes
@@ -155,15 +159,17 @@ export abstract class FusableCausalOperation<T, C extends CausalClock>
       }
 
       commit(): CausalOperation<T, C> {
-        if (this.fused != null && this.time != null)
+        if (this.fused != null && this.time != null) {
           return {
             from: original.from,
             time: this.time,
             deletes: original.expand(this.fused.deletes),
             inserts: original.expand(this.fused.inserts)
           };
-        else
-          return original;
+        } else {
+          const { from, time, deletes, inserts } = original;
+          return { from, time, deletes, inserts };
+        }
       }
 
       get footprint() {
@@ -172,19 +178,15 @@ export abstract class FusableCausalOperation<T, C extends CausalClock>
     };
   }
 
-  /** Pre: We can fuse iff we are causally contiguous with the next operation */
-  fuse(next: CausalOperation<T, C>): CausalOperation<T, C> {
-    return this.fusion().next(next).commit();
-  }
-
-  cutting(): CausalOperator<T, C> {
+  /** Pre: We can cut iff our from is within the previous range */
+  cutting(): CausalOperator<CausalOperation<T, C>> {
     const original = this;
     return new class {
       /** Lazy, in case next() never called */
       private cut: MutableOperation<ItemTid<T>> | undefined;
       private from = original.from;
 
-      next(prev: CausalOperation<T, C>): CausalOperator<T, C> {
+      next(prev: CausalOperation<T, C>) {
         // Lazily create the cutting
         this.cut ??= original.mutable();
         // Remove all overlapping deletes
@@ -214,15 +216,17 @@ export abstract class FusableCausalOperation<T, C extends CausalClock>
       }
 
       commit(): CausalOperation<T, C> {
-        if (this.cut != null)
+        if (this.cut != null) {
           return {
             from: this.from,
             time: original.time,
             deletes: original.expand(this.cut.deletes),
             inserts: original.expand(this.cut.inserts)
           };
-        else
-          return original;
+        } else {
+          const { from, time, deletes, inserts } = original;
+          return { from, time, deletes, inserts };
+        }
       }
 
       get footprint() {
@@ -231,18 +235,8 @@ export abstract class FusableCausalOperation<T, C extends CausalClock>
     };
   }
 
-  /** Pre: We can cut iff our from is within the previous range */
-  cutBy(prev: CausalOperation<T, C>): CausalOperation<T, C> {
-    return this.cutting().next(prev).commit();
-  }
-
   private expand(itemTids: Iterable<ItemTid<T>>): ItemTids<T>[] {
-    const expanded = this.newIndexMap();
-    for (let itemTid of itemTids) {
-      const [item, tid] = itemTid;
-      expanded.with(item, () => []).push(tid);
-    }
-    return [...expanded];
+    return [...expandItemTids(itemTids, this.newIndexMap())];
   }
 
   private mutable(op: CausalOperation<T, C> = this): MutableOperation<ItemTid<T>> {
@@ -278,6 +272,17 @@ export abstract class FusableCausalOperation<T, C extends CausalClock>
       };
     }(items);
   };
+}
+
+export function expandItemTids<T, M extends IndexMap<T, string[]>>(
+  itemTids: Iterable<ItemTid<T>>,
+  output: M
+): M {
+  for (let itemTid of itemTids) {
+    const [item, tid] = itemTid;
+    output.with(item, () => []).push(tid);
+  }
+  return output;
 }
 
 export function *flattenItemTids<T>(

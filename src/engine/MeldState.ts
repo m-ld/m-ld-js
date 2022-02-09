@@ -1,7 +1,8 @@
 import { Query, Read, Subject, SubjectProperty, Update, Write } from '../jrql-support';
 import { Subscription } from 'rxjs';
 import {
-  any, GraphSubject, MeldState, MeldStateMachine, readResult, ReadResult, StateProc, UpdateProc
+  any, GraphSubject, MeldState, MeldStateMachine, readResult, ReadResult, StateProc, UpdateProc,
+  WriteOptions
 } from '../api';
 import { CloneEngine, EngineState, EngineUpdateProc, StateEngine } from './StateEngine';
 import { QueryableRdfSourceProxy } from './quads';
@@ -24,8 +25,8 @@ abstract class ApiState extends QueryableRdfSourceProxy implements MeldState {
     return readResult(this.state.read(request));
   }
 
-  async write<W = Write>(request: W): Promise<MeldState> {
-    return this.construct(await this.state.write(request));
+  async write<W = Write>(request: W, opts?: WriteOptions): Promise<MeldState> {
+    return this.construct(await this.state.write(request, opts));
   }
 
   delete(id: string): Promise<MeldState> {
@@ -71,8 +72,8 @@ export class ApiStateMachine extends ApiState implements MeldStateMachine {
         stateEngine.read(state => result.resolve(state.read(request)));
         return inflateFrom(result);
       }
-      async write(request: Write): Promise<this> {
-        await stateEngine.write(state => state.write(request));
+      async write(request: Write, opts?: WriteOptions): Promise<this> {
+        await stateEngine.write(state => state.write(request, opts));
         return this;
       }
       ask(pattern: Query): Promise<boolean> {
@@ -107,13 +108,13 @@ export class ApiStateMachine extends ApiState implements MeldStateMachine {
   }
 
   write(procedure: StateProc<MeldState>): Promise<unknown>;
-  write<W = Write>(request: W): Promise<MeldState>;
-  async write(request: Write | StateProc<MeldState>) {
+  write<W = Write>(request: W, opts?: WriteOptions): Promise<MeldState>;
+  async write(request: Write | StateProc<MeldState>, opts?: WriteOptions) {
     if (typeof request == 'function') {
       await this.engine.write(state => request(new ImmutableState(state)));
       return this;
     } else {
-      return super.write(request);
+      return super.write(request, opts);
     }
   }
 

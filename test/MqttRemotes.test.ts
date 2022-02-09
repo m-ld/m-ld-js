@@ -181,7 +181,7 @@ describe('New MQTT remotes', () => {
       // Local clone provides a rev-up on any request
       const { left: localTime, right: remoteTime } = TreeClock.GENESIS.forked();
       const revupUpdate = new MockProcess(remoteTime).sentOperation({}, {});
-      const gwc = GlobalClock.GENESIS.update(localTime).update(remoteTime);
+      const gwc = GlobalClock.GENESIS.set(localTime).set(remoteTime);
       remotes.setLocal(mockLocal({
         revupFrom: () => Promise.resolve({ gwc, updates: of(revupUpdate) })
       }));
@@ -314,7 +314,7 @@ describe('New MQTT remotes', () => {
         if (type === '__send' && json['@type'] === 'http://control.m-ld.org/request/revup') {
           mqtt.mockPublish('__reply/client1/consumer2/reply1/' + messageId, MsgPack.encode({
             '@type': 'http://control.m-ld.org/response/revup',
-            gwc: GlobalClock.GENESIS.update(TreeClock.GENESIS.forked().right).toJSON(),
+            gwc: GlobalClock.GENESIS.set(TreeClock.GENESIS.forked().right).toJSON(),
             updatesAddress: 'subChannel1'
           }));
         }
@@ -343,7 +343,7 @@ describe('New MQTT remotes', () => {
           } else {
             mqtt.mockPublish(`__reply/client1/${toId}/reply2/${messageId}`, MsgPack.encode({
               '@type': 'http://control.m-ld.org/response/revup',
-              gwc: GlobalClock.GENESIS.update(TreeClock.GENESIS.forked().right).toJSON(),
+              gwc: GlobalClock.GENESIS.set(TreeClock.GENESIS.forked().right).toJSON(),
               updatesAddress: 'subChannel1'
             }));
           }

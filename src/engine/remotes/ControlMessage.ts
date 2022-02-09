@@ -71,7 +71,9 @@ export abstract class Response extends ControlMessage {
           return new NewClockResponse(TreeClock.fromJson(json.clock));
         case MeldResponseType.snapshot:
           return new SnapshotResponse(
-            GlobalClock.fromJSON(json.gwc), json.dataAddress,
+            GlobalClock.fromJSON(json.gwc),
+            TreeClock.fromJson(json.agreed),
+            json.dataAddress,
             json.updatesAddress);
         case MeldResponseType.revup:
           return new RevupResponse(
@@ -106,6 +108,7 @@ export class NewClockResponse extends Response {
 export class SnapshotResponse extends Response {
   constructor(
     readonly gwc: GlobalClock,
+    readonly agreed: TreeClock,
     readonly dataAddress: string,
     readonly updatesAddress: string) {
     super();
@@ -115,6 +118,7 @@ export class SnapshotResponse extends Response {
     return {
       '@type': MeldResponseType.snapshot,
       gwc: this.gwc.toJSON(),
+      agreed: this.agreed.toJSON(),
       dataAddress: this.dataAddress,
       updatesAddress: this.updatesAddress
     };

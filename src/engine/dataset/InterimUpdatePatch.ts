@@ -1,5 +1,4 @@
 import { DeleteInsert, InterimUpdate, MeldUpdate } from '../../api';
-import { TreeClock } from '../clocks';
 import { Subject, SubjectProperty, Update } from '../../jrql-support';
 import { PatchQuads } from '.';
 import { JrqlGraph } from './JrqlGraph';
@@ -23,15 +22,17 @@ export class InterimUpdatePatch implements InterimUpdate {
   /**
    * @param graph
    * @param ctx
-   * @param time
+   * @param ticks
    * @param patch the starting app patch (will not be mutated unless 'mutable')
    * @param mutable?
    */
   constructor(
     private readonly graph: JrqlGraph,
     private readonly ctx: ActiveContext,
-    private readonly time: TreeClock,
-    private readonly patch: PatchQuads, private readonly mutable?: 'mutable') {
+    private readonly ticks: number,
+    private readonly patch: PatchQuads,
+    private readonly mutable?: 'mutable'
+  ) {
     // If mutable, we treat the app patch as assertions
     this.assertions = mutable ? patch : new PatchQuads();
     this.needsUpdate = Promise.resolve(true);
@@ -95,7 +96,7 @@ export class InterimUpdatePatch implements InterimUpdate {
 
   private createUpdate(patch: PatchQuads, ctx?: ActiveContext): MeldUpdate {
     return {
-      '@ticks': this.time.ticks,
+      '@ticks': this.ticks,
       '@delete': this.quadSubjects(patch.deletes, ctx),
       '@insert': this.quadSubjects(patch.inserts, ctx)
     };

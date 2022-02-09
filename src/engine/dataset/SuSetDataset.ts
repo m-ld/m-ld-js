@@ -1,10 +1,10 @@
-import { GraphSubject, MeldConstraint, MeldExtensions, MeldUpdate } from '../../api';
+import { GraphSubject, MeldConstraint, MeldExtensions, MeldUpdate, WriteOptions } from '../../api';
 import { BufferEncoding, EncodedOperation, OperationMessage, Snapshot } from '..';
 import { GlobalClock, TickTree, TreeClock } from '../clocks';
 import { Context, Query, Read, Write } from '../../jrql-support';
 import { Dataset, PatchQuads, PatchResult } from '.';
 import { JrqlGraph } from './JrqlGraph';
-import { MeldEncoder, MeldOperation, TriplesTids, unreify, UUID } from '../MeldEncoding';
+import { MeldEncoder, RefTriplesTids, UUID } from '../MeldEncoding';
 import { EMPTY, merge, mergeMap, Observable, of, Subject as Source } from 'rxjs';
 import { expand, filter, map, takeWhile } from 'rxjs/operators';
 import { check, completed, Future, getIdLogger, inflate } from '../util';
@@ -14,19 +14,20 @@ import { Quad, Triple, tripleIndexKey, TripleMap } from '../quads';
 import { InterimUpdatePatch } from './InterimUpdatePatch';
 import { ActiveContext } from 'jsonld/lib/context';
 import { activeCtx } from '../jsonld';
-import { Journal, JournalEntry, JournalState } from '../journal';
+import { EntryBuilder, Journal, JournalEntry, JournalState } from '../journal';
 import { JournalClerk } from '../journal/JournalClerk';
 import { PatchTids, TidsStore } from './TidsStore';
-import { flattenItemTids } from '../ops';
-import { EntryBuilder } from '../journal/JournalState';
+import { expandItemTids, flattenItemTids } from '../ops';
 import { Consumable, flowable } from 'rx-flowable';
 import { batch } from 'rx-flowable/operators';
 import { consume } from 'rx-flowable/consume';
 import { MeldMessageType } from '../../ns/m-ld';
 import { CheckList } from '../../constraints/CheckList';
-import { MeldConfig } from '../../config';
+import { JournalAdmin, MeldConfig } from '../../config';
+import { MeldOperation } from '../MeldOperation';
+import { ClockHolder } from '../messages';
 
-type DatasetSnapshot = Omit<Snapshot, 'updates'>;
+export type DatasetSnapshot = Omit<Snapshot, 'updates'>;
 
 type DatasetConfig = Pick<MeldConfig,
   '@id' | '@domain' | 'maxOperationSize' | 'logLevel' | 'journal'>;
@@ -36,11 +37,12 @@ type DatasetConfig = Pick<MeldConfig,
  * Journals every transaction and creates m-ld compliant operations.
  */
 export class SuSetDataset extends MeldEncoder {
-  private static checkNotClosed =
-    check((d: SuSetDataset) => !d.dataset.closed, () => new MeldError('Clone has closed'));
+  private static checkNotClosed = check((d: SuSetDataset) =>
+    !d.dataset.closed, () => new MeldError('Clone has closed'));
 
   /** External context used for reads, writes and updates, but not for constraints. */
-  /*readonly*/ userCtx: ActiveContext;
+  /*readonly*/
+  userCtx: ActiveContext;
 
   private /*readonly*/ userGraph: JrqlGraph;
   private readonly tidsStore: TidsStore;
@@ -54,13 +56,14 @@ export class SuSetDataset extends MeldEncoder {
     private readonly dataset: Dataset,
     private readonly context: Context,
     private readonly extensions: MeldExtensions,
-    config: DatasetConfig
+    config: DatasetConfig,
+    journalAdmin?: JournalAdmin
   ) {
     super(config['@domain'], dataset.rdf);
     this.log = getIdLogger(this.constructor, config['@id'], config.logLevel);
     this.journal = new Journal(dataset, this);
     this.tidsStore = new TidsStore(dataset);
-    this.journalClerk = new JournalClerk(this.journal, config);
+    this.journalClerk = new JournalClerk(this.journal, config, journalAdmin);
     this.maxOperationSize = config.maxOperationSize ?? Infinity;
   }
 
@@ -122,7 +125,8 @@ export class SuSetDataset extends MeldEncoder {
       prepare: async () => {
         return {
           kvps: this.journal.reset(localTime,
-            GlobalClock.GENESIS.update(localTime))
+            GlobalClock.GENESIS.set(localTime),
+            TreeClock.GENESIS)
         };
       }
     });
@@ -130,7 +134,8 @@ export class SuSetDataset extends MeldEncoder {
 
   @SuSetDataset.checkNotClosed.async
   async saveClock(
-    prepare: (gwc: GlobalClock) => Promise<TreeClock> | TreeClock): Promise<TreeClock> {
+    prepare: (gwc: GlobalClock) => Promise<TreeClock> | TreeClock
+  ): Promise<TreeClock> {
     return this.dataset.transact<TreeClock>({
       id: 'suset-save-clock',
       prepare: async () => {
@@ -181,7 +186,9 @@ export class SuSetDataset extends MeldEncoder {
 
   @SuSetDataset.checkNotClosed.async
   async transact(
-    prepare: () => Promise<[TreeClock, PatchQuads]>): Promise<OperationMessage | null> {
+    prepare: () => Promise<[TreeClock, PatchQuads]>,
+    { agree }: WriteOptions = {}
+  ): Promise<OperationMessage | null> {
     return this.dataset.transact<OperationMessage | null>({
       prepare: async txc => {
         const [time, patch] = await prepare();
@@ -190,14 +197,14 @@ export class SuSetDataset extends MeldEncoder {
 
         txc.sw.next('check-constraints');
         const interim = new InterimUpdatePatch(
-          this.userGraph, this.userCtx, time, patch, 'mutable');
+          this.userGraph, this.userCtx, time.ticks, patch, 'mutable');
         await this.constraint.check(this.readState, interim);
         const { update, entailments } = await interim.finalise();
 
         txc.sw.next('find-tids');
         const deletedTriplesTids = await this.tidsStore.findTriplesTids(patch.deletes);
         const tid = time.hash;
-        const op = this.txnOperation(tid, time, patch.inserts, deletedTriplesTids);
+        const op = this.txnOperation(tid, time, patch.inserts, deletedTriplesTids, agree);
 
         // Include tid changes in final patch
         txc.sw.next('new-tids');
@@ -206,7 +213,7 @@ export class SuSetDataset extends MeldEncoder {
         // Include journaling in final patch
         txc.sw.next('journal');
         const journal = await this.journal.state();
-        const journaling = journal.builder().next(op, time);
+        const journaling = journal.builder().next(op, deletedTriplesTids, time);
         const opMsg = await this.operationMessage(journal, time, op);
 
         return this.txnResult(
@@ -216,9 +223,7 @@ export class SuSetDataset extends MeldEncoder {
   }
 
   /**
-   * Rolls up the given transaction details into a single patch. This method is
-   * just a type convenience for ensuring everything needed for a transaction is
-   * present.
+   * Rolls up the given transaction details into a single patch to the store.
    */
   private async txnResult(
     assertions: PatchQuads,
@@ -226,9 +231,10 @@ export class SuSetDataset extends MeldEncoder {
     tidPatch: PatchTids,
     journaling: EntryBuilder,
     opMessage: OperationMessage | null,
-    update: MeldUpdate): Promise<PatchResult<OperationMessage | null>> {
+    update: MeldUpdate
+  ): Promise<PatchResult<OperationMessage | null>> {
     const commitTids = await this.tidsStore.commit(tidPatch);
-    this.log.debug(`patch ${journaling.entries.map(e => e.operation.time)}:
+    this.log.debug(`patch ${journaling.appendEntries.map(e => e.operation.time)}:
     deletes: ${[...assertions.deletes].map(tripleIndexKey)}
     inserts: ${[...assertions.inserts].map(tripleIndexKey)}`);
     return {
@@ -250,7 +256,7 @@ export class SuSetDataset extends MeldEncoder {
   private async operationMessage(journal: JournalState, time: TreeClock, op: MeldOperation) {
     const prev = journal.gwc.getTicks(time);
     // Construct the operation message with the previous visible clock tick
-    let [version, from, timeJson, update, encoding] = op.encoded;
+    let [version, from, timeJson, update, encoding, agreed] = op.encoded;
     // Apply transport security to the encoded update
     const wired = await this.extensions.transportSecurity.wire(
       update, MeldMessageType.operation, 'out', this.readState);
@@ -259,24 +265,36 @@ export class SuSetDataset extends MeldEncoder {
       encoding = encoding.concat(BufferEncoding.SECURE);
     }
     const operationMsg = new OperationMessage(
-      prev, [version, from, timeJson, update, encoding], time);
+      prev, [version, from, timeJson, update, encoding, agreed], time);
     if (operationMsg.size > this.maxOperationSize)
       throw new MeldError('Delta too big');
     return operationMsg;
   }
 
   private txnTidPatch(
-    tid: string, insert: Iterable<Quad>, deletedTriplesTids: TripleMap<UUID[]>) {
+    tid: string,
+    insert: Iterable<Quad>,
+    deletedTriplesTids: TripleMap<UUID[]>
+  ) {
     return new PatchTids({
       deletes: flattenItemTids(deletedTriplesTids),
       inserts: [...insert].map(triple => [triple, tid])
     });
   }
 
-  private txnOperation(tid: string, time: TreeClock,
-    inserts: Iterable<Quad>, deletes: TripleMap<UUID[]>) {
+  private txnOperation(
+    tid: string,
+    time: TreeClock,
+    inserts: Iterable<Quad>,
+    deletes: TripleMap<UUID[]>,
+    agreed?: true
+  ) {
     return MeldOperation.fromOperation(this, {
-      from: time.ticks, time, deletes, inserts: [...inserts].map(triple => [triple, [tid]])
+      from: time.ticks,
+      time,
+      deletes,
+      inserts: [...inserts].map(triple => [triple, [tid]]),
+      agreed: agreed ? time.ticks : undefined
     });
   }
 
@@ -286,26 +304,60 @@ export class SuSetDataset extends MeldEncoder {
     triple.object,
     this.rdf.defaultGraph());
 
+  /**
+   * @param msg the remote message to apply to this dataset
+   * @param clockHolder a holder carrying a clock which can be manipulated
+   */
   @SuSetDataset.checkNotClosed.async
-  async apply(msg: OperationMessage,
-    localTime: TreeClock, cxnTime: TreeClock): Promise<OperationMessage | null> {
+  async apply(
+    msg: OperationMessage,
+    clockHolder: ClockHolder<TreeClock>
+  ): Promise<OperationMessage | null> {
     return this.dataset.transact<OperationMessage | null>({
       prepare: async txc => {
         txc.sw.next('decode-op');
         const journal = await this.journal.state();
-        this.log.debug(`Applying operation: ${msg.time} @ ${localTime}`);
-        const op = await journal.applicableOperation(
+        const applicableOp = await journal.applicableOperation(
           MeldOperation.fromEncoded(this, await this.unSecureOperation(msg)));
+        if (applicableOp == null) {
+          this.log.debug(`Ignoring pre-agreement operation: ${msg.time} @ ${clockHolder.peek()}`);
+          return { return: null };
+        }
 
+        this.log.debug(`Applying operation: ${msg.time} @ ${clockHolder.peek()}`);
         txc.sw.next('apply-txn');
-        const patch = new PatchQuads();
+        // TODO: Refactor this txn to a class with patches as members
+        const patch = new PatchQuads(), tidPatch = new PatchTids(), journaling = journal.builder();
+        if (applicableOp.agreed != null) {
+          // TODO: check agreement conditions
+
+          // void more recent entries
+          await this.rewindTo(msg.time, patch, tidPatch, journaling);
+          // If we now find that we are not ready for the agreement, we need to
+          // re-connect to recover what's missing. This could include a rewound
+          // local txn. But first, commit the rewind.
+          const rewoundJoinTime = journaling.state.time.ticked(msg.time);
+          if (rewoundJoinTime.anyLt(msg.time)) {
+            clockHolder.push(journaling.state.time); // Not joining
+            return this.missingCausesResult(patch, tidPatch, journaling);
+          } else {
+            clockHolder.push(rewoundJoinTime);
+          }
+        }
+        const opTime = clockHolder.event(), cxnTime = clockHolder.event();
+
         // Process deletions and inserts
-        const insertTids = new TripleMap(op.inserts);
-        const tidPatch = await this.processSuDeletions(op.deletes, patch);
-        patch.append({ inserts: op.inserts.map(([triple]) => this.toUserQuad(triple)) });
+        const insertTids = new TripleMap(applicableOp.inserts);
+        const deletions = await this.processSuDeletions(applicableOp.deletes);
+        tidPatch.append({ deletes: deletions.tids });
+        patch.append({
+          deletes: deletions.triples.map(this.toUserQuad),
+          inserts: applicableOp.inserts.map(([triple]) => this.toUserQuad(triple))
+        });
 
         txc.sw.next('apply-cx'); // "cx" = constraint
-        const interim = new InterimUpdatePatch(this.userGraph, this.userCtx, cxnTime, patch);
+        const interim = new InterimUpdatePatch(
+          this.userGraph, this.userCtx, cxnTime.ticks, patch);
         await this.constraint.apply(this.readState, interim);
         const { update, assertions, entailments } = await interim.finalise();
         const cxn = await this.constraintTxn(assertions, patch, insertTids, cxnTime);
@@ -319,7 +371,7 @@ export class SuSetDataset extends MeldEncoder {
         // have an empty patch, but we still need to complete the journal
         // entry for it.
         txc.sw.next('journal');
-        const journaling = journal.builder().next(op, localTime);
+        journaling.next(applicableOp, expandItemTids(deletions.tids, new TripleMap), opTime);
 
         // If the constraint has done anything, we need to merge its work
         if (cxn != null) {
@@ -327,7 +379,7 @@ export class SuSetDataset extends MeldEncoder {
           tidPatch.append(cxn.tidPatch);
           patch.append(assertions);
           // Also create a journal entry for the constraint "transaction"
-          journaling.next(cxn.operation, cxnTime);
+          journaling.next(cxn.operation, cxn.deletedTriplesTids, cxnTime);
         }
         // FIXME: If this operation message exceeds max size, what to do?
         const opMsg = cxn != null && cxn.operation != null ?
@@ -337,46 +389,117 @@ export class SuSetDataset extends MeldEncoder {
     });
   }
 
+  private async rewindTo(
+    agreementTime: TreeClock,
+    patch: PatchQuads,
+    tidPatch: PatchTids,
+    journaling: EntryBuilder
+  ) {
+    for (
+      let entry = await this.journal.entryBefore();
+      entry != null && agreementTime.anyLt(entry.operation.time);
+      entry = await this.journal.entryBefore(entry.key)
+    ) {
+      const entryOp = entry.operation.asMeldOperation();
+      // Reversing a journal entry involves:
+      tidPatch.append({
+        // 1. Deleting triples that were inserted. The TIDs of the inserted
+        // triples always come from the entry itself, so we know exactly
+        // what TripleTids were added and we can safely remove them.
+        deletes: flattenItemTids(entryOp.inserts),
+        // 2. Inserting triples that were deleted. From the MeldOperation
+        // by itself we don't know which TripleTids were actually removed
+        // (a prior transaction may have removed the same ones). Instead,
+        // the journal keeps track of the actual deletes made.
+        inserts: flattenItemTids(entryOp.byTriple('deletes', entry.deleted))
+      });
+      journaling.void(entry);
+    }
+    // Now compare the affected triple-TIDs to the current state to find
+    // actual triples to delete or insert
+    for (let [triple, tids] of await this.tidsStore.affected(tidPatch))
+      patch.append({ [tids.size ? 'inserts' : 'deletes']: [this.toUserQuad(triple)] });
+  }
+
+  private async missingCausesResult(
+    patch: PatchQuads,
+    tidPatch: PatchTids,
+    journaling: EntryBuilder
+  ): Promise<PatchResult<null>> {
+    const { update } = await new InterimUpdatePatch(
+      this.userGraph, this.userCtx, journaling.state.time.ticks, patch
+    ).finalise();
+    const commitTids = await this.tidsStore.commit(tidPatch);
+    return {
+      patch,
+      kvps: batch => {
+        commitTids(batch);
+        journaling.commit(batch);
+      },
+      return: null,
+      after: () => {
+        this.emitUpdate(update);
+        throw new MeldError('Update out of order',
+          'Journal rewind missing agreement causes');
+      }
+    };
+  }
+
   /**
    * Up-applies transport security from the encoded operation in the message
    */
   private async unSecureOperation(msg: OperationMessage): Promise<EncodedOperation> {
-    let [version, from, timeJson, updated, encoding] = msg.data;
+    let [version, from, timeJson, updated, encoding, agreed] = msg.data;
     if (encoding[encoding.length - 1] === BufferEncoding.SECURE) {
       updated = await this.extensions.transportSecurity.wire(
         updated, MeldMessageType.operation, 'in', this.readState);
       encoding = encoding.slice(0, -1);
     }
-    return [version, from, timeJson, updated, encoding];
+    return [version, from, timeJson, updated, encoding, agreed];
   }
 
   /**
-   * The operation's delete contains reifications of deleted triples.
-   * This method adds the resolved deletions to the given transaction patch.
-   * @return tidPatch patch to the triple TIDs graph
+   * The operation's delete contains reifications of deleted triples. This
+   * method resolves the deletions into TID graph changes and deleted triples.
+   * Note that the triples for which a TID is being deleted are not necessarily
+   * deleted themselves, per SU-Set operation.
+   *
+   * @return deletions to the triple TIDs and the user graph
    */
-  private processSuDeletions(opDeletions: TriplesTids, patch: PatchQuads): Promise<PatchTids> {
-    return opDeletions.reduce(async (tripleTidPatch, [triple, theirTids]) => {
+  private processSuDeletions(
+    opDeletions: RefTriplesTids
+  ): Promise<{
+    tids: [Triple, UUID][],
+    triples: Triple[]
+  }> {
+    return opDeletions.reduce(async (resultSoFar, [triple, theirTids]) => {
       // For each unique deleted triple, subtract the claimed tids from the tids we have
-      const ourTripleTids = await this.tidsStore.findTripleTids(triple);
+      const [ourTripleTids, deletions] = await Promise.all(
+        [this.tidsStore.findTripleTids(triple), resultSoFar]);
       const toRemove = ourTripleTids.filter(tripleTid => theirTids.includes(tripleTid));
       // If no tids are left, delete the triple in our graph
       if (toRemove.length > 0 && toRemove.length == ourTripleTids.length) {
-        patch.append({ deletes: [this.toUserQuad(triple)] });
+        deletions.triples.push(triple);
       } else {
         this.log.debug(`Not removing ${tripleIndexKey(triple)}:
         Ours: ${ourTripleTids}
         Theirs: ${theirTids}`);
       }
-      return (await tripleTidPatch).append({ deletes: toRemove.map(tid => [triple, tid]) });
-    }, Promise.resolve(new PatchTids()));
+      for (let tid of toRemove)
+        deletions.tids.push([triple, tid]);
+      return deletions;
+    }, Promise.resolve({ tids: [] as [Triple, UUID][], triples: [] as Triple[] }));
   }
 
   /**
    * Caution: mutates patch
    */
   private async constraintTxn(
-    assertions: PatchQuads, patch: PatchQuads, insertTids: TripleMap<UUID[]>, cxnTime: TreeClock) {
+    assertions: PatchQuads,
+    patch: PatchQuads,
+    insertTids: TripleMap<UUID[]>,
+    cxnTime: TreeClock
+  ) {
     if (!assertions.isEmpty) {
       // Triples that were inserted in the applied transaction may have been
       // deleted by the constraint - these need to be removed from the applied
@@ -392,7 +515,8 @@ export class SuSetDataset extends MeldEncoder {
       const cxnId = cxnTime.hash;
       return {
         operation: this.txnOperation(cxnId, cxnTime, assertions.inserts, deletedTriplesTids),
-        tidPatch: await this.txnTidPatch(cxnId, assertions.inserts, deletedExistingTids)
+        tidPatch: await this.txnTidPatch(cxnId, assertions.inserts, deletedExistingTids),
+        deletedTriplesTids // This is as-if the constraint was applied in isolation
       };
     }
   }
@@ -409,13 +533,14 @@ export class SuSetDataset extends MeldEncoder {
     await this.dataset.transact({
       id: 'suset-reset',
       prepare: async () =>
-        ({ kvps: this.journal.reset(localTime, snapshot.gwc) })
+        ({ kvps: this.journal.reset(localTime, snapshot.gwc, snapshot.agreed) })
     });
     await completed(inflate(snapshot.data, async batch => this.dataset.transact({
       id: 'snapshot-batch',
       prepare: async () => {
         if ('inserts' in batch) {
-          const triplesTids = unreify(this.triplesFromBuffer(batch.inserts, batch.encoding));
+          const triplesTids = MeldEncoder.unreifyTriplesTids(
+            this.triplesFromBuffer(batch.inserts, batch.encoding));
           // For each triple in the batch, insert the TIDs into the tids graph
           const tidPatch = new PatchTids({ inserts: flattenItemTids(triplesTids) });
           // And include the triples themselves
@@ -441,7 +566,7 @@ export class SuSetDataset extends MeldEncoder {
       batch(10), // TODO batch size config
       mergeMap(async ({ value: quads, next }) => {
         const tidQuads = await this.tidsStore.findTriplesTids(quads, 'includeEmpty');
-        const reified = this.reifyTriplesTids([...tidQuads]);
+        const reified = this.reifyTriplesTids(this.identifyTriplesTids(tidQuads));
         const [inserts, encoding] = this.bufferFromTriples(reified);
         return { value: { inserts, encoding }, next };
       }));
@@ -450,6 +575,7 @@ export class SuSetDataset extends MeldEncoder {
     });
     return {
       gwc: journal.gwc,
+      agreed: journal.agreed,
       data: flowable<Snapshot.Datum>(merge(insData, opData))
     };
   }
