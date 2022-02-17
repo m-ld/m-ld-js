@@ -315,6 +315,22 @@ export class TreeClock extends TickTree<boolean> implements CausalClock {
     }
   }
 
+  /**
+   * Is this clock a just-forked ID with no ticks of its own? (If `true`, it has
+   * the same hash identity as its parent.)
+   *
+   * @see {@link hash}
+   */
+  get isZeroId(): boolean {
+    if (this.isId) {
+      return this.localTicks === 0;
+    } else if (this.fork != null) {
+      return this.fork.left.isZeroId || this.fork.right.isZeroId;
+    } else {
+      return false; // Non-ID leaf
+    }
+  }
+
   toJSON(forHash?: 'forHash'): TreeClockJson {
     if (this.isId) {
       return this.leafJson(true);

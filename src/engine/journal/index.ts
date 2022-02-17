@@ -217,11 +217,16 @@ export class Journal {
     // that is causally contiguous with this one.
     const seekToFrom = async (tick: number, tid: string): Promise<TickTid> => {
       const [prevTick, prevTid] = await this.entryPrev(tid) ?? [];
-      if (prevTid == null || prevTick == null || prevTick < minFrom || prevTick < tick - 1)
+      if (prevTid == null || prevTick == null // No previous in journal
+        || prevTick < minFrom // gone back further than allowed
+        // CAUTION: the following logically duplicates CausalTimeRange.contiguous
+        || prevTick < tick - 1 // previous is not contiguous
+        || op.time.ticked(prevTick).isZeroId // about to cross a fork
+      ) {
         return [tick, tid]; // This is as far back as we have
-      else
-        // Get previous tick for given tick (or our tick)
-        return seekToFrom(prevTick, prevTid);
+      }
+      // Get previous tick for given tick (or our tick)
+      return seekToFrom(prevTick, prevTid);
     };
     let [tick, tid] = await seekToFrom(op.tick, op.tid);
     // Begin the operation and fast-forward
