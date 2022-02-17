@@ -97,8 +97,9 @@ export class LockManager<K extends string = string> {
   state(key: K) {
     const lock = this.locks[key];
     return lock == null ? null : {
-      running: lock.running?.toString(),
-      head: lock.head.toString(),
+      // Debugging possibilities:
+      // running: lock.running?.toString(),
+      // head: lock.head.toString(),
       exclusive: lock.exclusive
     }
   }

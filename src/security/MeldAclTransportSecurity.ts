@@ -9,53 +9,28 @@ import { MeldError } from '../engine/MeldError';
 import { MeldConfig } from '../config';
 import { Iri } from 'jsonld/jsonld-spec';
 
+/** @internal */
 const ALGO = {
   ENCRYPT: 'AES-CBC',
   SIGN: 'RSASSA-PKCS1-v1_5'
 };
 
 /**
- * The m-ld Access Control List (m-ld ACL) extension provides authorisation
- * controls on a m-ld domain using principals and permissions registered in the
- * domain data.
+ * An instance of this class must be included as the `transportSecurity` member
+ * of the `MeldApp` for an access-controlled domain. This is because transport
+ * security must be available _before_ the clone can connect to the domain.
  *
- * At present the implemented control is whole-domain read/write authorisation.
- *
- * This extension requires an {@link AppPrincipal} object to be available in the
- * app, which signs data using
- * [RSASSA-PKCS1-v1_5](https://datatracker.ietf.org/doc/html/rfc3447).
- *
- * The following pattern should be used for the domain data:
- *
- * ```typescript
- * domain = {
- *   '@id': `http://${domain-name}/`,
- *   'http://m-ld.org/#secret': {
- *     '@type': 'http://www.w3.org/2001/XMLSchema#base64Binary',
- *     '@value': `${base-64-encoded-AES-key}`
- *   }
- * }
- *
- * principal = {
- *   '@id': `${principal-iri}`,
- *   'http://m-ld.org/#publicKey': {
- *     '@type': 'http://www.w3.org/2001/XMLSchema#base64Binary',
- *     '@value': `${base-64-encoded-RSA-public-key-spki}`
- *   }
- * }
- * ```
+ * @category Experimental
+ * @experimental
  */
-export class MeldAccessControlList implements MeldTransportSecurity {
+export class MeldAclTransportSecurity implements MeldTransportSecurity {
   private readonly log: Logger;
   private readonly domainId: string;
-  private principal?: AppPrincipal;
+  private readonly principal: AppPrincipal;
 
-  constructor(config: MeldConfig) {
+  constructor(config: MeldConfig, principal: AppPrincipal) {
     this.log = getIdLogger(this.constructor, config['@id'], config.logLevel ?? 'info');
     this.domainId = `http://${config['@domain']}/`;
-  }
-
-  setPrincipal(principal: AppPrincipal | undefined) {
     this.principal = principal;
   }
 
@@ -153,7 +128,7 @@ export class MeldAccessControlList implements MeldTransportSecurity {
     if (principal == null)
       throw new MeldError('Request rejected', 'Signature principal unavailable');
     const rawKey = propertyValue(principal, M_LD.publicKey, Uint8Array);
-    return subtle.importKey(
-      'spki', rawKey, { name: ALGO.SIGN, hash: 'SHA-256' }, false, ['verify']);
+    return subtle.importKey('spki', rawKey,
+      { name: ALGO.SIGN, hash: 'SHA-256' }, false, ['verify']);
   }
 }

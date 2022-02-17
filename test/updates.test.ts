@@ -493,10 +493,19 @@ describe('Update utilities', () => {
     test('cast object', () => {
       expect(propertyValue({
         wife: { name: 'Wilma' }
-      }, 'wife', Object)).toEqual({ name: 'Wilma' });
+      }, 'wife', Subject)).toEqual({ name: 'Wilma' });
       expect(() => propertyValue({
         wife: 'Wilma'
-      }, 'wife', Object)).toThrow();
+      }, 'wife', Subject)).toThrow();
+    });
+
+    test('cast reference', () => {
+      expect(propertyValue({
+        wife: { '@id': 'wilma' }
+      }, 'wife', Reference)).toEqual({ '@id': 'wilma' });
+      expect(() => propertyValue({
+        wife: { name: 'Wilma' }
+      }, 'wife', Reference)).toThrow();
     });
 
     test('cast buffer', () => {

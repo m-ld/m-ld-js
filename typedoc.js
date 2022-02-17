@@ -14,8 +14,7 @@ module.exports = {
     './src/memdown/**',
     './src/mqtt/**',
     './src/wrtc/**',
-    './src/socket.io/**',
-    './src/security/**'
+    './src/socket.io/**'
   ],
   excludePrivate: true,
   excludeProtected: true,

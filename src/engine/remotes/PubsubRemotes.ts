@@ -13,7 +13,7 @@ import { Future, MsgPack, Stopwatch, toJSON } from '../util';
 import { delay, first, ignoreElements, map, reduce, tap, timeout, toArray } from 'rxjs/operators';
 import { MeldError, MeldErrorStatus } from '../MeldError';
 import { AbstractMeld } from '../AbstractMeld';
-import { MeldExtensions, MeldReadState, shortId } from '../../index';
+import { MeldExtensions, MeldReadState, noTransportSecurity, shortId } from '../../index';
 import { JsonNotification, NotifyParams, ReplyParams, SendParams } from './PubsubParams';
 import { consume } from 'rx-flowable/consume';
 import { MeldMessageType } from '../../ns/m-ld';
@@ -90,6 +90,10 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
   ) {
     super(config);
     this.sendTimeout = config.networkTimeout ?? 5000;
+  }
+
+  private get transportSecurity() {
+    return this.extensions.transportSecurity ?? noTransportSecurity
   }
 
   setLocal(clone: MeldLocal | null) {
@@ -349,7 +353,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
         // The local state is required to prepare the response and to send it
         const replied = await clone.withLocalState(async state => {
           try {
-            const unwired = await this.extensions.transportSecurity.wire(
+            const unwired = await this.transportSecurity.wire(
               payload, MeldMessageType.request, 'in', state);
             const req = Request.fromJson(MsgPack.decode(unwired));
             if (req instanceof NewClockRequest) {
@@ -398,7 +402,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     if (replyParams.sentMessageId in this.replyResolvers && this.clone != null) {
       try {
         const { resolve, state, readyToAck } = this.replyResolvers[replyParams.sentMessageId];
-        const unwired = await this.extensions.transportSecurity.wire(
+        const unwired = await this.transportSecurity.wire(
           payload, MeldMessageType.response, 'in', state);
         const json = MsgPack.decode(unwired);
         resolve(json != null ? Response.fromJson(json) : null);
@@ -437,7 +441,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
   }
 
   private wireRequest = (ctrlMsg: ControlMessage, state: MeldReadState | null) => {
-    return this.extensions.transportSecurity.wire(
+    return this.transportSecurity.wire(
       MsgPack.encode(ctrlMsg.toJSON()), MeldMessageType.request, 'out', state);
   };
 
@@ -614,7 +618,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     const replier = await this.replier({ fromId: this.id, toId, messageId, sentMessageId });
     this.log.debug('Replying response', messageId, 'to', sentMessageId, res, replier.id);
     const payload = MsgPack.encode(res == null ? null : res.toJSON());
-    const wire = await this.extensions.transportSecurity.wire(
+    const wire = await this.transportSecurity.wire(
       payload, MeldMessageType.response, 'out', state);
     return replier.publish(wire).finally(() => replier.close?.());
   }

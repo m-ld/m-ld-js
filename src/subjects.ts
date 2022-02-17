@@ -1,5 +1,6 @@
 import {
-  isList, isPropertyObject, isSet, isValueObject, Subject, SubjectPropertyObject, Value
+  isList, isPropertyObject, isReference, isSet, isValueObject, isVocabReference, Reference, Subject,
+  SubjectPropertyObject, Value, VocabReference
 } from './jrql-support';
 import { isArray } from './engine/util';
 import { compareValues, getValues, hasProperty, hasValue } from './engine/jsonld';
@@ -98,19 +99,29 @@ export function includesValue(subject: Subject, property: string, value?: Value)
   return new SubjectPropertyValues(subject, property).exists(value);
 }
 
-export type NativeAtomConstructor =
-  typeof Number |
+export type AtomValueConstructor =
   typeof String |
+  typeof Number |
   typeof Boolean |
   typeof Date |
-  typeof Object |
-  typeof Uint8Array
+  typeof Uint8Array |
+  typeof Subject |
+  typeof Reference |
+  typeof VocabReference
 
-export type NativeContainerConstructor =
+export type ContainerValueConstructor =
   typeof Array |
   typeof Set
 
-export type NativeValueConstructor = NativeAtomConstructor | NativeContainerConstructor;
+export type PropertyValueConstructor = AtomValueConstructor | ContainerValueConstructor;
+
+/** @internal */
+type ValueConstructed<T, S> =
+  T extends String ? string :
+    T extends Number ? number :
+      T extends Boolean ? boolean :
+        T extends unknown[] ? S[] :
+          T extends Set<unknown> ? Set<S> : T;
 
 /**
  * Extracts a property value from the given subject with the given type. This is
@@ -146,12 +157,12 @@ export type NativeValueConstructor = NativeAtomConstructor | NativeContainerCons
  * @throws TypeError if the given property does not have the correct type
  * @category Utility
  */
-export function propertyValue<T>(
+export function propertyValue<T, S>(
   subject: Subject,
   property: string,
-  type: NativeValueConstructor & (new (v: any) => T),
-  subType?: NativeAtomConstructor
-): T {
+  type: PropertyValueConstructor & (new (v: any) => T),
+  subType?: AtomValueConstructor & (new (v: any) => S)
+): ValueConstructed<T, S> {
   const value = subject[property];
   if (value == null) {
     switch (type) {
@@ -179,11 +190,11 @@ export function propertyValue<T>(
  * @throws TypeError if the given property does not have the correct type
  * @category Utility
  */
-export function castPropertyValue<T>(
+export function castPropertyValue<T, S>(
   value: SubjectPropertyObject,
-  type: NativeValueConstructor & (new (v: any) => T),
-  subType?: NativeAtomConstructor
-): T {
+  type: PropertyValueConstructor & (new (v: any) => T),
+  subType?: AtomValueConstructor & (new (v: any) => S)
+): ValueConstructed<T, S> {
   switch (type) {
     case Set:
     case Array:
@@ -223,7 +234,7 @@ function valueAsArray(value: SubjectPropertyObject) {
 }
 
 /**@internal*/
-function castValue<T>(value: Value, type: NativeAtomConstructor & (new (v: any) => T)): T {
+function castValue<T>(value: Value, type: AtomValueConstructor): T {
   if (isValueObject(value)) {
     switch (type) {
       case Number:
@@ -246,7 +257,7 @@ function castValue<T>(value: Value, type: NativeAtomConstructor & (new (v: any) 
         if (value['@type'] === XS.base64Binary)
           return <any>Buffer.from(String(value['@value']), 'base64');
         break;
-      // Do not support Object here
+      // Do not support Object or Reference here
     }
   } else {
     switch (type) {
@@ -273,8 +284,16 @@ function castValue<T>(value: Value, type: NativeAtomConstructor & (new (v: any) 
             return <any>date;
         }
         break;
-      case Object:
+      case Subject:
         if (typeof value == 'object')
+          return <any>value;
+        break;
+      case Reference:
+        if (isReference(value))
+          return <any>value;
+        break;
+      case VocabReference:
+        if (isVocabReference(value))
           return <any>value;
         break;
       // Do not support Buffer here

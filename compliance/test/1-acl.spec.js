@@ -32,7 +32,7 @@ const genPrincipalKeys = () => generateKeyPairSync('rsa', {
  */
 const transportSecurity = {
   require: '@m-ld/m-ld/dist/security',
-  export: 'MeldAccessControlList'
+  export: 'MeldAclTransportSecurity'
 };
 
 // generateKeySync('aes') was only added in Node 15

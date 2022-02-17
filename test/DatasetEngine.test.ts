@@ -1,7 +1,5 @@
 import { DatasetEngine } from '../src/engine/dataset/DatasetEngine';
-import {
-  hotLive, memStore, MockProcess, mockRemotes, testConfig, testExtensions
-} from './testClones';
+import { hotLive, memStore, MockProcess, mockRemotes, testConfig } from './testClones';
 import {
   asapScheduler, BehaviorSubject, EMPTY, EmptyError, firstValueFrom, NEVER, of, Subject as Source,
   throwError
@@ -26,7 +24,7 @@ describe('Dataset engine', () => {
     async function genesis(
       remotes: MeldRemotes, config?: Partial<MeldConfig>): Promise<DatasetEngine> {
       let clone = new DatasetEngine({
-        dataset: await memStore(), remotes, extensions: testExtensions(), config: testConfig(config)
+        dataset: await memStore(), remotes, extensions: {}, config: testConfig(config)
       });
       await clone.initialise();
       return clone;
@@ -75,7 +73,7 @@ describe('Dataset engine', () => {
       silo = new TestDatasetEngine({
         dataset: await memStore(),
         remotes: mockRemotes(),
-        extensions: testExtensions(),
+        extensions: {},
         config: testConfig()
       });
       await silo.initialise();
@@ -156,7 +154,7 @@ describe('Dataset engine', () => {
       // Ensure that remote updates are async
       const remotes = mockRemotes(remoteUpdates.pipe(observeOn(asapScheduler)), remotesLive);
       clone = new TestDatasetEngine({
-        dataset: await memStore(), remotes, extensions: testExtensions(), config: testConfig()
+        dataset: await memStore(), remotes, extensions: {}, config: testConfig()
       });
       await clone.initialise();
       await comesAlive(clone); // genesis is alive
@@ -249,7 +247,7 @@ describe('Dataset engine', () => {
 
     test('initialises from snapshot', async () => {
       const clone = new DatasetEngine({
-        dataset: await memStore(), remotes, extensions: testExtensions(),
+        dataset: await memStore(), remotes, extensions: {},
         config: testConfig({ genesis: false })
       });
       await clone.initialise();
@@ -259,7 +257,7 @@ describe('Dataset engine', () => {
 
     test('can become a silo', async () => {
       const clone = new DatasetEngine({
-        dataset: await memStore(), remotes, extensions: testExtensions(),
+        dataset: await memStore(), remotes, extensions: {},
         config: testConfig({ genesis: false })
       });
       await clone.initialise();
@@ -269,7 +267,7 @@ describe('Dataset engine', () => {
 
     test('ignores operation from before snapshot', async () => {
       const clone = new TestDatasetEngine({
-        dataset: await memStore(), remotes, extensions: testExtensions(),
+        dataset: await memStore(), remotes, extensions: {},
         config: testConfig({ genesis: false })
       });
       await clone.initialise();
@@ -294,7 +292,7 @@ describe('Dataset engine', () => {
       let clone = new DatasetEngine({
         dataset: await memStore({ backend }),
         remotes: mockRemotes(),
-        extensions: testExtensions(),
+        extensions: {},
         config
       });
       await clone.initialise();
@@ -310,7 +308,7 @@ describe('Dataset engine', () => {
       const clone = new DatasetEngine({
         dataset: await memStore({ backend }),
         remotes,
-        extensions: testExtensions(),
+        extensions: {},
         config: testConfig()
       });
 
@@ -330,7 +328,7 @@ describe('Dataset engine', () => {
       const clone = new DatasetEngine({
         dataset: await memStore({ backend }),
         remotes,
-        extensions: testExtensions(),
+        extensions: {},
         config: testConfig()
       });
 
@@ -349,7 +347,7 @@ describe('Dataset engine', () => {
       const clone = new DatasetEngine({
         dataset: await memStore({ backend }),
         remotes,
-        extensions: testExtensions(),
+        extensions: {},
         config: testConfig()
       });
 
@@ -372,7 +370,7 @@ describe('Dataset engine', () => {
       const clone = new DatasetEngine({
         dataset: await memStore({ backend }),
         remotes,
-        extensions: testExtensions(),
+        extensions: {},
         config: testConfig()
       });
       await clone.initialise();
@@ -395,7 +393,7 @@ describe('Dataset engine', () => {
       const clone = new DatasetEngine({
         dataset: await memStore({ backend }),
         remotes,
-        extensions: testExtensions(),
+        extensions: {},
         config: testConfig()
       });
       await clone.initialise();
@@ -408,7 +406,7 @@ describe('Dataset engine', () => {
       let clone = new TestDatasetEngine({
         dataset: await memStore({ backend }),
         remotes: mockRemotes(),
-        extensions: testExtensions(),
+        extensions: {},
         config
       });
       await clone.initialise();
@@ -427,10 +425,10 @@ describe('Dataset engine', () => {
         };
       });
       // The clone will initialise into a revving-up state, waiting for a revUp
-      clone = new DatasetEngine({
+      clone = new TestDatasetEngine({
         dataset: await memStore({ backend }),
         remotes,
-        extensions: testExtensions(),
+        extensions: {},
         config: testConfig()
       });
       const observedTicks = firstValueFrom(clone.operations.pipe(
@@ -460,7 +458,7 @@ describe('Dataset engine', () => {
       const clone = new DatasetEngine({
         dataset: await memStore({ backend }),
         remotes,
-        extensions: testExtensions(),
+        extensions: {},
         config: testConfig()
       });
       await clone.initialise();
@@ -485,7 +483,7 @@ describe('Dataset engine', () => {
       const clone = new TestDatasetEngine({
         dataset: await memStore({ backend }),
         remotes,
-        extensions: testExtensions(),
+        extensions: {},
         config: testConfig()
       });
       await clone.initialise();

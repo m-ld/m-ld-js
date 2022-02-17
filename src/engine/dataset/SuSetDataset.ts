@@ -1,4 +1,6 @@
-import { GraphSubject, MeldConstraint, MeldExtensions, MeldUpdate, WriteOptions } from '../../api';
+import {
+  GraphSubject, MeldConstraint, MeldExtensions, MeldUpdate, noTransportSecurity, WriteOptions
+} from '../../api';
 import { BufferEncoding, EncodedOperation, OperationMessage, Snapshot } from '..';
 import { GlobalClock, TickTree, TreeClock } from '../clocks';
 import { Context, Query, Read, Write } from '../../jrql-support';
@@ -39,6 +41,11 @@ type DatasetConfig = Pick<MeldConfig,
 export class SuSetDataset extends MeldEncoder {
   private static checkNotClosed = check((d: SuSetDataset) =>
     !d.dataset.closed, () => new MeldError('Clone has closed'));
+  private static checkStateLocked =
+    check((ssd: SuSetDataset) => ssd.dataset.lock.state('state') !== null,
+      () => new MeldError('Unknown error', 'Clone state not locked'));
+  private static checkReadyForTxn = check((d: SuSetDataset) =>
+    d.readyForTxn, () => new MeldError('Unknown error', 'Dataset not ready'));
 
   /** External context used for reads, writes and updates, but not for constraints. */
   /*readonly*/
@@ -51,6 +58,7 @@ export class SuSetDataset extends MeldEncoder {
   private readonly updateSource: Source<MeldUpdate> = new Source;
   private readonly maxOperationSize: number;
   private readonly log: Logger;
+  private readyForTxn = false;
 
   constructor(
     private readonly dataset: Dataset,
@@ -74,8 +82,12 @@ export class SuSetDataset extends MeldEncoder {
     this.userGraph = new JrqlGraph(this.dataset.graph());
   }
 
+  private get transportSecurity() {
+    return this.extensions.transportSecurity ?? noTransportSecurity;
+  }
+
   private get constraint(): MeldConstraint {
-    return new CheckList(this.extensions.constraints);
+    return new CheckList(this.extensions.constraints ?? []);
   }
 
   get readState() {
@@ -86,14 +98,23 @@ export class SuSetDataset extends MeldEncoder {
     return this.updateSource;
   }
 
+  @SuSetDataset.checkStateLocked.async
+  async allowTransact() {
+    await this.extensions.initialise?.(this.readState);
+    this.readyForTxn = true;
+  }
+
+  @SuSetDataset.checkStateLocked.rx
   read<R extends Read>(request: R): Consumable<GraphSubject> {
     return this.userGraph.read(request, this.userCtx);
   }
 
+  @SuSetDataset.checkStateLocked.async
   write(request: Write): Promise<PatchQuads> {
     return this.userGraph.write(request, this.userCtx);
   }
 
+  @SuSetDataset.checkStateLocked.async
   ask(pattern: Query): Promise<boolean> {
     return this.userGraph.ask(pattern, this.userCtx);
   }
@@ -185,6 +206,8 @@ export class SuSetDataset extends MeldEncoder {
   }
 
   @SuSetDataset.checkNotClosed.async
+  @SuSetDataset.checkStateLocked.async
+  @SuSetDataset.checkReadyForTxn.async
   async transact(
     prepare: () => Promise<[TreeClock, PatchQuads]>,
     { agree }: WriteOptions = {}
@@ -197,27 +220,28 @@ export class SuSetDataset extends MeldEncoder {
 
         txc.sw.next('check-constraints');
         const interim = new InterimUpdatePatch(
-          this.userGraph, this.userCtx, time.ticks, patch, 'mutable');
+          this.userGraph, this.userCtx, time.ticks, patch, { mutable: true });
         await this.constraint.check(this.readState, interim);
-        const { update, entailments } = await interim.finalise();
+        const txn = await interim.finalise();
 
         txc.sw.next('find-tids');
-        const deletedTriplesTids = await this.tidsStore.findTriplesTids(patch.deletes);
+        const deletedTriplesTids = await this.tidsStore.findTriplesTids(txn.assertions.deletes);
         const tid = time.hash;
-        const op = this.txnOperation(tid, time, patch.inserts, deletedTriplesTids, agree);
+        const op = this.txnOperation(tid, time, txn.assertions.inserts, deletedTriplesTids, agree);
 
         // Include tid changes in final patch
         txc.sw.next('new-tids');
-        const tidPatch = this.txnTidPatch(tid, patch.inserts, deletedTriplesTids);
+        const tidPatch = this.txnTidPatch(tid, txn.assertions.inserts, deletedTriplesTids);
 
         // Include journaling in final patch
         txc.sw.next('journal');
         const journal = await this.journal.state();
         const journaling = journal.builder().next(op, deletedTriplesTids, time);
-        const opMsg = await this.operationMessage(journal, time, op);
+        const opMessage = await this.operationMessage(journal, time, op);
 
-        return this.txnResult(
-          patch, entailments, tidPatch, journaling, opMsg, update);
+        return this.txnResult({
+          ...txn, tidPatch, journaling, opMessage
+        });
       }
     });
   }
@@ -225,26 +249,31 @@ export class SuSetDataset extends MeldEncoder {
   /**
    * Rolls up the given transaction details into a single patch to the store.
    */
-  private async txnResult(
+  private async txnResult(txn: {
     assertions: PatchQuads,
     entailments: PatchQuads,
     tidPatch: PatchTids,
     journaling: EntryBuilder,
     opMessage: OperationMessage | null,
-    update: MeldUpdate
-  ): Promise<PatchResult<OperationMessage | null>> {
-    const commitTids = await this.tidsStore.commit(tidPatch);
-    this.log.debug(`patch ${journaling.appendEntries.map(e => e.operation.time)}:
-    deletes: ${[...assertions.deletes].map(tripleIndexKey)}
-    inserts: ${[...assertions.inserts].map(tripleIndexKey)}`);
+    internalUpdate: MeldUpdate,
+    userUpdate: MeldUpdate
+  }): Promise<PatchResult<OperationMessage | null>> {
+    const commitTids = await this.tidsStore.commit(txn.tidPatch);
+    this.log.debug(`patch ${txn.journaling.appendEntries.map(e => e.operation.time)}:
+    deletes: ${[...txn.assertions.deletes].map(tripleIndexKey)}
+    inserts: ${[...txn.assertions.inserts].map(tripleIndexKey)}`);
     return {
-      patch: new PatchQuads(assertions).append(entailments),
+      patch: new PatchQuads(txn.assertions).append(txn.entailments),
       kvps: batch => {
         commitTids(batch);
-        journaling.commit(batch);
+        txn.journaling.commit(batch);
       },
-      return: opMessage,
-      after: () => this.emitUpdate(update)
+      return: txn.opMessage,
+      after: async () => {
+        if (this.readyForTxn && this.extensions.onUpdate != null)
+          await this.extensions.onUpdate(txn.internalUpdate, this.readState);
+        this.emitUpdate(txn.userUpdate);
+      }
     };
   }
 
@@ -258,7 +287,7 @@ export class SuSetDataset extends MeldEncoder {
     // Construct the operation message with the previous visible clock tick
     let [version, from, timeJson, update, encoding, agreed] = op.encoded;
     // Apply transport security to the encoded update
-    const wired = await this.extensions.transportSecurity.wire(
+    const wired = await this.transportSecurity.wire(
       update, MeldMessageType.operation, 'out', this.readState);
     if (wired !== update) {
       update = wired;
@@ -309,6 +338,7 @@ export class SuSetDataset extends MeldEncoder {
    * @param clockHolder a holder carrying a clock which can be manipulated
    */
   @SuSetDataset.checkNotClosed.async
+  @SuSetDataset.checkStateLocked.async
   async apply(
     msg: OperationMessage,
     clockHolder: ClockHolder<TreeClock>
@@ -357,10 +387,11 @@ export class SuSetDataset extends MeldEncoder {
 
         txc.sw.next('apply-cx'); // "cx" = constraint
         const interim = new InterimUpdatePatch(
-          this.userGraph, this.userCtx, cxnTime.ticks, patch);
+          this.userGraph, this.userCtx, cxnTime.ticks, patch, { mutable: false });
         await this.constraint.apply(this.readState, interim);
-        const { update, assertions, entailments } = await interim.finalise();
-        const cxn = await this.constraintTxn(assertions, patch, insertTids, cxnTime);
+        // TODO: The effect of the 'mutable' property on assertions is confusing
+        const { assertions: cxnAssertions, ...txn } = await interim.finalise();
+        const cxn = await this.constraintTxn(cxnAssertions, patch, insertTids, cxnTime);
         // After applying the constraint, some new quads might have been removed
         tidPatch.append(new PatchTids({
           inserts: flattenItemTids([...patch.inserts]
@@ -377,14 +408,16 @@ export class SuSetDataset extends MeldEncoder {
         if (cxn != null) {
           // update['@ticks'] = cxnTime.ticks;
           tidPatch.append(cxn.tidPatch);
-          patch.append(assertions);
+          patch.append(cxnAssertions);
           // Also create a journal entry for the constraint "transaction"
           journaling.next(cxn.operation, cxn.deletedTriplesTids, cxnTime);
         }
         // FIXME: If this operation message exceeds max size, what to do?
-        const opMsg = cxn != null && cxn.operation != null ?
+        const opMessage = cxn != null && cxn.operation != null ?
           await this.operationMessage(journal, cxnTime, cxn.operation) : null;
-        return this.txnResult(patch, entailments, tidPatch, journaling, opMsg, update);
+        return this.txnResult({
+          ...txn, assertions: patch, tidPatch, journaling, opMessage
+        });
       }
     });
   }
@@ -426,8 +459,8 @@ export class SuSetDataset extends MeldEncoder {
     tidPatch: PatchTids,
     journaling: EntryBuilder
   ): Promise<PatchResult<null>> {
-    const { update } = await new InterimUpdatePatch(
-      this.userGraph, this.userCtx, journaling.state.time.ticks, patch
+    const { userUpdate } = await new InterimUpdatePatch(
+      this.userGraph, this.userCtx, journaling.state.time.ticks, patch, { mutable: false }
     ).finalise();
     const commitTids = await this.tidsStore.commit(tidPatch);
     return {
@@ -438,7 +471,7 @@ export class SuSetDataset extends MeldEncoder {
       },
       return: null,
       after: () => {
-        this.emitUpdate(update);
+        this.emitUpdate(userUpdate);
         throw new MeldError('Update out of order',
           'Journal rewind missing agreement causes');
       }
@@ -451,7 +484,7 @@ export class SuSetDataset extends MeldEncoder {
   private async unSecureOperation(msg: OperationMessage): Promise<EncodedOperation> {
     let [version, from, timeJson, updated, encoding, agreed] = msg.data;
     if (encoding[encoding.length - 1] === BufferEncoding.SECURE) {
-      updated = await this.extensions.transportSecurity.wire(
+      updated = await this.transportSecurity.wire(
         updated, MeldMessageType.operation, 'in', this.readState);
       encoding = encoding.slice(0, -1);
     }

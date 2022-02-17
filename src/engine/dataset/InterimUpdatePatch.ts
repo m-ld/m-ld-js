@@ -8,6 +8,8 @@ import { ActiveContext } from 'jsonld/lib/context';
 import { Quad } from '../quads';
 
 export class InterimUpdatePatch implements InterimUpdate {
+  /** If mutable, we allow mutation of the input patch */
+  private readonly mutable: boolean;
   /** Assertions made by the constraint (not including the app patch if not mutable) */
   private readonly assertions: PatchQuads;
   /** Entailments made by the constraint */
@@ -21,18 +23,19 @@ export class InterimUpdatePatch implements InterimUpdate {
 
   /**
    * @param graph
-   * @param ctx
+   * @param userCtx
    * @param ticks
    * @param patch the starting app patch (will not be mutated unless 'mutable')
    * @param mutable?
    */
   constructor(
     private readonly graph: JrqlGraph,
-    private readonly ctx: ActiveContext,
+    private readonly userCtx: ActiveContext,
     private readonly ticks: number,
     private readonly patch: PatchQuads,
-    private readonly mutable?: 'mutable'
+    { mutable }: { mutable: boolean }
   ) {
+    this.mutable = mutable;
     // If mutable, we treat the app patch as assertions
     this.assertions = mutable ? patch : new PatchQuads();
     this.needsUpdate = Promise.resolve(true);
@@ -47,10 +50,14 @@ export class InterimUpdatePatch implements InterimUpdate {
       }
     };
     // The final update to the app includes all assertions and entailments
-    const update = this.createUpdate(
-      new PatchQuads(this.allAssertions).append(this.entailments), this.ctx);
-    const { assertions, entailments } = this;
-    return { update, assertions, entailments };
+    const finalPatch = new PatchQuads(this.allAssertions).append(this.entailments);
+    return {
+      userUpdate: this.createUpdate(finalPatch, this.userCtx),
+      // TODO: Make the internal update conditional on anyone wanting it
+      internalUpdate: this.createUpdate(finalPatch),
+      assertions: this.assertions,
+      entailments: this.entailments
+    };
   }
 
   /** @returns an interim update to be presented to constraints */
@@ -65,20 +72,20 @@ export class InterimUpdatePatch implements InterimUpdate {
   }
 
   assert = (update: Update) => this.mutate(async () => {
-    const patch = await this.graph.write(update, this.ctx);
+    const patch = await this.graph.write(update, this.userCtx);
     this.assertions.append(patch);
     return !patch.isEmpty;
   });
 
   entail = (update: Update) => this.mutate(async () => {
-    const patch = await this.graph.write(update, this.ctx);
+    const patch = await this.graph.write(update, this.userCtx);
     this.entailments.append(patch);
     return false;
   });
 
   remove = (key: keyof DeleteInsert<any>, pattern: Subject | Subject[]) =>
     this.mutate(() => {
-      const toRemove = this.graph.graphQuads(pattern, this.ctx);
+      const toRemove = this.graph.graphQuads(pattern, this.userCtx);
       const removed = this.assertions.remove(
         key == '@delete' ? 'deletes' : 'inserts', toRemove);
       return removed.length !== 0;

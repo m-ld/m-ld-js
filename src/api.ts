@@ -8,9 +8,10 @@ import { shortId } from './util';
 import { Iri } from 'jsonld/jsonld-spec';
 import { SubjectGraph } from './engine/SubjectGraph';
 import { QueryableRdfSource } from './rdfjs-support';
-import { Consumable, flow, Flowable } from 'rx-flowable';
+import { Consumable, each, flow, Flowable } from 'rx-flowable';
 import { Future, tapComplete } from './engine/util';
 import { MeldMessageType } from './ns/m-ld';
+import { MeldApp, MeldConfig } from './config';
 
 /**
  * A convenience type for a struct with a `@insert` and `@delete` property, like
@@ -102,6 +103,15 @@ export interface ReadResult extends Flowable<GraphSubject>, PromiseLike<GraphSub
    * subscribers (either to `this`, or to `this.consume`).
    */
   readonly completed: PromiseLike<unknown>;
+  /**
+   * Allows handling of each read subject in turn. If the handler returns a
+   * Promise, the next subject will not be handled until the promise has
+   * resolved. If the handler throws or returns a rejected promise, no more
+   * subjects will be handled and the return will be a rejected promise.
+   *
+   * @param handle a handler for each subject
+   */
+  each(handle: (value: GraphSubject) => any): Promise<unknown>;
 }
 
 /** @internal */
@@ -113,6 +123,10 @@ export function readResult(result: Consumable<GraphSubject>): ReadResult {
 
     constructor() {
       super(subs => flow(this.consume, subs));
+    }
+
+    each(handle: (value: GraphSubject) => any) {
+      return each(this.consume, handle);
     }
 
     then: PromiseLike<GraphSubjects>['then'] =
@@ -407,10 +421,6 @@ export interface MeldClone extends MeldStateMachine {
    */
   readonly status: LiveStatus;
   /**
-   * Active extensions
-   */
-  readonly extensions: MeldExtensions;
-  /**
    * Closes this clone engine gracefully. Using this method ensures that data
    * has been fully flushed to storage and all transactions have been notified
    * to the domain (if this clone is online).
@@ -425,8 +435,7 @@ export interface MeldClone extends MeldStateMachine {
  *
  * In general, extensions should be dynamically selected and loaded based on the
  * clone's (meta)data content – this allows a domain to evolve without
- * necessitating the redeployment of app code. Where applicable, the members of
- * this interface document alternative means of providing behaviour.
+ * necessitating the redeployment of app code.
  *
  * > ⚠️ Changing extensions at runtime may require coordination between clones,
  * to prevent outdated clones from acting incorrectly in ways that could cause
@@ -441,19 +450,36 @@ export interface MeldExtensions {
    * Constraints declared in the configuration or the data.
    *
    * @experimental
-   * @todo provide data-declared constraints
    * @see https://github.com/m-ld/m-ld-spec/issues/73
    */
-  constraints: MeldConstraint[];
+  readonly constraints?: MeldConstraint[];
   /**
    * A transport security interceptor. If the initial transport security is not
    * compatible with the rest of the domain, this clone may not be able to join
    * until the app is updated.
    *
    * @experimental
-   * @todo provide data-declared transport security
    */
-  transportSecurity: MeldTransportSecurity;
+  readonly transportSecurity?: MeldTransportSecurity;
+  /**
+   * Initialises the extensions against the given clone state. This method could
+   * be used to read significant state into memory for the efficient
+   * implementation of an extension's function.
+   */
+  readonly initialise?: StateProc;
+  /**
+   * Called to inform the extensions of an update to the state, _after_ it has
+   * been applied. If available, this procedure will be called for every state
+   * after that passed to {@link initialise}.
+   */
+  readonly onUpdate?: UpdateProc;
+}
+
+/**
+ * Required constructor form for **m-ld** extension classes
+ */
+export interface ConstructMeldExtensions {
+  new(config: MeldConfig, app: MeldApp): MeldExtensions;
 }
 
 /**
@@ -606,13 +632,6 @@ export interface AppPrincipal {
  * @category Experimental
  */
 export interface MeldTransportSecurity {
-  /**
-   * Initialises this extension with the application security principal. This
-   * method will only be called once.
-   *
-   * @param principal the current application principal (user or machine)
-   */
-  setPrincipal?(principal: AppPrincipal | undefined): void;
   /**
    * Check and/or transform wire data.
    *

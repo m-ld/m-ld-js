@@ -1,8 +1,7 @@
 import { SuSetDataset } from '../src/engine/dataset/SuSetDataset';
-import { memStore, MockProcess, testExtensions, testOp } from './testClones';
+import { MockProcess, MockState, testOp } from './testClones';
 import { TreeClock } from '../src/engine/clocks';
 import { toArray } from 'rxjs/operators';
-import { Dataset } from '../src/engine/dataset';
 import { EmptyError, firstValueFrom, lastValueFrom, Subject } from 'rxjs';
 import { Describe, JournalCheckPoint, MeldConstraint, MeldUpdate } from '../src';
 import { jsonify } from './testUtil';
@@ -23,16 +22,14 @@ const fred = {
 };
 
 describe('SU-Set Dataset', () => {
-  let dataset: Dataset;
-  let unlock: () => void;
+  let state: MockState;
   let ssd: SuSetDataset;
 
   beforeEach(async () => {
-    dataset = await memStore();
-    unlock = await dataset.lock.acquire('state', 'test', 'share');
+    state = await MockState.create();
   });
 
-  afterEach(() => unlock());
+  afterEach(() => state.close());
 
   function captureUpdate(): Promise<MeldUpdate> {
     // Convert the subject graphs to JSON for matching convenience
@@ -48,11 +45,12 @@ describe('SU-Set Dataset', () => {
 
   describe('with basic config', () => {
     beforeEach(async () => {
-      ssd = new SuSetDataset(dataset, {}, testExtensions(), {
+      ssd = new SuSetDataset(state.dataset, {}, {}, {
         '@id': 'test',
         '@domain': 'test.m-ld.org'
       });
       await ssd.initialise();
+      await ssd.allowTransact();
     });
 
     test('does not have a time', async () => {
@@ -213,16 +211,12 @@ describe('SU-Set Dataset', () => {
           // Prepare some entailed information which does not have any
           // transaction identity. Using the dataset this way is a back door and
           // may be brittle if the way that entailments work changes.
-          await dataset.transact({
-            prepare: async () => ({
-              patch: await ssd.write({
-                '@insert': {
-                  '@id': 'http://test.m-ld.org/fred',
-                  'http://test.m-ld.org/#sex': 'male'
-                }
-              })
-            })
-          });
+          await state.write(() => ssd.write({
+            '@insert': {
+              '@id': 'http://test.m-ld.org/fred',
+              'http://test.m-ld.org/#sex': 'male'
+            }
+          }));
           const snapshot = await ssd.takeSnapshot();
           const data = await firstValueFrom(snapshot.data.pipe(toArray()));
           expect(data.length).toBe(2);
@@ -569,11 +563,13 @@ describe('SU-Set Dataset', () => {
         check: () => Promise.resolve(),
         apply: () => Promise.resolve()
       };
-      ssd = new SuSetDataset(dataset, {},
-        testExtensions({ constraints: [constraint] }),
+      ssd = new SuSetDataset(state.dataset,
+        {},
+        { constraints: [constraint] },
         { '@id': 'test', '@domain': 'test.m-ld.org' });
       await ssd.initialise();
       await ssd.resetClock(local.tick().time);
+      await ssd.allowTransact();
     });
 
     test('checks the constraint', async () => {
@@ -725,11 +721,12 @@ describe('SU-Set Dataset', () => {
       local = new MockProcess(left);
       remote = new MockProcess(right);
       checkpoints = new Subject<JournalCheckPoint>();
-      ssd = new SuSetDataset(dataset, {}, testExtensions(),
+      ssd = new SuSetDataset(state.dataset, {}, {},
         { '@id': 'test', '@domain': 'test.m-ld.org', journal: { adminDebounce: 0 } },
         { checkpoints });
       await ssd.initialise();
       await ssd.resetClock(local.time);
+      await ssd.allowTransact();
     });
 
     test('emits a forced agreed operation', async () => {
@@ -880,13 +877,14 @@ describe('SU-Set Dataset', () => {
   });
 
   test('enforces operation size limit', async () => {
-    ssd = new SuSetDataset(await memStore(), {}, testExtensions(), {
+    ssd = new SuSetDataset(state.dataset, {}, {}, {
       '@id': 'test',
       '@domain': 'test.m-ld.org',
       maxOperationSize: 1
     });
     await ssd.initialise();
     await ssd.resetClock(TreeClock.GENESIS);
+    await ssd.allowTransact();
     await expect(ssd.transact(async () => [
       TreeClock.GENESIS.ticked(),
       await ssd.write({ '@insert': fred })

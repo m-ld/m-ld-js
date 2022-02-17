@@ -53,7 +53,7 @@ export async function clone(
     Stopwatch.timingEvents.on('timing', e => backendEvents.emit('timing', e));
   const sw = new Stopwatch('clone', config['@id']);
 
-  sw.next('extensions');
+  sw.next('dependencies');
   const context = new DomainContext(config['@domain'], config['@context']);
   const extensions = await CloneExtensions.initial(config, app, context);
   const remotes = new constructRemotes(config, extensions);
@@ -68,6 +68,7 @@ export async function clone(
   sw.next('engine');
   await engine.initialise(sw.lap);
   sw.stop();
+
   return new DatasetClone(engine, extensions);
 }
 

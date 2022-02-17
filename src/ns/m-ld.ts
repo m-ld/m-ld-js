@@ -18,6 +18,30 @@ export const principal = `${$base}Principal`;
 /** Property for asymmetric public key */
 export const publicKey = `${$base}#publicKey`;
 
+/** Singleton list of m-ld extension declarations */
+export const extensions = `${$base}extensions`;
+
+export namespace EXT {
+  /**
+   * The namespace of **m-ld**-owned extensions, typically sub-namespaced e.g.
+   * 'security/ACL'
+   */
+  export const $base = 'http://m-ld.org/ext/';
+}
+
+export namespace JS {
+  export const $base = 'http://js.m-ld.org/';
+
+  /** CommonJS module class */
+  export const commonJsModule = `${$base}CommonJSModule`;
+
+  /** Property for CommonJS module require id */
+  export const require = `${$base}#require`;
+
+  /** Property for Javascript class name (in module scope) */
+  export const className = `${$base}#class`;
+}
+
 export const rdflseq = `${$base}RdfLseq`;
 
 const rdflseqPosIdPre = `${rdflseq}/?=`;
@@ -36,7 +60,7 @@ export function rdflseqPosId(lseqPosId: string): string {
  * @see ../remotes/ControlMessage.ts
  */
 export enum MeldMessageType {
-/** The (usually implicit) RDFS Class of m-ld operation messages */
+  /** The (usually implicit) RDFS Class of m-ld operation messages */
   operation = 'http://m-ld.org/operation',
   request = 'http://control.m-ld.org/request',
   response = 'http://control.m-ld.org/response'

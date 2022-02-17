@@ -156,6 +156,9 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
         // For a new non-genesis clone, the first connect is essential.
         await comesAlive(this);
       }
+      // Inform the dataset that we're open for business
+      await this.lock.share('state', 'initialised',
+        () => this.dataset.allowTransact());
     } catch (e) {
       // Failed to initialise somehow – this is fatal
       await this.close(e);

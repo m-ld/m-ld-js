@@ -30,6 +30,19 @@ export type Pattern = jrql.Pattern;
  * @category json-rql
  */
 export type Reference = jrql.Reference;
+/** @internal */
+interface ReferenceConstructor {
+  new (value: Reference): Reference
+}
+/**
+ * Constructor of references from references: used similarly to e.g. `Number`
+ */
+export const Reference: ReferenceConstructor = class implements Reference {
+  readonly '@id': Iri;
+  constructor(value: Reference) {
+    this['@id'] = value['@id'];
+  }
+};
 /**
  * Like a {@link Reference}, but used for "vocabulary" references. These are relevant to:
  * - Subject properties: the property name is a vocabulary reference
@@ -39,6 +52,19 @@ export type Reference = jrql.Reference;
  * @category json-rql
  */
 export type VocabReference = { '@vocab': Iri };
+/** @internal */
+interface VocabReferenceConstructor {
+  new (value: VocabReference): VocabReference
+}
+/**
+ * Constructor of vocab references from vocab references: used similarly to e.g. `Number`
+ */
+export const VocabReference: VocabReferenceConstructor = class implements VocabReference {
+  readonly '@vocab': Iri;
+  constructor(value: VocabReference) {
+    this['@vocab'] = value['@vocab'];
+  }
+};
 /**
  * A JSON-LD context for some JSON content such as a {@link Subject}. **m-ld**
  * does not require the use of a context, as plain JSON data will be stored
@@ -252,6 +278,19 @@ export interface Subject extends Pattern {
   [key: string]: SubjectPropertyObject | Context | undefined;
   // No support for inline filters
 }
+/** @internal */
+interface SubjectConstructor {
+  new (value: Subject): Subject
+}
+/**
+ * Constructor of subjects from subjects: used similarly to e.g. `Number`
+ */
+export const Subject: SubjectConstructor = class implements Subject {
+  [key: string]: Subject['any'];
+  constructor(value: Subject) {
+    Object.assign(this, value);
+  }
+};
 
 /**
  * 'Properties' of a Subject, including from {@link List} and {@link Slot}.

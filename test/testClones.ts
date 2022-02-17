@@ -3,27 +3,30 @@ import {
 } from '../src/engine';
 import { mock, MockProxy } from 'jest-mock-extended';
 import { asapScheduler, BehaviorSubject, from, NEVER, Observable, Observer } from 'rxjs';
-import { Dataset, QuadStoreDataset } from '../src/engine/dataset';
+import { Dataset, Patch, PatchQuads, QuadStoreDataset } from '../src/engine/dataset';
 import { GlobalClock, TreeClock } from '../src/engine/clocks';
 import { AsyncMqttClient, IPublishPacket } from 'async-mqtt';
 import { EventEmitter } from 'events';
 import { observeOn } from 'rxjs/operators';
-import { MeldConfig, MeldExtensions, MeldReadState, noTransportSecurity, StateProc } from '../src';
+import { MeldConfig, MeldConstraint, MeldReadState, MeldUpdate, StateProc } from '../src';
 import { AbstractLevelDOWN } from 'abstract-leveldown';
 import { LiveValue } from '../src/engine/LiveValue';
-import { Context } from 'jsonld/jsonld-spec';
 import { MeldMemDown } from '../src/memdown';
-import { MsgPack } from '../src/engine/util';
+import { Future, MsgPack } from '../src/engine/util';
 import { DatasetSnapshot } from '../src/engine/dataset/SuSetDataset';
 import { ClockHolder } from '../src/engine/messages';
+import { DomainContext } from '../src/engine/MeldEncoding';
+import { JrqlGraph } from '../src/engine/dataset/JrqlGraph';
+import { ActiveContext } from 'jsonld/lib/context';
+import { activeCtx } from '../src/engine/jsonld';
+import { Context, Write } from '../src/jrql-support';
+import { InterimUpdatePatch } from '../src/engine/dataset/InterimUpdatePatch';
 
 export function testConfig(config?: Partial<MeldConfig>): MeldConfig {
   return { '@id': 'test', '@domain': 'test.m-ld.org', genesis: true, ...config };
 }
 
-export function testExtensions(extensions?: Partial<MeldExtensions>): MeldExtensions {
-  return { constraints: [], transportSecurity: noTransportSecurity, ...extensions };
-}
+export const testContext = new DomainContext('test.m-ld.org');
 
 export function mockRemotes(
   updates: Observable<OperationMessage> = NEVER,
@@ -53,6 +56,61 @@ export async function memStore(opts?: {
   return new QuadStoreDataset(
     opts?.backend ?? new MeldMemDown,
     opts?.context).initialise();
+}
+
+export class MockState {
+  static async create({ dataset, context }: { dataset?: Dataset, context?: Context } = {}) {
+    dataset ??= await memStore({ context });
+    return new MockState(dataset,
+      await dataset.lock.acquire('state', 'test', 'share'));
+  }
+
+  protected constructor(
+    readonly dataset: Dataset,
+    readonly close: () => void
+  ) {}
+
+  write(txn: () => Promise<Patch>) {
+    return this.dataset.transact({
+      prepare: async () => ({ patch: await txn() })
+    });
+  }
+}
+
+export class MockGraphState {
+  static async create({ dataset, context }: { dataset?: Dataset, context?: Context } = {}) {
+    return new MockGraphState(
+      await MockState.create({ dataset, context }),
+      await activeCtx(context ?? {}));
+  }
+
+  readonly jrqlGraph: JrqlGraph;
+
+  protected constructor(
+    readonly state: MockState,
+    readonly ctx: ActiveContext
+  ) {
+    this.jrqlGraph = new JrqlGraph(state.dataset.graph());
+  }
+
+  async write(request: Write, constraint?: MeldConstraint): Promise<MeldUpdate> {
+    const update = new Future<MeldUpdate>();
+    await this.state.write(async () => {
+      const patch = await this.jrqlGraph.write(request, this.ctx);
+      const interim = new InterimUpdatePatch(this.jrqlGraph,
+        this.ctx, 1, patch, { mutable: true });
+      if (constraint != null)
+        await constraint.check(this.jrqlGraph.asReadState, interim);
+      const txn = await interim.finalise();
+      update.resolve(txn.internalUpdate);
+      return new PatchQuads(txn.assertions).append(txn.entailments);
+    });
+    return Promise.resolve(update);
+  }
+
+  close() {
+    this.state.close();
+  }
 }
 
 export function mockLocal(

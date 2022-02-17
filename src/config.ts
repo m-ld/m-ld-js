@@ -93,6 +93,7 @@ export interface JournalConfig {
 
 /**
  * Types of prompts for journal administration functions.
+ * @internal
  */
 export enum JournalCheckPoint {
   /**
@@ -107,12 +108,15 @@ export enum JournalCheckPoint {
    * A savepoint instructs the journal implementation to retain the most recent
    * entry so that subsequent entries can be precisely revoked.
    */
-  SAVEPOINT
-  // TODO: TRUNCATE, entries before will be dropped
+  SAVEPOINT,
+  /**
+   * TODO: TRUNCATE, entries before will be dropped
+   */
 }
 
 /**
  * Hooks for the app to take control of clone journal administration
+ * @internal
  */
 export type JournalAdmin = {
   /**
@@ -158,6 +162,7 @@ export interface MeldApp {
   backendEvents?: EventEmitter;
   /**
    * Journal administration hooks
+   * @internal
    */
   journalAdmin?: JournalAdmin;
 }
@@ -169,4 +174,4 @@ export interface MeldApp {
  *
  * @category Configuration
  */
-export type InitialApp = MeldApp & Partial<MeldExtensions>;
+export type InitialApp = MeldApp & MeldExtensions;
