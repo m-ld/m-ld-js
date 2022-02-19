@@ -213,29 +213,28 @@ export class Journal {
     createOperator: (first: MeldOperation) => CausalOperator<Triple, TreeClock>,
     minFrom = 1
   ): Promise<MeldOperation> {
-    // Work backward through the journal to find the first transaction ID (and associated tick)
-    // that is causally contiguous with this one.
-    const seekToFrom = async (tick: number, tid: string): Promise<TickTid> => {
+    // Work backward through the journal to find the first transaction ID (and
+    // associated tick) that is causally contiguous with this one.
+    const history = [op.asMeldOperation()];
+    const seekToFrom = async (tick: number, tid: string): Promise<void> => {
+      const currentOp = history[0];
       const [prevTick, prevTid] = await this.entryPrev(tid) ?? [];
-      if (prevTid == null || prevTick == null // No previous in journal
-        || prevTick < minFrom // gone back further than allowed
+      if (prevTid != null && prevTick != null // Previous exists in journal
+        && prevTick >= minFrom // not gone back further than required
         // CAUTION: the following logically duplicates CausalTimeRange.contiguous
-        || prevTick < tick - 1 // previous is not contiguous
-        || op.time.ticked(prevTick).isZeroId // about to cross a fork
+        && prevTick === currentOp.from - 1 // previous is contiguous
+        && !currentOp.time.ticked(prevTick).isZeroId // not about to cross a fork
       ) {
-        return [tick, tid]; // This is as far back as we have
+        // Bank this previous entry and keep trucking
+        history.unshift(await this.meldOperation(prevTid));
+        return seekToFrom(prevTick, prevTid);
       }
-      // Get previous tick for given tick (or our tick)
-      return seekToFrom(prevTick, prevTid);
     };
-    let [tick, tid] = await seekToFrom(op.tick, op.tid);
+    await seekToFrom(op.tick, op.tid);
     // Begin the operation and fast-forward
-    const operator = createOperator(await this.meldOperation(tid));
-    while (tid !== op.tid) {
-      tid = op.time.ticked(++tick).hash;
-      operator.next(tid === op.tid ?
-        op.asMeldOperation() : await this.meldOperation(tid));
-    }
+    const operator = createOperator(history[0]);
+    for (let next of history.slice(1))
+      operator.next(next);
     return this.toMeldOperation(operator.commit());
   }
 

@@ -1,7 +1,7 @@
 import { MeldLocal, MeldRemotes, OperationMessage, Revup, Snapshot } from '../index';
 import {
   BehaviorSubject, concatWith, defer, EMPTY, firstValueFrom, from, identity, NEVER, Observable,
-  Observer, of, onErrorResumeNext, race, Subject as Source, switchMapTo, throwError
+  Observer, of, onErrorResumeNext, race, Subject as Source, Subscription, switchMapTo, throwError
 } from 'rxjs';
 import { TreeClock } from '../clocks';
 import { generate as uuid } from 'short-uuid';
@@ -66,6 +66,7 @@ type ACK = typeof ACK;
  */
 export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes {
   private clone: MeldLocal | null = null;
+  private cloneSubs = new Subscription;
   private readonly replyResolvers: {
     [messageId: string]: {
       resolve: (res: Response | ACK) => void,
@@ -100,7 +101,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     } else if (this.clone == null) {
       this.clone = clone;
       // Start sending updates from the local clone to the remotes
-      clone.operations.subscribe({
+      this.cloneSubs.add(clone.operations.subscribe({
         next: async msg => {
           // If we are not connected, we just ignore updates.
           // They will be replayed from the clone's journal on re-connection.
@@ -125,12 +126,12 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
         // Local m-ld clone has stopped unexpectedly.
         // The application will already know, so just shut down gracefully.
         error: err => this.closeSafely(err)
-      });
+      }));
       // When the clone comes live, join the presence on this domain if we can
-      clone.live.subscribe(live => {
+      this.cloneSubs.add(clone.live.subscribe(live => {
         if (live != null)
           this.cloneLive(live).catch(this.warnError);
-      });
+      }));
     } else if (clone != this.clone) {
       throw new Error(`${this.id}: Local clone cannot change`);
     }
@@ -218,8 +219,9 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
   }
 
   private closeSafely(err?: any) {
+    this.clone = null;
+    this.cloneSubs.unsubscribe();
     this.cloneLive(false)
-      .then(() => this.clone = null)
       .catch(this.warnError)
       .finally(() => this.close(err).catch(this.warnError));
   }
@@ -323,7 +325,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
   protected onOperation(payload: Buffer) {
     const update = OperationMessage.decode(payload);
     if (update)
-      this.nextOperation(update);
+      this.nextOperation(update, 'remote');
     else
       // This is extremely bad - may indicate a bad actor
       this.log.error(new MeldError('Bad update'));

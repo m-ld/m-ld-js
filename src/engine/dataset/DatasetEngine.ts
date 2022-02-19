@@ -203,14 +203,16 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
    */
   private get operationProblems(): Observable<OperationOutcome> {
     const acceptOutcomes = this.remoteOps.receiving.pipe(
-      // Only try and accept one operation at a time
-      concatMap(op => this.acceptRemoteOperation(op)),
+      // Only try and accept one operation at a time. If the operation no longer
+      // belongs to the remotes' active 'period', discard it.
+      concatMap(([op, period]) => period === this.remoteOps.period ?
+        this.acceptRemoteOperation(op) : EMPTY),
       // Ensure that the merge below does not incur two subscribes
       share());
     const [disordered, maybeBuffering] = partition(acceptOutcomes,
       outcome => outcome === OperationOutcome.DISORDERED);
     // Disordered messages are an immediate problem, buffering only if chronic
-    return merge(disordered, maybeBuffering.pipe(
+    const isBuffering = maybeBuffering.pipe(
       // Accepted messages need no action, we are only interested in buffered
       filter(outcome => outcome === OperationOutcome.BUFFERED),
       // Wait for the network timeout in case the buffer clears
@@ -226,7 +228,9 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
           this.log.debug('Messages were out of order, but now cleared.');
           return false;
         }
-      }))).pipe(tap(() => this.remoteOps.detach('outdated')));
+      }));
+    return merge(disordered, isBuffering)
+      .pipe(tap(() => this.remoteOps.detach('outdated')));
   }
 
   private async acceptRemoteOperation(op: OperationMessage): Promise<OperationOutcome> {
@@ -267,7 +271,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
           async ([msg, localTime, cxnTime]) => {
             const cxOp = await this.dataset.apply(msg, localTime, cxnTime);
             if (cxOp != null)
-              this.nextOperation(cxOp);
+              this.nextOperation(cxOp, 'constraint');
             msg.delivered.resolve();
           }));
         return accepted ? OperationOutcome.ACCEPTED : OperationOutcome.BUFFERED;
@@ -422,7 +426,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
       if (recent == null)
         throw new MeldError('Clone outdated', `Missing local ticks since ${recovery.gwc}`);
       else
-        return toReturn(recent.pipe(tap(this.nextOperation)));
+        return toReturn(recent.pipe(tap(op => this.nextOperation(op, 'post-recovery'))));
     }
   }
 
@@ -503,7 +507,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
       from(this.orderingBuffer),
       // #2 Anything that arrives stamped prior to now
       this.remoteOps.receiving.pipe(
-        filter(message => message.time.anyLt(now)),
+        filter(([op]) => op.time.anyLt(now)),
         takeUntil(from(until)))
     ).pipe(tap((msg: OperationMessage) => {
       this.log.debug('Forwarding update', msg.toString(this.log.getLevel()));
@@ -553,7 +557,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
         [sendTime, await this.dataset.write(request)]);
       // Publish the operation
       if (update != null)
-        this.nextOperation(update);
+        this.nextOperation(update, 'write');
     });
     return this;
   }

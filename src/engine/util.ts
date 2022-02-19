@@ -1,7 +1,7 @@
 import {
-  AsyncSubject, BehaviorSubject, concat, defaultIfEmpty, firstValueFrom, from, NEVER, Observable,
-  ObservableInput, ObservedValueOf, Observer, onErrorResumeNext, OperatorFunction, Subject,
-  Subscription, throwError
+  AsyncSubject, BehaviorSubject, concat, defaultIfEmpty, EMPTY, firstValueFrom, from, NEVER,
+  Observable, ObservableInput, ObservedValueOf, Observer, onErrorResumeNext, OperatorFunction,
+  Subject, Subscription, throwError
 } from 'rxjs';
 import { mergeMap, publish, switchAll, tap } from 'rxjs/operators';
 import { getLogger, getLoggers, LogLevelDesc } from 'loglevel';
@@ -179,6 +179,11 @@ export class HotSwitch<T> extends Observable<T> {
 
   switch(to: Observable<T>) {
     this.in.next(to);
+  }
+
+  close() {
+    this.switch(EMPTY);
+    this.in.complete();
   }
 }
 
