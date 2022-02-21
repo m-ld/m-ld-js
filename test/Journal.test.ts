@@ -297,11 +297,12 @@ describe('Dataset Journal', () => {
         await addEntry(local, remote);
         const [, r2, r3, , r4] = await expectEntries;
         // fuse r2-r3, so journal says l1 -> r1 -> l2 -> (r2-r3) -> l3 -> r4
-        const fusedOp = MeldOperation.fromOperation(encoder, r2o.fuse(r3o));
+        const fusedOp = MeldOperation.fromOperation(encoder, r2o.fusion().next(r3o).commit());
         await journal.spliceEntries([r2.index, r3.index],
-          JournalEntry.fromOperation(journal, r3.key, r2.prev, fusedOp));
+          [JournalEntry.fromOperation(journal, r3.key, r2.prev, fusedOp, new TripleMap)],
+          { appending: false });
         // first of causal reduce from r4 should be r1
-        const [ , from, time] = await r4.operation.fusedPast();
+        const [, from, time] = await r4.operation.fusedPast();
         expect(TreeClock.fromJson(time).equals(r4.operation.time)).toBe(true);
         expect(from).toBe(remoteOp.from);
       });
@@ -325,17 +326,19 @@ describe('Dataset Journal', () => {
       test('fused operation past does not cross the fork', async () => {
         const next = await addEntry(local, remote);
         const saved = await journal.operation(next.time.hash);
-        const expectedFused = MeldOperation.fromOperation(encoder, remoteOp.fuse(next));
+        const expectedFused = MeldOperation.fromOperation(
+          encoder, remoteOp.fusion().next(next).commit());
         await expect(saved!.fusedPast()).resolves.toEqual(expectedFused.encoded);
       });
 
       test('can drop pre-fork entry', async () => {
         await addEntry(local); // So the GWC no longer has the pre-fork
         // This simulates a journal truncation or a post-fork snapshot
-        await journal.spliceEntries([preForkEntry.index]);
+        await journal.spliceEntries([preForkEntry.index], [], { appending: false });
         const next = await addEntry(local, remote);
         const saved = await journal.operation(next.time.hash);
-        const expectedFused = MeldOperation.fromOperation(encoder, remoteOp.fuse(next));
+        const expectedFused = MeldOperation.fromOperation(
+          encoder, remoteOp.fusion().next(next).commit());
         await expect(saved!.fusedPast()).resolves.toEqual(expectedFused.encoded);
       });
 
@@ -344,10 +347,14 @@ describe('Dataset Journal', () => {
         const nextOp1 = await addEntry(local, remote);
         const nextOp2 = await addEntry(local, remote);
         const [nextEntry1, nextEntry2] = await expectEntries;
-        const fused = MeldOperation.fromOperation(encoder, remoteOp.fuse(nextOp1));
+        const fused = MeldOperation.fromOperation(
+          encoder, remoteOp.fusion().next(nextOp1).commit());
+        const fusedEntry = JournalEntry.fromOperation(
+          journal, nextEntry1.key, remoteEntry.prev, fused, new TripleMap);
         await journal.spliceEntries([remoteEntry.index, nextEntry1.index],
-          JournalEntry.fromOperation(journal, nextEntry1.key, remoteEntry.prev, fused));
-        const expectedFused = MeldOperation.fromOperation(encoder, fused.fuse(nextOp2));
+          [fusedEntry], { appending: false });
+        const expectedFused = MeldOperation.fromOperation(
+          encoder, fused.fusion().next(nextOp2).commit());
         await expect(nextEntry2.operation.fusedPast()).resolves.toEqual(expectedFused.encoded);
       });
     });
