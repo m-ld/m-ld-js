@@ -51,6 +51,12 @@ describe('Tree clock', () => {
     expect(tickedFork.ticked(0).hash).toBe(TreeClock.GENESIS.hash);
   });
 
+  test('Untick to fork retains forked ID', () => {
+    const tickedFork = TreeClock.GENESIS.ticked().forked().left.ticked();
+    expect(tickedFork.ticked(1).equals(TreeClock.GENESIS.ticked())).toBe(false);
+    expect(tickedFork.ticked(1).hash).toBe(TreeClock.GENESIS.ticked().hash);
+  });
+
   test('Untick does not affect non-ID leaf', () => {
     // This was a defect in which a left branch could be un-ticked without having an ID
     let { left, right } = TreeClock.GENESIS.ticked().forked();
@@ -373,6 +379,17 @@ describe('Tree clock', () => {
       time = right.update(left.ticked(0xFFFFFFFF));
       expect(time.hash.length).toBeLessThanOrEqual(22);
     }
+  });
+
+  test('forked has zero ticks ID', () => {
+    const { left, right } = TreeClock.GENESIS.ticked().forked();
+    expect(left.isZeroId).toBe(true);
+    expect(right.isZeroId).toBe(true);
+  });
+
+  test('unticked back to fork has zero ticks ID', () => {
+    const { left } = TreeClock.GENESIS.ticked().forked();
+    expect(left.ticked().ticked(1).isZeroId).toBe(true);
   });
 });
 

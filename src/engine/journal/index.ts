@@ -237,24 +237,28 @@ export class Journal {
     createOperator: (first: MeldOperation) => CausalOperator<AgreeableOperationSpec>,
     minFrom = 1
   ): Promise<MeldOperation> {
-    // Work backward through the journal to find the first transaction ID (and associated tick)
-    // that is causally contiguous with this one.
-    const seekToFrom = async (tick: number, tid: string): Promise<TickTid> => {
+    // Work backward through the journal to find the first transaction ID (and
+    // associated tick) that is causally contiguous with this one.
+    const history = [op.asMeldOperation()];
+    const seekToFrom = async (tick: number, tid: string): Promise<void> => {
+      const currentOp = history[0];
       const [prevTick, prevTid] = await this.entryPrev(tid) ?? [];
-      if (prevTid == null || prevTick == null || prevTick < minFrom || prevTick < tick - 1)
-        return [tick, tid]; // This is as far back as we have
-      else
-        // Get previous tick for given tick (or our tick)
+      if (prevTid != null && prevTick != null // Previous exists in journal
+        && prevTick >= minFrom // not gone back further than required
+        // CAUTION: the following logically duplicates CausalTimeRange.contiguous
+        && prevTick === currentOp.from - 1 // previous is contiguous
+        && !currentOp.time.ticked(prevTick).isZeroId // not about to cross a fork
+      ) {
+        // Bank this previous entry and keep trucking
+        history.unshift(await this.meldOperation(prevTid));
         return seekToFrom(prevTick, prevTid);
+      }
     };
-    let [tick, tid] = await seekToFrom(op.tick, op.tid);
+    await seekToFrom(op.tick, op.tid);
     // Begin the operation and fast-forward
-    const operator = createOperator(await this.meldOperation(tid));
-    while (tid !== op.tid) {
-      tid = op.time.ticked(++tick).hash;
-      // Small optimisation - no need to reload the given op
-      operator.next(tid === op.tid ? op.asMeldOperation() : await this.meldOperation(tid));
-    }
+    const operator = createOperator(history[0]);
+    for (let next of history.slice(1))
+      operator.next(next);
     return this.toMeldOperation(operator.commit());
   }
 

@@ -2,7 +2,7 @@ import { Meld, OperationMessage, Revup, Snapshot } from '.';
 import { LiveValue } from './LiveValue';
 import { TreeClock } from './clocks';
 import { asapScheduler, BehaviorSubject, firstValueFrom, Observable, of } from 'rxjs';
-import { catchError, distinctUntilChanged, filter, observeOn, skip, tap } from 'rxjs/operators';
+import { catchError, distinctUntilChanged, filter, observeOn, skip } from 'rxjs/operators';
 import { Logger } from 'loglevel';
 import { check, getIdLogger, PauseableSource } from './util';
 import { MeldError } from './MeldError';
@@ -35,9 +35,7 @@ export abstract class AbstractMeld implements Meld {
     this.log = getIdLogger(this.constructor, this.id, config.logLevel ?? 'info');
 
     // Operation notifications are delayed to ensure internal processing has priority
-    this.operations = this.operationSource.pipe(observeOn(asapScheduler), tap(msg => {
-      this.log.debug('has operation', msg.toString(this.log.getLevel()));
-    }));
+    this.operations = this.operationSource.pipe(observeOn(asapScheduler));
 
     // Live notifications are distinct, only transitions are notified; an error
     // indicates a return to undecided liveness followed by completion.
@@ -50,7 +48,10 @@ export abstract class AbstractMeld implements Meld {
       live => this.log.debug('is', live == null ? 'gone' : live ? 'live' : 'dead'));
   }
 
-  protected nextOperation = (op: OperationMessage) => this.operationSource.next(op);
+  protected nextOperation = (op: OperationMessage, reason: string) => {
+    this.log.debug('has operation', reason, op.toString(this.log.getLevel()));
+    this.operationSource.next(op);
+  };
   protected pauseOperations = (until: PromiseLike<unknown>) => this.operationSource.pause(until);
 
   protected warnError = (err: any) => this.log.warn(err);

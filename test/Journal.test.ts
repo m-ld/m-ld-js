@@ -287,6 +287,69 @@ describe('Dataset Journal', () => {
         const read = await journal.operation(nextOp.time.hash);
         expect(read!.encoded).toEqual(fused.encoded);
       });
+
+      test('fused past crosses a fusion', async () => {
+        const expectEntries = firstValueFrom(journal.tail.pipe(take(5), toArray()));
+        await addEntry(local);
+        const r2o = await addEntry(local, remote);
+        const r3o = await addEntry(local, remote);
+        await addEntry(local);
+        await addEntry(local, remote);
+        const [, r2, r3, , r4] = await expectEntries;
+        // fuse r2-r3, so journal says l1 -> r1 -> l2 -> (r2-r3) -> l3 -> r4
+        const fusedOp = MeldOperation.fromOperation(encoder, r2o.fuse(r3o));
+        await journal.spliceEntries([r2.index, r3.index],
+          JournalEntry.fromOperation(journal, r3.key, r2.prev, fusedOp));
+        // first of causal reduce from r4 should be r1
+        const [ , from, time] = await r4.operation.fusedPast();
+        expect(TreeClock.fromJson(time).equals(r4.operation.time)).toBe(true);
+        expect(from).toBe(remoteOp.from);
+      });
+    });
+
+    describe('with remote after local operation', () => {
+      let remote: MockProcess;
+      let preForkOp: MeldOperation, preForkEntry: JournalEntry;
+      let remoteOp: MeldOperation, remoteEntry: JournalEntry;
+
+      beforeEach(async () => {
+        const expectPreForkEntry = firstValueFrom(journal.tail);
+        preForkOp = await addEntry(local); // Have an entry before the fork
+        preForkEntry = await expectPreForkEntry;
+        remote = local.fork();
+        const expectRemoteEntry = firstValueFrom(journal.tail);
+        remoteOp = await addEntry(local, remote);
+        remoteEntry = await expectRemoteEntry;
+      });
+
+      test('fused operation past does not cross the fork', async () => {
+        const next = await addEntry(local, remote);
+        const saved = await journal.operation(next.time.hash);
+        const expectedFused = MeldOperation.fromOperation(encoder, remoteOp.fuse(next));
+        await expect(saved!.fusedPast()).resolves.toEqual(expectedFused.encoded);
+      });
+
+      test('can drop pre-fork entry', async () => {
+        await addEntry(local); // So the GWC no longer has the pre-fork
+        // This simulates a journal truncation or a post-fork snapshot
+        await journal.spliceEntries([preForkEntry.index]);
+        const next = await addEntry(local, remote);
+        const saved = await journal.operation(next.time.hash);
+        const expectedFused = MeldOperation.fromOperation(encoder, remoteOp.fuse(next));
+        await expect(saved!.fusedPast()).resolves.toEqual(expectedFused.encoded);
+      });
+
+      test('past does not cross the fork if prev is fused', async () => {
+        const expectEntries = firstValueFrom(journal.tail.pipe(take(2), toArray()));
+        const nextOp1 = await addEntry(local, remote);
+        const nextOp2 = await addEntry(local, remote);
+        const [nextEntry1, nextEntry2] = await expectEntries;
+        const fused = MeldOperation.fromOperation(encoder, remoteOp.fuse(nextOp1));
+        await journal.spliceEntries([remoteEntry.index, nextEntry1.index],
+          JournalEntry.fromOperation(journal, nextEntry1.key, remoteEntry.prev, fused));
+        const expectedFused = MeldOperation.fromOperation(encoder, fused.fuse(nextOp2));
+        await expect(nextEntry2.operation.fusedPast()).resolves.toEqual(expectedFused.encoded);
+      });
     });
 
     describe('Clerk', () => {
