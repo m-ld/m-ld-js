@@ -67,7 +67,7 @@ export class IoRemotesService extends EventEmitter {
   };
 }
 
-function queryValue(socket: RemoteSocket<any> | Socket, param: string): string {
+function queryValue(socket: RemoteSocket<any, any> | Socket, param: string): string {
   const element = socket.handshake.query[param];
   if (element == null)
     throw new Error(`Missing ${param} query parameter`);
