@@ -168,10 +168,11 @@ export type EncodedOperation = [
    */
   encoding: BufferEncoding[],
   /**
-   * The _last_ tick in this operation's range that was an agreement.
+   * The _last_ tick in this operation's range that was an agreement, and any
+   * proof required for applicable agreement conditions
    * @since 4
    */
-  agreed: number | undefined
+  agreed?: [number, any]
 ];
 
 /**

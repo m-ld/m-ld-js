@@ -1,5 +1,5 @@
 import { Query, Read, Write } from '../jrql-support';
-import { GraphSubject, MeldUpdate, WriteOptions } from '../api';
+import { GraphSubject, MeldUpdate } from '../api';
 import { LockManager } from './locks';
 import { Observable, Subscription } from 'rxjs';
 import { QueryableRdfSource } from '../rdfjs-support';
@@ -19,7 +19,7 @@ export interface CloneEngine extends EngineState {
 
 export interface EngineState extends QueryableRdfSource {
   read(request: Read): Consumable<GraphSubject>;
-  write(request: Write, opts?: WriteOptions): Promise<EngineState>;
+  write(request: Write): Promise<EngineState>;
   ask(pattern: Query): Promise<boolean>;
 }
 
@@ -93,10 +93,10 @@ export class StateEngine extends QueryableRdfSourceProxy {
       read(request: Read) {
         return this.src.read(request);
       }
-      async write(request: Write, opts?: WriteOptions) {
+      async write(request: Write) {
         // Ensure all read handlers are complete before changing state
         await engine.handling;
-        await this.src.write(request, opts);
+        await this.src.write(request);
         // At this point, there should be a new state from the data update, but
         // not if the write was a no-op
         return engine.state;

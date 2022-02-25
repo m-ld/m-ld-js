@@ -185,32 +185,6 @@ export interface MeldReadState extends QueryableRdfSource {
 }
 
 /**
- * Options for writing to a **m-ld** clone.
- * @see {@link MeldState.write}
- */
-export interface WriteOptions {
-  /**
-   * Whether this write is an _agreement_. Agreements may cause concurrent
-   * operations on other clones to be _voided_, that is, reversed and removed
-   * from history.
-   *
-   * The use of an agreement usually requires either that some coordination has
-   * occurred in the app (externally to **m-ld**), or that the local user has
-   * the authority to unilaterally agree. Use of this flag may trigger an
-   * error if preconditions have not been met.
-   *
-   * A write without this flag may also be automatically upgraded to an
-   * agreement by a constraint.
-   *
-   * > 🚧 Agreements are an experimental feature. Please contact us to discuss
-   * your use-case.
-   *
-   * @experimental
-   */
-  agree?: true;
-}
-
-/**
  * A data state corresponding to a local clock tick. A state can be some initial
  * state (an new clone), or follow a write operation, which may have been
  * transacted locally in this clone, or remotely on another clone.
@@ -241,11 +215,10 @@ export interface MeldState extends MeldReadState {
    * new state.
    *
    * @param request the declarative write description
-   * @param opts write options to apply
    * @typeParam W one of the {@link Write} types
    * @returns the next state of the domain, changed by this write operation only
    */
-  write<W = Write>(request: W, opts?: WriteOptions): Promise<MeldState>;
+  write<W = Write>(request: W): Promise<MeldState>;
   /**
    * Shorthand method for deleting a single Subject by its `@id`. This will also
    * remove references to the given Subject from other Subjects.
@@ -280,11 +253,9 @@ export interface GraphSubjects extends Array<GraphSubject> {
 }
 
 /**
- * @see m-ld [specification](http://spec.m-ld.org/interfaces/meldupdate.html)
- *
- * @category API
+ * An update arising from a write operation to **m-ld** data.
  */
-export interface MeldUpdate extends DeleteInsert<GraphSubjects> {
+export interface GraphUpdate extends DeleteInsert<GraphSubjects> {
   /**
    * Partial subjects, containing properties that have been deleted from the
    * domain. Note that deletion of a property (even of all properties) does not
@@ -297,6 +268,14 @@ export interface MeldUpdate extends DeleteInsert<GraphSubjects> {
    * domain.
    */
   readonly '@insert': GraphSubjects;
+}
+
+/**
+ * @see m-ld [specification](http://spec.m-ld.org/interfaces/meldupdate.html)
+ *
+ * @category API
+ */
+export interface MeldUpdate extends GraphUpdate {
   /**
    * Current local clock ticks at the time of the update.
    * @see MeldStatus.ticks
@@ -322,8 +301,8 @@ export type StateProc<S extends MeldReadState = MeldReadState, T = unknown> =
  * guaranteed to remain 'live' until the procedure's return Promise resolves or
  * rejects.
  */
-export type UpdateProc =
-  (update: MeldUpdate, state: MeldReadState) => PromiseLike<unknown> | void;
+export type UpdateProc<U extends GraphUpdate = MeldUpdate> =
+  (update: U, state: MeldReadState) => PromiseLike<unknown> | void;
 
 /**
  * A m-ld state machine extends the {@link MeldState} API for convenience, but
@@ -437,7 +416,7 @@ export interface MeldClone extends MeldStateMachine {
  * clone's (meta)data content – this allows a domain to evolve without
  * necessitating the redeployment of app code.
  *
- * > ⚠️ Changing extensions at runtime may require coordination between clones,
+ * > ⚠ Changing extensions at runtime may require coordination between clones,
  * to prevent outdated clones from acting incorrectly in ways that could cause
  * data corruption or compromise security. Consult the extension's documentation
  * for safe operation.
@@ -447,12 +426,18 @@ export interface MeldClone extends MeldStateMachine {
  */
 export interface MeldExtensions {
   /**
-   * Constraints declared in the configuration or the data.
+   * Data invariant constraints applicable to the domain.
    *
    * @experimental
    * @see https://github.com/m-ld/m-ld-spec/issues/73
    */
-  readonly constraints?: MeldConstraint[];
+  readonly constraints?: Iterable<MeldConstraint>;
+  /**
+   * Agreement preconditions applicable to the domain.
+   *
+   * @experimental
+   */
+  readonly agreementConditions?: Iterable<AgreementCondition>;
   /**
    * A transport security interceptor. If the initial transport security is not
    * compatible with the rest of the domain, this clone may not be able to join
@@ -472,7 +457,7 @@ export interface MeldExtensions {
    * been applied. If available, this procedure will be called for every state
    * after that passed to {@link initialise}.
    */
-  readonly onUpdate?: UpdateProc;
+  readonly onUpdate?: UpdateProc<GraphUpdate>;
 }
 
 /**
@@ -522,6 +507,59 @@ export interface MeldConstraint {
    * @returns a rejection only if the constraint application fails
    */
   apply(state: MeldReadState, update: InterimUpdate): Promise<unknown>;
+}
+
+/**
+ * An agreement condition asserts a necessary precondition for an _agreement_.
+ *
+ * Violation of an agreement condition indicates that the source of the
+ * operation is not behaving correctly according to the specification of the
+ * app; for example, it has been replaced by malware (with or without the user's
+ * knowledge). The condition check is therefore made for incoming remote
+ * agreement operations, _not_ for a local write marked as an agreement – it is
+ * the responsibility of the app (and its {@link MeldConstraint constraints}) to
+ * ensure that preconditions are met for a local write.
+ *
+ * The consequence of a violation is that the operation is ignored, and also
+ * _any further operations from the same remote clone_. This causes a permanent
+ * divergence which can only be recovered by creating a new clone for the
+ * violating remote user/device.
+ *
+ * It is therefore imperative that agreement conditions _only consider inputs
+ * that are known to be consistent for all clones_. Generally this _does not_
+ * include the local clone state, because clone state on receipt of an agreement
+ * operation may not be the same as the prior state at the originating clone,
+ * per normal **m-ld** behaviour. Examples of valid inputs include:
+ *
+ * 1. Clone state which is known not to have changed since the _last_ agreement,
+ * for example if access controlled so that it cannot change without agreement.
+ *
+ * 2. External state known to have strong consistency, such as the content of a
+ * ledger or database. In this case it may be necessary for the operation to
+ * reference some immutable data such as specific block in a blockchain, or an
+ * append-only table row.
+ *
+ * @see {@link WriteOptions.agree}
+ * @todo clone status notification on receipt of a violating remote operation
+ * @experimental
+ * @category Experimental
+ */
+export interface AgreementCondition {
+  /**
+   * Checking of agreement conditions occurs prior to constraint checks for a
+   * remote operation marked as an agreement.
+   *
+   * > ⚠ Contents of the `state` provided may not always be suitable as an
+   * input for condition checking. See the {@link AgreementCondition}
+   * documentation.
+   *
+   * @param state a read-only view of data from the clone at the moment the
+   * agreement has been received
+   * @param agreement the agreement update, prior to application to the data
+   * @param proof any additional transmitted proof of the condition
+   * @returns a rejection if the condition is violated (or fails)
+   */
+  check(state: MeldReadState, agreement: GraphUpdate, proof: any): Promise<unknown>;
 }
 
 /**
@@ -592,7 +630,7 @@ export interface InterimUpdate {
    * the methods above have affected the `@insert` and `@delete` of the update,
    * they will have been applied.
    */
-  readonly update: Promise<MeldUpdate>;
+  readonly update: Promise<GraphUpdate>;
 }
 
 /**

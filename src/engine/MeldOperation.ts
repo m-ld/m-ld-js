@@ -7,7 +7,7 @@ import { Iri } from 'jsonld/jsonld-spec';
 
 /** A causal operation that may contain an agreement */
 export interface AgreeableOperationSpec extends CausalOperation<Triple, TreeClock> {
-  agreed: number | undefined;
+  readonly agreed?: { tick: number, proof: any };
 }
 
 interface MeldOperationSpec
@@ -29,7 +29,7 @@ interface MeldOperationSpec
 export class MeldOperation
   extends FusableCausalOperation<Triple, TreeClock>
   implements MeldOperationSpec {
-  agreed: number | undefined;
+  agreed: AgreeableOperationSpec['agreed'];
 
   static fromOperation(
     encoder: MeldEncoder,
@@ -45,8 +45,13 @@ export class MeldOperation
       encoder.reifyTriplesTids(refInserts);
     const jsons = [delTriples, insTriples].map(encoder.jsonFromTriples);
     const [update, encoding] = MeldEncoder.bufferFromJson(jsons);
-    const encoded: EncodedOperation =
-      [4, spec.from, spec.time.toJSON(), update, encoding, spec.agreed];
+    const encoded: EncodedOperation = [4,
+      spec.from,
+      spec.time.toJSON(),
+      update,
+      encoding,
+      agreed != null ? [agreed.tick, agreed.proof] : undefined
+    ];
     return new MeldOperation({
       from, time, deletes: refDeletes, inserts: refInserts, agreed
     }, encoded, jsons);
@@ -59,7 +64,7 @@ export class MeldOperation
     const [ver] = encoded;
     if (ver < 3)
       throw new Error(`Encoded operation version ${ver} not supported`);
-    let [, from, timeJson, update, encoding, agreed] = encoded;
+    let [, from, timeJson, update, encoding, encAgree] = encoded;
     const jsons: [object, object] = MeldEncoder.jsonFromBuffer(update, encoding);
     const [delTriples, insTriples] = jsons.map(encoder.triplesFromJson);
     const time = TreeClock.fromJson(timeJson);
@@ -72,8 +77,16 @@ export class MeldOperation
       // No need to calculate transaction ID if the encoding is fused
       inserts = MeldEncoder.unreifyTriplesTids(insTriples);
     }
+    const agreed = this.agreed(encAgree);
     return new MeldOperation({ from, time, deletes, inserts, agreed }, encoded, jsons);
-  };
+  }
+
+  static agreed(encoded: [number, any] | undefined) {
+    if (encoded != null) {
+      const [tick, proof] = encoded;
+      return { tick, proof };
+    }
+  }
 
   // Type declaration overrides to reified triples
   inserts: ItemTids<RefTriple>[];
@@ -112,7 +125,7 @@ export class MeldOperation
     return new class extends MeldOperationOperator {
       update(prev: AgreeableOperationSpec) {
         // Check if the last agreement is being cut away
-        if (this.agreed != null && prev.time.ticks >= this.agreed)
+        if (this.agreed != null && prev.time.ticks >= this.agreed.tick)
           this.agreed = undefined;
       }
     }(super.cutting(), this.agreed);
@@ -147,7 +160,7 @@ export class MeldOperation
 abstract class MeldOperationOperator implements CausalOperator<AgreeableOperationSpec> {
   constructor(
     protected operator: CausalOperator<CausalOperation<Triple, TreeClock>>,
-    protected agreed: number | undefined
+    protected agreed: AgreeableOperationSpec['agreed']
   ) {
   }
 

@@ -1,6 +1,5 @@
 import {
-  ConstructMeldExtensions, MeldConstraint, MeldExtensions, MeldReadState, MeldTransportSecurity,
-  MeldUpdate
+  ConstructMeldExtensions, GraphUpdate, MeldConstraint, MeldExtensions, MeldReadState
 } from '../api';
 import { Construct, Context, isList, List, Reference, Subject } from '../jrql-support';
 import { constraintFromConfig } from '../constraints';
@@ -28,11 +27,11 @@ export class CloneExtensions implements MeldExtensions {
 
   private static async constraintsFromConfig(
     config: MeldConfig,
-    initial: MeldConstraint[] | undefined,
+    initial: Iterable<MeldConstraint> | undefined,
     context: Context
   ) {
     // Take the initial constraints if provided
-    return (initial ?? []).concat(await Promise.all((config.constraints ?? [])
+    return ([...initial ?? []]).concat(await Promise.all((config.constraints ?? [])
       .map(item => constraintFromConfig(item, context))));
   }
 
@@ -47,17 +46,33 @@ export class CloneExtensions implements MeldExtensions {
     this.log = getIdLogger(this.constructor, config['@id'], config.logLevel);
   }
 
-  get constraints(): MeldConstraint[] {
-    const constraints: MeldConstraint[] = [];
-    for (let ext of this.extensions())
-      constraints.push(...ext.constraints ?? []);
-    // Ensure the default list constraint exists
-    if (!constraints.find(constraint => constraint instanceof DefaultList))
-      constraints.push(new DefaultList(this.config['@id']));
-    return constraints;
+  get constraints() {
+    return this._constraints();
   }
 
-  get transportSecurity(): MeldTransportSecurity | undefined {
+  private *_constraints() {
+    let foundDefaultList = false;
+    for (let ext of this.extensions()) {
+      for (let constraint of ext.constraints ?? []) {
+        yield constraint;
+        foundDefaultList ||= constraint instanceof DefaultList;
+      }
+    }
+    // Ensure the default list constraint exists
+    if (!foundDefaultList)
+      yield new DefaultList(this.config['@id']);
+  }
+
+  get agreementConditions() {
+    return this._agreementConditions();
+  }
+
+  private *_agreementConditions() {
+    for (let ext of this.extensions())
+      yield *ext.agreementConditions ?? [];
+  }
+
+  get transportSecurity() {
     for (let ext of this.extensions())
       if (ext.transportSecurity != null)
         return ext.transportSecurity;
@@ -91,10 +106,11 @@ export class CloneExtensions implements MeldExtensions {
       await ext.initialise?.(state);
   }
 
-  async onUpdate(update: MeldUpdate, state: MeldReadState) {
+  async onUpdate(update: GraphUpdate, state: MeldReadState) {
     // Capture any changes to the extensions
     updateSubject(this.extensionDefList, update);
     // Instantiate any new declared extensions, permissively
+    // TODO: check for changed modules, not just new ones
     this.instantiateNewModules({ permissive: true });
     // Update the extensions themselves
     for (let ext of this.extensions())

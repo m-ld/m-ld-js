@@ -32,7 +32,9 @@ describe('TIDs Store', () => {
 
   describe('with inserted TID', () => {
     beforeEach(async () => {
-      const kvps = await tidsStore.commit(new PatchTids({ inserts: [[fredName, 'tid1']] }));
+      const kvps = await tidsStore.commit(new PatchTids(tidsStore, {
+        inserts: [[fredName, 'tid1']]
+      }));
       await kvpStore.transact({ prepare: () => ({ kvps }) });
     });
 
@@ -45,8 +47,9 @@ describe('TIDs Store', () => {
     });
 
     test('Replaces inserted TID for triple', async () => {
-      const patchTids = new PatchTids({
-        deletes: [[fredName, 'tid1']], inserts: [[fredName, 'tid2']] });
+      const patchTids = new PatchTids(tidsStore, {
+        deletes: [[fredName, 'tid1']], inserts: [[fredName, 'tid2']]
+      });
       const kvps = await tidsStore.commit(patchTids);
       await kvpStore.transact({ prepare: () => ({ kvps }) });
 

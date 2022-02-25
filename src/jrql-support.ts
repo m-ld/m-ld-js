@@ -30,10 +30,12 @@ export type Pattern = jrql.Pattern;
  * @category json-rql
  */
 export type Reference = jrql.Reference;
+
 /** @internal */
 interface ReferenceConstructor {
-  new (value: Reference): Reference
+  new(value: Reference): Reference;
 }
+
 /**
  * Constructor of references from references: used similarly to e.g. `Number`
  */
@@ -52,10 +54,12 @@ export const Reference: ReferenceConstructor = class implements Reference {
  * @category json-rql
  */
 export type VocabReference = { '@vocab': Iri };
+
 /** @internal */
 interface VocabReferenceConstructor {
-  new (value: VocabReference): VocabReference
+  new(value: VocabReference): VocabReference;
 }
+
 /**
  * Constructor of vocab references from vocab references: used similarly to e.g. `Number`
  */
@@ -278,10 +282,12 @@ export interface Subject extends Pattern {
   [key: string]: SubjectPropertyObject | Context | undefined;
   // No support for inline filters
 }
+
 /** @internal */
 interface SubjectConstructor {
-  new (value: Subject): Subject
+  new(value: Subject): Subject;
 }
+
 /**
  * Constructor of subjects from subjects: used similarly to e.g. `Number`
  */
@@ -912,6 +918,32 @@ export interface Update extends Query {
    * The pattern above does nothing, because no prior height value is matched by the `@where`.
    */
   '@insert'?: Subject | Subject[];
+  /**
+   * If this key is included and is truthy, this update is an _agreement_. Use
+   * of an agreement will guarantee that all clones converge on the "agreed"
+   * data state (although they may continue to change thereafter). Agreements
+   * may cause concurrent operations on other clones to be _voided_, that is,
+   * reversed and removed from history.
+   *
+   * The use of an agreement usually requires either that some coordination has
+   * occurred in the app (externally to **m-ld**), or that the local user has
+   * the authority to unilaterally agree. The precondition will be automatically
+   * checked by an {@link AgreementCondition} at all remote clones. A violation
+   * may lead to the originating clone being flagged as malware.
+   *
+   * The key value may be used to include any JSON-serialisable proof that
+   * applicable agreement conditions have been met, such as a key to a ledger
+   * entry.
+   *
+   * An update with a falsy flag may be automatically upgraded to an agreement
+   * by a constraint.
+   *
+   * > 🚧 Agreements are an experimental feature. Please contact us to discuss
+   * your use-case.
+   *
+   * @experimental
+   */
+  '@agree'?: any;
 }
 
 /** @internal */

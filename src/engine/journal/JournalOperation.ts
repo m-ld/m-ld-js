@@ -3,7 +3,7 @@ import { TreeClock } from '../clocks';
 import { Kvps } from '../dataset';
 import { CausalTimeRange } from '../ops';
 import type { Journal } from '.';
-import { MeldOperation } from '../MeldOperation';
+import { AgreeableOperationSpec, MeldOperation } from '../MeldOperation';
 
 /**
  * Immutable _partial_ expansion of EncodedOperation. This does not interpret
@@ -16,7 +16,8 @@ export class JournalOperation implements CausalTimeRange<TreeClock> {
     const [, from, timeJson, , , agreed] = json;
     const time = TreeClock.fromJson(timeJson);
     tid ??= time.hash;
-    return new JournalOperation(journal, tid, from, time, agreed, json);
+    return new JournalOperation(
+      journal, tid, from, time, MeldOperation.agreed(agreed), json);
   }
 
   static fromOperation(journal: Journal, operation: MeldOperation) {
@@ -30,7 +31,7 @@ export class JournalOperation implements CausalTimeRange<TreeClock> {
     readonly tid: string,
     readonly from: number,
     readonly time: TreeClock,
-    readonly agreed: number | undefined,
+    readonly agreed: AgreeableOperationSpec['agreed'] | undefined,
     readonly encoded: EncodedOperation,
     private _meldOperation?: MeldOperation) {
   }

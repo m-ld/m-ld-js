@@ -31,8 +31,9 @@ describe('Top-level extensions loading', () => {
   test('empty config has just default list', async () => {
     const ext = await CloneExtensions.initial(testConfig(), {}, testContext);
     expect(ext.transportSecurity).toBeUndefined();
-    expect(ext.constraints.length).toBe(1);
-    expect(ext.constraints[0]).toBeInstanceOf(DefaultList);
+    const constraints = [...ext.constraints];
+    expect(constraints.length).toBe(1);
+    expect(constraints[0]).toBeInstanceOf(DefaultList);
   });
 
   test('from config', async () => {
@@ -43,10 +44,11 @@ describe('Top-level extensions loading', () => {
       }]
     }), {}, testContext);
     expect(ext.transportSecurity).toBeUndefined();
-    expect(ext.constraints.length).toBe(2);
-    expect(ext.constraints[0]).toBeInstanceOf(SingleValued);
-    expect(ext.constraints[0]).toMatchObject({ property: 'http://test.m-ld.org/#prop1' });
-    expect(ext.constraints[1]).toBeInstanceOf(DefaultList);
+    const constraints = [...ext.constraints];
+    expect(constraints.length).toBe(2);
+    expect(constraints[0]).toBeInstanceOf(SingleValued);
+    expect(constraints[0]).toMatchObject({ property: 'http://test.m-ld.org/#prop1' });
+    expect(constraints[1]).toBeInstanceOf(DefaultList);
   });
 
   test('from app', async () => {
@@ -55,9 +57,10 @@ describe('Top-level extensions loading', () => {
       transportSecurity: MockExtensions.mockTs
     }, testContext);
     expect(ext.transportSecurity).toBe(MockExtensions.mockTs);
-    expect(ext.constraints.length).toBe(2);
-    expect(ext.constraints[0]).toBe(MockExtensions.mockConstraint);
-    expect(ext.constraints[1]).toBeInstanceOf(DefaultList);
+    const constraints = [...ext.constraints];
+    expect(constraints.length).toBe(2);
+    expect(constraints[0]).toBe(MockExtensions.mockConstraint);
+    expect(constraints[1]).toBeInstanceOf(DefaultList);
   });
 
   describe('from data', () => {
@@ -90,9 +93,10 @@ describe('Top-level extensions loading', () => {
       await ext.initialise(state.jrqlGraph.asReadState);
       expect(MockExtensions.lastConfig).toBe(config);
       expect(ext.transportSecurity).toBe(MockExtensions.mockTs);
-      expect(ext.constraints.length).toBe(2);
-      expect(ext.constraints[0]).toBe(MockExtensions.mockConstraint);
-      expect(ext.constraints[1]).toBeInstanceOf(DefaultList);
+      const constraints = [...ext.constraints];
+      expect(constraints.length).toBe(2);
+      expect(constraints[0]).toBe(MockExtensions.mockConstraint);
+      expect(constraints[1]).toBeInstanceOf(DefaultList);
     });
 
     test('loads a module on update', async () => {
@@ -110,9 +114,10 @@ describe('Top-level extensions loading', () => {
       await ext.onUpdate(update, state.jrqlGraph.asReadState);
       expect(MockExtensions.lastConfig).toBe(config);
       expect(ext.transportSecurity).toBe(MockExtensions.mockTs);
-      expect(ext.constraints.length).toBe(2);
-      expect(ext.constraints[0]).toBe(MockExtensions.mockConstraint);
-      expect(ext.constraints[1]).toBeInstanceOf(DefaultList);
+      const constraints = [...ext.constraints];
+      expect(constraints.length).toBe(2);
+      expect(constraints[0]).toBe(MockExtensions.mockConstraint);
+      expect(constraints[1]).toBeInstanceOf(DefaultList);
     });
   });
 });

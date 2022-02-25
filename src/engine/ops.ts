@@ -1,5 +1,5 @@
 import { CausalClock } from './clocks';
-import { Filter, IndexMap, IndexSet } from './indices';
+import { IndexMap, IndexMatch, IndexSet } from './indices';
 
 export interface Operation<T> {
   readonly deletes: Iterable<T>;
@@ -36,7 +36,7 @@ export abstract class MutableOperation<T> implements Operation<T> {
     return this;
   }
 
-  remove(key: 'deletes' | 'inserts', items: Iterable<T> | Filter<T>): T[] {
+  remove(key: keyof Operation<any>, items: IndexMatch<T>): T[] {
     return [...this[key].deleteAll(items)];
   }
 

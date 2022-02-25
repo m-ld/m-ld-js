@@ -1,4 +1,4 @@
-import { DeleteInsert, InterimUpdate, MeldUpdate } from '../../api';
+import { DeleteInsert, GraphUpdate, InterimUpdate } from '../../api';
 import { Subject, SubjectProperty, Update } from '../../jrql-support';
 import { PatchQuads } from '.';
 import { JrqlGraph } from './JrqlGraph';
@@ -17,21 +17,19 @@ export class InterimUpdatePatch implements InterimUpdate {
   /** Whether to recreate the insert & delete fields from the assertions */
   private needsUpdate: PromiseLike<boolean>;
   /** Cached interim update, lazily recreated after changes */
-  private _update: MeldUpdate | undefined;
+  private _update: GraphUpdate | undefined;
   /** Aliases for use in updates */
   private subjectAliases = new Map<Iri | null, { [property in '@id' | string]: SubjectProperty }>();
 
   /**
    * @param graph
    * @param userCtx
-   * @param ticks
    * @param patch the starting app patch (will not be mutated unless 'mutable')
    * @param mutable?
    */
   constructor(
     private readonly graph: JrqlGraph,
     private readonly userCtx: ActiveContext,
-    private readonly ticks: number,
     private readonly patch: PatchQuads,
     { mutable }: { mutable: boolean }
   ) {
@@ -61,7 +59,7 @@ export class InterimUpdatePatch implements InterimUpdate {
   }
 
   /** @returns an interim update to be presented to constraints */
-  get update(): Promise<MeldUpdate> {
+  get update(): Promise<GraphUpdate> {
     return Promise.resolve(this.needsUpdate).then(needsUpdate => {
       if (needsUpdate || this._update == null) {
         this.needsUpdate = Promise.resolve(false);
@@ -101,9 +99,8 @@ export class InterimUpdatePatch implements InterimUpdate {
     return this.subjectAliases.get(subject)?.[property];
   };
 
-  private createUpdate(patch: PatchQuads, ctx?: ActiveContext): MeldUpdate {
+  private createUpdate(patch: PatchQuads, ctx?: ActiveContext): GraphUpdate {
     return {
-      '@ticks': this.ticks,
       '@delete': this.quadSubjects(patch.deletes, ctx),
       '@insert': this.quadSubjects(patch.inserts, ctx)
     };

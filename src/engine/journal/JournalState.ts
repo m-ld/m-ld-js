@@ -98,8 +98,8 @@ export class JournalState {
           operation,
           deleted));
         this.state = this.state.withTime(localTime,
-          this.state.gwc.set(operation.time),
-          operation.agreed != null ? operation.time.ticked(operation.agreed) : undefined);
+          this.state.gwc.set(operation.time), operation.agreed != null ?
+            operation.time.ticked(operation.agreed.tick) : undefined);
         return this;
       }
 

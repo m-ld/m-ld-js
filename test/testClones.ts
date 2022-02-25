@@ -8,7 +8,7 @@ import { GlobalClock, TreeClock } from '../src/engine/clocks';
 import { AsyncMqttClient, IPublishPacket } from 'async-mqtt';
 import { EventEmitter } from 'events';
 import { observeOn } from 'rxjs/operators';
-import { MeldConfig, MeldConstraint, MeldReadState, MeldUpdate, StateProc } from '../src';
+import { GraphUpdate, MeldConfig, MeldConstraint, MeldReadState, StateProc } from '../src';
 import { AbstractLevelDOWN } from 'abstract-leveldown';
 import { LiveValue } from '../src/engine/LiveValue';
 import { MeldMemDown } from '../src/memdown';
@@ -93,12 +93,11 @@ export class MockGraphState {
     this.jrqlGraph = new JrqlGraph(state.dataset.graph());
   }
 
-  async write(request: Write, constraint?: MeldConstraint): Promise<MeldUpdate> {
-    const update = new Future<MeldUpdate>();
+  async write(request: Write, constraint?: MeldConstraint): Promise<GraphUpdate> {
+    const update = new Future<GraphUpdate>();
     await this.state.write(async () => {
       const patch = await this.jrqlGraph.write(request, this.ctx);
-      const interim = new InterimUpdatePatch(this.jrqlGraph,
-        this.ctx, 1, patch, { mutable: true });
+      const interim = new InterimUpdatePatch(this.jrqlGraph, this.ctx, patch, { mutable: true });
       if (constraint != null)
         await constraint.check(this.jrqlGraph.asReadState, interim);
       const txn = await interim.finalise();
@@ -132,7 +131,7 @@ export function testOp(
   time: TreeClock,
   deletes: object = {},
   inserts: object = {},
-  { from, agreed }: { from?: number, agreed?: number } = {}
+  { from, agreed }: { from?: number, agreed?: [number, any] } = {}
 ): EncodedOperation {
   return [
     4,
@@ -199,12 +198,12 @@ export class MockProcess implements ClockHolder<TreeClock> {
     return new OperationMessage(this.prev, op);
   }
 
-  operated(deletes: object, inserts: object, agree?: true): EncodedOperation {
+  operated(deletes: object, inserts: object, agree?: any): EncodedOperation {
     this.tick();
-    let agreed: number | undefined;
+    let agreed: [number, any] | undefined;
     if (agree) {
       this.agreed = this.time;
-      agreed = this.time.ticks;
+      agreed = [this.time.ticks, agree];
     }
     return testOp(this.time, deletes, inserts, { agreed });
   }

@@ -3,12 +3,15 @@ import { MockProcess, MockState, testOp } from './testClones';
 import { TreeClock } from '../src/engine/clocks';
 import { toArray } from 'rxjs/operators';
 import { EmptyError, firstValueFrom, lastValueFrom, Subject } from 'rxjs';
-import { Describe, JournalCheckPoint, MeldConstraint, MeldUpdate } from '../src';
+import {
+  AgreementCondition, Describe, JournalCheckPoint, MeldConstraint, MeldUpdate
+} from '../src';
 import { jsonify } from './testUtil';
 import { MeldEncoder } from '../src/engine/MeldEncoding';
 import { BufferEncoding, OperationMessage } from '../src/engine';
 import { drain } from 'rx-flowable';
 import { MeldError } from '../src/engine/MeldError';
+import { mockFn } from 'jest-mock-extended';
 
 const fred = {
   '@id': 'http://test.m-ld.org/fred',
@@ -551,7 +554,7 @@ describe('SU-Set Dataset', () => {
     });
   });
 
-  describe('with a constraint', () => {
+  describe('constraints', () => {
     let local: MockProcess, remote: MockProcess;
     let constraint: MeldConstraint;
 
@@ -715,13 +718,15 @@ describe('SU-Set Dataset', () => {
   describe('agreements', () => {
     let local: MockProcess, remote: MockProcess;
     let checkpoints: Subject<JournalCheckPoint>;
+    let agreementConditions: AgreementCondition[];
 
     beforeEach(async () => {
       let { left, right } = TreeClock.GENESIS.forked();
       local = new MockProcess(left);
       remote = new MockProcess(right);
       checkpoints = new Subject<JournalCheckPoint>();
-      ssd = new SuSetDataset(state.dataset, {}, {},
+      agreementConditions = [];
+      ssd = new SuSetDataset(state.dataset, {}, { agreementConditions },
         { '@id': 'test', '@domain': 'test.m-ld.org', journal: { adminDebounce: 0 } },
         { checkpoints });
       await ssd.initialise();
@@ -732,10 +737,20 @@ describe('SU-Set Dataset', () => {
     test('emits a forced agreed operation', async () => {
       const agreement = (await ssd.transact(async () => [
         local.tick().time,
-        await ssd.write({ '@insert': fred })
-      ], { agree: true }))!;
+        await ssd.write({ '@insert': fred }),
+        true
+      ]))!;
       const [, , , , , agreed] = agreement.data;
-      expect(agreed).toBe(local.time.ticks);
+      expect(agreed).toEqual([local.time.ticks, true]);
+    });
+
+    test('does not enforce conditions on local agreement', async () => {
+      agreementConditions.push({ check: mockFn().mockRejectedValue('nope') });
+      await expect(ssd.transact(async () => [
+        local.tick().time,
+        await ssd.write({ '@insert': fred }),
+        true
+      ])).resolves.toBeDefined();
     });
 
     test('admits an agreed operation caused after a local write', async () => {
@@ -749,11 +764,19 @@ describe('SU-Set Dataset', () => {
         local.join(remote.time))).resolves.toBe(null);
     });
 
+    test('enforces conditions on remote operation', async () => {
+      agreementConditions.push({ check: mockFn().mockRejectedValue('nope') });
+      await expect(ssd.apply(
+        remote.sentOperation({}, { '@id': 'wilma', 'name': 'Wilma' }, true),
+        local.join(remote.time))).rejects.toBe('nope');
+    });
+
     test('ignores an operation concurrent with a local agreement', async () => {
       await ssd.transact(async () => [
         local.tick().time,
-        await ssd.write({ '@insert': fred })
-      ], { agree: true });
+        await ssd.write({ '@insert': fred }),
+        true
+      ]);
       // Not joining with local time here
       const willUpdate = captureUpdate();
       await expect(ssd.apply(

@@ -1,5 +1,5 @@
 import { isList, List, Reference, Slot, Subject } from './jrql-support';
-import { DeleteInsert, GraphSubject, GraphSubjects, isDeleteInsert } from './api';
+import { DeleteInsert, GraphSubject, GraphUpdate, isDeleteInsert } from './api';
 import { getValues } from './engine/jsonld';
 import { deepValues, isNaturalNumber, setAtPath } from './engine/util';
 import { array } from './util';
@@ -109,7 +109,7 @@ function unReifyRefs(subject: Subject) {
  * @category Utility
  */
 export function updateSubject<T extends Subject & Reference>(
-  subject: T, update: SubjectUpdates | DeleteInsert<GraphSubjects>): T {
+  subject: T, update: SubjectUpdates | GraphUpdate): T {
   return new SubjectUpdater(update).update(subject);
 }
 
@@ -125,7 +125,7 @@ export class SubjectUpdater {
     (subject: GraphSubject, key: keyof DeleteInsert<any>) => GraphSubject | undefined;
   private readonly done = new Set<object>();
 
-  constructor(update: SubjectUpdates | DeleteInsert<GraphSubjects>) {
+  constructor(update: SubjectUpdates | GraphUpdate) {
     if (isDeleteInsert(update))
       this.delOrInsForSubject = (subject, key) =>
         update[key].graph.get(subject['@id']);

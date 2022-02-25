@@ -8,9 +8,7 @@ import { comesAlive } from '../src/engine/AbstractMeld';
 import { count, map, observeOn, take, toArray } from 'rxjs/operators';
 import { TreeClock } from '../src/engine/clocks';
 import { MeldRemotes, OperationMessage, Snapshot } from '../src/engine';
-import {
-  Describe, GraphSubject, MeldConfig, MeldReadState, Read, Subject, Update, WriteOptions
-} from '../src';
+import { Describe, GraphSubject, MeldConfig, MeldReadState, Read, Subject, Update } from '../src';
 import { AbstractLevelDOWN } from 'abstract-leveldown';
 import { jsonify } from './testUtil';
 import { MeldMemDown } from '../src/memdown';
@@ -61,8 +59,8 @@ describe('Dataset engine', () => {
       return inflateFrom(this.lock.share('state', 'test', () => super.read(request)));
     }
 
-    async write(request: Write, opts?: WriteOptions): Promise<this> {
-      return this.lock.exclusive('state', 'test', () => super.write(request, opts));
+    async write(request: Write): Promise<this> {
+      return this.lock.exclusive('state', 'test', () => super.write(request));
     }
   }
 

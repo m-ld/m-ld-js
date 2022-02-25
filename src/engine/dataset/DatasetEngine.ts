@@ -1,9 +1,9 @@
 import {
-  GraphSubject, LiveStatus, MeldExtensions, MeldReadState, MeldStatus, StateProc, WriteOptions
+  GraphSubject, LiveStatus, MeldExtensions, MeldReadState, MeldStatus, StateProc
 } from '../../api';
 import { MeldLocal, MeldRemotes, OperationMessage, Recovery, Revup, Snapshot } from '..';
 import { liveRollup } from '../LiveValue';
-import { Context, Pattern, Query, Read, Write } from '../../jrql-support';
+import { Context, isUpdate, Pattern, Query, Read, Write } from '../../jrql-support';
 import {
   BehaviorSubject, concat, concatMap, defaultIfEmpty, EMPTY, firstValueFrom, from, interval, merge,
   Observable, of, OperatorFunction, partition, Subscriber, Subscription
@@ -543,14 +543,17 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
 
   @DatasetEngine.checkNotClosed.async
   @DatasetEngine.checkStateLocked.async
-  async write(request: Write, opts?: WriteOptions): Promise<this> {
+  async write(request: Write): Promise<this> {
     await this.lock.share('live', 'write', async () => {
       this.logRequest('write', request);
       // Take the send timestamp just before enqueuing the transaction. This
       // ensures that transaction stamps increase monotonically.
       const sendTime = this.messageService.event();
-      const update = await this.dataset.transact(async () =>
-        [sendTime, await this.dataset.write(request)], opts);
+      const update = await this.dataset.transact(async () => [
+        sendTime,
+        await this.dataset.write(request),
+        isUpdate(request) ? request['@agree'] : undefined
+      ]);
       // Publish the operation
       if (update != null)
         this.nextOperation(update, 'write');
