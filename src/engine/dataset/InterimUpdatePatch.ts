@@ -1,4 +1,4 @@
-import { DeleteInsert, GraphUpdate, InterimUpdate } from '../../api';
+import { DeleteInsert, InterimUpdate, MeldUpdateBid } from '../../api';
 import { Subject, SubjectProperty, Update } from '../../jrql-support';
 import { PatchQuads } from '.';
 import { JrqlGraph } from './JrqlGraph';
@@ -6,6 +6,7 @@ import { GraphAliases, SubjectGraph } from '../SubjectGraph';
 import { Iri } from 'jsonld/jsonld-spec';
 import { ActiveContext } from 'jsonld/lib/context';
 import { Quad } from '../quads';
+import { compactIri } from '../jsonld';
 
 export class InterimUpdatePatch implements InterimUpdate {
   /** If mutable, we allow mutation of the input patch */
@@ -17,7 +18,7 @@ export class InterimUpdatePatch implements InterimUpdate {
   /** Whether to recreate the insert & delete fields from the assertions */
   private needsUpdate: PromiseLike<boolean>;
   /** Cached interim update, lazily recreated after changes */
-  private _update: GraphUpdate | undefined;
+  private _update: MeldUpdateBid | undefined;
   /** Aliases for use in updates */
   private subjectAliases = new Map<Iri | null, { [property in '@id' | string]: SubjectProperty }>();
 
@@ -25,12 +26,16 @@ export class InterimUpdatePatch implements InterimUpdate {
    * @param graph
    * @param userCtx
    * @param patch the starting app patch (will not be mutated unless 'mutable')
+   * @param principalId
+   * @param agree
    * @param mutable?
    */
   constructor(
     private readonly graph: JrqlGraph,
     private readonly userCtx: ActiveContext,
     private readonly patch: PatchQuads,
+    private readonly principalId: Iri | null,
+    private readonly agree: any | null,
     { mutable }: { mutable: boolean }
   ) {
     this.mutable = mutable;
@@ -59,7 +64,7 @@ export class InterimUpdatePatch implements InterimUpdate {
   }
 
   /** @returns an interim update to be presented to constraints */
-  get update(): Promise<GraphUpdate> {
+  get update(): Promise<MeldUpdateBid> {
     return Promise.resolve(this.needsUpdate).then(needsUpdate => {
       if (needsUpdate || this._update == null) {
         this.needsUpdate = Promise.resolve(false);
@@ -99,10 +104,14 @@ export class InterimUpdatePatch implements InterimUpdate {
     return this.subjectAliases.get(subject)?.[property];
   };
 
-  private createUpdate(patch: PatchQuads, ctx?: ActiveContext): GraphUpdate {
+  private createUpdate(patch: PatchQuads, ctx?: ActiveContext): MeldUpdateBid {
     return {
       '@delete': this.quadSubjects(patch.deletes, ctx),
-      '@insert': this.quadSubjects(patch.inserts, ctx)
+      '@insert': this.quadSubjects(patch.inserts, ctx),
+      '@principal': this.principalId != null ?
+        { '@id': compactIri(this.principalId, ctx) } : undefined,
+      // Note that agreement specifically checks truthy-ness, not just non-null
+      '@agree': this.agree || undefined
     };
   }
 

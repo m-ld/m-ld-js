@@ -919,11 +919,11 @@ export interface Update extends Query {
    */
   '@insert'?: Subject | Subject[];
   /**
-   * If this key is included and is truthy, this update is an _agreement_. Use
-   * of an agreement will guarantee that all clones converge on the "agreed"
-   * data state (although they may continue to change thereafter). Agreements
-   * may cause concurrent operations on other clones to be _voided_, that is,
-   * reversed and removed from history.
+   * If this key is included and the value is truthy, this update is an
+   * _agreement_. Use of an agreement will guarantee that all clones converge on
+   * the "agreed" data state (although they may continue to change thereafter).
+   * Agreements may cause concurrent operations on other clones to be _voided_,
+   * that is, reversed and removed from history.
    *
    * The use of an agreement usually requires either that some coordination has
    * occurred in the app (externally to **m-ld**), or that the local user has

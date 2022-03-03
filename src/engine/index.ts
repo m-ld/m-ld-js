@@ -6,56 +6,71 @@ import { Observable } from 'rxjs';
 import { Message } from './messages';
 import { Future, MsgPack } from './util';
 import { LiveValue } from './LiveValue';
-import { MeldError } from './MeldError';
-import { MeldReadState, StateProc } from '../api';
+import { Attribution, MeldReadState, StateProc } from '../api';
 import { levels } from 'loglevel';
 import { MeldEncoder } from './MeldEncoding';
+import { MeldError } from './MeldError';
 
 const inspect = Symbol.for('nodejs.util.inspect.custom');
 
 /**
- * An operation on domain data, expressed such that it can be causally-ordered using its
- * logical clock time, with a message service.
+ * An operation on domain data, expressed such that it can be causally-ordered
+ * using its logical clock time, with a message service.
  */
 export class OperationMessage implements Message<TreeClock, EncodedOperation> {
   readonly delivered = new Future;
-  private _encoded: Buffer;
 
-  constructor(
-    /** Previous public tick from the operation source */
-    readonly prev: number,
-    /** Encoded update operation */
-    readonly data: EncodedOperation,
-    /** Message time if you happen to have it, otherwise read from data */
-    readonly time = TreeClock.fromJson(data[2])
+  static fromOperation(
+    prev: number,
+    data: EncodedOperation,
+    attr: Attribution | null,
+    time?: TreeClock
   ) {
+    return new OperationMessage(
+      prev, EncodedOperation.toBuffer(data), attr, data, time);
   }
 
-  get encoded(): Buffer {
-    if (this._encoded == null) {
-      const { prev, data } = this;
-      this._encoded = MsgPack.encode({ prev, data });
-    }
-    return this._encoded;
-  }
-
-  static decode(enc: Buffer): OperationMessage {
-    const json = MsgPack.decode(enc);
-    if (typeof json.prev == 'number' && Array.isArray(json.data))
-      return new OperationMessage(json.prev, json.data);
-    else
+  static fromBuffer(payload: Buffer): OperationMessage {
+    const json = MsgPack.decode(payload);
+    if (typeof json == 'object' && typeof json.prev == 'number' &&
+      Buffer.isBuffer(json.enc) && typeof json.attr == 'object') {
+      return new OperationMessage(json.prev, json.enc, json.attr);
+    } else {
       throw new MeldError('Bad update');
+    }
   }
 
+  /**
+   * @param prev Previous public tick from the operation source
+   * @param enc MessagePack-encoded enclosed update operation
+   * @param attr Attribution of the operation to a security principal
+   * @param [data] the actual update operation (decoded if not provided)
+   * @param [time] the update time (decoded of not provided)
+   */
+  private constructor(
+    readonly prev: number,
+    readonly enc: Buffer,
+    readonly attr: Attribution | null,
+    readonly data: EncodedOperation = EncodedOperation.fromBuffer(enc),
+    readonly time = TreeClock.fromJson(data[EncodedOperation.Key.time])
+  ) {}
+
+  /** Approximate length of serialised message, in bytes */
   get size() {
-    return this.encoded.length;
+    const { pid, sig } = this.attr ?? {};
+    return 8 + this.enc.length + (pid?.length ?? 0) + (sig?.length ?? 0);
+  }
+
+  toBuffer() {
+    const { prev, enc, attr } = this;
+    return MsgPack.encode({ prev, enc, attr });
   }
 
   toString(logLevel: number = levels.INFO) {
     const [v, from, time, updateData, encoding] = this.data;
     const update = logLevel <= levels.DEBUG ?
       encoding.includes(BufferEncoding.SECURE) ? '---ENCRYPTED---' :
-      MeldEncoder.jsonFromBuffer(updateData, encoding) :
+        MeldEncoder.jsonFromBuffer(updateData, encoding) :
       { length: updateData.length, encoding };
     return `${JSON.stringify({ v, from, time, update })}
     @ ${this.time}, prev ${this.prev}`;
@@ -66,10 +81,11 @@ export class OperationMessage implements Message<TreeClock, EncodedOperation> {
 }
 
 /**
- * Primary internal m-ld engine-to-engine interface, used both as an interface of the local clone,
- * but also, symmetrically, to present remote clones to the local clone. Each member is similarly
- * used symmetrically: outgoing vs. incoming operations; liveness of the local clone vs.
- * is-anyone-out-there; and providing recovery to a peer vs. recovering from a peer.
+ * Primary internal m-ld engine-to-engine interface, used both as an interface
+ * of the local clone, but also, symmetrically, to present remote clones to the
+ * local clone. Each member is similarly used symmetrically: outgoing vs.
+ * incoming operations; liveness of the local clone vs. is-anyone-out-there; and
+ * providing recovery to a peer vs. recovering from a peer.
  */
 export interface Meld {
   /**
@@ -163,17 +179,46 @@ export type EncodedOperation = [
    */
   update: Buffer,
   /**
-   * Encodings applied to the update
+   * Encodings applied to the update, in the order of application
    * @since 3
    */
   encoding: BufferEncoding[],
   /**
-   * The _last_ tick in this operation's range that was an agreement, and any
-   * proof required for applicable agreement conditions
+   * The identity Iri compacted against the canonical domain context of the
+   * principal responsible for this operation, if available; or `null`. Note
+   * that this principal is not necessarily the same as the attribution of a
+   * sent operation message if the operation has been processed in some way,
+   * such as with a fusion.
+   * @see AppPrincipal
    * @since 4
    */
-  agreed?: [number, any]
+  principalId: string | null,
+  /**
+   * The _last_ tick in this operation's range that was an agreement, and any
+   * proof required for applicable agreement conditions, or `null` if this
+   * operation does not contain an agreement.
+   * @see OperationAgreedSpec
+   * @since 4
+   */
+  agreed: [number, any] | null
 ];
+
+export namespace EncodedOperation {
+  /** @internal utility to strongly key into EncodedOperation */
+  export enum Key {
+    // noinspection JSUnusedGlobalSymbols
+    version,
+    from,
+    time,
+    update,
+    encoding,
+    principalId,
+    agreed
+  }
+
+  export const toBuffer: (op: EncodedOperation) => Buffer = MsgPack.encode;
+  export const fromBuffer: (buffer: Buffer) => EncodedOperation = MsgPack.decode;
+}
 
 /**
  * Common components of a clone snapshot and rev-up – both of which provide a

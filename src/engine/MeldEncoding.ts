@@ -3,7 +3,7 @@ import { flatten, lazy, MsgPack } from './util';
 import { Context, ExpandedTermDef, Reference } from '../jrql-support';
 import { Iri } from 'jsonld/jsonld-spec';
 import { RdfFactory, Triple } from './quads';
-import { activeCtx } from './jsonld';
+import { activeCtx, compactIri, expandTerm } from './jsonld';
 import { M_LD, RDF, XS } from '../ns';
 import { SubjectGraph } from './SubjectGraph';
 import { SubjectQuads } from './SubjectQuads';
@@ -48,8 +48,7 @@ const OPERATION_CONTEXT = {
 /**
  * A reference triple carries a blank node identifier
  */
-export interface RefTriple extends Triple, Reference {
-}
+export type RefTriple = Triple & Reference;
 
 export type RefTriplesTids = [RefTriple, UUID[]][];
 
@@ -70,6 +69,9 @@ export class MeldEncoder {
   }
 
   private name = lazy(name => this.rdf.namedNode(name));
+
+  compactIri = (iri: Iri) => compactIri(iri, this.ctx);
+  expandTerm = (value: string) => expandTerm(value, this.ctx);
 
   identifyTriple = (triple: Triple): RefTriple =>
     ({ '@id': `_:${this.rdf.blankNode().value}`, ...triple });

@@ -6,6 +6,7 @@ import { EntryIndex, Journal, tickKey } from '.';
 import { MeldOperation } from '../MeldOperation';
 import { TripleMap } from '../quads';
 import { UUID } from '../MeldEncoding';
+import { Attribution } from '../../api';
 
 interface JournalStateJson {
   /**
@@ -34,7 +35,12 @@ interface JournalStateJson {
 }
 
 export interface EntryBuilder {
-  next(operation: MeldOperation, deleted: TripleMap<UUID[]>, localTime: TreeClock): this;
+  next(
+    operation: MeldOperation,
+    deleted: TripleMap<UUID[]>,
+    localTime: TreeClock,
+    attribution: Attribution | null
+  ): this;
   void(entry: JournalEntry): this;
   appendEntries: JournalEntry[];
   state: JournalState;
@@ -88,7 +94,12 @@ export class JournalState {
         public state: JournalState) {
       }
 
-      next(operation: MeldOperation, deleted: TripleMap<UUID[]>, localTime: TreeClock) {
+      next(
+        operation: MeldOperation,
+        deleted: TripleMap<UUID[]>,
+        localTime: TreeClock,
+        attribution: Attribution | null
+      ) {
         const prevTicks = this.state.gwc.getTicks(operation.time);
         const prevTid = this.state.gwc.tid(operation.time);
         this.appendEntries.push(JournalEntry.fromOperation(
@@ -96,7 +107,8 @@ export class JournalState {
           tickKey(localTime.ticks),
           [prevTicks, prevTid],
           operation,
-          deleted));
+          deleted,
+          attribution));
         this.state = this.state.withTime(localTime,
           this.state.gwc.set(operation.time), operation.agreed != null ?
             operation.time.ticked(operation.agreed.tick) : undefined);
@@ -129,6 +141,18 @@ export class JournalState {
     })(this);
   }
 
+  /**
+   * Uses the journal to calculate the applicable operation based on the
+   * incoming operation:
+   * 1. If the incoming operation is a fusion for which we already have some
+   * prefix, the prefix is cut away leaving only the part we have not seen.
+   * 1. If the incoming operation pre-dates the last agreement we have seen, it
+   * is ignored.
+   *
+   * @param op the incoming operation
+   * @returns `op` if no changes are required, or an operation representing the
+   * un-applied suffix, or `null` if `op` should be ignored.
+   */
   applicableOperation(op: MeldOperation): Promise<MeldOperation | null> {
     return this.journal.withLockedHistory(async () => {
       // Cut away stale parts of an incoming fused operation.

@@ -26,7 +26,7 @@ import { MeldError, MeldErrorStatus } from '../MeldError';
 import { AsyncIterator, TransformIterator, wrap } from 'asynciterator';
 import { BaseStream } from '../../rdfjs-support';
 import { Consumable } from 'rx-flowable';
-import { JournalAdmin, MeldConfig } from '../../config';
+import { MeldApp, MeldConfig } from '../../config';
 
 enum ConnectStyle {
   SOFT, HARD
@@ -40,6 +40,15 @@ enum OperationOutcome {
   /** Operation was unacceptable due to missing prior operations */
   DISORDERED
 }
+
+export type DatasetEngineParameters = {
+  dataset: Dataset;
+  remotes: MeldRemotes;
+  extensions: MeldExtensions;
+  config: MeldConfig;
+  app: MeldApp;
+  context?: Context;
+};
 
 export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLocal {
   protected static checkStateLocked =
@@ -69,17 +78,10 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
   /*readonly*/
   query: CloneEngine['query'];
 
-  constructor({ dataset, remotes, extensions, config, journalAdmin, context }: {
-    dataset: Dataset;
-    remotes: MeldRemotes;
-    extensions: MeldExtensions;
-    config: MeldConfig;
-    journalAdmin?: JournalAdmin;
-    context?: Context;
-  }) {
+  constructor({ dataset, remotes, extensions, config, app, context }: DatasetEngineParameters) {
     super(config);
     this.dataset = new SuSetDataset(
-      dataset, context ?? {}, extensions, config, journalAdmin);
+      dataset, context ?? {}, extensions, app, config);
     this.lock = dataset.lock;
     this.subs.add(this.dataUpdates
       .pipe(map(update => update['@ticks']))

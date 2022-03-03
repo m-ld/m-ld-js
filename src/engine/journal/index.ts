@@ -8,7 +8,7 @@ import { JournalOperation } from './JournalOperation';
 import { JournalEntry, TickTid } from './JournalEntry';
 import { EntryBuilder, JournalState } from './JournalState';
 import { defaultIfEmpty, firstValueFrom, Observable, Subject as Source } from 'rxjs';
-import { AgreeableOperationSpec, MeldOperation } from '../MeldOperation';
+import { MeldOperation, MeldOperationSpec } from '../MeldOperation';
 
 export { JournalState, JournalEntry, EntryBuilder };
 
@@ -78,7 +78,7 @@ export class Journal {
     return MeldOperation.fromEncoded(this.encoder, op);
   }
 
-  toMeldOperation(op: AgreeableOperationSpec) {
+  toMeldOperation(op: MeldOperationSpec) {
     return MeldOperation.fromOperation(this.encoder, op);
   }
 
@@ -189,11 +189,7 @@ export class Journal {
   commitOperation(op: JournalOperation): Kvps {
     return batch => batch.put(tidOpKey(op.tid), MsgPack.encode(op.encoded));
   }
-
-  async meldOperation(tid: string): Promise<MeldOperation> {
-    return this.decode((await this.operation(tid, 'require')).encoded);
-  }
-
+  
   insertPastOperation(operation: EncodedOperation): Kvps {
     return this.commitOperation(JournalOperation.fromJson(this, operation));
   }
@@ -231,10 +227,11 @@ export class Journal {
    * @param minFrom the least required value of the range of the operation with
    * the returned identity. Must not be <1 (genesis is never represented in the journal).
    * @returns found operations, up to and including this one
+   * @see MeldOperation.contiguous
    */
   async causalReduce(
     op: JournalOperation,
-    createOperator: (first: MeldOperation) => CausalOperator<AgreeableOperationSpec>,
+    createOperator: (first: MeldOperation) => CausalOperator<MeldOperationSpec>,
     minFrom = 1
   ): Promise<MeldOperation> {
     // Work backward through the journal to find the first transaction ID (and
@@ -245,13 +242,17 @@ export class Journal {
       const [prevTick, prevTid] = await this.entryPrev(tid) ?? [];
       if (prevTid != null && prevTick != null // Previous exists in journal
         && prevTick >= minFrom // not gone back further than required
-        // CAUTION: the following logically duplicates CausalTimeRange.contiguous
+        // CAUTION: the following logically duplicates MeldOperation.contiguous
         && prevTick === currentOp.from - 1 // previous is contiguous
         && !currentOp.time.ticked(prevTick).isZeroId // not about to cross a fork
       ) {
-        // Bank this previous entry and keep trucking
-        history.unshift(await this.meldOperation(prevTid));
-        return seekToFrom(prevTick, prevTid);
+        const prevOp = await this.operation(prevTid, 'require');
+        // Final check: principal has not changed
+        if (prevOp.principalId === currentOp.principalId) {
+          // Bank this previous entry and keep trucking
+          history.unshift(this.decode(prevOp.encoded));
+          await seekToFrom(prevTick, prevTid);
+        }
       }
     };
     await seekToFrom(op.tick, op.tid);

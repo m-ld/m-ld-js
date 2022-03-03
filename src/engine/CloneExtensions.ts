@@ -1,5 +1,5 @@
 import {
-  ConstructMeldExtensions, GraphUpdate, MeldConstraint, MeldExtensions, MeldReadState
+  ConstructMeldExtensions, MeldConstraint, MeldExtensions, MeldReadState, MeldUpdateBid
 } from '../api';
 import { Construct, Context, isList, List, Reference, Subject } from '../jrql-support';
 import { constraintFromConfig } from '../constraints';
@@ -106,7 +106,7 @@ export class CloneExtensions implements MeldExtensions {
       await ext.initialise?.(state);
   }
 
-  async onUpdate(update: GraphUpdate, state: MeldReadState) {
+  async onUpdate(update: MeldUpdateBid, state: MeldReadState) {
     // Capture any changes to the extensions
     updateSubject(this.extensionDefList, update);
     // Instantiate any new declared extensions, permissively

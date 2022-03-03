@@ -1,21 +1,26 @@
-import { CausalOperation, CausalOperator, FusableCausalOperation, ItemTids } from './ops';
+import { CausalOperation, CausalOperator, CausalTimeRange, FusableCausalOperation } from './ops';
 import { Triple, tripleIndexKey, TripleMap } from './quads';
 import { TreeClock } from './clocks';
 import { EncodedOperation } from '.';
 import { MeldEncoder, RefTriple } from './MeldEncoding';
 import { Iri } from 'jsonld/jsonld-spec';
 
-/** A causal operation that may contain an agreement */
-export interface AgreeableOperationSpec extends CausalOperation<Triple, TreeClock> {
-  readonly agreed?: { tick: number, proof: any };
+/**
+ * The 'range' of an operation comprises the information required to determine
+ * whether operations are logically contiguous.
+ * @see MeldOperation.contiguous
+ */
+export interface MeldOperationRange extends CausalTimeRange<TreeClock> {
+  readonly principalId: Iri | null;
 }
 
-interface MeldOperationSpec
-  extends AgreeableOperationSpec, CausalOperation<RefTriple, TreeClock> {
-  // Type declaration overrides to reified triples
-  inserts: ItemTids<RefTriple>[],
-  deletes: ItemTids<RefTriple>[]
+/** A causal operation that may contain an agreement */
+export interface MeldOperationSpec<T extends Triple = RefTriple>
+  extends MeldOperationRange, CausalOperation<T, TreeClock> {
+  readonly agreed: OperationAgreedSpec | null;
 }
+
+export type OperationAgreedSpec = { tick: number, proof: any };
 
 /**
  * An immutable operation, fully expanded from the wire or journal encoding to
@@ -27,15 +32,26 @@ interface MeldOperationSpec
  * fusions, which compare triples by value.
  */
 export class MeldOperation
-  extends FusableCausalOperation<Triple, TreeClock>
+  extends FusableCausalOperation<RefTriple, TreeClock>
   implements MeldOperationSpec {
-  agreed: AgreeableOperationSpec['agreed'];
+  /**
+   * Does operation two continue immediately from operation one, with no
+   * intermediate causes from other processes or changes of principal?
+   */
+  static contiguous(one: MeldOperationRange, two: MeldOperationRange) {
+    return CausalTimeRange.contiguous(one, two) &&
+      one.principalId === two.principalId;
+  }
 
+  /**
+   * Create an operation from the given specification. Note that the triples in
+   * the spec will always be given new scoped identities.
+   */
   static fromOperation(
     encoder: MeldEncoder,
-    spec: AgreeableOperationSpec
+    spec: MeldOperationSpec<Triple>
   ): MeldOperation {
-    const { from, time, deletes, inserts, agreed } = spec;
+    const { from, time, deletes, inserts, principalId, agreed } = spec;
     const [refDeletes, refInserts] =
       [deletes, inserts].map(encoder.identifyTriplesTids);
     const delTriples = encoder.reifyTriplesTids(refDeletes);
@@ -50,13 +66,18 @@ export class MeldOperation
       spec.time.toJSON(),
       update,
       encoding,
-      agreed != null ? [agreed.tick, agreed.proof] : undefined
+      principalId != null ? encoder.compactIri(principalId) : null,
+      agreed != null ? [agreed.tick, agreed.proof] : null
     ];
     return new MeldOperation({
-      from, time, deletes: refDeletes, inserts: refInserts, agreed
+      from, time, deletes: refDeletes, inserts: refInserts, principalId, agreed
     }, encoded, jsons);
   };
 
+  /**
+   * Create an operation from the given wire encoding. Note that the triples in
+   * the spec will retain their scoped identities from the encoding.
+   */
   static fromEncoded(
     encoder: MeldEncoder,
     encoded: EncodedOperation
@@ -64,7 +85,7 @@ export class MeldOperation
     const [ver] = encoded;
     if (ver < 3)
       throw new Error(`Encoded operation version ${ver} not supported`);
-    let [, from, timeJson, update, encoding, encAgree] = encoded;
+    let [, from, timeJson, update, encoding, principalId, encAgree] = encoded;
     const jsons: [object, object] = MeldEncoder.jsonFromBuffer(update, encoding);
     const [delTriples, insTriples] = jsons.map(encoder.triplesFromJson);
     const time = TreeClock.fromJson(timeJson);
@@ -77,20 +98,22 @@ export class MeldOperation
       // No need to calculate transaction ID if the encoding is fused
       inserts = MeldEncoder.unreifyTriplesTids(insTriples);
     }
+    principalId = principalId != null ? encoder.expandTerm(principalId) : null;
     const agreed = this.agreed(encAgree);
-    return new MeldOperation({ from, time, deletes, inserts, agreed }, encoded, jsons);
+    const spec = { from, time, deletes, inserts, principalId, agreed };
+    return new MeldOperation(spec, encoded, jsons);
   }
 
-  static agreed(encoded: [number, any] | undefined) {
+  static agreed(encoded: [number, any] | null) {
     if (encoded != null) {
       const [tick, proof] = encoded;
       return { tick, proof };
     }
+    return null;
   }
 
-  // Type declaration overrides to reified triples
-  inserts: ItemTids<RefTriple>[];
-  deletes: ItemTids<RefTriple>[];
+  readonly agreed: OperationAgreedSpec | null;
+  readonly principalId: Iri | null;
 
   /**
    * Serialisation of triples is not required to be normalised. For any m-ld
@@ -109,26 +132,27 @@ export class MeldOperation
   ) {
     super(spec, tripleIndexKey);
     this.agreed = spec.agreed;
+    this.principalId = spec.principalId;
   }
 
-  fusion(): CausalOperator<AgreeableOperationSpec> {
+  fusion(): CausalOperator<MeldOperationSpec> {
     return new class extends MeldOperationOperator {
-      update(next: AgreeableOperationSpec) {
+      update(next: MeldOperationSpec) {
         // Most recent agreement is significant
         if (next.agreed != null)
           this.agreed = next.agreed;
       }
-    }(super.fusion(), this.agreed);
+    }(super.fusion(), this.principalId, this.agreed);
   }
 
-  cutting(): CausalOperator<AgreeableOperationSpec> {
+  cutting(): CausalOperator<MeldOperationSpec> {
     return new class extends MeldOperationOperator {
-      update(prev: AgreeableOperationSpec) {
+      update(prev: MeldOperationSpec) {
         // Check if the last agreement is being cut away
         if (this.agreed != null && prev.time.ticks >= this.agreed.tick)
-          this.agreed = undefined;
+          this.agreed = null;
       }
-    }(super.cutting(), this.agreed);
+    }(super.cutting(), this.principalId, this.agreed);
   }
 
   byRef<T>(key: 'deletes' | 'inserts', byTriple: TripleMap<T>): { [id: Iri]: T } {
@@ -157,23 +181,27 @@ export class MeldOperation
   }
 }
 
-abstract class MeldOperationOperator implements CausalOperator<AgreeableOperationSpec> {
+abstract class MeldOperationOperator implements CausalOperator<MeldOperationSpec> {
   constructor(
-    protected operator: CausalOperator<CausalOperation<Triple, TreeClock>>,
-    protected agreed: AgreeableOperationSpec['agreed']
-  ) {
-  }
+    protected operator: CausalOperator<CausalOperation<RefTriple, TreeClock>>,
+    protected principalId: Iri | null,
+    protected agreed: OperationAgreedSpec | null
+  ) {}
 
-  abstract update(op: AgreeableOperationSpec): void;
+  abstract update(op: MeldOperationSpec): void;
 
-  next(op: AgreeableOperationSpec): this {
+  next(op: MeldOperationSpec): this {
     this.operator.next(op);
     this.update(op);
     return this;
   }
 
   commit() {
-    return { ...this.operator.commit(), agreed: this.agreed };
+    return {
+      ...this.operator.commit(),
+      principalId: this.principalId,
+      agreed: this.agreed
+    };
   }
 
   get footprint() {

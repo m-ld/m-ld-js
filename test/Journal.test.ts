@@ -41,7 +41,7 @@ describe('Dataset Journal', () => {
       prepare: () => ({
         async kvps(batch) {
           const state = await journal.state();
-          return state.builder().next(op, new TripleMap, localTime).commit(batch);
+          return state.builder().next(op, new TripleMap, localTime, null).commit(batch);
         },
         return: op
       })
@@ -54,7 +54,7 @@ describe('Dataset Journal', () => {
 
     constructor(config: JournalConfig = {}, admin: JournalAdmin = {}) {
       const checkpoints = new Subject<JournalCheckPoint>();
-      super(journal, {
+      super(journal, () => Promise.resolve(null), {
         '@id': 'test',
         logLevel: 'debug',
         // Disable automatic admin, we use explicit checkpoints, unless override
@@ -223,9 +223,9 @@ describe('Dataset Journal', () => {
 
       test('reconstitutes the m-ld operation', async () => {
         const op = await commitOp;
-        const saved = await journal.meldOperation(op.time.hash);
-        expect(saved.time.equals(op.time)).toBe(true);
-        expect(saved.encoded).toEqual(op.encoded);
+        const savedOp = await journal.operation(op.time.hash, 'require');
+        expect(savedOp.time.equals(op.time)).toBe(true);
+        expect(savedOp.encoded).toEqual(op.encoded);
       });
 
       test('does not dispose the referenced operation', async () => {
@@ -280,7 +280,7 @@ describe('Dataset Journal', () => {
             kvps: journal.spliceEntries(
               [remoteEntry.index, nextEntry.index],
               [JournalEntry.fromOperation(
-                journal, nextEntry.key, remoteEntry.prev, fused, new TripleMap)],
+                journal, nextEntry.key, remoteEntry.prev, fused, new TripleMap, null)],
               { appending: false })
           })
         });
@@ -299,7 +299,7 @@ describe('Dataset Journal', () => {
         // fuse r2-r3, so journal says l1 -> r1 -> l2 -> (r2-r3) -> l3 -> r4
         const fusedOp = MeldOperation.fromOperation(encoder, r2o.fusion().next(r3o).commit());
         await journal.spliceEntries([r2.index, r3.index],
-          [JournalEntry.fromOperation(journal, r3.key, r2.prev, fusedOp, new TripleMap)],
+          [JournalEntry.fromOperation(journal, r3.key, r2.prev, fusedOp, new TripleMap, null)],
           { appending: false });
         // first of causal reduce from r4 should be r1
         const [, from, time] = await r4.operation.fusedPast();
@@ -350,7 +350,7 @@ describe('Dataset Journal', () => {
         const fused = MeldOperation.fromOperation(
           encoder, remoteOp.fusion().next(nextOp1).commit());
         const fusedEntry = JournalEntry.fromOperation(
-          journal, nextEntry1.key, remoteEntry.prev, fused, new TripleMap);
+          journal, nextEntry1.key, remoteEntry.prev, fused, new TripleMap, null);
         await journal.spliceEntries([remoteEntry.index, nextEntry1.index],
           [fusedEntry], { appending: false });
         const expectedFused = MeldOperation.fromOperation(

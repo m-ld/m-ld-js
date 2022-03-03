@@ -1,4 +1,4 @@
-import { DatasetEngine } from '../src/engine/dataset/DatasetEngine';
+import { DatasetEngine, DatasetEngineParameters } from '../src/engine/dataset/DatasetEngine';
 import { hotLive, memStore, MockProcess, mockRemotes, testConfig } from './testClones';
 import {
   asapScheduler, BehaviorSubject, EMPTY, EmptyError, firstValueFrom, NEVER, of, Subject as Source,
@@ -16,13 +16,14 @@ import { Write } from '../src/jrql-support';
 import { Consumable } from 'rx-flowable';
 import { inflateFrom } from '../src/engine/util';
 import { MeldError } from '../src/engine/MeldError';
+import { Dataset } from '../src/engine/dataset/index';
 
 describe('Dataset engine', () => {
   describe('as genesis', () => {
     async function genesis(
       remotes: MeldRemotes, config?: Partial<MeldConfig>): Promise<DatasetEngine> {
       let clone = new DatasetEngine({
-        dataset: await memStore(), remotes, extensions: {}, config: testConfig(config)
+        dataset: await memStore(), remotes, extensions: {}, app: {}, config: testConfig(config)
       });
       await clone.initialise();
       return clone;
@@ -55,6 +56,17 @@ describe('Dataset engine', () => {
   // Read and write methods on a clone require the state lock. These are
   // normally put in place by a StateEngine.
   class TestDatasetEngine extends DatasetEngine {
+    constructor(dataset: Dataset, params?: Partial<DatasetEngineParameters>) {
+      super({
+        dataset: params?.dataset ?? dataset,
+        remotes: params?.remotes ?? mockRemotes(),
+        extensions: params?.extensions ?? {},
+        config: params?.config ?? testConfig(),
+        app: params?.app ?? {},
+        context: params?.context
+      });
+    }
+
     read(request: Read): Consumable<GraphSubject> {
       return inflateFrom(this.lock.share('state', 'test', () => super.read(request)));
     }
@@ -68,12 +80,7 @@ describe('Dataset engine', () => {
     let silo: DatasetEngine;
 
     beforeEach(async () => {
-      silo = new TestDatasetEngine({
-        dataset: await memStore(),
-        remotes: mockRemotes(),
-        extensions: {},
-        config: testConfig()
-      });
+      silo = new TestDatasetEngine(await memStore());
       await silo.initialise();
     });
 
@@ -145,15 +152,14 @@ describe('Dataset engine', () => {
   describe('as genesis with remote clone', () => {
     let clone: DatasetEngine;
     let remote: MockProcess;
-    let remoteUpdates: Source<OperationMessage> = new Source;
+    let remoteUpdates: Source<OperationMessage>;
 
     beforeEach(async () => {
+      remoteUpdates = new Source;
       const remotesLive = hotLive([false]);
       // Ensure that remote updates are async
       const remotes = mockRemotes(remoteUpdates.pipe(observeOn(asapScheduler)), remotesLive);
-      clone = new TestDatasetEngine({
-        dataset: await memStore(), remotes, extensions: {}, config: testConfig()
-      });
+      clone = new TestDatasetEngine(await memStore(), { remotes });
       await clone.initialise();
       await comesAlive(clone); // genesis is alive
       remote = new MockProcess(await clone.newClock()); // no longer genesis
@@ -245,7 +251,7 @@ describe('Dataset engine', () => {
 
     test('initialises from snapshot', async () => {
       const clone = new DatasetEngine({
-        dataset: await memStore(), remotes, extensions: {},
+        dataset: await memStore(), remotes, extensions: {}, app: {},
         config: testConfig({ genesis: false })
       });
       await clone.initialise();
@@ -255,7 +261,7 @@ describe('Dataset engine', () => {
 
     test('can become a silo', async () => {
       const clone = new DatasetEngine({
-        dataset: await memStore(), remotes, extensions: {},
+        dataset: await memStore(), remotes, extensions: {}, app: {},
         config: testConfig({ genesis: false })
       });
       await clone.initialise();
@@ -264,9 +270,8 @@ describe('Dataset engine', () => {
     });
 
     test('ignores operation from before snapshot', async () => {
-      const clone = new TestDatasetEngine({
-        dataset: await memStore(), remotes, extensions: {},
-        config: testConfig({ genesis: false })
+      const clone = new TestDatasetEngine(await memStore(), {
+        remotes, config: testConfig({ genesis: false })
       });
       await clone.initialise();
       const updates = firstValueFrom(clone.dataUpdates.pipe(count()));
@@ -291,6 +296,7 @@ describe('Dataset engine', () => {
         dataset: await memStore({ backend }),
         remotes: mockRemotes(),
         extensions: {},
+        app: {},
         config
       });
       await clone.initialise();
@@ -307,6 +313,7 @@ describe('Dataset engine', () => {
         dataset: await memStore({ backend }),
         remotes,
         extensions: {},
+        app: {},
         config: testConfig()
       });
 
@@ -327,6 +334,7 @@ describe('Dataset engine', () => {
         dataset: await memStore({ backend }),
         remotes,
         extensions: {},
+        app: {},
         config: testConfig()
       });
 
@@ -346,6 +354,7 @@ describe('Dataset engine', () => {
         dataset: await memStore({ backend }),
         remotes,
         extensions: {},
+        app: {},
         config: testConfig()
       });
 
@@ -369,6 +378,7 @@ describe('Dataset engine', () => {
         dataset: await memStore({ backend }),
         remotes,
         extensions: {},
+        app: {},
         config: testConfig()
       });
       await clone.initialise();
@@ -392,6 +402,7 @@ describe('Dataset engine', () => {
         dataset: await memStore({ backend }),
         remotes,
         extensions: {},
+        app: {},
         config: testConfig()
       });
       await clone.initialise();
@@ -401,12 +412,7 @@ describe('Dataset engine', () => {
 
     test('maintains fifo during rev-up', async () => {
       // We need local siloed update
-      let clone = new TestDatasetEngine({
-        dataset: await memStore({ backend }),
-        remotes: mockRemotes(),
-        extensions: {},
-        config
-      });
+      let clone = new TestDatasetEngine(await memStore({ backend }), { config });
       await clone.initialise();
       await clone.write({
         '@id': 'http://test.m-ld.org/fred',
@@ -423,12 +429,7 @@ describe('Dataset engine', () => {
         };
       });
       // The clone will initialise into a revving-up state, waiting for a revUp
-      clone = new TestDatasetEngine({
-        dataset: await memStore({ backend }),
-        remotes,
-        extensions: {},
-        config: testConfig()
-      });
+      clone = new TestDatasetEngine(await memStore({ backend }), { remotes });
       const observedTicks = firstValueFrom(clone.operations.pipe(
         map(op => op.time.ticks), take(2), toArray()));
       await clone.initialise();
@@ -457,6 +458,7 @@ describe('Dataset engine', () => {
         dataset: await memStore({ backend }),
         remotes,
         extensions: {},
+        app: {},
         config: testConfig()
       });
       await clone.initialise();
@@ -478,12 +480,7 @@ describe('Dataset engine', () => {
       const remoteUpdates = new Source<OperationMessage>();
       const remotes = mockRemotes(remoteUpdates, [true]);
       remotes.revupFrom = async () => ({ gwc: remote.gwc, updates: EMPTY });
-      const clone = new TestDatasetEngine({
-        dataset: await memStore({ backend }),
-        remotes,
-        extensions: {},
-        config: testConfig()
-      });
+      const clone = new TestDatasetEngine(await memStore({ backend }), { remotes });
       await clone.initialise();
       await clone.status.becomes({ outdated: false });
 
@@ -493,7 +490,7 @@ describe('Dataset engine', () => {
         {}, { '@id': 'http://test.m-ld.org/wilma', 'http://test.m-ld.org/#name': 'Wilma' });
       remoteUpdates.next(op);
       // Push the same operation again
-      op = new OperationMessage(op.prev, op.data, op.time);
+      op = OperationMessage.fromOperation(op.prev, op.data, null, op.time);
       remoteUpdates.next(op);
       // Delivered OK, but need additional check below to see ignored
       await expect(op.delivered).resolves.toBeUndefined();

@@ -1,40 +1,42 @@
 import { EncodedOperation } from '../index';
 import { TreeClock } from '../clocks';
 import { Kvps } from '../dataset';
-import { CausalTimeRange } from '../ops';
 import type { Journal } from '.';
-import { AgreeableOperationSpec, MeldOperation } from '../MeldOperation';
+import { MeldOperation, MeldOperationRange, OperationAgreedSpec } from '../MeldOperation';
+import { Iri } from 'jsonld/jsonld-spec';
 
 /**
  * Immutable _partial_ expansion of EncodedOperation. This does not interpret
- * the data (triples) content like a `MeldOperation`, just the `from` and `time`
- * components, and the derived transaction ID.
+ * the data (triples) content like a `MeldOperation`, just the required
+ * components for operation range, and the derived transaction ID.
  */
-export class JournalOperation implements CausalTimeRange<TreeClock> {
+export class JournalOperation implements MeldOperationRange {
   static fromJson(journal: Journal, json: EncodedOperation, tid?: string) {
-    // Destructuring fields for convenience
-    const [, from, timeJson, , , agreed] = json;
+    // Destructuring fields for range definition
+    const [, from, timeJson, , , principalId, agreed] = json;
     const time = TreeClock.fromJson(timeJson);
     tid ??= time.hash;
     return new JournalOperation(
-      journal, tid, from, time, MeldOperation.agreed(agreed), json);
+      journal, tid, from, time, principalId, MeldOperation.agreed(agreed), json);
   }
 
-  static fromOperation(journal: Journal, operation: MeldOperation) {
-    const { from, time, encoded } = operation;
-    return new JournalOperation(journal, time.hash,
-      from, time, operation.agreed, encoded, operation);
+  static fromOperation(journal: Journal, op: MeldOperation) {
+    const { from, time, encoded, principalId, agreed } = op;
+    return new JournalOperation(
+      journal, time.hash, from, time, principalId, agreed, encoded, op);
   }
 
-  private constructor(
+  // noinspection JSUnusedGlobalSymbols: IDE does not recognise fields implementing interface
+  constructor(
     private readonly journal: Journal,
     readonly tid: string,
     readonly from: number,
     readonly time: TreeClock,
-    readonly agreed: AgreeableOperationSpec['agreed'] | undefined,
+    readonly principalId: Iri | null,
+    readonly agreed: OperationAgreedSpec | null,
     readonly encoded: EncodedOperation,
-    private _meldOperation?: MeldOperation) {
-  }
+    private _meldOperation?: MeldOperation
+  ) {}
 
   commit: Kvps = this.journal.commitOperation(this);
 
@@ -51,8 +53,6 @@ export class JournalOperation implements CausalTimeRange<TreeClock> {
   /**
    * Gets the causally-contiguous history of this operation (inclusive), fused
    * into a single operation.
-   *
-   * @see CausalTimeRange.contiguous
    */
   async fusedPast(): Promise<EncodedOperation> {
     return (await this.journal.causalReduce(this, first => first.fusion())).encoded;

@@ -48,7 +48,7 @@ describe('SU-Set Dataset', () => {
 
   describe('with basic config', () => {
     beforeEach(async () => {
-      ssd = new SuSetDataset(state.dataset, {}, {}, {
+      ssd = new SuSetDataset(state.dataset, {}, {}, {}, {
         '@id': 'test',
         '@domain': 'test.m-ld.org'
       });
@@ -477,15 +477,14 @@ describe('SU-Set Dataset', () => {
           // Finally the local gets the remote fusion (as a rev-up), which still
           // includes the insert of wilma
           remote.tick();
-          await ssd.apply(new OperationMessage(one.time.ticks, testOp(remote.time, {}, [
-              { 'tid': oneTid, 'o': 'Wilma', 'p': '#name', 's': 'wilma' },
-              {
-                'tid': remote.time.hash,
-                'o': 'Barney',
-                'p': '#name',
-                's': 'barney'
-              }], { from: one.time.ticks })),
-            local);
+          await ssd.apply(OperationMessage.fromOperation(one.time.ticks, testOp(remote.time, {}, [
+            { 'tid': oneTid, 'o': 'Wilma', 'p': '#name', 's': 'wilma' },
+            {
+              'tid': remote.time.hash,
+              'o': 'Barney',
+              'p': '#name',
+              's': 'barney'
+            }], { from: one.time.ticks }), null), local);
           // Result should not include wilma because of the third-party delete
           await expect(drain(ssd.read<Describe>({
             '@describe': 'http://test.m-ld.org/wilma'
@@ -505,15 +504,14 @@ describe('SU-Set Dataset', () => {
           // Finally the local gets the remote fusion (as a rev-up), which still
           // includes the insert of wilma but not betty
           remote.tick();
-          await ssd.apply(new OperationMessage(one.time.ticks, testOp(remote.time, {}, [
-              { 'tid': oneTid, 'o': 'Wilma', 'p': '#name', 's': 'wilma' },
-              {
-                'tid': remote.time.hash,
-                'o': 'Barney',
-                'p': '#name',
-                's': 'barney'
-              }], { from: one.time.ticks })),
-            local);
+          await ssd.apply(OperationMessage.fromOperation(one.time.ticks, testOp(remote.time, {}, [
+            { 'tid': oneTid, 'o': 'Wilma', 'p': '#name', 's': 'wilma' },
+            {
+              'tid': remote.time.hash,
+              'o': 'Barney',
+              'p': '#name',
+              's': 'barney'
+            }], { from: one.time.ticks }), null), local);
           // Result should not include betty because the fusion omits it
           await expect(drain(ssd.read<Describe>({
             '@describe': 'http://test.m-ld.org/betty'
@@ -536,15 +534,14 @@ describe('SU-Set Dataset', () => {
           // includes the insert of fred, plus barney who it forgot about
           const firstTick = local.time.ticks;
           local.tick();
-          await ssd.apply(new OperationMessage(0, testOp(local.time, {}, [
-              { 'tid': firstTid, 'o': 'Fred', 'p': '#name', 's': 'fred' },
-              {
-                'tid': local.time.hash,
-                'o': 'Barney',
-                'p': '#name',
-                's': 'barney'
-              }], { from: firstTick })),
-            newLocal);
+          await ssd.apply(OperationMessage.fromOperation(0, testOp(local.time, {}, [
+            { 'tid': firstTid, 'o': 'Fred', 'p': '#name', 's': 'fred' },
+            {
+              'tid': local.time.hash,
+              'o': 'Barney',
+              'p': '#name',
+              's': 'barney'
+            }], { from: firstTick }), null), newLocal);
           // Result should not include fred because of the remote delete
           await expect(drain(ssd.read<Describe>({
             '@describe': 'http://test.m-ld.org/fred'
@@ -568,7 +565,7 @@ describe('SU-Set Dataset', () => {
       };
       ssd = new SuSetDataset(state.dataset,
         {},
-        { constraints: [constraint] },
+        { constraints: [constraint] }, {},
         { '@id': 'test', '@domain': 'test.m-ld.org' });
       await ssd.initialise();
       await ssd.resetClock(local.tick().time);
@@ -727,8 +724,8 @@ describe('SU-Set Dataset', () => {
       checkpoints = new Subject<JournalCheckPoint>();
       agreementConditions = [];
       ssd = new SuSetDataset(state.dataset, {}, { agreementConditions },
-        { '@id': 'test', '@domain': 'test.m-ld.org', journal: { adminDebounce: 0 } },
-        { checkpoints });
+        { journalAdmin: { checkpoints } },
+        { '@id': 'test', '@domain': 'test.m-ld.org', journal: { adminDebounce: 0 } });
       await ssd.initialise();
       await ssd.resetClock(local.time);
       await ssd.allowTransact();
@@ -740,7 +737,7 @@ describe('SU-Set Dataset', () => {
         await ssd.write({ '@insert': fred }),
         true
       ]))!;
-      const [, , , , , agreed] = agreement.data;
+      const [, , , , , , agreed] = agreement.data;
       expect(agreed).toEqual([local.time.ticks, true]);
     });
 
@@ -900,7 +897,7 @@ describe('SU-Set Dataset', () => {
   });
 
   test('enforces operation size limit', async () => {
-    ssd = new SuSetDataset(state.dataset, {}, {}, {
+    ssd = new SuSetDataset(state.dataset, {}, {}, {}, {
       '@id': 'test',
       '@domain': 'test.m-ld.org',
       maxOperationSize: 1

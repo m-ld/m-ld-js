@@ -15,6 +15,9 @@ export const encrypted = `${$base}Encrypted`;
 /** Security Principal class */
 export const principal = `${$base}Principal`;
 
+/** The local engine as a principal, used for e.g. operation voiding */
+export const localEngine = `${$base}principal/local-engine`;
+
 /** Property for asymmetric public key */
 export const publicKey = `${$base}#publicKey`;
 

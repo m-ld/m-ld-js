@@ -8,7 +8,7 @@ import { GlobalClock, TreeClock } from '../src/engine/clocks';
 import { AsyncMqttClient, IPublishPacket } from 'async-mqtt';
 import { EventEmitter } from 'events';
 import { observeOn } from 'rxjs/operators';
-import { GraphUpdate, MeldConfig, MeldConstraint, MeldReadState, StateProc } from '../src';
+import { MeldConfig, MeldConstraint, MeldReadState, MeldUpdateBid, StateProc } from '../src';
 import { AbstractLevelDOWN } from 'abstract-leveldown';
 import { LiveValue } from '../src/engine/LiveValue';
 import { MeldMemDown } from '../src/memdown';
@@ -93,11 +93,12 @@ export class MockGraphState {
     this.jrqlGraph = new JrqlGraph(state.dataset.graph());
   }
 
-  async write(request: Write, constraint?: MeldConstraint): Promise<GraphUpdate> {
-    const update = new Future<GraphUpdate>();
+  async write(request: Write, constraint?: MeldConstraint): Promise<MeldUpdateBid> {
+    const update = new Future<MeldUpdateBid>();
     await this.state.write(async () => {
       const patch = await this.jrqlGraph.write(request, this.ctx);
-      const interim = new InterimUpdatePatch(this.jrqlGraph, this.ctx, patch, { mutable: true });
+      const interim = new InterimUpdatePatch(
+        this.jrqlGraph, this.ctx, patch, null, null, { mutable: true });
       if (constraint != null)
         await constraint.check(this.jrqlGraph.asReadState, interim);
       const txn = await interim.finalise();
@@ -131,7 +132,9 @@ export function testOp(
   time: TreeClock,
   deletes: object = {},
   inserts: object = {},
-  { from, agreed }: { from?: number, agreed?: [number, any] } = {}
+  { from, principalId, agreed }: {
+    from?: number, principalId?: string, agreed?: [number, any]
+  } = {}
 ): EncodedOperation {
   return [
     4,
@@ -139,7 +142,8 @@ export function testOp(
     time.toJSON(),
     MsgPack.encode([deletes, inserts]),
     [BufferEncoding.MSGPACK],
-    agreed
+    principalId ?? null,
+    agreed ?? null
   ];
 }
 
@@ -195,7 +199,7 @@ export class MockProcess implements ClockHolder<TreeClock> {
   sentOperation(deletes: object, inserts: object, agree?: true) {
     // Do not inline: this sets prev
     const op = this.operated(deletes, inserts, agree);
-    return new OperationMessage(this.prev, op);
+    return OperationMessage.fromOperation(this.prev, op, null);
   }
 
   operated(deletes: object, inserts: object, agree?: any): EncodedOperation {

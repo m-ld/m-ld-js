@@ -92,10 +92,8 @@ describe('New MQTT remotes', () => {
 
     test('emits remote operations', async () => {
       const time = TreeClock.GENESIS.forked().left;
-      mqtt.mockPublish('test.m-ld.org/operations/client2', MsgPack.encode({
-        prev: time.ticks,
-        data: testOp(time.ticked())
-      }));
+      mqtt.mockPublish('test.m-ld.org/operations/client2',
+        OperationMessage.fromOperation(time.ticks, testOp(time.ticked()), null).toBuffer());
       await expect(new Promise((resolve) => {
         remotes.operations.subscribe({ next: resolve });
       })).resolves.toHaveProperty('data');
@@ -188,18 +186,18 @@ describe('New MQTT remotes', () => {
 
       // Send a rev-up request from an imaginary client2
       mqtt.mockPublish('__send/client1/client2/send1/test.m-ld.org/control',
-        MsgPack.encode(new RevupRequest(localTime).toJSON()));
+        new RevupRequest(localTime).toBuffer());
 
       let updatesAddress: string, firstRevupBuffer: Buffer | null = null;
       const complete = new Future;
       mqtt.mockSubscribe((topic, payload) => {
         const [type, , , messageId] = topic.split('/');
         const json = Buffer.isBuffer(payload) ? MsgPack.decode(payload) : payload;
-        if (type === '__reply' && json &&
-          json['@type'] === 'http://control.m-ld.org/response/revup') {
+        if (type === '__reply' && json?.enc &&
+          MsgPack.decode(json.enc)['@type'] === 'http://control.m-ld.org/response/revup') {
           // Ack the rev-up response when it arrives
           updatesAddress =
-            (<RevupResponse>Response.fromJson(json)).updatesAddress;
+            (<RevupResponse>Response.fromBuffer(payload)).updatesAddress;
           mqtt.mockPublish('__reply/client1/client2/ack1/' + messageId, MsgPack.encode(null));
         } else if (topic == `test.m-ld.org/control/${updatesAddress}`) {
           const notification = (<JsonNotification>json);
@@ -212,7 +210,7 @@ describe('New MQTT remotes', () => {
       await complete;
       expect(firstRevupBuffer).not.toBeNull();
       if (firstRevupBuffer != null)
-        expect(revupUpdate.encoded.equals(firstRevupBuffer)).toBe(true);
+        expect(revupUpdate.toBuffer().equals(firstRevupBuffer)).toBe(true);
     });
   });
 
@@ -235,15 +233,18 @@ describe('New MQTT remotes', () => {
       await mqtt.mockPublish(
         '__presence/test.m-ld.org/client2', '{"consumer2":"test.m-ld.org/control"}');
       mqtt.mockSubscribe((topic, payload) => {
-        const [type, toId, fromId, messageId, domain,] = topic.split('/');
+        const [type, toId, fromId, messageId, domain] = topic.split('/');
         const json = Buffer.isBuffer(payload) && MsgPack.decode(payload);
-        if (type === '__send' && json['@type'] === 'http://control.m-ld.org/request/clock') {
+        if (type === '__send' && MsgPack.decode(json.enc)['@type'] === 'http://control.m-ld.org/request/clock') {
           expect(toId).toBe('consumer2');
           expect(fromId).toBe('client1');
           expect(domain).toBe('test.m-ld.org');
           mqtt.mockPublish('__reply/client1/consumer2/reply1/' + messageId, MsgPack.encode({
-            '@type': 'http://control.m-ld.org/response/clock',
-            clock: newClock.toJSON()
+            enc: MsgPack.encode({
+              '@type': 'http://control.m-ld.org/response/clock',
+              clock: newClock.toJSON()
+            }),
+            attr: null
           }));
         }
       });
@@ -261,17 +262,23 @@ describe('New MQTT remotes', () => {
       mqtt.mockSubscribe((topic, payload) => {
         const [type, toId, , messageId] = topic.split('/');
         const json = Buffer.isBuffer(payload) && MsgPack.decode(payload);
-        if (type === '__send' && json['@type'] === 'http://control.m-ld.org/request/clock') {
+        if (type === '__send' && MsgPack.decode(json.enc)['@type'] === 'http://control.m-ld.org/request/clock') {
           if (first) {
             first = false;
             mqtt.mockPublish(`__reply/client1/${toId}/reply1/` + messageId, MsgPack.encode({
-              '@type': 'http://control.m-ld.org/response/rejected',
-              status: MeldErrorStatus['Request rejected']
+              enc: MsgPack.encode({
+                '@type': 'http://control.m-ld.org/response/rejected',
+                status: MeldErrorStatus['Request rejected']
+              }),
+              attr: null
             }));
           } else {
             mqtt.mockPublish(`__reply/client1/${toId}/reply1/` + messageId, MsgPack.encode({
-              '@type': 'http://control.m-ld.org/response/clock',
-              clock: newClock.toJSON()
+              enc: MsgPack.encode({
+                '@type': 'http://control.m-ld.org/response/clock',
+                clock: newClock.toJSON()
+              }),
+              attr: null
             }));
           }
         }
@@ -288,15 +295,18 @@ describe('New MQTT remotes', () => {
       await mqtt.mockPublish(
         '__presence/test.m-ld.org/client2', '{"consumer2":"test.m-ld.org/control"}');
       mqtt.mockSubscribe((topic, payload) => {
-        const [type, toId, fromId, messageId, domain,] = topic.split('/');
+        const [type, toId, fromId, messageId, domain] = topic.split('/');
         const json = Buffer.isBuffer(payload) && MsgPack.decode(payload);
-        if (type === '__send' && json['@type'] === 'http://control.m-ld.org/request/revup') {
+        if (type === '__send' && MsgPack.decode(json.enc)['@type'] === 'http://control.m-ld.org/request/revup') {
           expect(toId).toBe('consumer2');
           expect(fromId).toBe('client1');
           expect(domain).toBe('test.m-ld.org');
           mqtt.mockPublish('__reply/client1/consumer2/reply1/' + messageId, MsgPack.encode({
-            '@type': 'http://control.m-ld.org/response/revup',
-            gwc: null, updatesAddress: 'consumer2'
+            enc: MsgPack.encode({
+              '@type': 'http://control.m-ld.org/response/revup',
+              gwc: null, updatesAddress: 'consumer2'
+            }),
+            attr: null
           }));
         }
       });
@@ -311,11 +321,14 @@ describe('New MQTT remotes', () => {
       mqtt.mockSubscribe((topic, payload) => {
         const [type, , , messageId] = topic.split('/');
         const json = Buffer.isBuffer(payload) && MsgPack.decode(payload);
-        if (type === '__send' && json['@type'] === 'http://control.m-ld.org/request/revup') {
+        if (type === '__send' && MsgPack.decode(json.enc)['@type'] === 'http://control.m-ld.org/request/revup') {
           mqtt.mockPublish('__reply/client1/consumer2/reply1/' + messageId, MsgPack.encode({
-            '@type': 'http://control.m-ld.org/response/revup',
-            gwc: GlobalClock.GENESIS.set(TreeClock.GENESIS.forked().right).toJSON(),
-            updatesAddress: 'subChannel1'
+            enc: MsgPack.encode({
+              '@type': 'http://control.m-ld.org/response/revup',
+              gwc: GlobalClock.GENESIS.set(TreeClock.GENESIS.forked().right).toJSON(),
+              updatesAddress: 'subChannel1'
+            }),
+            attr: null
           }));
         }
       });
@@ -333,18 +346,24 @@ describe('New MQTT remotes', () => {
       mqtt.mockSubscribe((topic, payload) => {
         const [type, toId, , messageId] = topic.split('/');
         const json = Buffer.isBuffer(payload) && MsgPack.decode(payload);
-        if (type === '__send' && json['@type'] === 'http://control.m-ld.org/request/revup') {
+        if (type === '__send' && MsgPack.decode(json.enc)['@type'] === 'http://control.m-ld.org/request/revup') {
           if (first) {
             first = false;
             mqtt.mockPublish(`__reply/client1/${toId}/reply1/${messageId}`, MsgPack.encode({
-              '@type': 'http://control.m-ld.org/response/revup',
-              gwc: null, updatesAddress: toId
+              enc: MsgPack.encode({
+                '@type': 'http://control.m-ld.org/response/revup',
+                gwc: null, updatesAddress: toId
+              }),
+              attr: null
             }));
           } else {
             mqtt.mockPublish(`__reply/client1/${toId}/reply2/${messageId}`, MsgPack.encode({
-              '@type': 'http://control.m-ld.org/response/revup',
-              gwc: GlobalClock.GENESIS.set(TreeClock.GENESIS.forked().right).toJSON(),
-              updatesAddress: 'subChannel1'
+              enc: MsgPack.encode({
+                '@type': 'http://control.m-ld.org/response/revup',
+                gwc: GlobalClock.GENESIS.set(TreeClock.GENESIS.forked().right).toJSON(),
+                updatesAddress: 'subChannel1'
+              }),
+              attr: null
             }));
           }
         }

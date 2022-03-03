@@ -23,6 +23,7 @@ describe('Meld State API', () => {
       remotes: mockRemotes(),
       extensions: { constraints: [new DefaultList('test')] },
       config: testConfig(),
+      app: {},
       context: testContext
     });
     await clone.initialise();

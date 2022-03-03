@@ -253,7 +253,7 @@ export interface GraphSubjects extends Array<GraphSubject> {
 }
 
 /**
- * An update arising from a write operation to **m-ld** data.
+ * An update arising from a write operation to **m-ld** graph data.
  */
 export interface GraphUpdate extends DeleteInsert<GraphSubjects> {
   /**
@@ -271,11 +271,35 @@ export interface GraphUpdate extends DeleteInsert<GraphSubjects> {
 }
 
 /**
+ * An update that has cleared preliminary checks and been assigned metadata, but
+ * has not yet been applied to the graph data. Available to triggered rules like
+ * {@link MeldConstraint constraints} and
+ * {@link AgreementCondition agreement&nbsp;conditions}.
+ */
+export interface MeldUpdateBid extends GraphUpdate {
+  /**
+   * If this key is included and the value is truthy, this update is an
+   * _agreement_. The value may include serialisable proof that applicable
+   * agreement conditions have been met, such as a key to a ledger entry.
+   *
+   * @experimental
+   */
+  readonly '@agree'?: any;
+  /**
+   * An identified security principal (user or machine) that is responsible for
+   * this update.
+   *
+   * @experimental
+   */
+  readonly '@principal'?: Reference;
+}
+
+/**
  * @see m-ld [specification](http://spec.m-ld.org/interfaces/meldupdate.html)
  *
  * @category API
  */
-export interface MeldUpdate extends GraphUpdate {
+export interface MeldUpdate extends MeldUpdateBid {
   /**
    * Current local clock ticks at the time of the update.
    * @see MeldStatus.ticks
@@ -301,7 +325,7 @@ export type StateProc<S extends MeldReadState = MeldReadState, T = unknown> =
  * guaranteed to remain 'live' until the procedure's return Promise resolves or
  * rejects.
  */
-export type UpdateProc<U extends GraphUpdate = MeldUpdate> =
+export type UpdateProc<U extends MeldUpdateBid = MeldUpdate> =
   (update: U, state: MeldReadState) => PromiseLike<unknown> | void;
 
 /**
@@ -457,7 +481,7 @@ export interface MeldExtensions {
    * been applied. If available, this procedure will be called for every state
    * after that passed to {@link initialise}.
    */
-  readonly onUpdate?: UpdateProc<GraphUpdate>;
+  readonly onUpdate?: UpdateProc<MeldUpdateBid>;
 }
 
 /**
@@ -476,10 +500,6 @@ export interface ConstructMeldExtensions {
  * is because a constraint may be violated as a result of data changes in either
  * clone. In this case, the constraint must resolve the violation by application
  * of some rule.
- *
- * > 🚧 *Data constraints are currently an experimental feature. Please
- * > [contact&nbsp;us](https://m-ld.org/hello/) to discuss constraints required for
- * > your use-case.*
  *
  * In this clone engine, constraints are checked and applied for updates prior
  * to their application to the data (the updates are 'interim'). If the
@@ -556,10 +576,9 @@ export interface AgreementCondition {
    * @param state a read-only view of data from the clone at the moment the
    * agreement has been received
    * @param agreement the agreement update, prior to application to the data
-   * @param proof any additional transmitted proof of the condition
    * @returns a rejection if the condition is violated (or fails)
    */
-  check(state: MeldReadState, agreement: GraphUpdate, proof: any): Promise<unknown>;
+  check(state: MeldReadState, agreement: MeldUpdateBid): Promise<unknown>;
 }
 
 /**
@@ -630,7 +649,7 @@ export interface InterimUpdate {
    * the methods above have affected the `@insert` and `@delete` of the update,
    * they will have been applied.
    */
-  readonly update: Promise<GraphUpdate>;
+  readonly update: Promise<MeldUpdateBid>;
 }
 
 /**
@@ -660,11 +679,33 @@ export interface AppPrincipal {
 }
 
 /**
+ * Attribution of some data to a responsible security principal.
+ * @see MeldApp.principal
+ */
+export interface Attribution {
+  /**
+   * The identity of the responsible principal
+   */
+  pid: Iri;
+  /**
+   * Signature provided by the security implementation, binding the principal to
+   * the attributed data.
+   * @see AppPrincipal.sign
+   */
+  sig: Buffer;
+}
+
+/**
  * A transport security interceptor extension. Modifies data buffers sent to
  * other clones via remotes, typically by applying cryptography.
  *
  * Installed transport security can be independent of the actual remoting
  * protocol, and therefore contribute to layered security.
+ *
+ * Wire security can be required for bootstrap messages during clone
+ * initialisation, i.e. `type` is `http://control.m-ld.org/request/clock` or
+ * `http://control.m-ld.org/request/snapshot` (and no prior state exists). In
+ * that case the `state` parameter of the methods will be `null`.
  *
  * @experimental
  * @category Experimental
@@ -676,10 +717,7 @@ export interface MeldTransportSecurity {
    * @param data the data to operate on
    * @param type the message purpose
    * @param direction message direction relative to the local clone
-   * @param state the current state of the clone. This may be `null`, but only
-   * for bootstrap messages, i.e. `type` is
-   * `http://control.m-ld.org/request/clock` or
-   * `http://control.m-ld.org/request/snapshot` (and no prior state exists).
+   * @param state the current state of the clone
    */
   wire(
     data: Buffer,
@@ -687,6 +725,28 @@ export interface MeldTransportSecurity {
     direction: 'in' | 'out',
     state: MeldReadState | null
   ): Buffer | Promise<Buffer>;
+  /**
+   * Create an attribution for wire data
+   *
+   * @param data the data to sign
+   * @param state the current state of the clone
+   */
+  sign?(
+    data: Buffer,
+    state: MeldReadState | null
+  ): Attribution | Promise<Attribution>;
+  /**
+   * Verify the attribution on wire data
+   *
+   * @param data the signed data
+   * @param attr the attribution
+   * @param state the current state of the clone
+   */
+  verify?(
+    data: Buffer,
+    attr: Attribution | null,
+    state: MeldReadState | null
+  ): void | Promise<unknown>;
 }
 
 /**@internal*/

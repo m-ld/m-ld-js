@@ -2,15 +2,16 @@ import { EntryIndex, Journal, JournalEntry } from './index';
 import { concatMap, debounceTime, endWith, map, share, take, takeUntil, tap } from 'rxjs/operators';
 import { EMPTY, merge, NEVER, Observable, of, race, Subject, timer } from 'rxjs';
 import { idling } from '../local';
-import { CausalOperator, CausalTimeRange } from '../ops';
+import { CausalOperator } from '../ops';
 import { TreeClock } from '../clocks';
 import { completed, getIdLogger, inflate } from '../util';
 import { array } from '../../util';
 import { JournalAdmin, JournalCheckPoint, MeldConfig } from '../../config';
-import { AgreeableOperationSpec, MeldOperation } from '../MeldOperation';
+import { MeldOperation, MeldOperationSpec } from '../MeldOperation';
 import { TickTid } from './JournalEntry';
 import { TripleMap } from '../quads';
 import { UUID } from '../MeldEncoding';
+import { Attribution } from '../../api';
 
 export type JournalClerkConfig = Pick<MeldConfig, '@id' | 'logLevel' | 'journal'>;
 
@@ -40,6 +41,7 @@ export class JournalClerk {
 
   constructor(
     readonly journal: Journal,
+    readonly sign: (op: MeldOperation) => Promise<Attribution | null>,
     config: JournalClerkConfig,
     { checkpoints, schedule }: JournalAdmin = {}
   ) {
@@ -146,7 +148,7 @@ class FusionAction extends ClerkAction {
 class Fusion {
   private readonly prev: TickTid;
   private readonly removals: EntryIndex[] = [];
-  private readonly operator: CausalOperator<AgreeableOperationSpec>;
+  private readonly operator: CausalOperator<MeldOperationSpec>;
   // Note: deletes in a fusion should never delete the same triple-TID
   // twice, so no need to use a Set per triple
   private readonly deleted = new TripleMap<UUID[]>();
@@ -168,7 +170,7 @@ class Fusion {
    * entry if the fusion was committed; or undefined if the fusion was discarded
    */
   async next(entry: JournalEntry): Promise<FusionAction | undefined> {
-    if (this.appendable && CausalTimeRange.contiguous(this.last.operation, entry.operation))
+    if (this.appendable && MeldOperation.contiguous(this.last.operation, entry.operation))
       return this.append(entry);
     else
       return this.commit();
@@ -186,8 +188,9 @@ class Fusion {
     if (this.removals.length > 1) {
       // CAUTION: constructing an operation can be expensive
       const operation = this.clerk.journal.toMeldOperation(this.operator.commit());
+      const attr = await this.clerk.sign(operation);
       const fusedEntry = JournalEntry.fromOperation(
-        this.clerk.journal, this.last.key, this.prev, operation, this.deleted);
+        this.clerk.journal, this.last.key, this.prev, operation, this.deleted, attr);
       await this.clerk.journal.withLockedHistory(() => ({
         kvps: this.clerk.journal.spliceEntries(
           this.removals, [fusedEntry], { appending: false })

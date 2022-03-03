@@ -1,11 +1,12 @@
 import { JournalOperation } from './JournalOperation';
-import { OperationMessage } from '../index';
 import type { Journal, TickKey } from '.';
 import { EntryIndex } from '.';
 import { MeldOperation } from '../MeldOperation';
 import { UUID } from '../MeldEncoding';
 import { TripleMap } from '../quads';
 import { Iri } from 'jsonld/jsonld-spec';
+import { Attribution } from '../../api';
+import { OperationMessage } from '../index';
 
 /**
  * Identifies an entry or operation by both tick and TID.
@@ -33,16 +34,21 @@ type JournalEntryJson = [
   /** Operation transaction ID */
   tid: string,
   /** Triple TIDs that were actually removed when this entry was applied */
-  deleted: EntryDeleted
+  deleted: EntryDeleted,
+  /** Original bound attribution of this entry */
+  attribution: Attribution | null
 ];
 
-/** Immutable expansion of JournalEntryJson, with the referenced operation */
+/**
+ * Immutable expansion of JournalEntryJson, with the referenced operation and
+ * attribution.
+ */
 export class JournalEntry {
   static async fromJson(journal: Journal, key: TickKey, json: JournalEntryJson) {
     // Destructuring fields for convenience
-    const [prev, tid, deleted] = json;
+    const [prev, tid, deleted, attribution] = json;
     const operation = await journal.operation(tid, 'require');
-    return new JournalEntry(journal, key, prev, operation, deleted);
+    return new JournalEntry(journal, key, prev, operation, deleted, attribution);
   }
 
   static fromOperation(
@@ -50,12 +56,13 @@ export class JournalEntry {
     key: TickKey,
     prev: TickTid,
     operation: MeldOperation,
-    deleted: TripleMap<UUID[]>
+    deleted: TripleMap<UUID[]>,
+    attribution: Attribution | null
   ) {
     return new JournalEntry(
       journal, key, prev,
       JournalOperation.fromOperation(journal, operation),
-      operation.byRef('deletes', deleted));
+      operation.byRef('deletes', deleted), attribution);
   }
 
   private constructor(
@@ -63,7 +70,8 @@ export class JournalEntry {
     readonly key: TickKey,
     readonly prev: TickTid,
     readonly operation: JournalOperation,
-    readonly deleted: EntryDeleted
+    readonly deleted: EntryDeleted,
+    readonly attribution: Attribution | null
   ) {
   }
 
@@ -72,15 +80,16 @@ export class JournalEntry {
   }
 
   get json(): JournalEntryJson {
-    return [this.prev, this.operation.tid, this.deleted];
+    return [this.prev, this.operation.tid, this.deleted, this.attribution];
   }
 
   async next(): Promise<JournalEntry | undefined> {
     return this.journal.entryAfter(this.key);
   }
 
-  asMessage(): OperationMessage {
+  asMessage() {
     const [prevTick] = this.prev;
-    return new OperationMessage(prevTick, this.operation.encoded, this.operation.time);
+    return OperationMessage.fromOperation(
+      prevTick, this.operation.encoded, this.attribution, this.operation.time);
   }
 }
