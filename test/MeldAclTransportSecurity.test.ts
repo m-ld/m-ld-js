@@ -71,13 +71,10 @@ describe('m-ld access control list', () => {
       const rawPublicKey = Buffer.from(await subtle.exportKey('spki', aliceKeys.publicKey!));
       await state.write(
         MeldAclExtensions.registerPrincipal('http://ex.org/Alice', rawPublicKey));
-      const wired = await acl.wire(
-        data, MeldMessageType.request, 'out', state.jrqlGraph.asReadState);
-      expect(wired.equals(data)).toBe(false); // Dunno, but not the same!
-      // Apply asymmetric verify
-      const unwired = await acl.wire(
-        wired, MeldMessageType.request, 'in', state.jrqlGraph.asReadState);
-      expect(unwired.equals(data)).toBe(true);
+      const attr = await acl.sign(data, state.jrqlGraph.asReadState);
+      expect(attr.sig.length).toBeGreaterThan(0);
+      // Asymmetric verify does not throw
+      await expect(acl.verify(data, attr, state.jrqlGraph.asReadState)).resolves.not.toThrow();
     });
   });
 });

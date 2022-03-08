@@ -1,4 +1,4 @@
-import { AppPrincipal, MeldReadState, MeldTransportSecurity } from '../api';
+import { AppPrincipal, Attribution, MeldReadState, MeldTransportSecurity } from '../api';
 import { propertyValue } from '../index';
 import { MeldMessageType } from '../ns/m-ld';
 import { getIdLogger, MsgPack } from '../engine/util';
@@ -42,14 +42,44 @@ export class MeldAclTransportSecurity implements MeldTransportSecurity {
   ): Promise<Buffer> {
     switch (type) {
       case MeldMessageType.operation:
-        return this.cryptOperation(data, direction, state);
-      case MeldMessageType.request:
-        if (direction === 'out')
-          return this.signRequest(data);
+        const key = state != null && await this.getSecretKey(state);
+        if (!key)
+          this.log.debug('No key available for message encryption');
+        else if (direction === 'out')
+          return this.encryptOperation(data, key);
         else
-          return this.verifyRequest(data, state);
+          return this.decryptOperation(data, key);
     }
+    // Anything else is left alone
     return data;
+  }
+
+  async sign(data: Buffer, state: MeldReadState | null): Promise<Attribution> {
+    if (this.principal?.sign == null) {
+      throw new Error('No signature possible for request');
+    } else {
+      return {
+        pid: this.principal['@id'],
+        sig: await this.principal.sign(data)
+      };
+    }
+  }
+
+  async verify(
+    data: Buffer,
+    attr: Attribution | null,
+    state: MeldReadState | null
+  ): Promise<void> {
+    if (state == null) {
+      throw new MeldError('Request rejected', 'No state available to verify signature');
+    } else if (attr == null) {
+      throw new MeldError('Request rejected', 'Request is not signed');
+    } else {
+      // Load the identified principal's public key
+      const key = await this.getPublicKey(attr.pid, state);
+      if (!(await subtle.verify(ALGO.SIGN, key, attr.sig, data)))
+        throw new MeldError('Request rejected', 'Signature invalid');
+    }
   }
 
   private async getSecretKey(state: MeldReadState) {
@@ -58,24 +88,6 @@ export class MeldAclTransportSecurity implements MeldTransportSecurity {
       const rawKey = propertyValue(domain, M_LD.secret, Uint8Array);
       return subtle.importKey(
         'raw', rawKey, ALGO.ENCRYPT, false, ['encrypt', 'decrypt']);
-    }
-  }
-
-  private async cryptOperation(
-    data: Buffer,
-    direction: 'in' | 'out',
-    state: MeldReadState | null
-  ): Promise<Buffer> {
-    const key = state != null ? await this.getSecretKey(state) : undefined;
-    if (key == null) {
-      this.log.debug('No key available for message encryption');
-      return data;
-    } else {
-      if (direction === 'out') {
-        return this.encryptOperation(data, key);
-      } else {
-        return this.decryptOperation(data, key);
-      }
     }
   }
 
@@ -92,34 +104,6 @@ export class MeldAclTransportSecurity implements MeldTransportSecurity {
       return Buffer.from(await subtle.decrypt({ name: ALGO.ENCRYPT, iv }, key, enc));
     } else {
       return data;
-    }
-  }
-
-  protected async signRequest(data: Buffer): Promise<Buffer> {
-    if (this.principal?.sign == null) {
-      throw new Error('No signature possible for request');
-    } else {
-      return MsgPack.encode({
-        '@type': M_LD.signed,
-        data,
-        pid: this.principal['@id'],
-        sig: await this.principal.sign(data)
-      });
-    }
-  }
-
-  protected async verifyRequest(signedData: Buffer, state: MeldReadState | null): Promise<Buffer> {
-    if (state == null)
-      throw new MeldError('Request rejected', 'No state available to verify signature');
-    const { '@type': type, data, pid, sig } = MsgPack.decode(signedData);
-    if (type === M_LD.signed && typeof pid == 'string') {
-      // Load the identified principal's public key
-      const key = await this.getPublicKey(pid, state);
-      if (!(await subtle.verify(ALGO.SIGN, key, sig, data)))
-        throw new MeldError('Request rejected', 'Signature invalid');
-      return data;
-    } else {
-      throw new MeldError('Request rejected', 'Request is not signed');
     }
   }
 
