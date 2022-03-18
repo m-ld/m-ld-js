@@ -74,7 +74,7 @@ describe('Top-level extensions loading', () => {
 
     test('initialises with no modules', async () => {
       const ext = await CloneExtensions.initial(testConfig(), {}, testContext);
-      await ext.initialise(state.jrqlGraph.asReadState);
+      await ext.initialise(state.graph.asReadState);
       expect(ext.transportSecurity).toBeUndefined();
     });
 
@@ -90,7 +90,7 @@ describe('Top-level extensions loading', () => {
           [M_LD.JS.className]: 'MockExtensions'
         }]
       }, new DefaultList('test'));
-      await ext.initialise(state.jrqlGraph.asReadState);
+      await ext.initialise(state.graph.asReadState);
       expect(MockExtensions.lastConfig).toBe(config);
       expect(ext.transportSecurity).toBe(MockExtensions.mockTs);
       const constraints = [...ext.constraints];
@@ -102,7 +102,7 @@ describe('Top-level extensions loading', () => {
     test('loads a module on update', async () => {
       const config = testConfig();
       const ext = await CloneExtensions.initial(config, {}, testContext);
-      await ext.initialise(state.jrqlGraph.asReadState);
+      await ext.initialise(state.graph.asReadState);
       const update = await state.write({
         '@id': M_LD.extensions,
         '@list': [{
@@ -111,7 +111,7 @@ describe('Top-level extensions loading', () => {
           [M_LD.JS.className]: 'MockExtensions'
         }]
       }, new DefaultList('test'));
-      await ext.onUpdate(update, state.jrqlGraph.asReadState);
+      await ext.onUpdate(update, state.graph.asReadState);
       expect(MockExtensions.lastConfig).toBe(config);
       expect(ext.transportSecurity).toBe(MockExtensions.mockTs);
       const constraints = [...ext.constraints];

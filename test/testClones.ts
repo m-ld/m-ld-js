@@ -8,7 +8,9 @@ import { GlobalClock, TreeClock } from '../src/engine/clocks';
 import { AsyncMqttClient, IPublishPacket } from 'async-mqtt';
 import { EventEmitter } from 'events';
 import { observeOn } from 'rxjs/operators';
-import { MeldConfig, MeldConstraint, MeldReadState, MeldUpdateBid, StateProc } from '../src';
+import {
+  InterimUpdate, MeldConfig, MeldConstraint, MeldPreUpdate, MeldReadState, MeldUpdate, StateProc
+} from '../src';
 import { AbstractLevelDOWN } from 'abstract-leveldown';
 import { LiveValue } from '../src/engine/LiveValue';
 import { MeldMemDown } from '../src/memdown';
@@ -45,7 +47,7 @@ export function mockRemotes(
 
 export function hotLive(lives: Array<boolean | null>): BehaviorSubject<boolean | null> {
   const live = new BehaviorSubject(lives[0]);
-  from(lives.slice(1)).pipe(observeOn(asapScheduler)).forEach(v => live.next(v));
+  from(lives.slice(1)).pipe(observeOn(asapScheduler)).subscribe(v => live.next(v));
   return live;
 }
 
@@ -79,28 +81,29 @@ export class MockState {
 
 export class MockGraphState {
   static async create({ dataset, context }: { dataset?: Dataset, context?: Context } = {}) {
+    context ??= testContext;
     return new MockGraphState(
       await MockState.create({ dataset, context }),
       await activeCtx(context ?? {}));
   }
 
-  readonly jrqlGraph: JrqlGraph;
+  readonly graph: JrqlGraph;
 
   protected constructor(
     readonly state: MockState,
     readonly ctx: ActiveContext
   ) {
-    this.jrqlGraph = new JrqlGraph(state.dataset.graph());
+    this.graph = new JrqlGraph(state.dataset.graph());
   }
 
-  async write(request: Write, constraint?: MeldConstraint): Promise<MeldUpdateBid> {
-    const update = new Future<MeldUpdateBid>();
+  async write(request: Write, constraint?: MeldConstraint): Promise<MeldPreUpdate> {
+    const update = new Future<MeldPreUpdate>();
     await this.state.write(async () => {
-      const patch = await this.jrqlGraph.write(request, this.ctx);
+      const patch = await this.graph.write(request, this.ctx);
       const interim = new InterimUpdatePatch(
-        this.jrqlGraph, this.ctx, patch, null, null, { mutable: true });
+        this.graph, this.ctx, patch, null, null, { mutable: true });
       if (constraint != null)
-        await constraint.check(this.jrqlGraph.asReadState, interim);
+        await constraint.check(this.graph.asReadState, interim);
       const txn = await interim.finalise();
       update.resolve(txn.internalUpdate);
       return new PatchQuads(txn.assertions).append(txn.entailments);
@@ -123,7 +126,7 @@ export function mockLocal(
     operations: NEVER,
     live,
     liveSource: live,
-    withLocalState: async <T>(procedure: StateProc<MeldReadState, T>) => procedure(mock()),
+    latch: async <T>(procedure: StateProc<MeldReadState, T>) => procedure(mock()),
     ...impl
   };
 }
@@ -253,4 +256,9 @@ export function mockMqtt(): MockMqtt & MockProxy<AsyncMqttClient> {
     (topic, payload: Buffer | string) => <any>mqtt.mockPublish(topic, payload));
   mqtt.end.mockImplementation(() => <any>mqtt.mockClose());
   return mqtt;
+}
+
+export function mockInterim(update: MeldUpdate) {
+  // Passing an implementation into the mock adds unwanted properties
+  return Object.assign(mock<InterimUpdate>(), { update: Promise.resolve(update) });
 }

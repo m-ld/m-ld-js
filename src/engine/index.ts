@@ -303,13 +303,21 @@ export interface MeldRemotes extends Meld {
 /**
  * Local variant of {@link Meld} representing the local clone to remote clones on the same domain.
  */
-export interface MeldLocal extends Meld {
+export interface MeldLocal extends Meld, ReadLatchable {
   /**
    * Make a bounded read-only use of the state of the local clone. This is used
    * in the implementation of the m-ld protocol to inspect metadata, for example
    * for transport security, when external events happen.
    */
-  withLocalState<T>(procedure: StateProc<MeldReadState, T>): Promise<T>;
+  readonly latch: ReadLatchable['latch'];
+}
+
+export interface ReadLatchable {
+  /**
+   * Make a bounded read-only use of state. The state is guaranteed not to
+   * change until the procedure's returned promise has settled.
+   */
+  latch<T>(procedure: StateProc<MeldReadState, T>): Promise<T>;
 }
 
 export { CloneExtensions } from './CloneExtensions';

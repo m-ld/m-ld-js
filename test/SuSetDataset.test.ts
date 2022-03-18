@@ -8,7 +8,7 @@ import {
 } from '../src';
 import { jsonify } from './testUtil';
 import { MeldEncoder } from '../src/engine/MeldEncoding';
-import { BufferEncoding, OperationMessage } from '../src/engine';
+import { BufferEncoding, EncodedOperation, OperationMessage } from '../src/engine';
 import { drain } from 'rx-flowable';
 import { MeldError } from '../src/engine/MeldError';
 import { mockFn } from 'jest-mock-extended';
@@ -560,8 +560,7 @@ describe('SU-Set Dataset', () => {
       local = new MockProcess(left);
       remote = new MockProcess(right);
       constraint = {
-        check: () => Promise.resolve(),
-        apply: () => Promise.resolve()
+        check: () => Promise.resolve()
       };
       ssd = new SuSetDataset(state.dataset,
         {},
@@ -608,6 +607,42 @@ describe('SU-Set Dataset', () => {
       ])).resolves.toBeDefined();
       await expect(drain(ssd.read(<Describe>{ '@describe': wilma['@id'] })))
         .resolves.toEqual([wilma]);
+    });
+
+    test('can upgrade an update to an agreement', async () => {
+      constraint.check = async (_, interim) => {
+        interim.assert({ '@insert': wilma, '@agree': true });
+      };
+      const msg = await ssd.transact(async () => [
+        local.tick().time,
+        await ssd.write({ '@insert': fred })
+      ]);
+      expect(msg?.data[EncodedOperation.Key.agreed]).toEqual([2, true]);
+    });
+
+    test('can accumulate agreements', async () => {
+      constraint.check = async (_, interim) => {
+        interim.assert({ '@insert': wilma, '@agree': 2 });
+        interim.assert({ '@insert': barney, '@agree': 3 });
+      };
+      const msg = await ssd.transact(async () => [
+        local.tick().time,
+        await ssd.write({ '@insert': fred }),
+        1
+      ]);
+      expect(msg?.data[EncodedOperation.Key.agreed]).toEqual([2, [1, 2, 3]]);
+    });
+
+    test('can downgrade an agreement to an update', async () => {
+      constraint.check = async (_, interim) => {
+        interim.assert({ '@insert': wilma, '@agree': false });
+      };
+      const msg = await ssd.transact(async () => [
+        local.tick().time,
+        await ssd.write({ '@insert': fred }),
+        true
+      ]);
+      expect(msg?.data[EncodedOperation.Key.agreed]).toBe(null);
     });
 
     test('applies an inserting constraint', async () => {
@@ -742,7 +777,7 @@ describe('SU-Set Dataset', () => {
     });
 
     test('does not enforce conditions on local agreement', async () => {
-      agreementConditions.push({ check: mockFn().mockRejectedValue('nope') });
+      agreementConditions.push({ test: mockFn().mockRejectedValue('nope') });
       await expect(ssd.transact(async () => [
         local.tick().time,
         await ssd.write({ '@insert': fred }),
@@ -762,7 +797,7 @@ describe('SU-Set Dataset', () => {
     });
 
     test('enforces conditions on remote operation', async () => {
-      agreementConditions.push({ check: mockFn().mockRejectedValue('nope') });
+      agreementConditions.push({ test: mockFn().mockRejectedValue('nope') });
       await expect(ssd.apply(
         remote.sentOperation({}, { '@id': 'wilma', 'name': 'Wilma' }, true),
         local.join(remote.time))).rejects.toBe('nope');

@@ -129,7 +129,8 @@ export function jrqlValue(property: SubjectProperty, object: Term, ctx?: ActiveC
     } else {
       const type = getContextType(property, ctx);
       const iri = compactIri(object.value, ctx, { vocab: type === '@vocab' });
-      return type === '@id' ? iri : { '@id': iri };
+      // An IRI is always output as a Reference
+      return type === '@id' || type === '@vocab' ? iri : { '@id': iri };
     }
   } else if (object.termType === 'Literal') {
     if (object.language)

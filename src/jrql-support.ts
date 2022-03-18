@@ -211,12 +211,12 @@ export function isValueObject(value: SubjectPropertyObject): value is ValueObjec
 
 /** @internal */
 export function isReference(value: SubjectPropertyObject): value is Reference {
-  return typeof value == 'object' && Object.keys(value).every(k => k === '@id');
+  return typeof value == 'object' && '@id' in value && Object.keys(value).length == 1;
 }
 
 /** @internal */
 export function isVocabReference(value: SubjectPropertyObject): value is VocabReference {
-  return typeof value == 'object' && Object.keys(value).every(k => k === '@vocab');
+  return typeof value == 'object' && '@vocab' in value && Object.keys(value).length == 1;
 }
 
 /**

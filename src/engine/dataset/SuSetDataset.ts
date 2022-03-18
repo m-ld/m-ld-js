@@ -1,5 +1,5 @@
 import {
-  Attribution, GraphSubject, MeldConstraint, MeldExtensions, MeldUpdate, MeldUpdateBid,
+  Attribution, GraphSubject, MeldConstraint, MeldExtensions, MeldPreUpdate, MeldUpdate,
   noTransportSecurity
 } from '../../api';
 import { BufferEncoding, EncodedOperation, OperationMessage, Snapshot } from '..';
@@ -228,7 +228,8 @@ export class SuSetDataset extends MeldEncoder {
         txc.sw.next('find-tids');
         const deletedTriplesTids = await this.tidsStore.findTriplesTids(txn.assertions.deletes);
         const tid = time.hash;
-        const op = this.txnOperation(tid, time, txn.assertions.inserts, deletedTriplesTids, agree);
+        const op = this.txnOperation(
+          tid, time, txn.assertions.inserts, deletedTriplesTids, txn.agree);
 
         // Include tid changes in final patch
         txc.sw.next('new-tids');
@@ -259,7 +260,7 @@ export class SuSetDataset extends MeldEncoder {
       agree,
       { mutable: verb === 'check' });
     for (let constraint of this.extensions.constraints ?? [])
-      await constraint[verb](this.readState, interim);
+      await constraint[verb]?.(this.readState, interim);
     return interim.finalise();
   }
 
@@ -272,8 +273,8 @@ export class SuSetDataset extends MeldEncoder {
     tidPatch: PatchTids,
     journaling: EntryBuilder,
     msg: OperationMessage | null,
-    internalUpdate: MeldUpdateBid,
-    userUpdate: MeldUpdateBid
+    internalUpdate: MeldPreUpdate,
+    userUpdate: MeldPreUpdate
   }): Promise<PatchResult<OperationMessage | null>> {
     const commitTids = await this.tidsStore.commit(txn.tidPatch);
     this.log.debug(`patch ${txn.journaling.appendEntries.map(e => e.operation.time)}:
@@ -445,8 +446,7 @@ export class SuSetDataset extends MeldEncoder {
         // far. This is allowed because an agreement condition should only
         // inspect previously agreed state.
         for (let agreementCondition of this.ssd.extensions.agreementConditions ?? [])
-          await agreementCondition.check(
-            this.ssd.readState, txn.internalUpdate);
+          await agreementCondition.test(this.ssd.readState, txn.internalUpdate);
         if (this.op.time.anyLt(this.journaling.state.time)) {
           // A rewind is required. This trumps the work we have already done.
           this.txc.sw.next('rewind');

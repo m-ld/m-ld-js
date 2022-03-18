@@ -54,6 +54,15 @@ describe('json-rql Quads translation', () => {
     expect(quads[0].object.value).toBe('http://test.m-ld.org/fred');
   });
 
+  test('quadifies anonymous vocab reference predicate', () => {
+    const quads = jrql.quads({ '?': { '@vocab': 'name' } }, { mode: 'match' }, context);
+    expect(quads.length).toBe(1);
+    expect(quads[0].subject.termType).toBe('Variable');
+    expect(quads[0].predicate.termType).toBe('Variable');
+    expect(quads[0].object.termType).toBe('NamedNode');
+    expect(quads[0].object.value).toBe('http://test.m-ld.org/#name');
+  });
+
   test('quadifies with numeric property', () => {
     const quads = jrql.quads({ '@id': 'fred', age: 40 }, { mode: 'match' }, context);
     expect(quads.length).toBe(1);

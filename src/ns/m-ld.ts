@@ -6,20 +6,32 @@ export const tid = `${$base}#tid`;
 /** Property for secret known only to domain users */
 export const secret = `${$base}#secret`;
 
-/** Class of signed request envelope */
-export const signed = `${$base}Signed`;
-
 /** Class of encrypted operation envelope */
-export const encrypted = `${$base}Encrypted`;
+export const Encrypted = `${$base}Encrypted`;
 
 /** Security Principal class */
-export const principal = `${$base}Principal`;
+export const Principal = `${$base}Principal`;
 
 /** The local engine as a principal, used for e.g. operation voiding */
 export const localEngine = `${$base}principal/local-engine`;
 
 /** Property for asymmetric public key */
-export const publicKey = `${$base}#publicKey`;
+export const publicKey = `${$base}#public-key`;
+
+/** Singleton permission + agreement condition for Authority */
+export const hasAuthority = `${$base}#has-authority`;
+
+/** Statute class */
+export const Statute = `${$base}Statute`;
+
+/** A reference to a SHACL shape whose target is statutory */
+export const statutoryShape = `${$base}#statutory-shape`;
+
+/** A reference to a SHACL shape whose target is permissioned */
+export const controlledShape = `${$base}#controlled-shape`;
+
+/** A reference to a sufficient condition for an agreement */
+export const sufficientCondition = `${$base}#sufficient-condition`;
 
 /** Singleton list of m-ld extension declarations */
 export const extensions = `${$base}extensions`;
@@ -29,7 +41,7 @@ export namespace EXT {
    * The namespace of **m-ld**-owned extensions, typically sub-namespaced e.g.
    * 'security/ACL'
    */
-  export const $base = 'http://m-ld.org/ext/';
+  export const $base = 'http://ext.m-ld.org/';
 }
 
 export namespace JS {

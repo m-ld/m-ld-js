@@ -1,7 +1,6 @@
-import { InterimUpdate, MeldUpdate, Update } from '../src';
-import { MockGraphState } from './testClones';
+import { Update } from '../src';
+import { MockGraphState, mockInterim } from './testClones';
 import { DefaultList } from '../src/constraints/DefaultList';
-import { mock } from 'jest-mock-extended';
 import { SubjectGraph } from '../src/engine/SubjectGraph';
 
 // Note that DefaultList is quite heavily tested by MeldState.test.ts but not
@@ -23,7 +22,7 @@ describe('Default list constraint', () => {
       '@insert': new SubjectGraph([])
     });
     // @ts-ignore 'Type instantiation is excessively deep and possibly infinite.ts(2589)'
-    await expect(constraint.check(state.jrqlGraph.asReadState, update)).resolves.toBeUndefined();
+    await expect(constraint.check(state.graph.asReadState, update)).resolves.toBeUndefined();
   });
 
   test('Rewrites a list insert', async () => {
@@ -42,7 +41,7 @@ describe('Default list constraint', () => {
           '@item': 'Bread'
         }])
     });
-    await expect(constraint.check(state.jrqlGraph.asReadState, update)).resolves.toBeUndefined();
+    await expect(constraint.check(state.graph.asReadState, update)).resolves.toBeUndefined();
     expect(update.remove).toBeCalledWith('@insert', {
       '@id': 'http://test.m-ld.org/shopping',
       '@list': {
@@ -101,7 +100,7 @@ describe('Default list constraint', () => {
         }
       }])
     });
-    await expect(constraint.apply(state.jrqlGraph.asReadState, update)).resolves.toBeDefined();
+    await expect(constraint.apply(state.graph.asReadState, update)).resolves.toBeDefined();
     expect(update.remove).not.toHaveBeenCalled();
     expect(update.assert).toBeCalledWith({
       '@delete': {
@@ -138,7 +137,7 @@ describe('Default list constraint', () => {
         }
       }])
     });
-    await expect(constraint.apply(state.jrqlGraph.asReadState, update)).resolves.toBeDefined();
+    await expect(constraint.apply(state.graph.asReadState, update)).resolves.toBeDefined();
     expect(update.remove).not.toHaveBeenCalled();
     expect(update.assert).toBeCalledWith({
       '@delete': {
@@ -181,7 +180,7 @@ describe('Default list constraint', () => {
         }
       }])
     });
-    await expect(constraint.apply(state.jrqlGraph.asReadState, update)).resolves.toBeDefined();
+    await expect(constraint.apply(state.graph.asReadState, update)).resolves.toBeDefined();
     expect(update.remove).not.toHaveBeenCalled();
     expect(update.assert).toBeCalledWith({
       '@delete': {
@@ -213,11 +212,6 @@ describe('Default list constraint', () => {
     });
   });
 });
-
-function mockInterim(update: MeldUpdate) {
-  // Passing an implementation into the mock adds unwanted properties
-  return Object.assign(mock<InterimUpdate>(), { update: Promise.resolve(update) });
-}
 
 function findIndexKey([u]: [Update]): string | undefined {
   return Object.keys(u['@insert'] ?? [])

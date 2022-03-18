@@ -22,6 +22,8 @@ export * from './api';
 export * from './config';
 export * from './updates';
 export * from './subjects';
+export * from './js-support';
+export * from './orm';
 
 /**
  * Constructor for a driver for connecting to remote m-ld clones on the domain.

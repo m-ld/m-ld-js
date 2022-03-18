@@ -17,7 +17,6 @@ module.exports = {
     './src/socket.io/**'
   ],
   excludePrivate: true,
-  excludeProtected: true,
   disableSources: true,
   includeVersion: true,
   stripInternal: true,

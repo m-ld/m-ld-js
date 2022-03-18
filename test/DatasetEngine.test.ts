@@ -173,7 +173,7 @@ describe('Dataset engine', () => {
     });
 
     test('answers rev-up from the new clone', async () => {
-      const revup = await clone.withLocalState(() => clone.revupFrom(remote.time));
+      const revup = await clone.latch(() => clone.revupFrom(remote.time));
       expect(revup).toBeDefined();
       await expect(firstValueFrom(revup!.updates)).rejects.toBeInstanceOf(EmptyError);
     });
@@ -209,7 +209,7 @@ describe('Dataset engine', () => {
         {}, { '@id': 'http://test.m-ld.org/wilma', 'http://test.m-ld.org/#name': 'Wilma' }));
       await updated;
       const thirdTime = await clone.newClock();
-      await expect(clone.withLocalState(() => clone.revupFrom(thirdTime))).resolves.toBeDefined();
+      await expect(clone.latch(() => clone.revupFrom(thirdTime))).resolves.toBeDefined();
     });
     // 2. a failed transaction
     test('answers rev-up from next new clone after failure', async () => {
@@ -220,7 +220,7 @@ describe('Dataset engine', () => {
         }, () => {
         });
       const thirdTime = await clone.newClock();
-      await expect(clone.withLocalState(() => clone.revupFrom(thirdTime))).resolves.toBeDefined();
+      await expect(clone.latch(() => clone.revupFrom(thirdTime))).resolves.toBeDefined();
     });
   });
 

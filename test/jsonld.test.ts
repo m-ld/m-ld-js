@@ -1,4 +1,6 @@
-import { expandTerm, compactIri, ActiveContext, activeCtx, getValues } from '../src/engine/jsonld';
+import {
+  ActiveContext, activeCtx, compactIri, compareValues, expandTerm, getValues
+} from '../src/engine/jsonld';
 
 describe('JSON-LD', () => {
   const context = {
@@ -57,5 +59,20 @@ describe('JSON-LD', () => {
     // Edge case: jsonld library incorrectly skips falsy values
     expect(getValues({ any: '' }, 'any')).toEqual(['']);
     expect(getValues({ any: [0, ''] }, 'any')).toEqual([0, '']);
+  });
+
+  test('compares values', () => {
+    expect(compareValues(1, 1)).toBe(true);
+    expect(compareValues(1, 2)).toBe(false);
+    expect(compareValues({ '@id': 'a' }, { '@id': 'a' })).toBe(true);
+    expect(compareValues({ '@id': 'a' }, { '@id': 'b' })).toBe(false);
+    expect(compareValues({ '@vocab': 'a' }, { '@vocab': 'a' })).toBe(true);
+    expect(compareValues({ '@vocab': 'a' }, { '@vocab': 'b' })).toBe(false);
+    // relative IRIs do not compare for reference and vocab reference
+    expect(compareValues({ '@vocab': 'a' }, { '@id': 'a' })).toBe(false);
+    expect(compareValues({ '@id': 'a' }, { '@vocab': 'a' })).toBe(false);
+    // absolute IRIs do compare for reference and vocab reference
+    expect(compareValues({ '@vocab': 'http://a' }, { '@id': 'http://a' })).toBe(true);
+    expect(compareValues({ '@id': 'http://a' }, { '@vocab': 'http://a' })).toBe(true);
   });
 });

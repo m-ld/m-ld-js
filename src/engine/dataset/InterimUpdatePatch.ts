@@ -1,4 +1,4 @@
-import { DeleteInsert, InterimUpdate, MeldUpdateBid } from '../../api';
+import { DeleteInsert, InterimUpdate, MeldPreUpdate } from '../../api';
 import { Subject, SubjectProperty, Update } from '../../jrql-support';
 import { PatchQuads } from '.';
 import { JrqlGraph } from './JrqlGraph';
@@ -7,6 +7,7 @@ import { Iri } from 'jsonld/jsonld-spec';
 import { ActiveContext } from 'jsonld/lib/context';
 import { Quad } from '../quads';
 import { compactIri } from '../jsonld';
+import { array } from '../../util';
 
 export class InterimUpdatePatch implements InterimUpdate {
   /** If mutable, we allow mutation of the input patch */
@@ -18,7 +19,7 @@ export class InterimUpdatePatch implements InterimUpdate {
   /** Whether to recreate the insert & delete fields from the assertions */
   private needsUpdate: PromiseLike<boolean>;
   /** Cached interim update, lazily recreated after changes */
-  private _update: MeldUpdateBid | undefined;
+  private _update: MeldPreUpdate | undefined;
   /** Aliases for use in updates */
   private subjectAliases = new Map<Iri | null, { [property in '@id' | string]: SubjectProperty }>();
 
@@ -35,7 +36,7 @@ export class InterimUpdatePatch implements InterimUpdate {
     private readonly userCtx: ActiveContext,
     private readonly patch: PatchQuads,
     private readonly principalId: Iri | null,
-    private readonly agree: any | null,
+    private agree: any | null,
     { mutable }: { mutable: boolean }
   ) {
     this.mutable = mutable;
@@ -59,12 +60,13 @@ export class InterimUpdatePatch implements InterimUpdate {
       // TODO: Make the internal update conditional on anyone wanting it
       internalUpdate: this.createUpdate(finalPatch),
       assertions: this.assertions,
-      entailments: this.entailments
+      entailments: this.entailments,
+      agree: this.agree
     };
   }
 
   /** @returns an interim update to be presented to constraints */
-  get update(): Promise<MeldUpdateBid> {
+  get update(): Promise<MeldPreUpdate> {
     return Promise.resolve(this.needsUpdate).then(needsUpdate => {
       if (needsUpdate || this._update == null) {
         this.needsUpdate = Promise.resolve(false);
@@ -75,9 +77,20 @@ export class InterimUpdatePatch implements InterimUpdate {
   }
 
   assert = (update: Update) => this.mutate(async () => {
-    const patch = await this.graph.write(update, this.userCtx);
-    this.assertions.append(patch);
-    return !patch.isEmpty;
+    let changed = false;
+    if (update['@delete'] != null || update['@insert'] != null) {
+      const patch = await this.graph.write(update, this.userCtx);
+      this.assertions.append(patch);
+      changed ||= !patch.isEmpty;
+    }
+    // We cannot upgrade an immutable update to an agreement
+    if (update['@agree'] != null && this.mutable) {
+      // A falsey agree removes the agreement, truthy accumulates
+      this.agree = update['@agree'] ? this.agree == null ? update['@agree'] :
+        array(this.agree).concat(update['@agree']) : null;
+      changed ||= true;
+    }
+    return changed;
   });
 
   entail = (update: Update) => this.mutate(async () => {
@@ -104,7 +117,7 @@ export class InterimUpdatePatch implements InterimUpdate {
     return this.subjectAliases.get(subject)?.[property];
   };
 
-  private createUpdate(patch: PatchQuads, ctx?: ActiveContext): MeldUpdateBid {
+  private createUpdate(patch: PatchQuads, ctx?: ActiveContext): MeldPreUpdate {
     return {
       '@delete': this.quadSubjects(patch.deletes, ctx),
       '@insert': this.quadSubjects(patch.inserts, ctx),

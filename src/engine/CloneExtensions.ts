@@ -1,5 +1,5 @@
 import {
-  ConstructMeldExtensions, MeldConstraint, MeldExtensions, MeldReadState, MeldUpdateBid
+  ConstructMeldExtensions, MeldConstraint, MeldExtensions, MeldPreUpdate, MeldReadState
 } from '../api';
 import { Construct, Context, isList, List, Reference, Subject } from '../jrql-support';
 import { constraintFromConfig } from '../constraints';
@@ -9,8 +9,8 @@ import { M_LD } from '../ns';
 import { getIdLogger } from './util';
 import { Logger } from 'loglevel';
 import { firstValueFrom } from 'rxjs';
-import { castPropertyValue, propertyValue } from '../subjects';
 import { updateSubject } from '../updates';
+import { castPropertyValue, propertyValue } from '../js-support';
 
 /**
  * Top-level aggregation of extensions. Created from the configuration and
@@ -106,7 +106,7 @@ export class CloneExtensions implements MeldExtensions {
       await ext.initialise?.(state);
   }
 
-  async onUpdate(update: MeldUpdateBid, state: MeldReadState) {
+  async onUpdate(update: MeldPreUpdate, state: MeldReadState) {
     // Capture any changes to the extensions
     updateSubject(this.extensionDefList, update);
     // Instantiate any new declared extensions, permissively

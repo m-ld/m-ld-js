@@ -92,7 +92,7 @@ function createApp(config) {
       createWriteStream(join(outDir, `${config['@id']}.csv`)));
     out.log(['name', 'startTime', 'duration'].join(','));
     app.backendEvents.on('timing', event => out.log([
-      event.name, Math.ceil(event.startTime), Math.ceil(event.duration)
+      event.names, Math.ceil(event.startTime), Math.ceil(event.duration)
     ].join(',')));
     app.backendEvents.on('error', err => LOG.warn('Backend error', err));
   }

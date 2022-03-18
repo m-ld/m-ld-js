@@ -572,7 +572,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
   }
 
   @DatasetEngine.checkNotClosed.async
-  withLocalState<T>(procedure: StateProc<MeldReadState, T>): Promise<T> {
+  latch<T>(procedure: StateProc<MeldReadState, T>): Promise<T> {
     return this.lock.share('state', 'protocol',
       () => procedure(this.dataset.readState));
   }

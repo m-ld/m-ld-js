@@ -3,11 +3,12 @@ import { propertyValue } from '../index';
 import { MeldMessageType } from '../ns/m-ld';
 import { getIdLogger, MsgPack } from '../engine/util';
 import { Logger } from 'loglevel';
-import { M_LD } from '../ns';
+import { M_LD, XS } from '../ns';
 import { getRandomValues, subtle } from '../engine/local';
 import { MeldError } from '../engine/MeldError';
 import { MeldConfig } from '../config';
 import { Iri } from 'jsonld/jsonld-spec';
+import { Write } from '../jrql-support';
 
 /** @internal */
 const ALGO = {
@@ -16,6 +17,8 @@ const ALGO = {
 };
 
 /**
+ * [[include:ext/acl.md]]
+ *
  * An instance of this class must be included as the `transportSecurity` member
  * of the `MeldApp` for an access-controlled domain. This is because transport
  * security must be available _before_ the clone can connect to the domain.
@@ -24,6 +27,46 @@ const ALGO = {
  * @experimental
  */
 export class MeldAclTransportSecurity implements MeldTransportSecurity {
+  /**
+   * Shared secret declaration. Insert into the domain data to install the
+   * extension. For example (assuming a **m-ld** `clone` object):
+   *
+   * ```typescript
+   * clone.write(MeldAclExtensions.declareSecret('test.m-ld.org', randomBytes(16)));
+   * ```
+   *
+   * @param domainName as declared in the `MeldConfig` of the clone
+   * @param aesKey a raw AES key, e.g. `randomBytes(32)`
+   */
+  static declareSecret = (domainName: string, aesKey: Buffer): Write => ({
+      '@id': `http://${domainName}/`,
+      [M_LD.secret]: {
+        '@type': XS.base64Binary,
+        '@value': `${aesKey.toString('base64')}`
+      }
+    });
+
+  /**
+   * Use to register each principal with access to the domain, for example
+   * (assuming a **m-ld** `clone` object):
+   *
+   * ```typescript
+   * clone.write(MeldAclTransportSecurity.registerPrincipal(
+   *   'https://alice.example/profile#me', alicePublicKeySpki));
+   * ```
+   *
+   * @param principalIri the principal's identity. As for all domain data, the
+   * principal's IRI can be relative (e.g. `'fred'`).
+   * @param rsaPublicKeySpki DER & SPKI encoded public key belonging to the principal
+   */
+  static registerPrincipal = (principalIri: Iri, rsaPublicKeySpki: Buffer): Write => ({
+    '@id': principalIri,
+    [M_LD.publicKey]: {
+      '@type': XS.base64Binary,
+      '@value': `${rsaPublicKeySpki.toString('base64')}`
+    }
+  });
+
   private readonly log: Logger;
   private readonly domainId: string;
   private readonly principal: AppPrincipal;
@@ -94,12 +137,12 @@ export class MeldAclTransportSecurity implements MeldTransportSecurity {
   protected async encryptOperation(data: Buffer, key: CryptoKey) {
     const iv = Buffer.from(getRandomValues(new Uint8Array(16)));
     const enc = Buffer.from(await subtle.encrypt({ name: ALGO.ENCRYPT, iv }, key, data));
-    return MsgPack.encode({ '@type': M_LD.encrypted, iv, enc });
+    return MsgPack.encode({ '@type': M_LD.Encrypted, iv, enc });
   }
 
   protected async decryptOperation(data: Buffer, key: CryptoKey) {
     const { '@type': type, iv, enc } = MsgPack.decode(data);
-    if (type === M_LD.encrypted) {
+    if (type === M_LD.Encrypted) {
       this.log.debug(`Decrypting operation with length ${enc.length}`);
       return Buffer.from(await subtle.decrypt({ name: ALGO.ENCRYPT, iv }, key, enc));
     } else {

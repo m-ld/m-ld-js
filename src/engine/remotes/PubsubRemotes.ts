@@ -354,7 +354,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
       const sw = new Stopwatch('reply', shortId(4));
       try {
         // The local state is required to prepare the response and to send it
-        const replied = await clone.withLocalState(async state => {
+        const replied = await clone.latch(async state => {
           try {
             // Unsecure the message if required
             const unwired = await this.transportSecurity.wire(

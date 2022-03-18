@@ -6,24 +6,30 @@ interface Task {
   run: () => Promise<unknown>;
 }
 
-class SharedPromise extends Future {
+export type SharedProc<T, P extends SharedPromise<unknown>> = (this: P) => (PromiseLike<T> | T);
+
+/**
+ * TODO docs
+ */
+export class SharedPromise<R> extends Future {
   private running: Promise<unknown> | null = null;
-  private tasks: Task[] = [];
+  private readonly tasks: Task[] = [];
+  readonly result: Promise<R>;
+
+  constructor(name: string, proc: SharedProc<R, SharedPromise<R>>) {
+    super();
+    this.result = this.share(name, proc);
+  }
 
   get isRunning() {
     return this.pending && this.running != null;
   }
 
-  /** Not currently used; for debugging deadlocks */
-  toString(): string {
-    return `[${this.tasks.map(({ name }) => name).join(', ')}]${this.running ? '...' : ''}`;
-  }
-
-  share<T>(name: string, proc: () => (PromiseLike<T> | T)): Promise<T> {
+  share<T>(name: string, proc: SharedProc<T, this>): Promise<T> {
     if (!this.pending)
       return Promise.reject(new RangeError('Promise not available for sharing'));
     else if (this.isRunning)
-      return this.extend(name, SharedPromise.exec(proc));
+      return this.extend(name, this.exec(proc));
     else
       return this.willRun(name, proc);
   }
@@ -35,21 +41,28 @@ class SharedPromise extends Future {
     return result;
   }
 
-  start() {
+  run() {
     // This allows for a recursive synchronous share in one of the runs
     this.running = Promise.resolve();
-    if (this.tasks.length === 0)
+    if (this.tasks.length === 0) {
       this.resolve();
-    else
+    } else {
       this.tasks.slice().forEach(task =>
         this.addRunning(task.run()));
+    }
+    return this;
   }
 
-  private willRun<T>(name: string, proc: () => (PromiseLike<T> | T)) {
+  /** Not currently used; for debugging deadlocks */
+  toString(): string {
+    return `[${this.tasks.map(({ name }) => name).join(', ')}]${this.running ? '...' : ''}`;
+  }
+
+  private willRun<T>(name: string, proc: SharedProc<T, this>) {
     return new Promise<T>((resolve, reject) => {
       this.tasks.push({
         name, run: () => {
-          const result = SharedPromise.exec(proc);
+          const result = this.exec(proc);
           result.then(resolve, reject);
           return settled(result);
         }
@@ -65,9 +78,10 @@ class SharedPromise extends Future {
     this.running = run;
   }
 
-  private static exec<T>(proc: () => PromiseLike<T> | T) {
+  private exec<T>(proc: SharedProc<T, this>) {
     try {
-      return Promise.resolve(proc());
+      // Use of try block catches both sync and async errors
+      return Promise.resolve(proc.call(this));
     } catch (e) {
       return Promise.reject(e);
     }
@@ -78,9 +92,9 @@ export class LockManager<K extends string = string> {
   private locks: {
     [key: string]: {
       /** Currently running task, may be extended */
-      running?: SharedPromise,
+      running?: SharedPromise<unknown>,
       /** Head task, may be shared if not exclusive */
-      head: SharedPromise,
+      head: SharedPromise<unknown>,
       /** Whether the head task is exclusive */
       exclusive: boolean
     }
@@ -101,7 +115,7 @@ export class LockManager<K extends string = string> {
       // running: lock.running?.toString(),
       // head: lock.head.toString(),
       exclusive: lock.exclusive
-    }
+    };
   }
 
   /**
@@ -174,20 +188,18 @@ export class LockManager<K extends string = string> {
   private async next<T = void>(
     key: K, purpose: string, proc: () => (PromiseLike<T> | T), exclusive: boolean) {
     const prevTask = this.locks[key]?.head;
-    const task = new SharedPromise;
+    const task = new SharedPromise(LockManager.taskName(key, purpose), proc);
     // Don't change the running task
     this.locks[key] = { ...this.locks[key], head: task, exclusive };
-    const name = LockManager.taskName(key, purpose);
     task.then(() => {
       // If we're the last in the queue, delete ourselves
       if (this.locks[key]?.head === task)
         delete this.locks[key];
     });
-    const result = task.share(name, proc);
     await prevTask; // This wait is the essence of the lock
     this.locks[key].running = task;
-    task.start();
-    return result;
+    task.run();
+    return task.result;
   }
 
   private static taskName(key: string, purpose: string) {

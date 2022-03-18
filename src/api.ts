@@ -272,11 +272,11 @@ export interface GraphUpdate extends DeleteInsert<GraphSubjects> {
 
 /**
  * An update that has cleared preliminary checks and been assigned metadata, but
- * has not yet been applied to the graph data. Available to triggered rules like
- * {@link MeldConstraint constraints} and
+ * has not yet been signalled to the application. Available to triggered rules
+ * like {@link MeldConstraint constraints} and
  * {@link AgreementCondition agreement&nbsp;conditions}.
  */
-export interface MeldUpdateBid extends GraphUpdate {
+export interface MeldPreUpdate extends GraphUpdate {
   /**
    * If this key is included and the value is truthy, this update is an
    * _agreement_. The value may include serialisable proof that applicable
@@ -299,7 +299,7 @@ export interface MeldUpdateBid extends GraphUpdate {
  *
  * @category API
  */
-export interface MeldUpdate extends MeldUpdateBid {
+export interface MeldUpdate extends MeldPreUpdate {
   /**
    * Current local clock ticks at the time of the update.
    * @see MeldStatus.ticks
@@ -325,8 +325,8 @@ export type StateProc<S extends MeldReadState = MeldReadState, T = unknown> =
  * guaranteed to remain 'live' until the procedure's return Promise resolves or
  * rejects.
  */
-export type UpdateProc<U extends MeldUpdateBid = MeldUpdate> =
-  (update: U, state: MeldReadState) => PromiseLike<unknown> | void;
+export type UpdateProc<U extends MeldPreUpdate = MeldUpdate, T = unknown> =
+  (update: U, state: MeldReadState) => PromiseLike<T> | void;
 
 /**
  * A m-ld state machine extends the {@link MeldState} API for convenience, but
@@ -481,7 +481,7 @@ export interface MeldExtensions {
    * been applied. If available, this procedure will be called for every state
    * after that passed to {@link initialise}.
    */
-  readonly onUpdate?: UpdateProc<MeldUpdateBid>;
+  readonly onUpdate?: UpdateProc<MeldPreUpdate>;
 }
 
 /**
@@ -526,7 +526,7 @@ export interface MeldConstraint {
    * @param update the interim update, prior to application to the data
    * @returns a rejection only if the constraint application fails
    */
-  apply(state: MeldReadState, update: InterimUpdate): Promise<unknown>;
+  apply?(state: MeldReadState, update: InterimUpdate): Promise<unknown>;
 }
 
 /**
@@ -578,7 +578,7 @@ export interface AgreementCondition {
    * @param agreement the agreement update, prior to application to the data
    * @returns a rejection if the condition is violated (or fails)
    */
-  check(state: MeldReadState, agreement: MeldUpdateBid): Promise<unknown>;
+  test(state: MeldReadState, agreement: MeldPreUpdate): Promise<unknown>;
 }
 
 /**
@@ -649,7 +649,7 @@ export interface InterimUpdate {
    * the methods above have affected the `@insert` and `@delete` of the update,
    * they will have been applied.
    */
-  readonly update: Promise<MeldUpdateBid>;
+  readonly update: Promise<MeldPreUpdate>;
 }
 
 /**

@@ -98,14 +98,14 @@ describe('Domain access control', () => {
       // adding them in Alice's clone)
       await aliceClone.transact({
         '@id': alice['@id'],
-        'http://m-ld.org/#publicKey': {
+        'http://m-ld.org/#public-key': {
           '@type': 'http://www.w3.org/2001/XMLSchema#base64Binary',
           '@value': alice.publicKey.toString('base64')
         }
       });
       await aliceClone.transact({
         '@id': bob['@id'],
-        'http://m-ld.org/#publicKey': {
+        'http://m-ld.org/#public-key': {
           '@type': 'http://www.w3.org/2001/XMLSchema#base64Binary',
           '@value': bob.publicKey.toString('base64')
         }

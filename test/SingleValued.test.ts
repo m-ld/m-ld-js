@@ -1,7 +1,5 @@
-import { InterimUpdate, MeldUpdate } from '../src';
-import { MockGraphState } from './testClones';
+import { MockGraphState, mockInterim } from './testClones';
 import { SingleValued } from '../src/constraints/SingleValued';
-import { mock } from 'jest-mock-extended';
 import { SubjectGraph } from '../src/engine/SubjectGraph';
 
 describe('Single-valued constraint', () => {
@@ -15,7 +13,7 @@ describe('Single-valued constraint', () => {
 
   test('Passes an empty update', async () => {
     const constraint = new SingleValued('http://test.m-ld.org/#name');
-    await expect(constraint.check(state.jrqlGraph.asReadState, mockInterim({
+    await expect(constraint.check(state.graph.asReadState, mockInterim({
       '@ticks': 0,
       '@delete': new SubjectGraph([]),
       '@insert': new SubjectGraph([])
@@ -24,7 +22,7 @@ describe('Single-valued constraint', () => {
 
   test('Passes a missing property update', async () => {
     const constraint = new SingleValued('http://test.m-ld.org/#name');
-    await expect(constraint.check(state.jrqlGraph.asReadState, mockInterim({
+    await expect(constraint.check(state.graph.asReadState, mockInterim({
       '@ticks': 0,
       '@delete': new SubjectGraph([]),
       '@insert': new SubjectGraph([{
@@ -35,7 +33,7 @@ describe('Single-valued constraint', () => {
 
   test('Passes a single-valued property update', async () => {
     const constraint = new SingleValued('http://test.m-ld.org/#name');
-    await expect(constraint.check(state.jrqlGraph.asReadState, mockInterim({
+    await expect(constraint.check(state.graph.asReadState, mockInterim({
       '@ticks': 0,
       '@delete': new SubjectGraph([]),
       '@insert': new SubjectGraph([{
@@ -46,7 +44,7 @@ describe('Single-valued constraint', () => {
 
   test('Fails a multi-valued property update', async () => {
     const constraint = new SingleValued('http://test.m-ld.org/#name');
-    await expect(constraint.check(state.jrqlGraph.asReadState, mockInterim({
+    await expect(constraint.check(state.graph.asReadState, mockInterim({
       '@ticks': 0,
       '@delete': new SubjectGraph([]),
       '@insert': new SubjectGraph([{
@@ -60,7 +58,7 @@ describe('Single-valued constraint', () => {
       '@insert': { '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Fred' }
     });
     const constraint = new SingleValued('http://test.m-ld.org/#name');
-    await expect(constraint.check(state.jrqlGraph.asReadState, mockInterim({
+    await expect(constraint.check(state.graph.asReadState, mockInterim({
       '@ticks': 0,
       '@delete': new SubjectGraph([]),
       '@insert': new SubjectGraph([{
@@ -79,7 +77,7 @@ describe('Single-valued constraint', () => {
       }])
     });
     // @ts-ignore - Type instantiation is excessively deep and possibly infinite. ts(2589)
-    await constraint.apply(state.jrqlGraph.asReadState, update);
+    await constraint.apply(state.graph.asReadState, update);
     expect(update.assert.mock.calls).toEqual([]);
   });
 
@@ -92,7 +90,7 @@ describe('Single-valued constraint', () => {
         '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': ['Fred', 'Flintstone']
       }])
     });
-    await constraint.apply(state.jrqlGraph.asReadState, update);
+    await constraint.apply(state.graph.asReadState, update);
     expect(update.assert).toBeCalledWith({
       '@delete': {
         '@id': 'http://test.m-ld.org/fred',
@@ -113,7 +111,7 @@ describe('Single-valued constraint', () => {
         '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Flintstone'
       }])
     });
-    await constraint.apply(state.jrqlGraph.asReadState, update);
+    await constraint.apply(state.graph.asReadState, update);
     expect(update.assert).toBeCalledWith({
       '@delete': {
         '@id': 'http://test.m-ld.org/fred',
@@ -138,17 +136,13 @@ describe('Single-valued constraint', () => {
         '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Flintstone'
       }])
     });
-    await constraint.apply(state.jrqlGraph.asReadState, update);
+    await constraint.apply(state.graph.asReadState, update);
     // FIXME: not applied to the dataset!
 
-    await expect(state.jrqlGraph.get('http://test.m-ld.org/fred', state.ctx))
-      .resolves.toMatchObject({ 'http://test.m-ld.org/#name': 'Fred' });
-    await expect(state.jrqlGraph.get('http://test.m-ld.org/wilma', state.ctx))
-      .resolves.toMatchObject({ 'http://test.m-ld.org/#name': 'Wilma' });
+    await expect(state.graph.get('http://test.m-ld.org/fred', state.ctx))
+      .resolves.toMatchObject({ name: 'Fred' });
+    await expect(state.graph.get('http://test.m-ld.org/wilma', state.ctx))
+      .resolves.toMatchObject({ name: 'Wilma' });
   });
 });
 
-function mockInterim(update: MeldUpdate) {
-  // Passing an implementation into the mock adds unwanted properties
-  return Object.assign(mock<InterimUpdate>(), { update: Promise.resolve(update) });
-}

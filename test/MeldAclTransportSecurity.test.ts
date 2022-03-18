@@ -2,7 +2,6 @@ import { MeldAclTransportSecurity } from '../src/security';
 import { MockGraphState, testConfig, testContext } from './testClones';
 import { MeldMessageType } from '../src/ns/m-ld';
 import { subtle } from '../src/engine/local';
-import { MeldAclExtensions } from '../src/security/MeldAclExtensions';
 
 describe('m-ld access control list', () => {
   let acl: MeldAclTransportSecurity;
@@ -56,25 +55,25 @@ describe('m-ld access control list', () => {
         true,
         ['encrypt', 'decrypt']
       );
-      await state.write(MeldAclExtensions.declare(0, 'test.m-ld.org',
+      await state.write(MeldAclTransportSecurity.declareSecret('test.m-ld.org',
         Buffer.from(await subtle.exportKey('raw', key))));
       const wired = await acl.wire(
-        data, MeldMessageType.operation, 'out', state.jrqlGraph.asReadState);
+        data, MeldMessageType.operation, 'out', state.graph.asReadState);
       expect(wired.equals(data)).toBe(false); // Dunno, but not the same!
       // Apply symmetric decryption
       const unwired = await acl.wire(
-        wired, MeldMessageType.operation, 'in', state.jrqlGraph.asReadState);
+        wired, MeldMessageType.operation, 'in', state.graph.asReadState);
       expect(unwired.equals(data)).toBe(true);
     });
 
     test('signs with principal', async () => {
       const rawPublicKey = Buffer.from(await subtle.exportKey('spki', aliceKeys.publicKey!));
       await state.write(
-        MeldAclExtensions.registerPrincipal('http://ex.org/Alice', rawPublicKey));
-      const attr = await acl.sign(data, state.jrqlGraph.asReadState);
+        MeldAclTransportSecurity.registerPrincipal('http://ex.org/Alice', rawPublicKey));
+      const attr = await acl.sign(data, state.graph.asReadState);
       expect(attr.sig.length).toBeGreaterThan(0);
       // Asymmetric verify does not throw
-      await expect(acl.verify(data, attr, state.jrqlGraph.asReadState)).resolves.not.toThrow();
+      await expect(acl.verify(data, attr, state.graph.asReadState)).resolves.not.toThrow();
     });
   });
 });
