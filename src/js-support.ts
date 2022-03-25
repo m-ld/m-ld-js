@@ -4,8 +4,8 @@ import {
 } from './jrql-support';
 import { array } from './util';
 import { isArray } from './engine/util';
-import { isAbsolute } from 'jsonld/lib/url';
 import { XS } from './ns';
+import { isAbsolute } from './engine/jsonld';
 
 export type JsAtomValueConstructor =
   typeof String |
