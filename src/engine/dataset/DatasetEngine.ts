@@ -505,7 +505,8 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
       from(this.orderingBuffer),
       // #2 Anything that arrives stamped prior to now
       this.remoteOps.receiving.pipe(
-        filter(([op]) => op.time.anyLt(now)),
+        map(([op]) => op),
+        filter(op => op.time.anyLt(now)),
         takeUntil(from(until)))
     ).pipe(tap((msg: OperationMessage) => {
       this.log.debug('Forwarding update', msg.toString(this.log.getLevel()));

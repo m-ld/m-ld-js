@@ -415,7 +415,9 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
           received.resolve(ACK);
         } else {
           const res = Response.fromBuffer(unwired);
-          await this.transportSecurity.verify?.(res.enc, res.attr, state);
+          // TODO: State for a request may be very old or non-existent.
+          // Therefore we cannot verify a response here.
+          // await this.transportSecurity.verify?.(res.enc, res.attr, state);
           received.resolve(res);
           if (readyToAck != null) {
             await readyToAck;
@@ -535,8 +537,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     await this.reply(sentParams, state, new NewClockResponse(clock));
   }
 
-  private async replySnapshot(
-    sentParams: SendParams, state: MeldReadState, snapshot: Snapshot) {
+  private async replySnapshot(sentParams: SendParams, state: MeldReadState, snapshot: Snapshot) {
     const { gwc, agreed, data, updates } = snapshot;
     const dataAddress = uuid(), updatesAddress = uuid();
     // Send the reply in parallel with establishing notifiers
@@ -573,7 +574,9 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     }
   }
 
-  private async consume<T>(fromId: string, channelId: string,
+  private async consume<T>(
+    fromId: string,
+    channelId: string,
     datumFromPayload: (payload: Buffer) => T,
     failIfSlow?: 'failIfSlow'
   ): Promise<Observable<T>> {
@@ -595,8 +598,11 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     return failIfSlow ? consumed.pipe(timeout(this.sendTimeout)) : consumed;
   }
 
-  private async produce<T>(data: Observable<T>, notifier: SubPub,
-    datumToPayload: (datum: T) => Buffer, type: string
+  private async produce<T>(
+    data: Observable<T>,
+    notifier: SubPub,
+    datumToPayload: (datum: T) => Buffer,
+    type: string
   ) {
     const notifyError = (error: any) => {
       this.log.warn('Notifying error on', notifier.id, error);

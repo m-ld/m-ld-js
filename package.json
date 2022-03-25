@@ -13,7 +13,9 @@
     "./dist/wrtc": "./dist/wrtc/index.js",
     "./dist/memdown": "./dist/memdown/index.js",
     "./dist/security": "./dist/security/index.js",
-    "./dist/shacl": "./dist/shacl/index.js"
+    "./dist/shacl": "./dist/shacl/index.js",
+    "./dist/constraints/WritePermitted": "./dist/constraints/WritePermitted.js",
+    "./dist/constraints/Statutory": "./dist/constraints/Statutory.js"
   },
   "scripts": {
     "link-locals": "npm link ../m-ld-spec ../json-rql ../typedoc-theme",

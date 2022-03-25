@@ -21,18 +21,16 @@ const genPrincipalKeys = () => generateKeyPairSync('rsa', {
 });
 
 /**
- * Configuration for transport security. The given module and export will be
+ * Configuration for transport security. The given module and class will be
  * instantiated in the app just prior to creating the [clone](../clone.js). This
  * indirection is only present because the HTTP API is a contrivance for
- * platform-independent compliance testing. Nevertheless, it is suggestive of a
- * data structure to be used in future for registration of the extension in the
- * domain itself.
+ * platform-independent compliance testing.
  *
- * @type {{require: string, export: string}}
+ * @type {{require: string, class: string}}
  */
 const transportSecurity = {
   require: '@m-ld/m-ld/dist/security',
-  export: 'MeldAclTransportSecurity'
+  class: 'MeldAclTransportSecurity'
 };
 
 // generateKeySync('aes') was only added in Node 15
@@ -42,7 +40,7 @@ const secret = randomBytes(16).toString('base64');
  * Compliance tests for access control lists using the above transport security
  * extension and principal keys.
  */
-describe('Domain access control', () => {
+describe('ACL Transport Security', () => {
   let aliceClone, bobClone;
   let alice, bob;
 

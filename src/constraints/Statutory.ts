@@ -170,7 +170,7 @@ export class Statute extends OrmSubject implements MeldConstraint, AgreementCond
   ) {
     const affected: Shape[] = [];
     for (let statutory of this.statutoryShapes)
-      affected.push(...await statutory.affected(update, state));
+      affected.push(...await statutory.affected(state, update));
     if (affected.length > 0)
       return proc(affected);
   }

@@ -29,7 +29,7 @@ export abstract class Shape extends OrmSubject {
    * @returns an array of shapes affected by the given update. All returned
    * shapes will {@link refines refine} this Shape.
    */
-  abstract affected(update: MeldPreUpdate, state: MeldReadState): Promise<Shape[]>;
+  abstract affected(state: MeldReadState, update: MeldPreUpdate): Promise<Shape[]>;
 
   /**
    * @returns whether this shape is a strict refinement of the other Shape, that
@@ -72,7 +72,7 @@ export class PropertyShape extends Shape {
     return subject[this.path['@vocab']] != null;
   }
 
-  async affected(update: MeldPreUpdate, state: MeldReadState): Promise<Shape[]> {
+  async affected(state: MeldReadState, update: MeldPreUpdate): Promise<Shape[]> {
     for (let subject of update['@delete'])
       if (this.isFocus(subject))
         return [this];

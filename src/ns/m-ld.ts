@@ -18,7 +18,11 @@ export const localEngine = `${$base}principal/local-engine`;
 /** Property for asymmetric public key */
 export const publicKey = `${$base}#public-key`;
 
-/** Singleton permission + agreement condition for Authority */
+/**
+ * Dual-use identifier:
+ * - Property for Principal to have authority over a sh:Shape
+ * - Singleton agreement condition
+ */
 export const hasAuthority = `${$base}#has-authority`;
 
 /** Statute class */
@@ -27,8 +31,14 @@ export const Statute = `${$base}Statute`;
 /** A reference to a SHACL shape whose target is statutory */
 export const statutoryShape = `${$base}#statutory-shape`;
 
-/** A reference to a SHACL shape whose target is permissioned */
+/** Access-controls a set of sh:Shapes */
+export const WritePermission = `${$base}WritePermission`;
+
+/** A reference to a SHACL shape whose targets are permissioned */
 export const controlledShape = `${$base}#controlled-shape`;
+
+/** Principal to Permission link */
+export const hasPermission = `${$base}#has-permission`;
 
 /** A reference to a sufficient condition for an agreement */
 export const sufficientCondition = `${$base}#sufficient-condition`;

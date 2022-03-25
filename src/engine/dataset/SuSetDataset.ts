@@ -150,8 +150,8 @@ export class SuSetDataset extends MeldEncoder {
       prepare: async () => {
         return {
           kvps: this.journal.reset(localTime,
-            GlobalClock.GENESIS.set(localTime),
-            TreeClock.GENESIS)
+            // Set GWC and last agreed to a default; will re-set on snapshot
+            GlobalClock.GENESIS, TreeClock.GENESIS)
         };
       }
     });

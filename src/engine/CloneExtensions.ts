@@ -125,10 +125,11 @@ export class CloneExtensions implements MeldExtensions {
           const className = propertyValue(cjsModuleDef, M_LD.JS.className, String);
           const construct: ConstructMeldExtensions = require(cjsModule)[className];
           cjsModuleDef.__instance = <any>new construct(this.config, this.app);
+          this.log.info(`Installed extension ${cjsModuleDef['@id']}`);
         } catch (e) {
           if (permissive) {
             this.log.warn(`CommonJS module ${cjsModuleDef[M_LD.JS.require]} ` +
-              `class ${cjsModuleDef[M_LD.JS.className]} cannot be instantiated`);
+              `class ${cjsModuleDef[M_LD.JS.className]} cannot be instantiated`, e);
             cjsModuleDef.__instance = {};
           } else {
             throw e;

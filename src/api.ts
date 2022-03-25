@@ -745,7 +745,7 @@ export interface MeldTransportSecurity {
   verify?(
     data: Buffer,
     attr: Attribution | null,
-    state: MeldReadState | null
+    state: MeldReadState
   ): void | Promise<unknown>;
 }
 

@@ -79,8 +79,8 @@ function createApp(config) {
   // 2. Create transport security
   if (transportSecurity) {
     delete config.transportSecurity;
-    app.transportSecurity =
-      new (require(transportSecurity.require)[transportSecurity.export])(config);
+    const TsClass = require(transportSecurity.require)[transportSecurity.class];
+    app.transportSecurity = new TsClass(config, app.principal);
   }
   // 3. Performance timings
   if (LOG.getLevel() <= LOG.levels.TRACE) {

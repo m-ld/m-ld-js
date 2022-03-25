@@ -1,6 +1,6 @@
 import { SuSetDataset } from '../src/engine/dataset/SuSetDataset';
 import { MockProcess, MockState, testOp } from './testClones';
-import { TreeClock } from '../src/engine/clocks';
+import { GlobalClock, TreeClock } from '../src/engine/clocks';
 import { toArray } from 'rxjs/operators';
 import { EmptyError, firstValueFrom, lastValueFrom, Subject } from 'rxjs';
 import {
@@ -82,7 +82,8 @@ describe('SU-Set Dataset', () => {
 
       test('answers an empty snapshot', async () => {
         const snapshot = await ssd.takeSnapshot();
-        expect(snapshot.gwc.equals(local.gwc)).toBe(true);
+        // Test artifact: resetClock sets GWC to genesis – always set to a snapshot in prod
+        expect(snapshot.gwc.equals(GlobalClock.GENESIS)).toBe(true);
         await expect(lastValueFrom(snapshot.data)).rejects.toBeInstanceOf(EmptyError);
       });
 

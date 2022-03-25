@@ -82,7 +82,7 @@ export class MeldEncoder {
   reifyTriplesTids(triplesTids: RefTriplesTids): Triple[] {
     return flatten(triplesTids.map(([triple, tids]) => {
       if (!triple['@id'].startsWith('_:'))
-        throw new TypeError('Triple is not a blank node');
+        throw new TypeError(`Triple ${triple['@id']} is not a blank node`);
       const rid = this.rdf.blankNode(triple['@id'].slice(2));
       return [
         // Reification must be known, so Statement type is redundant
@@ -99,7 +99,7 @@ export class MeldEncoder {
     return Object.values(reifications.reduce((rids, reification) => {
       const rid = reification.subject.value; // Blank node value
       // Add the blank node IRI prefix to a new triple
-      let [triple, tids] = rids[rid] || [{ '@id': `_.${rid}` }, []];
+      let [triple, tids] = rids[rid] || [{ '@id': `_:${rid}` }, []];
       switch (reification.predicate.value) {
         case RDF.subject:
           if (reification.object.termType == 'NamedNode')

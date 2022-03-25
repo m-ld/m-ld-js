@@ -15,7 +15,11 @@ describe('json-rql Quads translation', () => {
   let context: ActiveContext;
 
   beforeEach(async () => {
-    context = await activeCtx({ '@base': 'http://test.m-ld.org/', '@vocab': '#' });
+    context = await activeCtx({
+      '@base': 'http://test.m-ld.org/',
+      '@vocab': '#',
+      'ex': 'http://example.org/'
+    });
     jrql = new JrqlQuads(mock<Graph>(rdf));
   });
 
@@ -32,6 +36,15 @@ describe('json-rql Quads translation', () => {
     expect(quads.length).toBe(1);
     expect(quads[0].subject.termType).toBe('Variable');
     expect(rdf.namedNode('http://test.m-ld.org/#name').equals(quads[0].predicate)).toBe(true);
+    expect(quads[0].object.termType).toBe('Literal');
+    expect(quads[0].object.value).toBe('Fred');
+  });
+
+  test('quadifies subject with prefixed id', () => {
+    const quads = jrql.quads({ '@id': 'ex:fred', 'name': 'Fred' }, { mode: 'load' }, context);
+    expect(quads.length).toBe(1);
+    expect(rdf.namedNode('http://example.org/fred').equals(quads[0].subject)).toBe(true);
+    expect(quads[0].predicate.value).toBe('http://test.m-ld.org/#name');
     expect(quads[0].object.termType).toBe('Literal');
     expect(quads[0].object.value).toBe('Fred');
   });
