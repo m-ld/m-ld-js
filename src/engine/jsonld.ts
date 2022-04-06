@@ -4,6 +4,8 @@ import { compactIri as _compactIri } from 'jsonld/lib/compact';
 import { compareValues as _compareValues } from 'jsonld/lib/util';
 import { ActiveContext, expandIri, getInitialContext } from 'jsonld/lib/context';
 import { isAbsolute } from 'jsonld/lib/url';
+import { isSet } from '../jrql-support';
+import { array } from '../util';
 
 export { hasProperty, hasValue } from 'jsonld/lib/util';
 export { ActiveContext, getContextValue } from 'jsonld/lib/context';
@@ -61,11 +63,22 @@ export async function nextCtx(ctx: ActiveContext, context?: Context,
  *
  * @param subject the subject.
  * @param property the property.
- *
  * @return all of the values for a subject's property as an array.
  */
 export function getValues(subject: { [key: string]: any }, property: string): Array<any> {
-  return [].concat(subject[property] ?? []);
+  return asValues(subject[property]);
+}
+
+/**
+ * Normalises the value of a JSON-LD object entry to an array of values.
+ *
+ * Note that Lists are treated as Subjects.
+ *
+ * @param value the value.
+ * @return the value as an array of values.
+ */
+export function asValues(value: any) {
+  return value == null ? [] : array(isSet(value) ? value['@set'] : value);
 }
 
 export function canonicalDouble(value: number) {

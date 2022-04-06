@@ -1,5 +1,5 @@
 import { SuSetDataset } from '../src/engine/dataset/SuSetDataset';
-import { MockProcess, MockState, testOp } from './testClones';
+import { MockProcess, MockState, testExtensions, testOp } from './testClones';
 import { GlobalClock, TreeClock } from '../src/engine/clocks';
 import { toArray } from 'rxjs/operators';
 import { EmptyError, firstValueFrom, lastValueFrom, Subject } from 'rxjs';
@@ -48,7 +48,7 @@ describe('SU-Set Dataset', () => {
 
   describe('with basic config', () => {
     beforeEach(async () => {
-      ssd = new SuSetDataset(state.dataset, {}, {}, {}, {
+      ssd = new SuSetDataset(state.dataset, {}, testExtensions(), {}, {
         '@id': 'test',
         '@domain': 'test.m-ld.org'
       });
@@ -565,7 +565,7 @@ describe('SU-Set Dataset', () => {
       };
       ssd = new SuSetDataset(state.dataset,
         {},
-        { constraints: [constraint] }, {},
+        testExtensions({ constraints: [constraint] }), {},
         { '@id': 'test', '@domain': 'test.m-ld.org' });
       await ssd.initialise();
       await ssd.resetClock(local.tick().time);
@@ -759,7 +759,7 @@ describe('SU-Set Dataset', () => {
       remote = new MockProcess(right);
       checkpoints = new Subject<JournalCheckPoint>();
       agreementConditions = [];
-      ssd = new SuSetDataset(state.dataset, {}, { agreementConditions },
+      ssd = new SuSetDataset(state.dataset, {}, testExtensions({ agreementConditions }),
         { journalAdmin: { checkpoints } },
         { '@id': 'test', '@domain': 'test.m-ld.org', journal: { adminDebounce: 0 } });
       await ssd.initialise();
@@ -933,7 +933,7 @@ describe('SU-Set Dataset', () => {
   });
 
   test('enforces operation size limit', async () => {
-    ssd = new SuSetDataset(state.dataset, {}, {}, {}, {
+    ssd = new SuSetDataset(state.dataset, {}, testExtensions(), {}, {
       '@id': 'test',
       '@domain': 'test.m-ld.org',
       maxOperationSize: 1

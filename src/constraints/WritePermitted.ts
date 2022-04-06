@@ -1,6 +1,6 @@
 import { OrmDomain, OrmState, OrmSubject } from '../orm';
 import {
-  GraphSubject, InterimUpdate, MeldConstraint, MeldExtensions, MeldPreUpdate, MeldReadState
+  GraphSubject, InterimUpdate, MeldExtensions, MeldPreUpdate, MeldReadState, StateManaged
 } from '../api';
 import { Shape } from '../shacl/index';
 import { Describe, Reference, Subject } from '../jrql-support';
@@ -8,7 +8,7 @@ import { M_LD } from '../ns';
 import { MeldError } from '../engine/MeldError';
 import { Iri } from 'jsonld/jsonld-spec';
 
-export class WritePermitted extends OrmDomain implements MeldExtensions {
+export class WritePermitted extends OrmDomain implements StateManaged<MeldExtensions> {
   /**
    * Extension declaration. Insert into the domain data to install the
    * extension. For example (assuming a **m-ld** `clone` object):
@@ -48,7 +48,10 @@ export class WritePermitted extends OrmDomain implements MeldExtensions {
    * @param permissionIri the permission's identity (e.g. for use in {@link declarePermission})
    * @param controlledShapes shape Subjects, or References to pre-existing shapes
    */
-  static declareControlled = (permissionIri: Iri, ...controlledShapes: (Subject | Reference)[]): Subject => ({
+  static declareControlled = (
+    permissionIri: Iri,
+    ...controlledShapes: (Subject | Reference)[]
+  ): Subject => ({
     '@id': permissionIri,
     '@type': M_LD.WritePermission,
     [M_LD.controlledShape]: controlledShapes
@@ -74,38 +77,49 @@ export class WritePermitted extends OrmDomain implements MeldExtensions {
     [M_LD.hasPermission]: permission
   });
 
-  private permissions: WritePermission[] = [];
+  private permissions = new Map<Iri, WritePermission>();
 
   checkPermissions = (state: MeldReadState, update: InterimUpdate) =>
-    this.withActiveState(state, () =>
-      Promise.all(this.permissions.map(permission => permission.check(state, update))));
+    this.updating(state, () =>
+      Promise.all([...this.permissions.values()]
+        .map(permission => permission.check(state, update))));
 
-  readonly constraints: MeldConstraint[] = [{
-    check: this.checkPermissions,
-    apply: this.checkPermissions
-  }];
+  ready(): Promise<MeldExtensions> {
+    return this.upToDate().then(() => ({
+      constraints: [{
+        check: this.checkPermissions,
+        apply: this.checkPermissions
+      }]
+    }));
+  }
 
   async initialise(state: MeldReadState) {
-    await this.withActiveState(state, async orm => {
+    await this.updating(state, async orm => {
       // Read the available permissions
       await state.read<Describe>({
         '@describe': '?permission',
         '@where': { '@id': '?permission', '@type': M_LD.WritePermission }
-      }).each(src => this.permissions.push(new WritePermission(src, orm)));
+      }).each(src => this.loadPermission(src, orm));
       await orm.update();
     });
   }
 
   onUpdate(update: MeldPreUpdate, state: MeldReadState) {
-    return this.withActiveState(state, async orm => {
-      // Capture any new permissions
-      for (let src of update['@insert'])
-        if (src['@type'] === M_LD.WritePermission)
-          this.permissions.push(new WritePermission(src, orm));
-      await orm.update(update);
-      // Remove any deleted permissions
-      this.permissions = this.permissions.filter(permission => !permission.deleted);
+    return this.updating(state, async orm => {
+      await orm.update(update, deleted => {
+        // Remove any deleted permissions
+        this.permissions.delete(deleted.src['@id']);
+      }, async insert => {
+        // Capture any new permissions
+        if (insert['@type'] === M_LD.WritePermission)
+          await this.loadPermission(insert, orm);
+      });
     });
+  }
+
+  private async loadPermission(src: GraphSubject, orm: OrmState) {
+    // Putting into both our permissions map and the domain cache
+    this.permissions.set(src['@id'], await orm.get(src, src => new WritePermission(src, orm)));
   }
 }
 
@@ -123,7 +137,7 @@ export class WritePermission extends OrmSubject {
     const update = await interim.update;
     for (let shape of this.controlledShapes) {
       const affected = await shape.affected(state, update);
-      if (affected.length > 0)
+      if (affected['@delete'].length > 0 || affected['@insert'].length > 0)
         return this.checkPrincipal(update['@principal'], shape);
     }
   }

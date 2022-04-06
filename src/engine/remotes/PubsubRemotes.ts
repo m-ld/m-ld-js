@@ -88,14 +88,14 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
 
   protected constructor(
     config: MeldConfig,
-    private readonly extensions: MeldExtensions
+    private readonly extensions: () => Promise<MeldExtensions>
   ) {
     super(config);
     this.sendTimeout = config.networkTimeout ?? 5000;
   }
 
   private get transportSecurity() {
-    return this.extensions.transportSecurity ?? noTransportSecurity;
+    return this.extensions().then(ext => ext.transportSecurity ?? noTransportSecurity);
   }
 
   setLocal(clone: MeldLocal | null) {
@@ -357,11 +357,12 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
         const replied = await clone.latch(async state => {
           try {
             // Unsecure the message if required
-            const unwired = await this.transportSecurity.wire(
+            const transportSecurity = await this.transportSecurity;
+            const unwired = await transportSecurity.wire(
               payload, MeldMessageType.request, 'in', state);
             const req = Request.fromBuffer(unwired);
             // Verify the message if necessary
-            await this.transportSecurity.verify?.(req.enc, req.attr, state);
+            await transportSecurity.verify?.(req.enc, req.attr, state);
             // Generate a suitable response
             if (req instanceof NewClockRequest) {
               sw.next('clock');
@@ -409,7 +410,8 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     if (replyParams.sentMessageId in this.replyResolvers && this.clone != null) {
       const { received, state, readyToAck } = this.replyResolvers[replyParams.sentMessageId];
       try {
-        const unwired = await this.transportSecurity.wire(
+        const transportSecurity = await this.transportSecurity;
+        const unwired = await transportSecurity.wire(
           payload, MeldMessageType.response, 'in', state);
         if (ACK_PAYLOAD.equals(unwired)) {
           received.resolve(ACK);
@@ -456,8 +458,9 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
 
   private wireRequest = async (ctrlMsg: ControlMessage, state: MeldReadState | null) => {
     // Sign the enclosed request
-    ctrlMsg.attr = await this.transportSecurity.sign?.(ctrlMsg.enc, state) ?? null;
-    return this.transportSecurity.wire(
+    const transportSecurity = await this.transportSecurity;
+    ctrlMsg.attr = await transportSecurity.sign?.(ctrlMsg.enc, state) ?? null;
+    return transportSecurity.wire(
       ctrlMsg.toBuffer(), MeldMessageType.request, 'out', state);
   };
 
@@ -636,15 +639,16 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
   ): Promise<unknown> {
     const replier = await this.replier({ fromId: this.id, toId, messageId, sentMessageId });
     this.log.debug('Replying response', messageId, 'to', sentMessageId, res, replier.id);
+    const transportSecurity = await this.transportSecurity;
     let payload: Buffer;
     if (res == ACK) {
       payload = ACK_PAYLOAD;
     } else {
       // Sign the enclosed request
-      res.attr = await this.transportSecurity.sign?.(res.enc, state) ?? null;
+      res.attr = await transportSecurity.sign?.(res.enc, state) ?? null;
       payload = res.toBuffer();
     }
-    const wire = await this.transportSecurity.wire(
+    const wire = await transportSecurity.wire(
       payload, MeldMessageType.response, 'out', state);
     return replier.publish(wire).finally(() => replier.close?.());
   }

@@ -41,7 +41,7 @@ export class AblyRemotes extends PubsubRemotes {
 
   constructor(
     config: MeldAblyConfig,
-    extensions: MeldExtensions,
+    extensions: () => Promise<MeldExtensions>,
     connect = ablyConnect
   ) {
     super(config, extensions);

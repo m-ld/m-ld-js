@@ -1,50 +1,51 @@
 import { mockFn } from 'jest-mock-extended';
 import {
   asSubjectUpdates, includesValue, includeValues, Optional, propertyValue, Reference, Subject,
-  updateSubject
+  updateSubject, VocabReference
 } from '../src';
 import { SubjectGraph } from '../src/engine/SubjectGraph';
 import { XS } from '../src/ns';
-import { VocabReference } from '../src/jrql-support';
 
 describe('Update utilities', () => {
-  test('converts simple group update to subject updates', () => {
-    expect(asSubjectUpdates({
-      '@delete': [{ '@id': 'foo', size: 10 }],
-      '@insert': [{ '@id': 'foo', size: 20 }]
-    })).toEqual({
-      'foo': {
-        '@delete': { '@id': 'foo', size: 10 },
-        '@insert': { '@id': 'foo', size: 20 }
-      }
+  describe('by-subject indexing', () => {
+    test('converts simple group update to subject updates', () => {
+      expect(asSubjectUpdates({
+        '@delete': [{ '@id': 'foo', size: 10 }],
+        '@insert': [{ '@id': 'foo', size: 20 }]
+      })).toEqual({
+        'foo': {
+          '@delete': { '@id': 'foo', size: 10 },
+          '@insert': { '@id': 'foo', size: 20 }
+        }
+      });
     });
-  });
 
-  test('un-reifies references in subject updates', () => {
-    expect(asSubjectUpdates({
-      '@delete': [{ '@id': 'foo', friend: { '@id': 'bar', name: 'Bob' } }],
-      '@insert': []
-    })).toEqual({
-      'foo': {
-        '@delete': { '@id': 'foo', friend: { '@id': 'bar' } },
-        '@insert': undefined
-      }
+    test('un-reifies references in subject updates', () => {
+      expect(asSubjectUpdates({
+        '@delete': [{ '@id': 'foo', friend: { '@id': 'bar', name: 'Bob' } }],
+        '@insert': []
+      })).toEqual({
+        'foo': {
+          '@delete': { '@id': 'foo', friend: { '@id': 'bar' } },
+          '@insert': undefined
+        }
+      });
     });
-  });
 
-  test('converts array group update to subject updates', () => {
-    expect(asSubjectUpdates({
-      '@delete': [{ '@id': 'foo', size: 10 }, { '@id': 'bar', size: 30 }],
-      '@insert': [{ '@id': 'foo', size: 20 }, { '@id': 'bar', size: 40 }]
-    })).toEqual({
-      'foo': {
-        '@delete': { '@id': 'foo', size: 10 },
-        '@insert': { '@id': 'foo', size: 20 }
-      },
-      'bar': {
-        '@delete': { '@id': 'bar', size: 30 },
-        '@insert': { '@id': 'bar', size: 40 }
-      }
+    test('converts array group update to subject updates', () => {
+      expect(asSubjectUpdates({
+        '@delete': [{ '@id': 'foo', size: 10 }, { '@id': 'bar', size: 30 }],
+        '@insert': [{ '@id': 'foo', size: 20 }, { '@id': 'bar', size: 40 }]
+      })).toEqual({
+        'foo': {
+          '@delete': { '@id': 'foo', size: 10 },
+          '@insert': { '@id': 'foo', size: 20 }
+        },
+        'bar': {
+          '@delete': { '@id': 'bar', size: 30 },
+          '@insert': { '@id': 'bar', size: 40 }
+        }
+      });
     });
   });
 
@@ -79,6 +80,18 @@ describe('Update utilities', () => {
     expect(box.label).toEqual({ '@set': ['My Box', 'Your Box'] });
   });
 
+  test('remove set values in subject', () => {
+    // Using a plain Subject here because Box doesn't admit a label @set
+    const box = { '@id': 'bar', size: 10, label: { '@set': 'My Box' } };
+    updateSubject(box, {
+      bar: {
+        '@delete': { '@id': 'bar', label: 'My Box' },
+        '@insert': undefined
+      }
+    });
+    expect(box.label).toEqual({ '@set': [] });
+  });
+
   test('includes value in subject', () => {
     const box: Box = { '@id': 'bar', size: 10, label: 'My Box' };
     expect(includesValue(box, 'label', 'My Box')).toBe(true);
@@ -100,8 +113,8 @@ describe('Update utilities', () => {
     const box: Box = { '@id': 'foo', size: 10 };
     updateSubject(box, {
       foo: {
-        '@insert': { '@id': 'foo', label: 'My box' },
-        '@delete': undefined
+        '@delete': undefined,
+        '@insert': { '@id': 'foo', label: 'My box' }
       }
     });
     expect(box).toEqual({ '@id': 'foo', size: 10, label: 'My box' });
@@ -111,8 +124,8 @@ describe('Update utilities', () => {
     const box: Box = { '@id': 'foo', size: 10 };
     updateSubject(box, {
       foo: {
-        '@insert': { '@id': 'foo', size: [20, 30] },
-        '@delete': undefined
+        '@delete': undefined,
+        '@insert': { '@id': 'foo', size: [20, 30] }
       }
     });
     expect(box).toEqual({ '@id': 'foo', size: [10, 20, 30] });
@@ -128,8 +141,8 @@ describe('Update utilities', () => {
     const box = { '@id': 'foo', size: [10, 20] };
     updateSubject(box, {
       foo: {
-        '@insert': undefined,
-        '@delete': { '@id': 'foo', size: [10, 20] }
+        '@delete': { '@id': 'foo', size: [10, 20] },
+        '@insert': undefined
       }
     });
     expect(box).toEqual({ '@id': 'foo' });
@@ -163,8 +176,8 @@ describe('Update utilities', () => {
     const box: Box = { '@id': 'foo', size: 10, label: 'My box' };
     updateSubject(box, {
       foo: {
-        '@insert': { '@id': 'foo', size: 20 },
-        '@delete': { '@id': 'foo', size: 10 }
+        '@delete': { '@id': 'foo', size: 10 },
+        '@insert': { '@id': 'foo', size: 20 }
       }
     });
     expect(box).toEqual({ '@id': 'foo', size: 20, label: 'My box' });
@@ -174,8 +187,8 @@ describe('Update utilities', () => {
     const box: Box = { '@id': 'foo', size: 10, label: 'My box' };
     updateSubject(box, {
       foo: {
-        '@insert': { '@id': 'foo', size: 10 },
-        '@delete': { '@id': 'foo', size: 10 }
+        '@delete': { '@id': 'foo', size: 10 },
+        '@insert': { '@id': 'foo', size: 10 }
       }
     });
     expect(box).toEqual({ '@id': 'foo', size: 10, label: 'My box' });
@@ -211,6 +224,54 @@ describe('Update utilities', () => {
       }
     });
     expect(box).toEqual({ '@id': 'foo', size: 10, contents: [{ '@id': 'baz' }] });
+  });
+
+  describe('with defined properties', () => {
+    let changed: boolean;
+    const box = Object.defineProperty({ '@id': 'foo' }, 'size', {
+      get: () => 10,
+      set: () => changed = true,
+      enumerable: true
+    });
+
+    beforeEach(() => {
+      changed = false;
+    });
+
+    test('invokes setter if value added', () => {
+      updateSubject(box, {
+        foo: { '@delete': undefined, '@insert': { '@id': 'foo', size: 11 } }
+      });
+      expect(changed).toBe(true);
+    });
+
+    test('invokes setter if value removed', () => {
+      updateSubject(box, {
+        foo: { '@delete': { '@id': 'foo', size: 10 }, '@insert': undefined }
+      });
+      expect(changed).toBe(true);
+    });
+
+    test('does not invoke setter on irrelevant change', () => {
+      updateSubject(box, {
+        bar: { '@delete': undefined, '@insert': { '@id': 'bar', size: 100 } }
+      });
+      expect(changed).toBe(false);
+    });
+
+    test('does not invoke setter if same value added', () => {
+      updateSubject(box, {
+        foo: { '@delete': undefined, '@insert': { '@id': 'foo', size: 10 } }
+      });
+      expect(changed).toBe(false);
+    });
+
+    test('does not invoke setter if unmatched value removed', () => {
+      updateSubject(box, {
+        foo: { '@delete': { '@id': 'foo', size: 11 }, '@insert': undefined }
+      });
+      expect(changed).toBe(false);
+    });
   });
 
   describe('Deep updates', () => {

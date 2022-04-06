@@ -1,6 +1,6 @@
 import {
   Attribution, GraphSubject, MeldConstraint, MeldExtensions, MeldPreUpdate, MeldUpdate,
-  noTransportSecurity
+  noTransportSecurity, StateManaged
 } from '../../api';
 import { BufferEncoding, EncodedOperation, OperationMessage, Snapshot } from '..';
 import { GlobalClock, TickTree, TreeClock } from '../clocks';
@@ -69,7 +69,7 @@ export class SuSetDataset extends MeldEncoder {
   constructor(
     private readonly dataset: Dataset,
     private readonly context: Context,
-    private readonly extensions: MeldExtensions,
+    private readonly extensions: StateManaged<MeldExtensions>,
     private readonly app: MeldApp,
     config: DatasetConfig
   ) {
@@ -91,7 +91,7 @@ export class SuSetDataset extends MeldEncoder {
   }
 
   private get transportSecurity() {
-    return this.extensions.transportSecurity ?? noTransportSecurity;
+    return this.extensions.ready().then(ext => ext.transportSecurity ?? noTransportSecurity);
   }
 
   get readState() {
@@ -259,7 +259,8 @@ export class SuSetDataset extends MeldEncoder {
       principalId,
       agree,
       { mutable: verb === 'check' });
-    for (let constraint of this.extensions.constraints ?? [])
+    const ext = await this.extensions.ready();
+    for (let constraint of ext.constraints ?? [])
       await constraint[verb]?.(this.readState, interim);
     return interim.finalise();
   }
@@ -310,7 +311,8 @@ export class SuSetDataset extends MeldEncoder {
     const attribution = await this.sign(op);
     // Apply transport wire security to the encoded update
     let encoded: EncodedOperation = [...op.encoded];
-    const wireUpdate = await this.transportSecurity.wire(
+    const transportSecurity = await this.transportSecurity;
+    const wireUpdate = await transportSecurity.wire(
       encoded[OpKey.update], MeldMessageType.operation, 'out', this.readState);
     if (wireUpdate !== encoded[OpKey.update]) {
       encoded[OpKey.update] = wireUpdate;
@@ -323,26 +325,29 @@ export class SuSetDataset extends MeldEncoder {
     return operationMsg;
   }
 
-  private sign = async (op: MeldOperation) =>
-    this.transportSecurity.sign != null ?
-      this.transportSecurity.sign(EncodedOperation.toBuffer(op.encoded), this.readState) : null;
+  private sign = async (op: MeldOperation) => {
+    const transportSecurity = await this.transportSecurity;
+    return transportSecurity.sign != null ?
+      transportSecurity.sign(EncodedOperation.toBuffer(op.encoded), this.readState) : null;
+  };
 
   /**
    * Un-applies transport security from the encoded operation in the message
    */
   private async unSecureOperation(msg: OperationMessage): Promise<EncodedOperation> {
+    const transportSecurity = await this.transportSecurity;
     let encoded: EncodedOperation = [...msg.data];
     if (encoded[OpKey.encoding][encoded[OpKey.encoding].length - 1] === BufferEncoding.SECURE) {
       // Un-apply wire security
-      encoded[OpKey.update] = await this.transportSecurity.wire(
+      encoded[OpKey.update] = await transportSecurity.wire(
         encoded[OpKey.update], MeldMessageType.operation, 'in', this.readState);
       encoded[OpKey.encoding] = encoded[OpKey.encoding].slice(0, -1);
       // Now verify the unsecured encoded update
-      await this.transportSecurity.verify?.(
+      await transportSecurity.verify?.(
         EncodedOperation.toBuffer(encoded), msg.attr, this.readState);
     } else {
       // Signature applies to the already-encoded message data
-      await this.transportSecurity.verify?.(msg.enc, msg.attr, this.readState);
+      await transportSecurity.verify?.(msg.enc, msg.attr, this.readState);
     }
     return encoded;
   }
@@ -445,7 +450,8 @@ export class SuSetDataset extends MeldEncoder {
         // state, because we may have to recover if the rewind goes back too
         // far. This is allowed because an agreement condition should only
         // inspect previously agreed state.
-        for (let agreementCondition of this.ssd.extensions.agreementConditions ?? [])
+        const ext = await this.ssd.extensions.ready();
+        for (let agreementCondition of ext.agreementConditions ?? [])
           await agreementCondition.test(this.ssd.readState, txn.internalUpdate);
         if (this.op.time.anyLt(this.journaling.state.time)) {
           // A rewind is required. This trumps the work we have already done.

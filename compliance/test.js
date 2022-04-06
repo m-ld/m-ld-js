@@ -1,11 +1,10 @@
 const { fork } = require('child_process');
 const { createWriteStream } = require('fs');
-const { join } = require('path');
+const { dirname, join } = require('path');
 const inspector = require('inspector');
 const LOG = require('loglevel');
 
-const COMPLIANCE_DIR = '../node_modules/@m-ld/m-ld-spec/compliance'.split('/');
-const COMPLIANCE_PATH = join(__dirname, ...COMPLIANCE_DIR);
+const COMPLIANCE_PATH = dirname(require.resolve('@m-ld/m-ld-spec/compliance/jasmine.json'));
 const Jasmine = require(require.resolve('jasmine', { paths: [COMPLIANCE_PATH] }));
 const jasmine = new Jasmine();
 

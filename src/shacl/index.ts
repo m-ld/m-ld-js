@@ -1,9 +1,10 @@
 import { Subject, VocabReference } from '../jrql-support';
-import { GraphSubject, MeldPreUpdate, MeldReadState } from '../api';
+import { GraphSubject, GraphUpdate, MeldReadState } from '../api';
 import { SH } from '../ns/index';
 import { OrmSubject } from '../orm';
-import { compareValues } from '../engine/jsonld';
 import { Iri } from 'jsonld/jsonld-spec';
+import { SubjectGraph } from '../engine/SubjectGraph';
+import { array } from '../util';
 
 /**
  * @see https://www.w3.org/TR/shacl/#constraints-section
@@ -26,36 +27,32 @@ export abstract class Shape extends OrmSubject {
   }
 
   /**
-   * @returns an array of shapes affected by the given update. All returned
-   * shapes will {@link refines refine} this Shape.
+   * @returns filtered updates where the affected subject matches this shape
+   * either before or after the update is applied to the state
    */
-  abstract affected(state: MeldReadState, update: MeldPreUpdate): Promise<Shape[]>;
-
-  /**
-   * @returns whether this shape is a strict refinement of the other Shape, that
-   * is, all focus nodes of this Shape are also focus nodes of the other Shape.
-   */
-  abstract refines(other: Shape): boolean;
+  abstract affected(state: MeldReadState, update: GraphUpdate): Promise<GraphUpdate>;
 }
 
 /**
  * @see https://www.w3.org/TR/shacl/#property-shapes
  */
 export class PropertyShape extends Shape {
-  path: VocabReference; // | List etc.
-  name: Set<string>;
+  path: Iri; // | List etc.
+  name: string[];
 
-  static declare = ({ shapeId, path, targetClass, name }: {
-    shapeId: Iri,
-    path: VocabReference;
-    targetClass?: VocabReference | VocabReference[];
+  static declare = (spec: Iri | {
+    shapeId?: Iri,
+    path: Iri;
+    targetClass?: Iri | Iri[];
     name?: string | string[];
-  }): Subject => ({
-    '@id': shapeId,
-    [SH.path]: path,
-    [SH.targetClass]: targetClass,
-    [SH.name]: name
-  });
+  }): Subject => typeof spec == 'object' ? {
+    '@id': spec.shapeId,
+    [SH.path]: { '@vocab': spec.path },
+    [SH.targetClass]: array(spec.targetClass).map(iri => ({ '@vocab': iri })),
+    [SH.name]: spec.name
+  } : {
+    [SH.path]: { '@vocab': spec }
+  };
 
   constructor(
     src: GraphSubject,
@@ -63,30 +60,36 @@ export class PropertyShape extends Shape {
   ) {
     super(src, init?.targetClass);
     this.initSrcProperty(src, SH.path, VocabReference,
-      () => this.path, v => this.path = v, init?.path);
-    this.initSrcProperty(src, SH.name, [Set, String],
+      () => ({ '@vocab': this.path }), v => this.path = v['@vocab'],
+      init?.path ? { '@vocab': init.path } : undefined);
+    this.initSrcProperty(src, SH.name, [Array, String],
       () => this.name, v => this.name = v, init?.name);
   }
 
-  isFocus(subject: Subject) {
-    return subject[this.path['@vocab']] != null;
+  /**
+   * Updated subjects for a property shape will only contain the single property
+   * which matches this property shape's path.
+   *
+   * @inheritDoc
+   * @todo inverse properties: which subject is returned?
+   */
+  async affected(state: MeldReadState, update: GraphUpdate): Promise<GraphUpdate> {
+    return {
+      '@delete': this.filterSubjects(update['@delete']),
+      '@insert': this.filterSubjects(update['@insert'])
+    };
   }
 
-  async affected(state: MeldReadState, update: MeldPreUpdate): Promise<Shape[]> {
-    for (let subject of update['@delete'])
-      if (this.isFocus(subject))
-        return [this];
-    for (let subject of update['@insert'])
-      if (this.isFocus(subject))
-        return [this];
-    return [];
-  }
-
-  refines(other: Shape): boolean {
-    return other instanceof PropertyShape && compareValues(this.path, other.path);
+  private filterSubjects(subjects: SubjectGraph) {
+    return new SubjectGraph(subjects
+      .filter(s => this.path in s)
+      .map<GraphSubject>(s => ({
+        '@id': s['@id'],
+        [this.path]: s[this.path]
+      })));
   }
 
   toString(): string {
-    return this.name.size ? this.name.toString() : this.path['@vocab'];
+    return this.name.length ? this.name.toString() : this.path;
   }
 }

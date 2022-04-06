@@ -2,7 +2,7 @@ import {
   any, Construct, Describe, Group, MeldUpdate, Reference, Select, Subject, Update
 } from '../src';
 import { ApiStateMachine } from '../src/engine/MeldState';
-import { memStore, mockRemotes, testConfig, testContext } from './testClones';
+import { memStore, mockRemotes, testConfig, testContext, testExtensions } from './testClones';
 import { DatasetEngine } from '../src/engine/dataset/DatasetEngine';
 import { Future } from '../src/engine/util';
 import { blankRegex, genIdRegex } from './testUtil';
@@ -18,10 +18,11 @@ describe('Meld State API', () => {
   let captureUpdate: Future<MeldUpdate>;
 
   beforeEach(async () => {
+    const ext = { constraints: [new DefaultList('test')] };
     let clone = new DatasetEngine({
       dataset: await memStore({ context: testContext }),
       remotes: mockRemotes(),
-      extensions: { constraints: [new DefaultList('test')] },
+      extensions: testExtensions(ext),
       config: testConfig(),
       app: {},
       context: testContext

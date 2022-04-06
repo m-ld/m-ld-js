@@ -11,7 +11,7 @@ import { QueryableRdfSource } from './rdfjs-support';
 import { Consumable, each, flow, Flowable } from 'rx-flowable';
 import { Future, tapComplete } from './engine/util';
 import { MeldMessageType } from './ns/m-ld';
-import { MeldApp, MeldConfig } from './config';
+import { MeldApp } from './config';
 
 /**
  * A convenience type for a struct with a `@insert` and `@delete` property, like
@@ -434,6 +434,32 @@ export interface MeldClone extends MeldStateMachine {
 }
 
 /**
+ * Some component of type `T` that is loaded from domain state. The current
+ * value may change as the domain evolves; and may also be temporarily
+ * unavailable during an update.
+ * @internal
+ */
+export interface StateManaged<T> {
+  /**
+   * Get the current or next available value, ready for use (or a rejection,
+   * e.g. if the clone is shutting down).
+   */
+  ready(): Promise<T>;
+  /**
+   * Initialises the extensions against the given clone state. This method could
+   * be used to read significant state into memory for the efficient
+   * implementation of an extension's function.
+   */
+  readonly initialise?: StateProc;
+  /**
+   * Called to inform the extensions of an update to the state, _after_ it has
+   * been applied. If available, this procedure will be called for every state
+   * after that passed to {@link initialise}.
+   */
+  readonly onUpdate?: UpdateProc<MeldPreUpdate>;
+}
+
+/**
  * Extensions applied to a **m-ld** clone.
  *
  * In general, extensions should be dynamically selected and loaded based on the
@@ -444,9 +470,6 @@ export interface MeldClone extends MeldStateMachine {
  * to prevent outdated clones from acting incorrectly in ways that could cause
  * data corruption or compromise security. Consult the extension's documentation
  * for safe operation.
- *
- * @experimental
- * @category Experimental
  */
 export interface MeldExtensions {
   /**
@@ -470,25 +493,6 @@ export interface MeldExtensions {
    * @experimental
    */
   readonly transportSecurity?: MeldTransportSecurity;
-  /**
-   * Initialises the extensions against the given clone state. This method could
-   * be used to read significant state into memory for the efficient
-   * implementation of an extension's function.
-   */
-  readonly initialise?: StateProc;
-  /**
-   * Called to inform the extensions of an update to the state, _after_ it has
-   * been applied. If available, this procedure will be called for every state
-   * after that passed to {@link initialise}.
-   */
-  readonly onUpdate?: UpdateProc<MeldPreUpdate>;
-}
-
-/**
- * Required constructor form for **m-ld** extension classes
- */
-export interface ConstructMeldExtensions {
-  new(config: MeldConfig, app: MeldApp): MeldExtensions;
 }
 
 /**

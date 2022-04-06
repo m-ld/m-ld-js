@@ -21,7 +21,11 @@ export interface MeldIoConfig extends MeldConfig {
 export class IoRemotes extends PubsubRemotes {
   private readonly socket: Socket;
 
-  constructor(config: MeldIoConfig, extensions: MeldExtensions, connect = io) {
+  constructor(
+    config: MeldIoConfig,
+    extensions: () => Promise<MeldExtensions>,
+    connect = io
+  ) {
     super(config, extensions);
     const opts = config.io?.opts;
     const optsToUse: Partial<ManagerOptions> = {
