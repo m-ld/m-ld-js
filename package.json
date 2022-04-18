@@ -6,6 +6,7 @@
   "types": "dist/index.d.ts",
   "exports": {
     ".": "./dist/index.js",
+    "./dist/orm": "./dist/orm/index.js",
     "./dist/mqtt": "./dist/mqtt/index.js",
     "./dist/socket.io": "./dist/socket.io/index.js",
     "./dist/socket.io-server": "./dist/socket.io/server/index.js",

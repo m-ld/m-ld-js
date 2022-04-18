@@ -1,15 +1,29 @@
 // noinspection ES6MissingAwait
 
-import { LockManager } from '../src/engine/locks';
+import { LockManager, SharedPromise } from '../src/engine/locks';
+
+let ops: number[]; // Used to assert concurrent operation ordering
+const pushOp = async (n: number) => ops.push(n);
+
+beforeEach(() => {
+  ops = [];
+});
+
+// SharedPromise was exported after LockManager already used it, so it's mostly
+// tested by the 'Sharable lock' suite below.
+describe('Shared promise', () => {
+  test('can await run', async () => {
+    const sp = new SharedPromise('test', async () => {
+      await pushOp(1);
+      sp.extend('ex', pushOp(2));
+      return 3;
+    });
+    await sp.run();
+    expect(ops).toEqual([1, 2]);
+  });
+});
 
 describe('Sharable lock', () => {
-  let ops: number[]; // Used to assert concurrent operation ordering
-  const pushOp = async (n: number) => ops.push(n);
-
-  beforeEach(() => {
-    ops = [];
-  });
-
   test('exclusive ops execute immediately', async () => {
     const lock = new LockManager<'it'>();
     await lock.exclusive('it', 'test', async () => {

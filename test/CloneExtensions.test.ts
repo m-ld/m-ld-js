@@ -2,34 +2,34 @@ import { CloneExtensions } from '../src/engine/index';
 import { MockGraphState, testConfig, testContext } from './testClones';
 import { DefaultList } from '../src/constraints/DefaultList';
 import { SingleValued } from '../src/constraints/SingleValued';
-import {
-  MeldApp, MeldConfig, MeldConstraint, MeldExtensions, MeldTransportSecurity
-} from '../src/index';
-import { mock, mockFn } from 'jest-mock-extended';
+import { MeldConstraint, MeldExtensions, MeldTransportSecurity, StateManaged } from '../src/index';
+import { mock } from 'jest-mock-extended';
 import { M_LD } from '../src/ns';
+import { ExtensionEnvironment } from '../src/orm';
 
 const thisModuleId = require.resolve('./CloneExtensions.test');
 
-export class MockExtensions implements MeldExtensions {
+export class MockExtensions implements StateManaged<MeldExtensions> {
   static mockTs = mock<MeldTransportSecurity>();
   static mockConstraint = mock<MeldConstraint>();
-  static lastConfig: MeldConfig;
-  static lastApp: MeldApp;
+  static last: ExtensionEnvironment;
 
-  constructor(config: MeldConfig, app: MeldApp) {
-    MockExtensions.lastConfig = config;
-    MockExtensions.lastApp = app;
+  constructor(parent: { env: ExtensionEnvironment }) {
+    MockExtensions.last = parent.env;
   }
 
-  readonly constraints = [MockExtensions.mockConstraint];
-  readonly transportSecurity = MockExtensions.mockTs;
-  readonly initialise = mockFn();
-  readonly onUpdate = mockFn();
+  async ready(): Promise<MeldExtensions> {
+    return {
+      constraints: [MockExtensions.mockConstraint],
+      transportSecurity: MockExtensions.mockTs
+    };
+  }
 }
 
 describe('Top-level extensions loading', () => {
   test('empty config has just default list', async () => {
-    const ext = await CloneExtensions.initial(testConfig(), {}, testContext);
+    const cloneExtensions = await CloneExtensions.initial(testConfig(), {}, testContext);
+    const ext = await cloneExtensions.ready();
     expect(ext.transportSecurity).toBeUndefined();
     const constraints = [...ext.constraints];
     expect(constraints.length).toBe(1);
@@ -37,12 +37,13 @@ describe('Top-level extensions loading', () => {
   });
 
   test('from config', async () => {
-    const ext = await CloneExtensions.initial(testConfig({
+    const cloneExtensions = await CloneExtensions.initial(testConfig({
       constraints: [{
         '@type': 'single-valued',
         property: 'prop1'
       }]
     }), {}, testContext);
+    const ext = await cloneExtensions.ready();
     expect(ext.transportSecurity).toBeUndefined();
     const constraints = [...ext.constraints];
     expect(constraints.length).toBe(2);
@@ -52,10 +53,11 @@ describe('Top-level extensions loading', () => {
   });
 
   test('from app', async () => {
-    const ext = await CloneExtensions.initial(testConfig(), {
+    const cloneExtensions = await CloneExtensions.initial(testConfig(), {
       constraints: [MockExtensions.mockConstraint],
       transportSecurity: MockExtensions.mockTs
     }, testContext);
+    const ext = await cloneExtensions.ready();
     expect(ext.transportSecurity).toBe(MockExtensions.mockTs);
     const constraints = [...ext.constraints];
     expect(constraints.length).toBe(2);
@@ -73,14 +75,16 @@ describe('Top-level extensions loading', () => {
     afterEach(() => state.close());
 
     test('initialises with no modules', async () => {
-      const ext = await CloneExtensions.initial(testConfig(), {}, testContext);
-      await ext.initialise(state.graph.asReadState);
+      const cloneExtensions = await CloneExtensions.initial(testConfig(), {}, testContext);
+      await cloneExtensions.initialise(state.graph.asReadState);
+      const ext = await cloneExtensions.ready();
       expect(ext.transportSecurity).toBeUndefined();
     });
 
     test('loads a module on initialise', async () => {
       const config = testConfig();
-      const ext = await CloneExtensions.initial(config, {}, testContext);
+      const cloneExtensions = await CloneExtensions.initial(config, {}, testContext);
+      let ext = await cloneExtensions.ready();
       expect(ext.transportSecurity).toBeUndefined();
       await state.write({
         '@id': M_LD.extensions,
@@ -90,19 +94,20 @@ describe('Top-level extensions loading', () => {
           [M_LD.JS.className]: 'MockExtensions'
         }]
       }, new DefaultList('test'));
-      await ext.initialise(state.graph.asReadState);
-      expect(MockExtensions.lastConfig).toBe(config);
+      await cloneExtensions.initialise(state.graph.asReadState);
+      ext = await cloneExtensions.ready();
       expect(ext.transportSecurity).toBe(MockExtensions.mockTs);
       const constraints = [...ext.constraints];
       expect(constraints.length).toBe(2);
       expect(constraints[0]).toBe(MockExtensions.mockConstraint);
       expect(constraints[1]).toBeInstanceOf(DefaultList);
+      expect(MockExtensions.last.config).toBe(config);
     });
 
     test('loads a module on update', async () => {
       const config = testConfig();
-      const ext = await CloneExtensions.initial(config, {}, testContext);
-      await ext.initialise(state.graph.asReadState);
+      const cloneExtensions = await CloneExtensions.initial(config, {}, testContext);
+      await cloneExtensions.initialise(state.graph.asReadState);
       const update = await state.write({
         '@id': M_LD.extensions,
         '@list': [{
@@ -111,13 +116,14 @@ describe('Top-level extensions loading', () => {
           [M_LD.JS.className]: 'MockExtensions'
         }]
       }, new DefaultList('test'));
-      await ext.onUpdate(update, state.graph.asReadState);
-      expect(MockExtensions.lastConfig).toBe(config);
+      await cloneExtensions.onUpdate(update, state.graph.asReadState);
+      let ext = await cloneExtensions.ready();
       expect(ext.transportSecurity).toBe(MockExtensions.mockTs);
       const constraints = [...ext.constraints];
       expect(constraints.length).toBe(2);
       expect(constraints[0]).toBe(MockExtensions.mockConstraint);
       expect(constraints[1]).toBeInstanceOf(DefaultList);
+      expect(MockExtensions.last.config).toBe(config);
     });
   });
 });

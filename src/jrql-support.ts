@@ -210,13 +210,21 @@ export function isValueObject(value: SubjectPropertyObject): value is ValueObjec
 }
 
 /** @internal */
+function isUnaryObject(value: SubjectPropertyObject, theKey: string) {
+  return value != null && typeof value == 'object'
+    && theKey in value
+    && Object.entries(value).every(
+      ([key, value]) => key === theKey || value === undefined);
+}
+
+/** @internal */
 export function isReference(value: SubjectPropertyObject): value is Reference {
-  return typeof value == 'object' && '@id' in value && Object.keys(value).length == 1;
+  return isUnaryObject(value, '@id');
 }
 
 /** @internal */
 export function isVocabReference(value: SubjectPropertyObject): value is VocabReference {
-  return typeof value == 'object' && '@vocab' in value && Object.keys(value).length == 1;
+  return isUnaryObject(value, '@vocab');
 }
 
 /**
@@ -316,8 +324,10 @@ export type SubjectProperty =
  * @param object the object (value) of the property
  * @category json-rql
  */
-export function isPropertyObject(property: string, object: Subject['any']):
-  object is SubjectPropertyObject {
+export function isPropertyObject(
+  property: string,
+  object: Subject['any']
+): object is SubjectPropertyObject {
   return property !== '@context' && property !== '@id' && object != null;
 }
 

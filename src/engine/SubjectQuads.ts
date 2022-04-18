@@ -42,7 +42,7 @@ export class SubjectQuads {
           this.objectTerm(value, property));
       // TODO: What if the property expands to a keyword in the context?
       else
-        throw new Error('Cannot yield quad from top-level value');
+        throw new Error(`Cannot yield quad from top-level value: ${value}`);
   }
 
   private *subjectQuads(

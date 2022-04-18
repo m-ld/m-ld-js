@@ -8,7 +8,7 @@ export class AblyWrtcRemotes extends AblyRemotes implements PeerSignaller {
 
   constructor(
     config: MeldAblyConfig & MeldWrtcConfig,
-    extensions: MeldExtensions,
+    extensions: () => Promise<MeldExtensions>,
     connect = ablyConnect
   ) {
     super(config, extensions, connect);

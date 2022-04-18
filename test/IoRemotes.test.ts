@@ -15,6 +15,7 @@ describe('Socket.io Remotes', () => {
   let localRemotes: IoRemotes;
   let domain: string;
   let port: number;
+  const extensions = () => Promise.resolve({});
 
   beforeAll(done => {
     const server = createServer();
@@ -30,11 +31,11 @@ describe('Socket.io Remotes', () => {
   });
 
   beforeEach(() => {
-    domain = `${(expect.getState().currentTestName.replace(/[^\w]/g, ''))}.m-ld.org`;
+    domain = `${(expect.getState().currentTestName.replace(/\W/g, ''))}.m-ld.org`;
     remoteRemotes = new IoRemotes({
       '@id': 'remote-remotes', '@domain': domain, genesis: true,
       io: { uri: `http://localhost:${port}` }
-    }, {});
+    }, extensions);
   });
 
   test('remote connects', async () => {
@@ -50,7 +51,7 @@ describe('Socket.io Remotes', () => {
     localRemotes = new IoRemotes({
       '@id': 'local-remotes', '@domain': domain, genesis: false,
       io: { uri: `http://localhost:${port}` }
-    }, {});
+    }, extensions);
     const remoteClone = mockLocal();
     remoteRemotes.setLocal(remoteClone);
     await expect(comesAlive(localRemotes)).resolves.toBe(true);
@@ -64,7 +65,7 @@ describe('Socket.io Remotes', () => {
     localRemotes = new IoRemotes({
       '@id': 'local-remotes', '@domain': domain, genesis: false,
       io: { uri: `http://localhost:${port}` }
-    }, {});
+    }, extensions);
     localRemotes.setLocal(mockLocal());
     const clock = TreeClock.GENESIS.forked().left;
     remoteRemotes.setLocal(mockLocal({
@@ -80,7 +81,7 @@ describe('Socket.io Remotes', () => {
     localRemotes = new IoRemotes({
       '@id': 'local-remotes', '@domain': domain, genesis: false,
       io: { uri: `http://localhost:${port}` }
-    }, {});
+    }, extensions);
     localRemotes.setLocal(mockLocal());
     const remote = new MockProcess(TreeClock.GENESIS.forked().right);
     remoteRemotes.setLocal(mockLocal({

@@ -2,10 +2,9 @@ import {
   isList, isPropertyObject, isReference, isSet, isValueObject, isVocabReference, Reference, Subject,
   SubjectPropertyObject, Value, VocabReference
 } from './jrql-support';
-import { array } from './util';
 import { isArray } from './engine/util';
 import { XS } from './ns';
-import { isAbsolute } from './engine/jsonld';
+import { asValues, isAbsolute } from './engine/jsonld';
 
 export type JsAtomValueConstructor =
   typeof String |
@@ -52,7 +51,7 @@ type OptionalConstructed<S> =
         S | undefined;
 
 /** @internal */
-export type ValueConstructed<T, S> =
+export type ValueConstructed<T, S = unknown> =
   T extends String ? string :
     T extends Number ? number :
       T extends Boolean ? boolean :
@@ -177,16 +176,14 @@ export function castPropertyValue<T, S>(
 }
 
 /**@internal*/
-function valueAsArray(value: SubjectPropertyObject) {
-  if (isSet(value)) {
-    return array(value['@set']);
-  } else if (isList(value)) {
+export function valueAsArray(value: SubjectPropertyObject) {
+  if (isList(value)) {
     if (isArray(value['@list']))
       return value['@list'];
     else
       return Object.assign([], value['@list']);
   } else {
-    return array(value);
+    return asValues(value);
   }
 }
 
@@ -274,7 +271,7 @@ function castValue<T>(value: Value, type: JsAtomValueConstructor): T {
  * JSON-LD value suitable for use in a {@link Subject}.
  */
 export function normaliseValue(
-  value: ValueConstructed<unknown, unknown>
+  value: ValueConstructed<unknown>
 ): SubjectPropertyObject | undefined {
   if (isArray(value))
     return value.map(v => normaliseAtomValue(v));
@@ -288,7 +285,7 @@ export function normaliseValue(
 
 /**@internal*/
 function normaliseAtomValue(
-  value: ValueConstructed<unknown, unknown>
+  value: ValueConstructed<unknown>
 ): SubjectPropertyObject {
   switch (typeof value) {
     case 'string':

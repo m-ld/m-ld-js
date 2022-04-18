@@ -2,7 +2,6 @@ import { QuadStoreDataset } from './engine/dataset';
 import { DatasetEngine } from './engine/dataset/DatasetEngine';
 import { ApiStateMachine } from './engine/MeldState';
 import { DomainContext } from './engine/MeldEncoding';
-import { Context } from './jrql-support';
 import { MeldClone, MeldExtensions } from './api';
 import { CloneExtensions, MeldRemotes } from './engine';
 import type { LiveStatus } from '@m-ld/m-ld-spec';
@@ -11,25 +10,22 @@ import { InitialApp } from './config';
 import type { AbstractLevelDOWN } from 'abstract-leveldown';
 import { Stopwatch } from './engine/util';
 
-export {
-  Pattern, Reference, Context, Variable, Value, Describe, Construct,
-  Group, Query, Read, Result, Select, Subject, Update,
-  isRead, isWrite
-} from './jrql-support';
-
 export * from './util';
 export * from './api';
 export * from './config';
 export * from './updates';
 export * from './subjects';
 export * from './js-support';
-export * from './orm';
+export * from './jrql-support';
 
 /**
  * Constructor for a driver for connecting to remote m-ld clones on the domain.
  * @internal
  */
-type ConstructRemotes = new (config: MeldConfig, extensions: MeldExtensions) => MeldRemotes;
+type ConstructRemotes = new (
+  config: MeldConfig,
+  extensions: () => Promise<MeldExtensions>
+) => MeldRemotes;
 
 /**
  * Create or initialise a local clone, depending on whether the given backend
@@ -58,7 +54,7 @@ export async function clone(
   sw.next('dependencies');
   const context = new DomainContext(config['@domain'], config['@context']);
   const extensions = await CloneExtensions.initial(config, app, context);
-  const remotes = new constructRemotes(config, extensions);
+  const remotes = new constructRemotes(config, extensions.ready);
 
   sw.next('dataset');
   const dataset = await new QuadStoreDataset(
@@ -71,14 +67,13 @@ export async function clone(
   await engine.initialise(sw.lap);
   sw.stop();
 
-  return new DatasetClone(engine, extensions);
+  return new DatasetClone(engine);
 }
 
 /** @internal */
 class DatasetClone extends ApiStateMachine implements MeldClone {
   constructor(
-    private readonly dataset: DatasetEngine,
-    readonly extensions: MeldExtensions
+    private readonly dataset: DatasetEngine
   ) {
     super(dataset);
   }

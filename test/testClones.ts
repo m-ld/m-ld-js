@@ -9,7 +9,8 @@ import { AsyncMqttClient, IPublishPacket } from 'async-mqtt';
 import { EventEmitter } from 'events';
 import { observeOn } from 'rxjs/operators';
 import {
-  InterimUpdate, MeldConfig, MeldConstraint, MeldPreUpdate, MeldReadState, MeldUpdate, StateProc
+  Context, InterimUpdate, MeldConfig, MeldConstraint, MeldExtensions, MeldPreUpdate, MeldReadState,
+  MeldUpdate, StateManaged, StateProc, Write
 } from '../src';
 import { AbstractLevelDOWN } from 'abstract-leveldown';
 import { LiveValue } from '../src/engine/LiveValue';
@@ -21,7 +22,6 @@ import { DomainContext } from '../src/engine/MeldEncoding';
 import { JrqlGraph } from '../src/engine/dataset/JrqlGraph';
 import { ActiveContext } from 'jsonld/lib/context';
 import { activeCtx } from '../src/engine/jsonld';
-import { Context, Write } from '../src/jrql-support';
 import { InterimUpdatePatch } from '../src/engine/dataset/InterimUpdatePatch';
 
 export function testConfig(config?: Partial<MeldConfig>): MeldConfig {
@@ -29,6 +29,10 @@ export function testConfig(config?: Partial<MeldConfig>): MeldConfig {
 }
 
 export const testContext = new DomainContext('test.m-ld.org');
+
+export const testExtensions = (ext?: MeldExtensions): StateManaged<MeldExtensions> => ({
+  ready: () => Promise.resolve(ext ?? {})
+});
 
 export function mockRemotes(
   updates: Observable<OperationMessage> = NEVER,
@@ -79,6 +83,8 @@ export class MockState {
   }
 }
 
+type GraphStateWriteOpts = { updateType?: 'user' | 'internal', constraint?: MeldConstraint };
+
 export class MockGraphState {
   static async create({ dataset, context }: { dataset?: Dataset, context?: Context } = {}) {
     context ??= testContext;
@@ -96,16 +102,20 @@ export class MockGraphState {
     this.graph = new JrqlGraph(state.dataset.graph());
   }
 
-  async write(request: Write, constraint?: MeldConstraint): Promise<MeldPreUpdate> {
+  async write(
+    request: Write,
+    opts?: MeldConstraint | GraphStateWriteOpts
+  ): Promise<MeldPreUpdate> {
+    const { constraint, updateType }: GraphStateWriteOpts =
+      opts != null ? ('check' in opts ? { constraint: opts } : opts) : {};
     const update = new Future<MeldPreUpdate>();
     await this.state.write(async () => {
       const patch = await this.graph.write(request, this.ctx);
       const interim = new InterimUpdatePatch(
         this.graph, this.ctx, patch, null, null, { mutable: true });
-      if (constraint != null)
-        await constraint.check(this.graph.asReadState, interim);
+      await constraint?.check(this.graph.asReadState, interim);
       const txn = await interim.finalise();
-      update.resolve(txn.internalUpdate);
+      update.resolve(updateType === 'user' ? txn.userUpdate : txn.internalUpdate);
       return new PatchQuads(txn.assertions).append(txn.entailments);
     });
     return Promise.resolve(update);

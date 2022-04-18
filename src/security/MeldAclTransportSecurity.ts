@@ -39,12 +39,12 @@ export class MeldAclTransportSecurity implements MeldTransportSecurity {
    * @param aesKey a raw AES key, e.g. `randomBytes(32)`
    */
   static declareSecret = (domainName: string, aesKey: Buffer): Write => ({
-      '@id': `http://${domainName}/`,
-      [M_LD.secret]: {
-        '@type': XS.base64Binary,
-        '@value': `${aesKey.toString('base64')}`
-      }
-    });
+    '@id': `http://${domainName}/`,
+    [M_LD.secret]: {
+      '@type': XS.base64Binary,
+      '@value': `${aesKey.toString('base64')}`
+    }
+  });
 
   /**
    * Use to register each principal with access to the domain, for example

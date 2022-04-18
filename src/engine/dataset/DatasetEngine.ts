@@ -1,5 +1,5 @@
 import {
-  GraphSubject, LiveStatus, MeldExtensions, MeldReadState, MeldStatus, StateProc
+  GraphSubject, LiveStatus, MeldExtensions, MeldReadState, MeldStatus, StateManaged, StateProc
 } from '../../api';
 import { MeldLocal, MeldRemotes, OperationMessage, Recovery, Revup, Snapshot } from '..';
 import { liveRollup } from '../LiveValue';
@@ -44,7 +44,7 @@ enum OperationOutcome {
 export type DatasetEngineParameters = {
   dataset: Dataset;
   remotes: MeldRemotes;
-  extensions: MeldExtensions;
+  extensions: StateManaged<MeldExtensions>;
   config: MeldConfig;
   app: MeldApp;
   context?: Context;

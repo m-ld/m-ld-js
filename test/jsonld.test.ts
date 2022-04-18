@@ -54,11 +54,14 @@ describe('JSON-LD', () => {
     expect(getValues({}, 'any')).toEqual([]);
     expect(getValues({ any: null }, 'any')).toEqual([]);
     expect(getValues({ any: undefined }, 'any')).toEqual([]);
+    expect(getValues({ any: { '@set': [] } }, 'any')).toEqual([]);
     expect(getValues({ any: 'any' }, 'any')).toEqual(['any']);
     expect(getValues({ any: ['any'] }, 'any')).toEqual(['any']);
     // Edge case: jsonld library incorrectly skips falsy values
     expect(getValues({ any: '' }, 'any')).toEqual(['']);
     expect(getValues({ any: [0, ''] }, 'any')).toEqual([0, '']);
+    expect(getValues({ any: { '@set': 0 } }, 'any')).toEqual([0]);
+    expect(getValues({ any: { '@set': [0] } }, 'any')).toEqual([0]);
   });
 
   test('compares values', () => {

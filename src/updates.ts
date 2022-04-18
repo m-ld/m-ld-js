@@ -154,8 +154,9 @@ export class SubjectUpdater {
             break;
           default:
             const subjectProperty = new SubjectPropertyValues(subject, property, this.updateValues);
-            subjectProperty.delete(...getValues(deletes ?? {}, property));
-            subjectProperty.insert(...getValues(inserts ?? {}, property));
+            subjectProperty.update(
+              getValues(deletes ?? {}, property),
+              getValues(inserts ?? {}, property));
         }
       }
     }
@@ -171,10 +172,11 @@ export class SubjectUpdater {
 
   private updateList(subject: GraphSubject, deletes?: GraphSubject, inserts?: GraphSubject) {
     if (isList(subject)) {
-      if (isListUpdate(deletes) || isListUpdate(inserts))
+      if (isListUpdate(deletes) || isListUpdate(inserts)) {
         this.updateListIndexes(subject['@list'],
           isListUpdate(deletes) ? deletes['@list'] : {},
           isListUpdate(inserts) ? inserts['@list'] : {});
+      }
       this.updateValues(array(subject['@list']));
     }
   }
@@ -182,8 +184,10 @@ export class SubjectUpdater {
   private updateListIndexes(list: List['@list'], deletes: List['@list'], inserts: List['@list']) {
     const splice = typeof list.splice == 'function' ? list.splice : (() => {
       // Array splice operation must have a length field to behave
-      const maxIndex = Math.max(...Object.keys(list).map(Number).filter(isNaturalNumber));
-      list.length = isFinite(maxIndex) ? maxIndex + 1 : 0;
+      if (!('length' in list)) {
+        const maxIndex = Math.max(...Object.keys(list).map(Number).filter(isNaturalNumber));
+        list.length = isFinite(maxIndex) ? maxIndex + 1 : 0;
+      }
       return [].splice;
     })();
     const splices: { deleteCount: number, items?: any[] }[] = []; // Sparse

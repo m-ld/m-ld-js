@@ -29,7 +29,7 @@ describe('New MQTT remotes', () => {
       '@domain': 'test.m-ld.org',
       genesis: true, // Actually not used by MqttRemotes
       mqtt: { hostname: 'unused' }
-    }, {}, () => mqtt);
+    }, () => Promise.resolve({}), () => mqtt);
   });
 
   test('live starts unknown', async () => {
