@@ -1,7 +1,5 @@
-import { DatasetEngine } from '../src/engine/dataset/DatasetEngine';
-import {
-  hotLive, memStore, MockProcess, mockRemotes, testConfig, testExtensions
-} from './testClones';
+import { DatasetEngine, DatasetEngineParameters } from '../src/engine/dataset/DatasetEngine';
+import { hotLive, memStore, MockProcess, mockRemotes, testConfig } from './testClones';
 import {
   asapScheduler, BehaviorSubject, EMPTY, EmptyError, firstValueFrom, NEVER, of, Subject as Source,
   throwError
@@ -18,13 +16,14 @@ import { Write } from '../src/jrql-support';
 import { Consumable } from 'rx-flowable';
 import { inflateFrom } from '../src/engine/util';
 import { MeldError } from '../src/engine/MeldError';
+import { Dataset } from '../src/engine/dataset/index';
 
 describe('Dataset engine', () => {
   describe('as genesis', () => {
     async function genesis(
       remotes: MeldRemotes, config?: Partial<MeldConfig>): Promise<DatasetEngine> {
       let clone = new DatasetEngine({
-        dataset: await memStore(), remotes, extensions: testExtensions(), config: testConfig(config)
+        dataset: await memStore(), remotes, extensions: {}, app: {}, config: testConfig(config)
       });
       await clone.initialise();
       return clone;
@@ -57,6 +56,17 @@ describe('Dataset engine', () => {
   // Read and write methods on a clone require the state lock. These are
   // normally put in place by a StateEngine.
   class TestDatasetEngine extends DatasetEngine {
+    constructor(dataset: Dataset, params?: Partial<DatasetEngineParameters>) {
+      super({
+        dataset: params?.dataset ?? dataset,
+        remotes: params?.remotes ?? mockRemotes(),
+        extensions: params?.extensions ?? {},
+        config: params?.config ?? testConfig(),
+        app: params?.app ?? {},
+        context: params?.context
+      });
+    }
+
     read(request: Read): Consumable<GraphSubject> {
       return inflateFrom(this.lock.share('state', 'test', () => super.read(request)));
     }
@@ -70,12 +80,7 @@ describe('Dataset engine', () => {
     let silo: DatasetEngine;
 
     beforeEach(async () => {
-      silo = new TestDatasetEngine({
-        dataset: await memStore(),
-        remotes: mockRemotes(),
-        extensions: testExtensions(),
-        config: testConfig()
-      });
+      silo = new TestDatasetEngine(await memStore());
       await silo.initialise();
     });
 
@@ -147,15 +152,14 @@ describe('Dataset engine', () => {
   describe('as genesis with remote clone', () => {
     let clone: DatasetEngine;
     let remote: MockProcess;
-    let remoteUpdates: Source<OperationMessage> = new Source;
+    let remoteUpdates: Source<OperationMessage>;
 
     beforeEach(async () => {
+      remoteUpdates = new Source;
       const remotesLive = hotLive([false]);
       // Ensure that remote updates are async
       const remotes = mockRemotes(remoteUpdates.pipe(observeOn(asapScheduler)), remotesLive);
-      clone = new TestDatasetEngine({
-        dataset: await memStore(), remotes, extensions: testExtensions(), config: testConfig()
-      });
+      clone = new TestDatasetEngine(await memStore(), { remotes });
       await clone.initialise();
       await comesAlive(clone); // genesis is alive
       remote = new MockProcess(await clone.newClock()); // no longer genesis
@@ -169,7 +173,7 @@ describe('Dataset engine', () => {
     });
 
     test('answers rev-up from the new clone', async () => {
-      const revup = await clone.withLocalState(() => clone.revupFrom(remote.time));
+      const revup = await clone.latch(() => clone.revupFrom(remote.time));
       expect(revup).toBeDefined();
       await expect(firstValueFrom(revup!.updates)).rejects.toBeInstanceOf(EmptyError);
     });
@@ -205,7 +209,7 @@ describe('Dataset engine', () => {
         {}, { '@id': 'http://test.m-ld.org/wilma', 'http://test.m-ld.org/#name': 'Wilma' }));
       await updated;
       const thirdTime = await clone.newClock();
-      await expect(clone.withLocalState(() => clone.revupFrom(thirdTime))).resolves.toBeDefined();
+      await expect(clone.latch(() => clone.revupFrom(thirdTime))).resolves.toBeDefined();
     });
     // 2. a failed transaction
     test('answers rev-up from next new clone after failure', async () => {
@@ -216,7 +220,7 @@ describe('Dataset engine', () => {
         }, () => {
         });
       const thirdTime = await clone.newClock();
-      await expect(clone.withLocalState(() => clone.revupFrom(thirdTime))).resolves.toBeDefined();
+      await expect(clone.latch(() => clone.revupFrom(thirdTime))).resolves.toBeDefined();
     });
   });
 
@@ -238,6 +242,7 @@ describe('Dataset engine', () => {
       remotes = mockRemotes(remoteUpdates, remotesLive, left);
       snapshot = jest.fn().mockReturnValueOnce(Promise.resolve<Snapshot>({
         gwc: collaborator.gwc,
+        agreed: TreeClock.GENESIS,
         data: EMPTY, // Cheating, should really contain Wilma (see op above)
         updates: EMPTY
       }));
@@ -246,7 +251,7 @@ describe('Dataset engine', () => {
 
     test('initialises from snapshot', async () => {
       const clone = new DatasetEngine({
-        dataset: await memStore(), remotes, extensions: testExtensions(),
+        dataset: await memStore(), remotes, extensions: {}, app: {},
         config: testConfig({ genesis: false })
       });
       await clone.initialise();
@@ -256,7 +261,7 @@ describe('Dataset engine', () => {
 
     test('can become a silo', async () => {
       const clone = new DatasetEngine({
-        dataset: await memStore(), remotes, extensions: testExtensions(),
+        dataset: await memStore(), remotes, extensions: {}, app: {},
         config: testConfig({ genesis: false })
       });
       await clone.initialise();
@@ -265,9 +270,8 @@ describe('Dataset engine', () => {
     });
 
     test('ignores operation from before snapshot', async () => {
-      const clone = new TestDatasetEngine({
-        dataset: await memStore(), remotes, extensions: testExtensions(),
-        config: testConfig({ genesis: false })
+      const clone = new TestDatasetEngine(await memStore(), {
+        remotes, config: testConfig({ genesis: false })
       });
       await clone.initialise();
       const updates = firstValueFrom(clone.dataUpdates.pipe(count()));
@@ -291,7 +295,8 @@ describe('Dataset engine', () => {
       let clone = new DatasetEngine({
         dataset: await memStore({ backend }),
         remotes: mockRemotes(),
-        extensions: testExtensions(),
+        extensions: {},
+        app: {},
         config
       });
       await clone.initialise();
@@ -307,7 +312,8 @@ describe('Dataset engine', () => {
       const clone = new DatasetEngine({
         dataset: await memStore({ backend }),
         remotes,
-        extensions: testExtensions(),
+        extensions: {},
+        app: {},
         config: testConfig()
       });
 
@@ -327,7 +333,8 @@ describe('Dataset engine', () => {
       const clone = new DatasetEngine({
         dataset: await memStore({ backend }),
         remotes,
-        extensions: testExtensions(),
+        extensions: {},
+        app: {},
         config: testConfig()
       });
 
@@ -346,7 +353,8 @@ describe('Dataset engine', () => {
       const clone = new DatasetEngine({
         dataset: await memStore({ backend }),
         remotes,
-        extensions: testExtensions(),
+        extensions: {},
+        app: {},
         config: testConfig()
       });
 
@@ -369,7 +377,8 @@ describe('Dataset engine', () => {
       const clone = new DatasetEngine({
         dataset: await memStore({ backend }),
         remotes,
-        extensions: testExtensions(),
+        extensions: {},
+        app: {},
         config: testConfig()
       });
       await clone.initialise();
@@ -392,7 +401,8 @@ describe('Dataset engine', () => {
       const clone = new DatasetEngine({
         dataset: await memStore({ backend }),
         remotes,
-        extensions: testExtensions(),
+        extensions: {},
+        app: {},
         config: testConfig()
       });
       await clone.initialise();
@@ -402,12 +412,7 @@ describe('Dataset engine', () => {
 
     test('maintains fifo during rev-up', async () => {
       // We need local siloed update
-      let clone = new TestDatasetEngine({
-        dataset: await memStore({ backend }),
-        remotes: mockRemotes(),
-        extensions: testExtensions(),
-        config
-      });
+      let clone = new TestDatasetEngine(await memStore({ backend }), { config });
       await clone.initialise();
       await clone.write({
         '@id': 'http://test.m-ld.org/fred',
@@ -420,16 +425,11 @@ describe('Dataset engine', () => {
       const revupCalled = new Promise<void>(resolve => {
         remotes.revupFrom = async () => {
           resolve();
-          return { gwc: remote.gwc.update(remote.time.ticked()), updates: revUps };
+          return { gwc: remote.gwc.set(remote.time.ticked()), updates: revUps };
         };
       });
       // The clone will initialise into a revving-up state, waiting for a revUp
-      clone = new DatasetEngine({
-        dataset: await memStore({ backend }),
-        remotes,
-        extensions: testExtensions(),
-        config: testConfig()
-      });
+      clone = new TestDatasetEngine(await memStore({ backend }), { remotes });
       const observedTicks = firstValueFrom(clone.operations.pipe(
         map(op => op.time.ticks), take(2), toArray()));
       await clone.initialise();
@@ -457,7 +457,8 @@ describe('Dataset engine', () => {
       const clone = new DatasetEngine({
         dataset: await memStore({ backend }),
         remotes,
-        extensions: testExtensions(),
+        extensions: {},
+        app: {},
         config: testConfig()
       });
       await clone.initialise();
@@ -479,12 +480,7 @@ describe('Dataset engine', () => {
       const remoteUpdates = new Source<OperationMessage>();
       const remotes = mockRemotes(remoteUpdates, [true]);
       remotes.revupFrom = async () => ({ gwc: remote.gwc, updates: EMPTY });
-      const clone = new TestDatasetEngine({
-        dataset: await memStore({ backend }),
-        remotes,
-        extensions: testExtensions(),
-        config: testConfig()
-      });
+      const clone = new TestDatasetEngine(await memStore({ backend }), { remotes });
       await clone.initialise();
       await clone.status.becomes({ outdated: false });
 
@@ -494,7 +490,7 @@ describe('Dataset engine', () => {
         {}, { '@id': 'http://test.m-ld.org/wilma', 'http://test.m-ld.org/#name': 'Wilma' });
       remoteUpdates.next(op);
       // Push the same operation again
-      op = new OperationMessage(op.prev, op.data, op.time);
+      op = OperationMessage.fromOperation(op.prev, op.data, null, op.time);
       remoteUpdates.next(op);
       // Delivered OK, but need additional check below to see ignored
       await expect(op.delivered).resolves.toBeUndefined();

@@ -3,6 +3,7 @@ import type { ConstraintConfig } from './constraints';
 import type { LogLevelDesc } from 'loglevel';
 import type { AppPrincipal, MeldExtensions } from './api';
 import type { EventEmitter } from 'events';
+import { Observable } from 'rxjs';
 
 /**
  * **m-ld** clone configuration, used to initialise a {@link clone} for use.
@@ -72,9 +73,11 @@ export interface MeldConfig {
  */
 export interface JournalConfig {
   /**
-   * Time, in milliseconds, to delay expensive journal administration tasks such
-   * as truncation and compaction, while the clone is highly active. Default is
-   * one second.
+   * Time, in milliseconds, to delay expensive automatic journal administration
+   * tasks such as truncation and compaction, while the clone is highly active.
+   * Default is one second. Set to `0` to disable automatic journal
+   * administration (administration may still be prompted by the app).
+   *
    * @default 1000
    */
   adminDebounce?: number;
@@ -87,6 +90,51 @@ export interface JournalConfig {
    */
   maxEntryFootprint?: number;
 }
+
+/**
+ * Types of prompts for journal administration functions.
+ * @internal
+ */
+export enum JournalCheckPoint {
+  /**
+   * General administration: the journal implementation responds by performing
+   * any outstanding (potentially compute intensive) tasks.
+   *
+   * Note that if {@link JournalConfig.adminDebounce} is non-zero (or omitted),
+   * admin checkpoints will occur automatically, debounced after clone activity.
+   */
+  ADMIN,
+  /**
+   * A savepoint instructs the journal implementation to retain the most recent
+   * entry so that subsequent entries can be precisely revoked.
+   */
+  SAVEPOINT,
+  /**
+   * TODO: TRUNCATE, entries before will be dropped
+   */
+}
+
+/**
+ * Hooks for the app to take control of clone journal administration
+ * @internal
+ */
+export type JournalAdmin = {
+  /**
+   * A stream of prompts for the journal to perform administrative activity.
+   *
+   * @see JournalCheckPoint
+   */
+  checkpoints?: Observable<JournalCheckPoint>,
+  /**
+   * The schedule delays journal administrative activity to some suitable time
+   * after a checkpoint. By default, in the browser this will wait for an idle
+   * period if `requestIdleCallback` is available; otherwise, it will wait for
+   * the next event loop tick.
+   *
+   * @see https://developer.mozilla.org/en-US/docs/Web/API/Window/requestIdleCallback
+   */
+  schedule?: Observable<unknown>
+};
 
 /**
  * The runtime embedding environment for the **m-ld** clone. The clone calls
@@ -112,6 +160,11 @@ export interface MeldApp {
    * - `timing(entry: PerformanceEntry)`: stopwatch timings for debugging
    */
   backendEvents?: EventEmitter;
+  /**
+   * Journal administration hooks
+   * @internal
+   */
+  journalAdmin?: JournalAdmin;
 }
 
 /**
@@ -121,4 +174,4 @@ export interface MeldApp {
  *
  * @category Configuration
  */
-export type InitialApp = MeldApp & Partial<MeldExtensions>;
+export type InitialApp = MeldApp & MeldExtensions;

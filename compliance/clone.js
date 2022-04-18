@@ -79,8 +79,8 @@ function createApp(config) {
   // 2. Create transport security
   if (transportSecurity) {
     delete config.transportSecurity;
-    app.transportSecurity =
-      new (require(transportSecurity.require)[transportSecurity.export])(config);
+    const TsClass = require(transportSecurity.require)[transportSecurity.class];
+    app.transportSecurity = new TsClass(config, app.principal);
   }
   // 3. Performance timings
   if (LOG.getLevel() <= LOG.levels.TRACE) {
@@ -92,7 +92,7 @@ function createApp(config) {
       createWriteStream(join(outDir, `${config['@id']}.csv`)));
     out.log(['name', 'startTime', 'duration'].join(','));
     app.backendEvents.on('timing', event => out.log([
-      event.name, Math.ceil(event.startTime), Math.ceil(event.duration)
+      event.names, Math.ceil(event.startTime), Math.ceil(event.duration)
     ].join(',')));
     app.backendEvents.on('error', err => LOG.warn('Backend error', err));
   }

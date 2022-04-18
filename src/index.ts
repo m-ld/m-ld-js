@@ -22,6 +22,8 @@ export * from './api';
 export * from './config';
 export * from './updates';
 export * from './subjects';
+export * from './js-support';
+export * from './orm';
 
 /**
  * Constructor for a driver for connecting to remote m-ld clones on the domain.
@@ -30,11 +32,11 @@ export * from './subjects';
 type ConstructRemotes = new (config: MeldConfig, extensions: MeldExtensions) => MeldRemotes;
 
 /**
- * Create or initialise a local clone, depending on whether the given LevelDB
- * database already exists. This function returns as soon as it is safe to begin
- * transactions against the clone; this may be before the clone has received all
- * updates from the domain. You can wait until the clone is up-to-date using the
- * {@link MeldClone.status} property.
+ * Create or initialise a local clone, depending on whether the given backend
+ * already contains m-ld data. This function returns as soon as it is safe to
+ * begin transactions against the clone; this may be before the clone has
+ * received all updates from the domain. You can wait until the clone is
+ * up-to-date using the {@link MeldClone.status} property.
  *
  * @param backend an instance of a leveldb backend
  * @param constructRemotes remotes constructor
@@ -53,7 +55,7 @@ export async function clone(
     Stopwatch.timingEvents.on('timing', e => backendEvents.emit('timing', e));
   const sw = new Stopwatch('clone', config['@id']);
 
-  sw.next('extensions');
+  sw.next('dependencies');
   const context = new DomainContext(config['@domain'], config['@context']);
   const extensions = await CloneExtensions.initial(config, app, context);
   const remotes = new constructRemotes(config, extensions);
@@ -62,12 +64,13 @@ export async function clone(
   const dataset = await new QuadStoreDataset(
     backend, context, backendEvents).initialise(sw.lap);
   const engine = new DatasetEngine({
-    dataset, remotes, extensions, config, context
+    dataset, remotes, extensions, config, app, context
   });
 
   sw.next('engine');
   await engine.initialise(sw.lap);
   sw.stop();
+
   return new DatasetClone(engine, extensions);
 }
 

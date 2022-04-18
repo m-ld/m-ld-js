@@ -38,8 +38,10 @@ export class DefaultList implements MeldConstraint {
     return this.doListRewrites('apply', update, state);
   }
 
-  private async doListRewrites(mode: keyof MeldConstraint,
-    interim: InterimUpdate, state: MeldReadState
+  private async doListRewrites(
+    mode: keyof MeldConstraint,
+    interim: InterimUpdate,
+    state: MeldReadState
   ) {
     const update = await interim.update;
     // Look for list slots being inserted (only used for check rewrite)

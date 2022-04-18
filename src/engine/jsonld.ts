@@ -1,28 +1,48 @@
 import { Options, processContext } from 'jsonld';
 import { Context, Iri } from 'jsonld/jsonld-spec';
 import { compactIri as _compactIri } from 'jsonld/lib/compact';
-import { getInitialContext, expandIri, ActiveContext } from 'jsonld/lib/context';
+import { compareValues as _compareValues } from 'jsonld/lib/util';
+import { ActiveContext, expandIri, getInitialContext } from 'jsonld/lib/context';
+import { isAbsolute } from 'jsonld/lib/url';
 
-export { compareValues, hasProperty, hasValue } from 'jsonld/lib/util';
+export { hasProperty, hasValue } from 'jsonld/lib/util';
 export { ActiveContext, getContextValue } from 'jsonld/lib/context';
+export { isAbsolute } from 'jsonld/lib/url';
+
+export function compareValues(v1: any, v2: any): boolean {
+  const jsonldEqual = _compareValues(v1, v2);
+  if (!jsonldEqual && typeof v1 == 'object' && typeof v2 == 'object') {
+    if ('@vocab' in v1 && '@vocab' in v2)
+      return v1['@vocab'] === v2['@vocab'];
+    else if ('@id' in v1 && '@vocab' in v2)
+      return isAbsolute(v1['@id']) && v1['@id'] === v2['@vocab'];
+    else if ('@vocab' in v1 && '@id' in v2)
+      return isAbsolute(v1['@vocab']) && v1['@vocab'] === v2['@id'];
+  }
+  return jsonldEqual;
+}
 
 export function expandTerm(value: string, ctx: ActiveContext,
-  options?: Options.Expand & { vocab?: boolean }): Iri {
+  options?: Options.Expand & { vocab?: boolean }
+): Iri {
   return expandIri(ctx, value, {
     base: true, vocab: options?.vocab
   }, options ?? {});
 }
 
 export function compactIri(iri: Iri, ctx?: ActiveContext,
-  options?: Options.CompactIri & { vocab?: boolean }): string {
+  options?: Options.CompactIri & { vocab?: boolean }
+): string {
   return ctx != null ? _compactIri({
     activeCtx: ctx, iri, ...options,
     ...options?.vocab ? { relativeTo: { vocab: options.vocab } } : null
   }) : iri;
 }
 
-export async function activeCtx(context: Context,
-  options?: Options.DocLoader): Promise<ActiveContext> {
+export async function activeCtx(
+  context: Context,
+  options?: Options.DocLoader
+): Promise<ActiveContext> {
   return nextCtx(initialCtx(), context, options);
 }
 
@@ -31,7 +51,8 @@ export function initialCtx(): ActiveContext {
 }
 
 export async function nextCtx(ctx: ActiveContext, context?: Context,
-  options?: Options.DocLoader): Promise<ActiveContext> {
+  options?: Options.DocLoader
+): Promise<ActiveContext> {
   return context != null ? processContext(ctx, context, options ?? {}) : ctx;
 }
 

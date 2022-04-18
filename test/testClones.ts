@@ -1,32 +1,40 @@
 import {
-  BufferEncoding, EncodedOperation, MeldLocal, MeldRemotes, OperationMessage
+  BufferEncoding, EncodedOperation, MeldLocal, MeldRemotes, OperationMessage, Snapshot
 } from '../src/engine';
 import { mock, MockProxy } from 'jest-mock-extended';
 import { asapScheduler, BehaviorSubject, from, NEVER, Observable, Observer } from 'rxjs';
-import { Dataset, QuadStoreDataset } from '../src/engine/dataset';
+import { Dataset, Patch, PatchQuads, QuadStoreDataset } from '../src/engine/dataset';
 import { GlobalClock, TreeClock } from '../src/engine/clocks';
 import { AsyncMqttClient, IPublishPacket } from 'async-mqtt';
 import { EventEmitter } from 'events';
 import { observeOn } from 'rxjs/operators';
-import { MeldConfig, MeldExtensions, MeldReadState, noTransportSecurity, StateProc } from '../src';
+import {
+  InterimUpdate, MeldConfig, MeldConstraint, MeldPreUpdate, MeldReadState, MeldUpdate, StateProc
+} from '../src';
 import { AbstractLevelDOWN } from 'abstract-leveldown';
 import { LiveValue } from '../src/engine/LiveValue';
-import { Context } from 'jsonld/jsonld-spec';
 import { MeldMemDown } from '../src/memdown';
-import { MsgPack } from '../src/engine/util';
+import { Future, MsgPack } from '../src/engine/util';
+import { DatasetSnapshot } from '../src/engine/dataset/SuSetDataset';
+import { ClockHolder } from '../src/engine/messages';
+import { DomainContext } from '../src/engine/MeldEncoding';
+import { JrqlGraph } from '../src/engine/dataset/JrqlGraph';
+import { ActiveContext } from 'jsonld/lib/context';
+import { activeCtx } from '../src/engine/jsonld';
+import { Context, Write } from '../src/jrql-support';
+import { InterimUpdatePatch } from '../src/engine/dataset/InterimUpdatePatch';
 
 export function testConfig(config?: Partial<MeldConfig>): MeldConfig {
   return { '@id': 'test', '@domain': 'test.m-ld.org', genesis: true, ...config };
 }
 
-export function testExtensions(extensions?: Partial<MeldExtensions>): MeldExtensions {
-  return { constraints: [], transportSecurity: noTransportSecurity, ...extensions }
-}
+export const testContext = new DomainContext('test.m-ld.org');
 
 export function mockRemotes(
   updates: Observable<OperationMessage> = NEVER,
   lives: Array<boolean | null> | LiveValue<boolean | null> = [false],
-  newClock: TreeClock = TreeClock.GENESIS): MeldRemotes {
+  newClock: TreeClock = TreeClock.GENESIS
+): MeldRemotes {
   // This weirdness is due to jest-mock-extended trying to mock arrays
   return {
     ...mock<MeldRemotes>(),
@@ -39,7 +47,7 @@ export function mockRemotes(
 
 export function hotLive(lives: Array<boolean | null>): BehaviorSubject<boolean | null> {
   const live = new BehaviorSubject(lives[0]);
-  from(lives.slice(1)).pipe(observeOn(asapScheduler)).forEach(v => live.next(v));
+  from(lives.slice(1)).pipe(observeOn(asapScheduler)).subscribe(v => live.next(v));
   return live;
 }
 
@@ -52,6 +60,62 @@ export async function memStore(opts?: {
     opts?.context).initialise();
 }
 
+export class MockState {
+  static async create({ dataset, context }: { dataset?: Dataset, context?: Context } = {}) {
+    dataset ??= await memStore({ context });
+    return new MockState(dataset,
+      await dataset.lock.acquire('state', 'test', 'share'));
+  }
+
+  protected constructor(
+    readonly dataset: Dataset,
+    readonly close: () => void
+  ) {}
+
+  write(txn: () => Promise<Patch>) {
+    return this.dataset.transact({
+      prepare: async () => ({ patch: await txn() })
+    });
+  }
+}
+
+export class MockGraphState {
+  static async create({ dataset, context }: { dataset?: Dataset, context?: Context } = {}) {
+    context ??= testContext;
+    return new MockGraphState(
+      await MockState.create({ dataset, context }),
+      await activeCtx(context ?? {}));
+  }
+
+  readonly graph: JrqlGraph;
+
+  protected constructor(
+    readonly state: MockState,
+    readonly ctx: ActiveContext
+  ) {
+    this.graph = new JrqlGraph(state.dataset.graph());
+  }
+
+  async write(request: Write, constraint?: MeldConstraint): Promise<MeldPreUpdate> {
+    const update = new Future<MeldPreUpdate>();
+    await this.state.write(async () => {
+      const patch = await this.graph.write(request, this.ctx);
+      const interim = new InterimUpdatePatch(
+        this.graph, this.ctx, patch, null, null, { mutable: true });
+      if (constraint != null)
+        await constraint.check(this.graph.asReadState, interim);
+      const txn = await interim.finalise();
+      update.resolve(txn.internalUpdate);
+      return new PatchQuads(txn.assertions).append(txn.entailments);
+    });
+    return Promise.resolve(update);
+  }
+
+  close() {
+    this.state.close();
+  }
+}
+
 export function mockLocal(
   impl?: Partial<MeldLocal>, lives: Array<boolean | null> = [true]):
   MeldLocal & { liveSource: Observer<boolean | null> } {
@@ -62,7 +126,7 @@ export function mockLocal(
     operations: NEVER,
     live,
     liveSource: live,
-    withLocalState: async <T>(procedure: StateProc<MeldReadState, T>) => procedure(mock()),
+    latch: async <T>(procedure: StateProc<MeldReadState, T>) => procedure(mock()),
     ...impl
   };
 }
@@ -71,57 +135,88 @@ export function testOp(
   time: TreeClock,
   deletes: object = {},
   inserts: object = {},
-  from = time.ticks): EncodedOperation {
+  { from, principalId, agreed }: {
+    from?: number, principalId?: string, agreed?: [number, any]
+  } = {}
+): EncodedOperation {
   return [
-    3,
-    from,
+    4,
+    from ?? time.ticks,
     time.toJSON(),
     MsgPack.encode([deletes, inserts]),
-    [BufferEncoding.MSGPACK]
+    [BufferEncoding.MSGPACK],
+    principalId ?? null,
+    agreed ?? null
   ];
 }
 
 /**
  * Wraps a clock and provides mock MessageService-like test mutations
  */
-export class MockProcess {
-  gwc: GlobalClock;
+export class MockProcess implements ClockHolder<TreeClock> {
+  agreed = TreeClock.GENESIS;
 
   constructor(
     public time: TreeClock,
-    public prev: number = time.ticks) {
-    this.gwc = GlobalClock.GENESIS.update(time);
+    public prev: number = time.ticks,
+    public gwc = GlobalClock.GENESIS.set(time)
+  ) {
+  }
+
+  event(): TreeClock {
+    // CAUTION: not necessarily internal
+    this.tick(true);
+    return this.time;
+  }
+
+  peek(): TreeClock {
+    return this.time;
+  }
+
+  push(time: TreeClock) {
+    this.time = time;
+    return this;
   }
 
   tick(internal = false) {
     if (!internal)
       this.prev = this.time.ticks;
     this.time = this.time.ticked();
-    this.gwc = this.gwc.update(this.time);
+    if (!internal)
+      this.gwc = this.gwc.set(this.time);
     return this;
   }
 
   join(clock: TreeClock) {
     this.time = this.time.update(clock);
-    this.gwc = this.gwc.update(this.time);
+    this.gwc = this.gwc.set(clock);
     return this;
   }
 
   fork() {
     const { left, right } = this.time.forked();
     this.time = left;
-    return new MockProcess(right);
+    return new MockProcess(right, this.prev, this.gwc);
   }
 
-  sentOperation(deletes: object, inserts: object) {
+  sentOperation(deletes: object, inserts: object, agree?: true) {
     // Do not inline: this sets prev
-    const op = this.operated(deletes, inserts);
-    return new OperationMessage(this.prev, op);
+    const op = this.operated(deletes, inserts, agree);
+    return OperationMessage.fromOperation(this.prev, op, null);
   }
 
-  operated(deletes: object, inserts: object): EncodedOperation {
+  operated(deletes: object, inserts: object, agree?: any): EncodedOperation {
     this.tick();
-    return testOp(this.time, deletes, inserts);
+    let agreed: [number, any] | undefined;
+    if (agree) {
+      this.agreed = this.time;
+      agreed = [this.time.ticks, agree];
+    }
+    return testOp(this.time, deletes, inserts, { agreed });
+  }
+
+  snapshot(data: Snapshot.Datum[]): DatasetSnapshot {
+    return { gwc: this.gwc, agreed: this.agreed, data: from(data) };
   }
 }
 
@@ -161,4 +256,9 @@ export function mockMqtt(): MockMqtt & MockProxy<AsyncMqttClient> {
     (topic, payload: Buffer | string) => <any>mqtt.mockPublish(topic, payload));
   mqtt.end.mockImplementation(() => <any>mqtt.mockClose());
   return mqtt;
+}
+
+export function mockInterim(update: MeldUpdate) {
+  // Passing an implementation into the mock adds unwanted properties
+  return Object.assign(mock<InterimUpdate>(), { update: Promise.resolve(update) });
 }

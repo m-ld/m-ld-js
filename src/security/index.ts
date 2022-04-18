@@ -1,1 +1,1 @@
-export { MeldAccessControlList } from './MeldAccessControlList';
+export { MeldAclTransportSecurity } from './MeldAclTransportSecurity';

@@ -13,7 +13,7 @@ import { Future, MsgPack, Stopwatch, toJSON } from '../util';
 import { delay, first, ignoreElements, map, reduce, tap, timeout, toArray } from 'rxjs/operators';
 import { MeldError, MeldErrorStatus } from '../MeldError';
 import { AbstractMeld } from '../AbstractMeld';
-import { MeldExtensions, MeldReadState, shortId } from '../../index';
+import { MeldExtensions, MeldReadState, noTransportSecurity, shortId } from '../../index';
 import { JsonNotification, NotifyParams, ReplyParams, SendParams } from './PubsubParams';
 import { consume } from 'rx-flowable/consume';
 import { MeldMessageType } from '../../ns/m-ld';
@@ -46,6 +46,7 @@ export interface SubPub {
 /** A m-ld ack is a reply to a reply with a null body */
 const ACK = null;
 type ACK = typeof ACK;
+const ACK_PAYLOAD = MsgPack.encode(ACK);
 
 /**
  * An abstract implementation of {@link MeldRemotes}, providing a common base for publish/subscribe
@@ -69,7 +70,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
   private cloneSubs = new Subscription;
   private readonly replyResolvers: {
     [messageId: string]: {
-      resolve: (res: Response | ACK) => void,
+      received: Future<Response | ACK>,
       state: MeldReadState | null,
       readyToAck?: PromiseLike<void>
     }
@@ -93,6 +94,10 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     this.sendTimeout = config.networkTimeout ?? 5000;
   }
 
+  private get transportSecurity() {
+    return this.extensions.transportSecurity ?? noTransportSecurity;
+  }
+
   setLocal(clone: MeldLocal | null) {
     if (clone == null) {
       if (this.clone != null)
@@ -108,7 +113,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
           try {
             if (this.connected.value) {
               // Operation received from the local clone. Relay to the domain
-              await this.publishOperation(msg.encoded);
+              await this.publishOperation(msg.toBuffer());
             }
           } catch (err) {
             // Failed to send an update while (probably) connected
@@ -247,11 +252,13 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     // Subscribe in parallel (subscription can be slow)
     const [data, updates] = await Promise.all([
       this.consume(fromId, res.dataAddress, MsgPack.decode, 'failIfSlow'),
-      this.consume(fromId, res.updatesAddress, OperationMessage.decode)
+      this.consume(fromId, res.updatesAddress, OperationMessage.fromBuffer)
     ]);
     sw.stop();
     return {
-      gwc: res.gwc, data: defer(() => {
+      gwc: res.gwc,
+      agreed: res.agreed,
+      data: defer(() => {
         // Ack the response to start the streams
         readyToAck.resolve();
         return data;
@@ -271,7 +278,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     if (res.gwc != null) {
       sw.next('consume');
       const updates = await this.consume(
-        from, res.updatesAddress, OperationMessage.decode, 'failIfSlow');
+        from, res.updatesAddress, OperationMessage.fromBuffer, 'failIfSlow');
       sw.stop();
       return {
         gwc: res.gwc, updates: defer(() => {
@@ -323,7 +330,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
    * @param payload the operation message payload
    */
   protected onOperation(payload: Buffer) {
-    const update = OperationMessage.decode(payload);
+    const update = OperationMessage.fromBuffer(payload);
     if (update)
       this.nextOperation(update, 'remote');
     else
@@ -347,11 +354,15 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
       const sw = new Stopwatch('reply', shortId(4));
       try {
         // The local state is required to prepare the response and to send it
-        const replied = await clone.withLocalState(async state => {
+        const replied = await clone.latch(async state => {
           try {
-            const unwired = await this.extensions.transportSecurity.wire(
+            // Unsecure the message if required
+            const unwired = await this.transportSecurity.wire(
               payload, MeldMessageType.request, 'in', state);
-            const req = Request.fromJson(MsgPack.decode(unwired));
+            const req = Request.fromBuffer(unwired);
+            // Verify the message if necessary
+            await this.transportSecurity.verify?.(req.enc, req.attr, state);
+            // Generate a suitable response
             if (req instanceof NewClockRequest) {
               sw.next('clock');
               const clock = await clone.newClock();
@@ -396,18 +407,25 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
    */
   protected async onReply(payload: Buffer, replyParams: ReplyParams) {
     if (replyParams.sentMessageId in this.replyResolvers && this.clone != null) {
+      const { received, state, readyToAck } = this.replyResolvers[replyParams.sentMessageId];
       try {
-        const { resolve, state, readyToAck } = this.replyResolvers[replyParams.sentMessageId];
-        const unwired = await this.extensions.transportSecurity.wire(
+        const unwired = await this.transportSecurity.wire(
           payload, MeldMessageType.response, 'in', state);
-        const json = MsgPack.decode(unwired);
-        resolve(json != null ? Response.fromJson(json) : null);
-        if (readyToAck != null) {
-          await readyToAck;
-          await this.reply(replyParams, state, ACK);
+        if (ACK_PAYLOAD.equals(unwired)) {
+          received.resolve(ACK);
+        } else {
+          const res = Response.fromBuffer(unwired);
+          // TODO: State for a request may be very old or non-existent.
+          // Therefore we cannot verify a response here.
+          // await this.transportSecurity.verify?.(res.enc, res.attr, state);
+          received.resolve(res);
+          if (readyToAck != null) {
+            await readyToAck;
+            await this.reply(replyParams, state, ACK);
+          }
         }
       } catch (err) {
-        this.log.warn(err);
+        received.reject(err);
       }
     }
   }
@@ -436,9 +454,11 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
       return this.setPresent(live);
   }
 
-  private wireRequest = (ctrlMsg: ControlMessage, state: MeldReadState | null) => {
-    return this.extensions.transportSecurity.wire(
-      MsgPack.encode(ctrlMsg.toJSON()), MeldMessageType.request, 'out', state);
+  private wireRequest = async (ctrlMsg: ControlMessage, state: MeldReadState | null) => {
+    // Sign the enclosed request
+    ctrlMsg.attr = await this.transportSecurity.sign?.(ctrlMsg.enc, state) ?? null;
+    return this.transportSecurity.wire(
+      ctrlMsg.toBuffer(), MeldMessageType.request, 'out', state);
   };
 
   // Note this method is recursive and can be long-running, waiting for timeout
@@ -501,15 +521,14 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
         concatWith(throwError(() => new MeldError('Clone has closed')))),
       // 4. Response received
       new Observable<T>(subs => {
-        this.replyResolvers[messageId] = {
-          resolve: res => {
-            if (res instanceof RejectedResponse)
-              subs.error(new MeldError(res.status));
-            else
-              subs.next(res as T);
-          },
-          state, readyToAck
-        };
+        const received = new Future<Response | ACK>();
+        received.then(res => {
+          if (res instanceof RejectedResponse)
+            subs.error(new MeldError(res.status));
+          else
+            subs.next(res as T);
+        }, err => subs.error(err));
+        this.replyResolvers[messageId] = { received, state, readyToAck };
         return () => { delete this.replyResolvers[messageId]; };
       })));
   }
@@ -518,14 +537,13 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     await this.reply(sentParams, state, new NewClockResponse(clock));
   }
 
-  private async replySnapshot(
-    sentParams: SendParams, state: MeldReadState, snapshot: Snapshot) {
-    const { gwc: gwc, data, updates } = snapshot;
+  private async replySnapshot(sentParams: SendParams, state: MeldReadState, snapshot: Snapshot) {
+    const { gwc, agreed, data, updates } = snapshot;
     const dataAddress = uuid(), updatesAddress = uuid();
     // Send the reply in parallel with establishing notifiers
     const replyId = uuid();
     const replied = this.reply(sentParams, state,
-      new SnapshotResponse(gwc, dataAddress, updatesAddress), replyId);
+      new SnapshotResponse(gwc, agreed, dataAddress, updatesAddress), replyId);
     // Allow time for the notifiers to resolve while waiting for a reply
     const [dataNotifier, updatesNotifier] = await this.getAck(replied, replyId, state, Promise.all([
       this.notifier({ toId: sentParams.fromId, fromId: this.id, channelId: dataAddress }),
@@ -535,7 +553,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     return {
       after: Promise.all([
         this.produce(data, dataNotifier, MsgPack.encode, 'snapshot'),
-        this.produce(updates, updatesNotifier, msg => msg.encoded, 'updates')
+        this.produce(updates, updatesNotifier, msg => msg.toBuffer(), 'updates')
       ])
     };
   }
@@ -550,13 +568,15 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
         toId: sentParams.fromId, fromId: this.id, channelId: updatesAddress
       })));
       // Ack has been sent, start streaming the updates
-      return { after: this.produce(revup.updates, notifier, msg => msg.encoded, 'updates') };
+      return { after: this.produce(revup.updates, notifier, msg => msg.toBuffer(), 'updates') };
     } else if (this.clone) {
       await this.reply(sentParams, state, new RevupResponse(null, this.id));
     }
   }
 
-  private async consume<T>(fromId: string, channelId: string,
+  private async consume<T>(
+    fromId: string,
+    channelId: string,
     datumFromPayload: (payload: Buffer) => T,
     failIfSlow?: 'failIfSlow'
   ): Promise<Observable<T>> {
@@ -578,8 +598,11 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     return failIfSlow ? consumed.pipe(timeout(this.sendTimeout)) : consumed;
   }
 
-  private async produce<T>(data: Observable<T>, notifier: SubPub,
-    datumToPayload: (datum: T) => Buffer, type: string
+  private async produce<T>(
+    data: Observable<T>,
+    notifier: SubPub,
+    datumToPayload: (datum: T) => Buffer,
+    type: string
   ) {
     const notifyError = (error: any) => {
       this.log.warn('Notifying error on', notifier.id, error);
@@ -613,8 +636,15 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
   ): Promise<unknown> {
     const replier = await this.replier({ fromId: this.id, toId, messageId, sentMessageId });
     this.log.debug('Replying response', messageId, 'to', sentMessageId, res, replier.id);
-    const payload = MsgPack.encode(res == null ? null : res.toJSON());
-    const wire = await this.extensions.transportSecurity.wire(
+    let payload: Buffer;
+    if (res == ACK) {
+      payload = ACK_PAYLOAD;
+    } else {
+      // Sign the enclosed request
+      res.attr = await this.transportSecurity.sign?.(res.enc, state) ?? null;
+      payload = res.toBuffer();
+    }
+    const wire = await this.transportSecurity.wire(
       payload, MeldMessageType.response, 'out', state);
     return replier.publish(wire).finally(() => replier.close?.());
   }

@@ -1,4 +1,4 @@
-import { Read, Subject, SubjectProperty, Update, Write } from '../jrql-support';
+import { Query, Read, Subject, SubjectProperty, Update, Write } from '../jrql-support';
 import { Subscription } from 'rxjs';
 import {
   any, GraphSubject, MeldState, MeldStateMachine, readResult, ReadResult, StateProc, UpdateProc
@@ -42,6 +42,10 @@ abstract class ApiState extends QueryableRdfSourceProxy implements MeldState {
       describeId(id) : constructProperties(id, properties)));
   }
 
+  ask(pattern: Query): Promise<boolean> {
+    return this.state.ask(pattern);
+  }
+
   protected abstract construct(state: EngineState): MeldState;
 }
 
@@ -70,6 +74,11 @@ export class ApiStateMachine extends ApiState implements MeldStateMachine {
       async write(request: Write): Promise<this> {
         await stateEngine.write(state => state.write(request));
         return this;
+      }
+      ask(pattern: Query): Promise<boolean> {
+        // The read itself must be in a state procedure, so indirect
+        return new Promise((resolve, reject) =>
+          stateEngine.read(state => state.ask(pattern).then(resolve, reject)));
       }
     });
     super(asEngineState);

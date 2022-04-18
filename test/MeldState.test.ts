@@ -2,9 +2,8 @@ import {
   any, Construct, Describe, Group, MeldUpdate, Reference, Select, Subject, Update
 } from '../src';
 import { ApiStateMachine } from '../src/engine/MeldState';
-import { memStore, mockRemotes, testConfig, testExtensions } from './testClones';
+import { memStore, mockRemotes, testConfig, testContext } from './testClones';
 import { DatasetEngine } from '../src/engine/dataset/DatasetEngine';
-import { DomainContext } from '../src/engine/MeldEncoding';
 import { Future } from '../src/engine/util';
 import { blankRegex, genIdRegex } from './testUtil';
 import { SubjectGraph } from '../src/engine/SubjectGraph';
@@ -19,13 +18,13 @@ describe('Meld State API', () => {
   let captureUpdate: Future<MeldUpdate>;
 
   beforeEach(async () => {
-    const context = new DomainContext('test.m-ld.org');
     let clone = new DatasetEngine({
-      dataset: await memStore({ context }),
+      dataset: await memStore({ context: testContext }),
       remotes: mockRemotes(),
-      extensions: testExtensions({ constraints: [new DefaultList('test')] }),
+      extensions: { constraints: [new DefaultList('test')] },
       config: testConfig(),
-      context
+      app: {},
+      context: testContext
     });
     await clone.initialise();
     api = new ApiStateMachine(clone);
@@ -231,6 +230,17 @@ describe('Meld State API', () => {
       await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
       await expect(api.get('fred', 'age'))
         .resolves.toBeUndefined();
+    });
+
+    test('asks exists', async () => {
+      await api.write<Subject>({ '@id': 'fred', name: 'Fred', age: 40 });
+      await expect(api.ask({})).resolves.toBe(true);
+      await expect(api.ask({ '@where': { '@id': '?' } })).resolves.toBe(true);
+      await expect(api.ask({ '@where': { '@id': 'fred' } })).resolves.toBe(true);
+      await expect(api.ask({ '@where': { '@id': 'wilma' } })).resolves.toBe(false);
+      await expect(api.ask({ '@where': { '@id': 'fred', age: 100 } })).resolves.toBe(false);
+      await expect(api.ask({ '@where': { '@id': 'fred', name: '?' } })).resolves.toBe(true);
+      await expect(api.ask({ '@where': { '@id': 'fred', height: '?' } })).resolves.toBe(false);
     });
 
     test('selects where', async () => {

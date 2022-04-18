@@ -3,9 +3,9 @@ import { mockDeep as mock, MockProxy } from 'jest-mock-extended';
 import { AblyRemotes, MeldAblyConfig } from '../src/ably';
 import { comesAlive } from '../src/engine/AbstractMeld';
 import { OperationMessage } from '../src/engine';
-import { mockLocal, testExtensions, testOp } from './testClones';
+import { mockLocal, testOp } from './testClones';
 import { BehaviorSubject, Subject as Source } from 'rxjs';
-import { Future, isArray, MsgPack } from '../src/engine/util';
+import { Future, isArray } from '../src/engine/util';
 import { TreeClock } from '../src/engine/clocks';
 import { NewClockRequest, NewClockResponse } from '../src/engine/remotes/ControlMessage';
 
@@ -60,7 +60,7 @@ describe('Ably remotes', () => {
   });
 
   test('connects with given config', async () => {
-    new AblyRemotes(config, testExtensions(), connect);
+    new AblyRemotes(config, {}, connect);
     expect(connect).toHaveBeenCalledWith({
       ...config.ably, clientId: 'test', echoMessages: false
     });
@@ -70,21 +70,21 @@ describe('Ably remotes', () => {
   });
 
   test('goes offline with no-one present', async () => {
-    const remotes = new AblyRemotes(config, testExtensions(), connect);
+    const remotes = new AblyRemotes(config, {}, connect);
     connCallbacks.connected?.(mock<Ably.Types.ConnectionStateChange>());
     // We have not supplied a presence update, per Ably behaviour
     await expect(comesAlive(remotes, false)).resolves.toBe(false);
   });
 
   test('responds to presence', async () => {
-    const remotes = new AblyRemotes(config, testExtensions(), connect);
+    const remotes = new AblyRemotes(config, {}, connect);
     connCallbacks.connected?.(mock<Ably.Types.ConnectionStateChange>());
     otherPresent();
     await expect(comesAlive(remotes)).resolves.toBe(true);
   });
 
   test('joins presence if clone is live', async () => {
-    const remotes = new AblyRemotes(config, testExtensions(), connect);
+    const remotes = new AblyRemotes(config, {}, connect);
     remotes.setLocal(mockLocal({}, [true]));
     const joined = new Future<any | undefined>();
     operations.presence.update.mockImplementation(async data => joined.resolve(data));
@@ -94,7 +94,7 @@ describe('Ably remotes', () => {
 
   test('does not join presence until subscribed', async () => {
     control.subscribe.mockReturnValue(new Promise(() => { }));
-    const remotes = new AblyRemotes(config, testExtensions(), connect);
+    const remotes = new AblyRemotes(config, {}, connect);
     remotes.setLocal(mockLocal({}, [true]));
     const joined = new Future<any | undefined>();
     operations.presence.update.mockImplementation(async data => joined.resolve(data));
@@ -106,7 +106,7 @@ describe('Ably remotes', () => {
 
   test('does not go live until subscribed', async () => {
     control.subscribe.mockReturnValue(new Promise(() => { }));
-    const remotes = new AblyRemotes(config, testExtensions(), connect);
+    const remotes = new AblyRemotes(config, {}, connect);
     remotes.setLocal(mockLocal({}, [true]));
     const goneLive = comesAlive(remotes, false); // No presence so false
     connCallbacks.connected?.(mock<Ably.Types.ConnectionStateChange>());
@@ -116,7 +116,7 @@ describe('Ably remotes', () => {
   });
 
   test('joins presence if clone comes live', async () => {
-    const remotes = new AblyRemotes(config, testExtensions(), connect);
+    const remotes = new AblyRemotes(config, {}, connect);
     remotes.setLocal(mockLocal({}, [false, true]));
     connCallbacks.connected?.(mock<Ably.Types.ConnectionStateChange>());
     const joined = new Future<any | undefined>();
@@ -125,7 +125,7 @@ describe('Ably remotes', () => {
   });
 
   test('leaves presence if clone goes offline', async () => {
-    const remotes = new AblyRemotes(config, testExtensions(), connect);
+    const remotes = new AblyRemotes(config, {}, connect);
     const live = new BehaviorSubject(true);
     remotes.setLocal(mockLocal({ live }));
     connCallbacks.connected?.(mock<Ably.Types.ConnectionStateChange>());
@@ -137,22 +137,22 @@ describe('Ably remotes', () => {
   });
 
   test('publishes an operation', async () => {
-    const remotes = new AblyRemotes(config, testExtensions(), connect);
+    const remotes = new AblyRemotes(config, {}, connect);
     connCallbacks.connected?.(mock<Ably.Types.ConnectionStateChange>());
     otherPresent();
     await comesAlive(remotes);
     const prevTime = TreeClock.GENESIS.forked().left, time = prevTime.ticked();
-    const entry = new OperationMessage(prevTime.ticks, testOp(time, {}, {}));
+    const entry = OperationMessage.fromOperation(prevTime.ticks, testOp(time, {}, {}), null);
     const updates = new Source<OperationMessage>();
     remotes.setLocal(mockLocal({ operations: updates }));
     updates.next(entry);
-    expect(operations.publish).toHaveBeenCalledWith('__op', entry.encoded);
+    expect(operations.publish).toHaveBeenCalledWith('__op', entry.toBuffer());
   });
 
   test('sends a new clock request', async () => {
     const newClock = TreeClock.GENESIS.forked().left;
     // Grab the control channel subscriber
-    const remotes = new AblyRemotes(config, testExtensions(), connect);
+    const remotes = new AblyRemotes(config, {}, connect);
     remotes.setLocal(mockLocal());
     connCallbacks.connected?.(mock<Ably.Types.ConnectionStateChange>());
     const [subscriber] = control.subscribe.mock.calls[0];
@@ -165,10 +165,11 @@ describe('Ably remotes', () => {
     other.publish.mockImplementation((name, data) => {
       const splitName = name.split(':');
       expect(splitName[0]).toBe('__send');
-      expect(MsgPack.decode(data)).toEqual(new NewClockRequest().toJSON());
-      setImmediate(() => subscriber(mock<Ably.Types.Message>({
+      expect(data.equals(new NewClockRequest().toBuffer())).toBe(true);
+      // Object assign overcomes mocking of the buffer which borks Buffer.equals
+      setImmediate(() => subscriber(Object.assign(mock<Ably.Types.Message>(), {
         clientId: 'other',
-        data: MsgPack.encode(new NewClockResponse(newClock).toJSON()),
+        data: new NewClockResponse(newClock).toBuffer(),
         name: `__reply:reply1:${splitName[1]}`
       })));
       return Promise.resolve();

@@ -58,6 +58,8 @@ export interface KvpStore {
    * @param txn prepares a write operation to be performed
    */
   transact<T = unknown>(txn: TxnOptions<KvpResult<T>>): Promise<T>;
+  /** Transaction and state locking, can also be used for other locks */
+  readonly lock: LockManager<'state' | 'txn' | string>;
 }
 
 /**
@@ -68,7 +70,6 @@ export interface KvpStore {
 export interface Dataset extends KvpStore {
   readonly location: string;
   readonly rdf: Required<DataFactory>;
-  readonly lock: LockManager<'state' | 'txn' | string>;
 
   graph(name?: GraphName): Graph;
 
@@ -119,6 +120,8 @@ export interface Graph extends RdfFactory, QueryableRdfSource {
   query(query: Algebra.Describe): AsyncIterator<Quad>;
   query(query: Algebra.Project): AsyncIterator<Binding>;
   query(query: Algebra.Distinct): AsyncIterator<Binding>;
+
+  ask(query: Algebra.Ask): Promise<boolean>;
 }
 
 /**
@@ -370,8 +373,9 @@ class QuadStoreGraph implements Graph {
   query(query: Algebra.Describe): AsyncIterator<Quad>;
   query(query: Algebra.Project): AsyncIterator<Binding>;
   query(query: Algebra.Distinct): AsyncIterator<Binding>;
-  query(...args: Parameters<QuadSource['match']> |
-    [Algebra.Operation]): AsyncIterator<Binding | Quad> {
+  query(
+    ...args: Parameters<QuadSource['match']> | [Algebra.Operation]
+  ): AsyncIterator<Binding | Quad> {
     const source = (async () => {
       try {
         const [query] = args;
@@ -394,14 +398,22 @@ class QuadStoreGraph implements Graph {
       this.dataset.lock.extend('state', 'query', source));
   }
 
+  async ask(query: Algebra.Ask): Promise<boolean> {
+    const result = await this.dataset.store.sparql(query);
+    if (result.type === 'boolean')
+      return result.value;
+    else
+      throw new TypeError('ASK query returned a non-boolean result');
+  }
+
   skolem = () => this.dataset.rdf.namedNode(
     new URL(`/.well-known/genid/${uuid()}`, this.dataset.base).href);
   namedNode = this.dataset.rdf.namedNode;
   // noinspection JSUnusedGlobalSymbols
   blankNode = this.dataset.rdf.blankNode;
   literal = this.dataset.rdf.literal;
-  variable = this.dataset.rdf.variable;
 
+  variable = this.dataset.rdf.variable;
   defaultGraph = this.dataset.rdf.defaultGraph;
   quad = (subject: Quad_Subject, predicate: Quad_Predicate, object: Quad_Object) =>
     this.dataset.rdf.quad(subject, predicate, object, this.name);

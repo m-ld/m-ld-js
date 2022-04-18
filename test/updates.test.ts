@@ -1,9 +1,11 @@
 import { mockFn } from 'jest-mock-extended';
 import {
-  asSubjectUpdates, includesValue, includeValues, propertyValue, Reference, Subject, updateSubject
+  asSubjectUpdates, includesValue, includeValues, Optional, propertyValue, Reference, Subject,
+  updateSubject
 } from '../src';
 import { SubjectGraph } from '../src/engine/SubjectGraph';
 import { XS } from '../src/ns';
+import { VocabReference } from '../src/jrql-support';
 
 describe('Update utilities', () => {
   test('converts simple group update to subject updates', () => {
@@ -490,13 +492,42 @@ describe('Update utilities', () => {
       }, 'birthday', Date)).toThrow();
     });
 
-    test('cast object', () => {
+    test('cast subject', () => {
       expect(propertyValue({
         wife: { name: 'Wilma' }
-      }, 'wife', Object)).toEqual({ name: 'Wilma' });
+      }, 'wife', Subject)).toEqual({ name: 'Wilma' });
       expect(() => propertyValue({
         wife: 'Wilma'
-      }, 'wife', Object)).toThrow();
+      }, 'wife', Subject)).toThrow();
+    });
+
+    test('cast reference', () => {
+      expect(propertyValue({
+        wife: { '@id': 'wilma' }
+      }, 'wife', Reference)).toEqual({ '@id': 'wilma' });
+      expect(propertyValue({
+        wife: { '@id': 'http://test.m-ld.org/wilma' }
+      }, 'wife', Reference)).toEqual({ '@id': 'http://test.m-ld.org/wilma' });
+      // A vocab reference can be cast if it's absolute
+      expect(propertyValue({
+        wife: { '@vocab': 'http://test.m-ld.org/wilma' }
+      }, 'wife', Reference)).toEqual({ '@id': 'http://test.m-ld.org/wilma' });
+      // but not if its relative
+      expect(() => propertyValue({
+        wife: { '@vocab': 'wilma' }
+      }, 'wife', Reference)).toThrow();
+      expect(() => propertyValue({
+        wife: { name: 'Wilma' }
+      }, 'wife', Reference)).toThrow();
+    });
+
+    test('cast vocab reference', () => {
+      expect(propertyValue({
+        prop: { '@vocab': 'name' }
+      }, 'prop', VocabReference)).toEqual({ '@vocab': 'name' });
+      expect(() => propertyValue({
+        prop: { name: 'name' }
+      }, 'prop', VocabReference)).toThrow();
     });
 
     test('cast buffer', () => {
@@ -543,6 +574,22 @@ describe('Update utilities', () => {
       expect(propertyValue({
         ears: { '@set': ['left', 'right'] }
       }, 'ears', Array)).toEqual(['left', 'right']);
+    });
+
+    test('cast optional', () => {
+      expect(propertyValue({
+        hairy: true
+      }, 'hairy', Optional, Boolean)).toBe(true);
+      expect(propertyValue({
+        hairy: [true]
+      }, 'hairy', Optional, Boolean)).toBe(true);
+      expect(() => propertyValue({
+        hairy: [true, false]
+      }, 'hairy', Optional, Boolean)).toThrow();
+      expect(propertyValue({}, 'hairy', Optional, Boolean)).toBeUndefined();
+      expect(propertyValue({
+        hairy: []
+      }, 'hairy', Optional, Boolean)).toBeUndefined();
     });
 
     test('cast empty', () => {

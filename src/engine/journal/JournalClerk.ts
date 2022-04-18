@@ -1,32 +1,28 @@
 import { EntryIndex, Journal, JournalEntry } from './index';
 import { concatMap, debounceTime, endWith, map, share, take, takeUntil, tap } from 'rxjs/operators';
-import { EMPTY, merge, Observable, of, race, Subject, timer } from 'rxjs';
+import { EMPTY, merge, NEVER, Observable, of, race, Subject, timer } from 'rxjs';
 import { idling } from '../local';
-import { CausalOperator, CausalTimeRange } from '../ops';
-import { Triple } from '../quads';
+import { CausalOperator } from '../ops';
 import { TreeClock } from '../clocks';
 import { completed, getIdLogger, inflate } from '../util';
 import { array } from '../../util';
-import { TickTid } from './JournalOperation';
-import { MeldConfig } from '../../config';
+import { JournalAdmin, JournalCheckPoint, MeldConfig } from '../../config';
+import { MeldOperation, MeldOperationSpec } from '../MeldOperation';
+import { TickTid } from './JournalEntry';
+import { TripleMap } from '../quads';
+import { UUID } from '../MeldEncoding';
+import { Attribution } from '../../api';
 
 export type JournalClerkConfig = Pick<MeldConfig, '@id' | 'logLevel' | 'journal'>;
 
 export class ClerkAction {
   constructor(
     readonly action: 'appended' | 'committed' | 'garbage collected',
-    readonly body: { [key: string]: any }) {
+    readonly body: { [key: string]: any }
+  ) {
   }
 
   toString = () => `${this.action} ${JSON.stringify(this.body)}`;
-}
-
-export enum CheckPoint {
-  /** General administration checkpoint */
-  ADMIN,
-  /** Required journal breakpoint – fusions must not cross */
-  SAVEPOINT
-  // TODO: TRUNCATE, entries before will be dropped
 }
 
 /**
@@ -45,38 +41,42 @@ export class JournalClerk {
 
   constructor(
     readonly journal: Journal,
+    readonly sign: (op: MeldOperation) => Promise<Attribution | null>,
     config: JournalClerkConfig,
-    { checkpoints, schedule }: {
-      /** @see CheckPoint */
-      checkpoints?: Observable<CheckPoint>,
-      /**
-       * The schedule delays activity to some suitable time. It should emit one value in response
-       * to a subscription.
-       */
-      schedule?: Observable<unknown>
-    } = {}) {
+    { checkpoints, schedule }: JournalAdmin = {}
+  ) {
     this.maxEntryFootprint = config.journal?.maxEntryFootprint ?? 10000;
     // Default checkpoints are general admin debounced after last entry
     const adminDebounce = config.journal?.adminDebounce ?? 1000;
-    checkpoints ??= journal.tail.pipe(
-      map(() => CheckPoint.ADMIN),
-      debounceTime(adminDebounce));
-    // Try to schedule everything (except save points) in idle time.
-    const awaitSchedule = schedule?.pipe(take(1)) ??
-      // Chrome sometimes never calls the idle callback, blocking activity, so time out
-      race(idling(), timer(adminDebounce).pipe(tap(() => log.warn('Idle request timed out'))));
-    this.activity = merge(journal.tail, checkpoints).pipe(
-      // Redundant if the journal is closed first.
-      takeUntil(this.closing),
-      // Ensure administration has been completed
-      endWith(CheckPoint.SAVEPOINT),
-      // For every entry, ask the schedule for a slot to process
-      concatMap(entry => inflate(
-        // Process save points immediately
-        entry === CheckPoint.SAVEPOINT ? of(0) : awaitSchedule,
-        () => this.process(entry))),
-      // Don't duplicate processing per subscriber
-      share());
+    const debouncedAdmin = adminDebounce > 0 ? journal.tail.pipe(
+      map(() => JournalCheckPoint.ADMIN),
+      debounceTime(adminDebounce)) : null;
+    if (debouncedAdmin == null && checkpoints == null) {
+      // If no prompts will ever happen, just wire the close
+      this.activity = NEVER.pipe(takeUntil(this.closing), share());
+    } else {
+      // Try to schedule everything (except save points) in idle time.
+      const awaitSchedule = schedule?.pipe(take(1)) ??
+        // Chrome sometimes never calls the idle callback, blocking activity, so time out
+        race(idling(), timer(adminDebounce || 1000).pipe(tap(() =>
+          log.warn('Idle request timed out'))));
+      this.activity = merge(
+        journal.tail, // We track entries even if we never commit them
+        debouncedAdmin ?? EMPTY, // Implicit admin, unless disabled
+        checkpoints ?? EMPTY // Explicit checkpoints
+      ).pipe(
+        // Redundant if the journal is closed first.
+        takeUntil(this.closing),
+        // Ensure administration has been completed
+        endWith(JournalCheckPoint.SAVEPOINT),
+        // For every entry, ask the schedule for a slot to process
+        concatMap(entry => inflate(
+          // Process save points immediately
+          entry === JournalCheckPoint.SAVEPOINT ? of(0) : awaitSchedule,
+          () => this.process(entry))),
+        // Don't duplicate processing per subscriber
+        share());
+    }
     // Kick things off by subscribing the logger
     const log = getIdLogger(this.constructor, config['@id'], config.logLevel);
     this.activity.subscribe({
@@ -91,7 +91,7 @@ export class JournalClerk {
     await completed(this.closing);
   }
 
-  private process(entry: JournalEntry | CheckPoint): Observable<ClerkAction> {
+  private process(entry: JournalEntry | JournalCheckPoint): Observable<ClerkAction> {
     if (typeof entry === 'number')
       return this.checkpoint(entry);
     else {
@@ -105,9 +105,9 @@ export class JournalClerk {
       this.applyFusion(entry));
   }
 
-  private checkpoint(entry: CheckPoint.ADMIN | CheckPoint.SAVEPOINT) {
+  private checkpoint(entry: JournalCheckPoint.ADMIN | JournalCheckPoint.SAVEPOINT) {
     return this.fusion == null ? EMPTY : inflate(this.fusion.commit(), action => {
-      if (entry === CheckPoint.SAVEPOINT || !this.fusion!.appendable)
+      if (entry === JournalCheckPoint.SAVEPOINT || !this.fusion!.appendable)
         delete this.fusion;
       return array(action);
     });
@@ -148,44 +148,55 @@ class FusionAction extends ClerkAction {
 class Fusion {
   private readonly prev: TickTid;
   private readonly removals: EntryIndex[] = [];
-  private readonly operator: CausalOperator<Triple, TreeClock>;
+  private readonly operator: CausalOperator<MeldOperationSpec>;
+  // Note: deletes in a fusion should never delete the same triple-TID
+  // twice, so no need to use a Set per triple
+  private readonly deleted = new TripleMap<UUID[]>();
   private last: JournalEntry;
 
   constructor(
     private readonly clerk: JournalClerk,
-    first: JournalEntry) {
+    first: JournalEntry
+  ) {
     this.prev = first.prev;
-    this.operator = first.operation.asMeldOperation().fusion();
-    this.reset(first);
+    const operation = first.operation.asMeldOperation();
+    this.operator = operation.fusion();
+    this.reset(first, operation);
   }
 
   /**
    * @param entry the next entry to fuse, or start a new fusion with
-   * @returns an action with `entry` if it was added to the fusion or a fused entry if the fusion
-   *   was committed; or undefined if the fusion was discarded
+   * @returns an action with `entry` if it was added to the fusion or a fused
+   * entry if the fusion was committed; or undefined if the fusion was discarded
    */
   async next(entry: JournalEntry): Promise<FusionAction | undefined> {
-    if (this.appendable && CausalTimeRange.contiguous(this.last.operation, entry.operation))
+    if (this.appendable && MeldOperation.contiguous(this.last.operation, entry.operation))
       return this.append(entry);
     else
       return this.commit();
   }
 
   /**
-   * Commits the current fusion to the journal. After calling this method, more entries can still
-   * be appended, as fusions to the committed fusion.
-   * @returns a commit action if the fusion was committed; or undefined if the fusion was discarded
+   * Commits the current fusion to the journal. After calling this method, more
+   * entries can still be appended, as fusions to the committed fusion.
+   *
+   * @returns a commit action if the fusion was committed; or undefined if the
+   * fusion was discarded
    */
   async commit(): Promise<FusionAction | undefined> {
     // Only do anything if the fusion is significant
     if (this.removals.length > 1) {
       // CAUTION: constructing an operation can be expensive
       const operation = this.clerk.journal.toMeldOperation(this.operator.commit());
+      const attr = await this.clerk.sign(operation);
       const fusedEntry = JournalEntry.fromOperation(
-        this.clerk.journal, this.last.key, this.prev, operation);
-      await this.clerk.journal.spliceEntries(this.removals, fusedEntry);
+        this.clerk.journal, this.last.key, this.prev, operation, this.deleted, attr);
+      await this.clerk.journal.withLockedHistory(() => ({
+        kvps: this.clerk.journal.spliceEntries(
+          this.removals, [fusedEntry], { appending: false })
+      }));
       // Start again with the fused entry
-      this.reset(fusedEntry);
+      this.reset(fusedEntry, operation);
       return this.action('committed', fusedEntry);
     }
   }
@@ -195,8 +206,9 @@ class Fusion {
   }
 
   private append(entry: JournalEntry) {
-    this.operator.next(entry.operation.asMeldOperation());
-    this.trackEntry(entry);
+    const operation = entry.operation.asMeldOperation();
+    this.operator.next(operation);
+    this.trackEntry(entry, operation);
     return this.action('appended', entry);
   }
 
@@ -204,14 +216,15 @@ class Fusion {
     return new FusionAction(action, entry.operation.time, this.operator.footprint);
   }
 
-  private trackEntry(entry: JournalEntry) {
+  private trackEntry(entry: JournalEntry, op: MeldOperation) {
     this.removals.push(entry.index);
     this.last = entry;
+    for (let [triple, tids] of op.byTriple('deletes', entry.deleted))
+      this.deleted.with(triple, () => []).push(...tids);
   }
 
-  private reset(first: JournalEntry) {
+  private reset(first: JournalEntry, operation: MeldOperation) {
     this.removals.length = 0;
-    this.trackEntry(first);
+    this.trackEntry(first, operation);
   }
 }
-

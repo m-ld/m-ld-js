@@ -1,28 +1,18 @@
-import { InterimUpdate, MeldUpdate, Update } from '../src';
-import { memStore } from './testClones';
+import { Update } from '../src';
+import { MockGraphState, mockInterim } from './testClones';
 import { DefaultList } from '../src/constraints/DefaultList';
-import { JrqlGraph } from '../src/engine/dataset/JrqlGraph';
-import { Dataset } from '../src/engine/dataset';
-import { mock } from 'jest-mock-extended';
 import { SubjectGraph } from '../src/engine/SubjectGraph';
-import { ActiveContext, initialCtx } from '../src/engine/jsonld';
 
 // Note that DefaultList is quite heavily tested by MeldState.test.ts but not
 // for apply mode
 describe('Default list constraint', () => {
-  let dataset: Dataset;
-  let unlock: () => void;
-  let graph: JrqlGraph;
-  let ctx: ActiveContext;
+  let state: MockGraphState;
 
   beforeEach(async () => {
-    dataset = await memStore();
-    unlock = await dataset.lock.acquire('state', 'test', 'share');
-    graph = new JrqlGraph(dataset.graph());
-    ctx = initialCtx();
+    state = await MockGraphState.create();
   });
 
-  afterEach(() => unlock());
+  afterEach(() => state.close());
 
   test('Passes an empty update', async () => {
     const constraint = new DefaultList('test');
@@ -32,7 +22,7 @@ describe('Default list constraint', () => {
       '@insert': new SubjectGraph([])
     });
     // @ts-ignore 'Type instantiation is excessively deep and possibly infinite.ts(2589)'
-    await expect(constraint.check(graph.asReadState, update)).resolves.toBeUndefined();
+    await expect(constraint.check(state.graph.asReadState, update)).resolves.toBeUndefined();
   });
 
   test('Rewrites a list insert', async () => {
@@ -51,7 +41,7 @@ describe('Default list constraint', () => {
           '@item': 'Bread'
         }])
     });
-    await expect(constraint.check(graph.asReadState, update)).resolves.toBeUndefined();
+    await expect(constraint.check(state.graph.asReadState, update)).resolves.toBeUndefined();
     expect(update.remove).toBeCalledWith('@insert', {
       '@id': 'http://test.m-ld.org/shopping',
       '@list': {
@@ -88,20 +78,16 @@ describe('Default list constraint', () => {
 
   test('Resolves a slot conflict with rejected remote', async () => {
     // Create a well-formed list with one slot containing 'Bread'
-    await dataset.transact({
-      prepare: async () => ({
-        patch: await graph.write({
-          '@insert': {
-            '@id': 'http://test.m-ld.org/shopping',
-            '@type': 'http://m-ld.org/RdfLseq',
-            'http://m-ld.org/RdfLseq/?=atest____________': {
-              '@id': 'http://test.m-ld.org/.well-known/genid/slot0',
-              '@item': 'Bread',
-              '@index': 0
-            }
-          }
-        }, ctx)
-      })
+    await state.write({
+      '@insert': {
+        '@id': 'http://test.m-ld.org/shopping',
+        '@type': 'http://m-ld.org/RdfLseq',
+        'http://m-ld.org/RdfLseq/?=atest____________': {
+          '@id': 'http://test.m-ld.org/.well-known/genid/slot0',
+          '@item': 'Bread',
+          '@index': 0
+        }
+      }
     });
     const constraint = new DefaultList('test');
     const update = mockInterim({
@@ -114,7 +100,7 @@ describe('Default list constraint', () => {
         }
       }])
     });
-    await expect(constraint.apply(graph.asReadState, update)).resolves.toBeDefined();
+    await expect(constraint.apply(state.graph.asReadState, update)).resolves.toBeDefined();
     expect(update.remove).not.toHaveBeenCalled();
     expect(update.assert).toBeCalledWith({
       '@delete': {
@@ -129,20 +115,16 @@ describe('Default list constraint', () => {
 
   test('Resolves a slot conflict with replace current and no index move', async () => {
     // Create a well-formed list with one slot containing 'Bread'
-    await dataset.transact({
-      prepare: async () => ({
-        patch: await graph.write({
-          '@insert': {
-            '@id': 'http://test.m-ld.org/shopping',
-            '@type': 'http://m-ld.org/RdfLseq',
-            'http://m-ld.org/RdfLseq/?=btest____________': {
-              '@id': 'http://test.m-ld.org/.well-known/genid/slot0',
-              '@item': 'Bread',
-              '@index': 0
-            }
-          }
-        }, ctx)
-      })
+    await state.write({
+      '@insert': {
+        '@id': 'http://test.m-ld.org/shopping',
+        '@type': 'http://m-ld.org/RdfLseq',
+        'http://m-ld.org/RdfLseq/?=btest____________': {
+          '@id': 'http://test.m-ld.org/.well-known/genid/slot0',
+          '@item': 'Bread',
+          '@index': 0
+        }
+      }
     });
     const constraint = new DefaultList('test');
     const update = mockInterim({
@@ -155,7 +137,7 @@ describe('Default list constraint', () => {
         }
       }])
     });
-    await expect(constraint.apply(graph.asReadState, update)).resolves.toBeDefined();
+    await expect(constraint.apply(state.graph.asReadState, update)).resolves.toBeDefined();
     expect(update.remove).not.toHaveBeenCalled();
     expect(update.assert).toBeCalledWith({
       '@delete': {
@@ -170,25 +152,21 @@ describe('Default list constraint', () => {
 
   test('Resolves a slot conflict with a moved index', async () => {
     // Create a well-formed list with two slots 'Bread', 'Milk'
-    await dataset.transact({
-      prepare: async () => ({
-        patch: await graph.write({
-          '@insert': {
-            '@id': 'http://test.m-ld.org/shopping',
-            '@type': 'http://m-ld.org/RdfLseq',
-            'http://m-ld.org/RdfLseq/?=btest____________': {
-              '@id': 'http://test.m-ld.org/.well-known/genid/slot0',
-              '@item': 'Bread',
-              '@index': 0
-            },
-            'http://m-ld.org/RdfLseq/?=dtest____________': {
-              '@id': 'http://test.m-ld.org/.well-known/genid/slot1',
-              '@item': 'Milk',
-              '@index': 1
-            }
-          }
-        }, ctx)
-      })
+    await state.write({
+      '@insert': {
+        '@id': 'http://test.m-ld.org/shopping',
+        '@type': 'http://m-ld.org/RdfLseq',
+        'http://m-ld.org/RdfLseq/?=btest____________': {
+          '@id': 'http://test.m-ld.org/.well-known/genid/slot0',
+          '@item': 'Bread',
+          '@index': 0
+        },
+        'http://m-ld.org/RdfLseq/?=dtest____________': {
+          '@id': 'http://test.m-ld.org/.well-known/genid/slot1',
+          '@item': 'Milk',
+          '@index': 1
+        }
+      }
     });
     const constraint = new DefaultList('test');
     const update = mockInterim({
@@ -202,7 +180,7 @@ describe('Default list constraint', () => {
         }
       }])
     });
-    await expect(constraint.apply(graph.asReadState, update)).resolves.toBeDefined();
+    await expect(constraint.apply(state.graph.asReadState, update)).resolves.toBeDefined();
     expect(update.remove).not.toHaveBeenCalled();
     expect(update.assert).toBeCalledWith({
       '@delete': {
@@ -234,11 +212,6 @@ describe('Default list constraint', () => {
     });
   });
 });
-
-function mockInterim(update: MeldUpdate) {
-  // Passing an implementation into the mock adds unwanted properties
-  return Object.assign(mock<InterimUpdate>(), { update: Promise.resolve(update) });
-}
 
 function findIndexKey([u]: [Update]): string | undefined {
   return Object.keys(u['@insert'] ?? [])
