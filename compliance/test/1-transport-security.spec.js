@@ -122,6 +122,9 @@ describe('ACL Transport Security', () => {
 
     it('accepts clone for registered user', async () => {
       await expectAsync(bobClone.start()).toBeResolved();
+      // Trivial update check to see that Bob is working
+      await aliceClone.transact({ '@id': 'fred', name: 'Fred' });
+      await expectAsync(bobClone.updated('@insert', 'Fred')).toBeResolved();
     });
 
     describe('with operation encryption secret', () => {
