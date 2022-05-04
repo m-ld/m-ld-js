@@ -10,6 +10,9 @@ import { InitialApp } from './config';
 import type { AbstractLevelDOWN } from 'abstract-leveldown';
 import { Stopwatch } from './engine/util';
 
+/**
+ * Core API exports. Extension exports can be found in package.json/exports
+ */
 export * from './util';
 export * from './api';
 export * from './config';

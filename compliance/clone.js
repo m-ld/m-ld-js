@@ -1,6 +1,6 @@
 const leveldown = require('leveldown');
 const { clone, isRead } = require('@m-ld/m-ld');
-const { MqttRemotes } = require('@m-ld/m-ld/dist/mqtt');
+const { MqttRemotes } = require('@m-ld/m-ld/ext/mqtt');
 const { createSign } = require('crypto');
 const LOG = require('loglevel');
 const { EventEmitter } = require('events');

@@ -35,7 +35,7 @@ describe('Statutory', () => {
         .resolves.toMatchObject({
           '@id': 'http://ext.m-ld.org/constraints/Statutory',
           '@type': 'http://js.m-ld.org/CommonJSModule',
-          'http://js.m-ld.org/#require': '@m-ld/m-ld/dist/constraints/Statutory',
+          'http://js.m-ld.org/#require': '@m-ld/m-ld/ext/constraints/Statutory',
           'http://js.m-ld.org/#class': 'Statutory'
         });
     });

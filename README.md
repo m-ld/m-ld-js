@@ -1,4 +1,5 @@
 <pre></pre>
+<!--suppress HtmlDeprecatedAttribute -->
 <p align="center">
   <a href="https://m-ld.org/">
     <img alt="m-ld" src="https://m-ld.org/m-ld.svg" width="300em" />
@@ -32,7 +33,7 @@ the engine documentation website at https://js.m-ld.org/ using
 ## extensions
 Plug-ins such as remotes implementations in this repository are structured as:
 - Directories under `src`
-- Entries in `package.json#exports` like `"./dist/socket.io": "./dist/socket.
+- Entries in `package.json#exports` like `"./ext/socket.io": "./ext/socket.
   io/index.js"`
 - Dependencies in `package.json#peerDependencies` and marked `optional` in
   `package.json#peerDependenciesMeta`. Also in `package.json#devDependencies` 

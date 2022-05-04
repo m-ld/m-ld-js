@@ -32,7 +32,7 @@ export class Statutory extends OrmDomain implements StateManaged<MeldExtensions>
       [priority]: {
         '@id': `${M_LD.EXT.$base}constraints/Statutory`,
         '@type': M_LD.JS.commonJsModule,
-        [M_LD.JS.require]: '@m-ld/m-ld/dist/constraints/Statutory',
+        [M_LD.JS.require]: '@m-ld/m-ld/ext/constraints/Statutory',
         [M_LD.JS.className]: 'Statutory'
       }
     }

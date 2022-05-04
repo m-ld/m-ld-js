@@ -1,5 +1,5 @@
 <!--
-Class documentation for @m-ld/dist/security MeldAclExtensions
+Class documentation for @m-ld/ext/security MeldAclExtensions
 -->
 
 The **m-ld** Access Control List (**m-ld** ACL) extensions provide authorisation controls on a m-ld domain using principals (users) and permissions registered in the domain data.
@@ -16,7 +16,7 @@ For example, assuming a **m-ld** `clone` object:
 await clone.write(MeldAclExtensions.declare(0, 'test.m-ld.org', randomBytes(16)));
 ```
 
-The `@m-ld/m-ld/dist/security` code module must be available to a global CommonJS-style `require` method in all clones using the Javascript engine.
+The `@m-ld/m-ld/ext/security` code module must be available to a global CommonJS-style `require` method in all clones using the Javascript engine.
 - In Node.js, the module is packaged in `@m-ld/m-ld`; no additional configuration is required.
 - In the browser, `require` is typically provided by the bundler. Since the module will be loaded dynamically, the bundler may need to be configured to guarantee the module is bundled, since it _may_ not be referenced statically by any code.
 

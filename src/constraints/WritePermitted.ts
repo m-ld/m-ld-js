@@ -26,7 +26,7 @@ export class WritePermitted extends OrmDomain implements StateManaged<MeldExtens
       [priority]: {
         '@id': `${M_LD.EXT.$base}constraints/WritePermitted`,
         '@type': M_LD.JS.commonJsModule,
-        [M_LD.JS.require]: '@m-ld/m-ld/dist/constraints/WritePermitted',
+        [M_LD.JS.require]: '@m-ld/m-ld/ext/constraints/WritePermitted',
         [M_LD.JS.className]: 'WritePermitted'
       }
     }

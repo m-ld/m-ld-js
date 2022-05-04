@@ -29,7 +29,7 @@ const genPrincipalKeys = () => generateKeyPairSync('rsa', {
  * @type {{require: string, class: string}}
  */
 const transportSecurity = {
-  require: '@m-ld/m-ld/dist/security',
+  require: '@m-ld/m-ld/ext/security',
   class: 'MeldAclTransportSecurity'
 };
 

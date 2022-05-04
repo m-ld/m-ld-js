@@ -8,7 +8,7 @@
     "inlineSourceMap": true,
     "declaration": true,
     "strictNullChecks": true,
-    "outDir": "dist"
+    "outDir": "ext"
   },
   "include": [
     "src/**/*"

@@ -39,8 +39,8 @@ jspm_packages/
 # dotenv environment variables file
 .env
 
-# distribution folder
-dist/
+# extensions folder
+ext/
 
 # site (documentation) folder & temporary file
 _site/

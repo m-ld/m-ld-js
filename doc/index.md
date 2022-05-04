@@ -33,7 +33,7 @@ There are two starter projects available:
 **m-ld** uses [levelup](https://github.com/level/levelup) to interface with a
 LevelDB-compatible storage backend.
 
-For the fastest in-memory responses, this library provides `MeldMemDown`, an optimised variant of [memdown](https://github.com/level/memdown), which can be imported from `'@m-ld/m-ld/dist/memdown'` as shown in the example below. To use, you must also install the [`memdown`](https://www.npmjs.com/package/memdown) package as a peer of `@m-ld/m-ld`.
+For the fastest in-memory responses, this library provides `MeldMemDown`, an optimised variant of [memdown](https://github.com/level/memdown), which can be imported from `'@m-ld/m-ld/ext/memdown'` as shown in the example below. To use, you must also install the [`memdown`](https://www.npmjs.com/package/memdown) package as a peer of `@m-ld/m-ld`.
 
 In a service or native application, use [leveldown](https://github.com/level/leveldown/) (file system storage).
 
@@ -57,8 +57,8 @@ and the clone [configuration](interfaces/meldconfig.html).
 
 ```typescript
 import { clone, uuid } from '@m-ld/m-ld';
-import { MeldMemDown } from '@m-ld/m-ld/dist/memdown';
-import { MqttRemotes, MeldMqttConfig } from '@m-ld/m-ld/dist/mqtt';
+import { MeldMemDown } from '@m-ld/m-ld/ext/memdown';
+import { MqttRemotes, MeldMqttConfig } from '@m-ld/m-ld/ext/mqtt';
 
 const config: MeldMqttConfig = {
   '@id': uuid(),
