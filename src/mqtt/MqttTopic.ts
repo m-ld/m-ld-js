@@ -39,7 +39,7 @@ export class MqttTopic<P extends TopicParams = TopicParams> {
 
   private get pattern(): string {
     return this.parts.map(part => typeof part === 'string' ?
-      part : '+' in part ? '+' + part['+'] : '#' + part['#']).join('/');
+      part : '+' in part ? '+' + <string>part['+'] : '#' + <string>part['#']).join('/');
   }
 }
 

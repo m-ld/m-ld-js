@@ -1,13 +1,13 @@
-import type { DataFactory, NamedNode, Quad, Term } from 'rdf-js';
+import type { Bindings, DataFactory, NamedNode, Quad, Term } from 'rdf-js';
 import { IndexMap, IndexSet } from './indices';
-import { QueryableRdfSource } from '../rdfjs-support';
+import { Binding, QueryableRdfSource } from '../rdfjs-support';
 
 export type Triple = Omit<Quad, 'graph'>;
 export type TriplePos = 'subject' | 'predicate' | 'object';
 
 export type {
   DefaultGraph, Quad, Term, DataFactory, NamedNode, Source as QuadSource,
-  Quad_Subject, Quad_Predicate, Quad_Object
+  Quad_Subject, Quad_Predicate, Quad_Object, Bindings, Literal
 } from 'rdf-js';
 
 export abstract class QueryableRdfSourceProxy implements QueryableRdfSource {
@@ -98,4 +98,11 @@ export interface RdfFactory extends Required<DataFactory> {
    * @see https://www.w3.org/TR/rdf11-concepts/#h3_section-skolemization
    */
   skolem?(): NamedNode;
+}
+
+export function toBinding(bindings: Bindings): Binding {
+  const binding: Binding = {};
+  for (let [variable, term] of bindings)
+    binding[`?${variable.value}`] = term;
+  return binding;
 }
