@@ -659,8 +659,8 @@ export class SuSetDataset extends MeldEncoder {
       id: 'snapshot-batch',
       prepare: async () => {
         if ('inserts' in batch) {
-          const triplesTids = MeldEncoder.unreifyTriplesTids(
-            this.triplesFromBuffer(batch.inserts, batch.encoding));
+          const reified = this.triplesFromBuffer(batch.inserts, batch.encoding);
+          const triplesTids = MeldEncoder.unreifyTriplesTids(reified);
           // For each triple in the batch, insert the TIDs into the tids graph
           const tidPatch = new PatchTids(this.tidsStore, { inserts: flattenItemTids(triplesTids) });
           // And include the triples themselves

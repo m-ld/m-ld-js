@@ -45,10 +45,10 @@ export abstract class IndexMap<K, V> extends Index<K, [K, V]> {
       this.setAll(map);
   }
 
-  with(key: K, factory: () => V): V {
+  with(key: K, factory: (key: K) => V): V {
     let value = this.get(key);
     if (value == null) {
-      value = factory();
+      value = factory(key);
       this.set(key, value);
     }
     return value;

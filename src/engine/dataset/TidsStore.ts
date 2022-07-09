@@ -90,33 +90,36 @@ export class PatchTids extends MutableOperation<[Triple, UUID]> {
    * Gathers the resultant TIDs after affecting the store with the given patch
    */
   get affected() {
-    return this._affected ??= (async () => {
-      const affected = new TripleMap<Set<UUID>>();
-      const affect = (tripleTids: Iterable<[Triple, UUID]>, effect: Set<UUID>['delete' | 'add']) =>
-        Promise.all([...tripleTids].map(async ([triple, tid]) =>
-          effect.call(await this.tripleTids(triple, affected), tid)));
-      await affect(this.deletes, Set.prototype.delete);
-      await affect(this.inserts, Set.prototype.add);
-      return affected;
-    })();
+    return this._affected ??= this.loadAffected();
+  }
+
+  private async loadAffected() {
+    const affected = new TripleMap<Set<UUID>>();
+    // First populate existing TIDs for all triples affected
+    const tidLoads: Promise<void>[] = [];
+    const loadExisting = (triple: Triple) => {
+      const tripleTids = new Set<UUID>();
+      tidLoads.push(this.store.findTripleTids(triple)
+        .then(tids => tids.forEach(tid => tripleTids.add(tid))));
+      return tripleTids;
+    };
+    for (let [triple] of this.deletes)
+      affected.with(triple, loadExisting);
+    for (let [triple] of this.inserts)
+      affected.with(triple, loadExisting);
+    await Promise.all(tidLoads);
+    // Then process modifications
+    for (let [triple, deleted] of this.deletes)
+      affected.get(triple)!.delete(deleted);
+    for (let [triple, inserted] of this.inserts)
+      affected.get(triple)!.add(inserted);
+    return affected;
   }
 
   async stateOf(triple: Triple): Promise<UUID[]> {
     const affectedState = (await this.affected).get(triple);
     return affectedState != null ?
       [...affectedState] : await this.store.findTripleTids(triple);
-  }
-
-  /**
-   * @returns Set<UUID> mutable set in the `affected` map
-   */
-  private async tripleTids(triple: Triple, affected: TripleMap<Set<UUID>>): Promise<Set<UUID>> {
-    let tids = affected.get(triple);
-    if (tids == null) {
-      tids = new Set(await this.store.findTripleTids(triple));
-      affected.set(triple, tids);
-    }
-    return tids;
   }
 
   /** @override to clear affected cache */

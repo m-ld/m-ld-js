@@ -16,7 +16,7 @@ import { MeldConfig } from '../config';
 
 export interface MeldMqttConfig extends MeldConfig {
   mqtt?: Omit<IClientOptions, 'will' | 'clientId'> &
-    ({ hostname: string } | { host: string, port: number })
+    ({ hostname: string } | { host: string, port: number });
 }
 
 interface DomainTopicParams extends TopicParams {
@@ -77,7 +77,7 @@ export class MqttRemotes extends PubsubRemotes {
     });
 
     // When MQTT.js receives an error just log - it will try to reconnect
-    this.mqtt.on('error', this.warnError);
+    this.mqtt.on('error', err => this.log.warn('MQTT client error', err));
 
     // MQTT.js 'close' event signals a disconnect - definitely offline.
     this.mqtt.on('close', () => this.onDisconnect());
@@ -85,12 +85,8 @@ export class MqttRemotes extends PubsubRemotes {
   }
 
   async close(err?: any) {
-    try {
-      await super.close(err);
-      await this.mqtt.end();
-    } catch (e) {
-      this.warnError(e);
-    }
+    await super.close(err);
+    await this.mqtt.end().catch(err => this.log.warn('Error closing MQTT client', err));
   }
 
   protected async onConnect() {
@@ -107,11 +103,12 @@ export class MqttRemotes extends PubsubRemotes {
         // noinspection ExceptionCaughtLocallyJS
         throw new Error('Requested QoS was not granted');
       // We don't have to wait for the presence to initialise
-      this.presence.initialise().catch(this.warnError);
+      this.presence.initialise()
+        .catch(err => this.log.warn('Failed to initialise presence', err));
       await super.onConnect();
     } catch (err) {
       if (this.mqtt.connected)
-        this.close(err).catch(this.warnError); // This is a catastrophe, can't bootstrap
+        this.close(err).catch(err => this.log.error('Failed to bootstrap', err));
       else
         this.log.debug(err);
     }
@@ -141,7 +138,8 @@ export class MqttRemotes extends PubsubRemotes {
     return {
       id: channelId,
       publish: notification => this.mqtt.publish(address, notification),
-      close: () => this.mqtt.unsubscribe(address).catch(this.warnError)
+      close: () => this.mqtt.unsubscribe(address)
+        .catch(err => this.log.warn('Failed to unsubscribe from MQTT', err))
     };
   }
 

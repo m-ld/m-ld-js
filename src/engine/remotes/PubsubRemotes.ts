@@ -1,7 +1,7 @@
 import { MeldLocal, MeldRemotes, OperationMessage, Revup, Snapshot } from '../index';
 import {
   BehaviorSubject, concatWith, defer, EMPTY, firstValueFrom, from, identity, NEVER, Observable,
-  Observer, of, onErrorResumeNext, race, Subject as Source, Subscription, switchMapTo, throwError
+  Observer, of, onErrorResumeNext, race, Subject as Source, Subscription, switchMap, throwError
 } from 'rxjs';
 import { TreeClock } from '../clocks';
 import { generate as uuid } from 'short-uuid';
@@ -117,7 +117,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
             }
           } catch (err) {
             // Failed to send an update while (probably) connected
-            this.log.warn(err);
+            this.log.warn('Failed to send an update while connected', err);
             // Operation delivery is guaranteed at-least-once. So, if it
             // fails, something catastrophic must have happened. Signal
             // failure of this service and allow the clone to deal with it.
@@ -135,7 +135,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
       // When the clone comes live, join the presence on this domain if we can
       this.cloneSubs.add(clone.live.subscribe(live => {
         if (live != null)
-          this.cloneLive(live).catch(this.warnError);
+          this.cloneLive(live).catch(err => this.log.warn('Failed to handle liveness', err));
       }));
     } else if (clone != this.clone) {
       throw new Error(`${this.id}: Local clone cannot change`);
@@ -219,7 +219,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
       this.active.complete();
       await this.active.value;
     } catch (e) {
-      this.warnError(e);
+      this.log.warn('Error while closing', e);
     }
   }
 
@@ -227,8 +227,8 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     this.clone = null;
     this.cloneSubs.unsubscribe();
     this.cloneLive(false)
-      .catch(this.warnError)
-      .finally(() => this.close(err).catch(this.warnError));
+      .finally(() => this.close(err))
+      .catch(err => this.log.warn('Error while closing safely', err));
   }
 
   async newClock(): Promise<TreeClock> {
@@ -383,15 +383,18 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
           } catch (err) {
             // This will only catch from the work methods, not the returned replies
             this.reply(sentParams, state, new RejectedResponse(asMeldErrorStatus(err)))
-              .catch(this.warnError);
+              .catch(err => this.log.warn('Failed to handle sent message', err));
             throw err;
           }
         });
         if (typeof replied == 'object')
           await replied.after;
       } catch (err) {
-        // Rejection will already have been sent
-        this.log.warn(err);
+        if (this.closed)
+          this.log.info('Clone closed: Not responding to sent message');
+        else
+          // Rejection will already have been sent
+          this.log.warn('Failed to respond to sent message', err);
       } finally {
         sw.stop();
         done.resolve();
@@ -492,8 +495,11 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     this.log.debug('Sending request', messageId, logRequest, sender.id);
     sw.next('send');
     const sent = sender.publish(wireRequest).finally(() => sender.close?.());
-    tried[sender.id] = this.getResponse<T>(sent, messageId, { readyToAck, state })
-      .then(res => ({ res, fromId: sender.id }));
+    tried[sender.id] = this.getResponse<T>(
+      sent,
+      messageId,
+      { readyToAck, state }
+    ).then(res => ({ res, fromId: sender.id }));
     // If the publish fails, don't keep trying other addresses
     await sent;
     // If the caller doesn't like this response, try again
@@ -513,12 +519,12 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
       // Four possible outcomes:
       // 1. Response times out after allowing time for prior work
       from(allowTimeFor ?? of(0)).pipe(delay(this.sendTimeout),
-        switchMapTo(throwError(() => {
+        switchMap(() => throwError(() => {
           this.log.debug(`Message ${messageId} timed out.`);
           return new Error('Send timeout exceeded.');
         }))),
       // 2. Send fails - abandon the response if it rejects
-      from(sent).pipe(switchMapTo(NEVER)),
+      from(sent).pipe(switchMap(() => NEVER)),
       // 3. Remotes have closed
       this.active.pipe(ignoreElements(),
         concatWith(throwError(() => new MeldError('Clone has closed')))),
@@ -571,7 +577,12 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
         toId: sentParams.fromId, fromId: this.id, channelId: updatesAddress
       })));
       // Ack has been sent, start streaming the updates
-      return { after: this.produce(revup.updates, notifier, msg => msg.toBuffer(), 'updates') };
+      return {
+        after: this.produce(
+          revup.updates,
+          notifier,
+            msg => msg.toBuffer(), 'updates')
+      };
     } else if (this.clone) {
       await this.reply(sentParams, state, new RevupResponse(null, this.id));
     }
