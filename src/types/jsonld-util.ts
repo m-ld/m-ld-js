@@ -1,3 +1,7 @@
+/**
+ * This declaration file is stored as .ts so that it is emitted
+ */
+
 declare module 'jsonld/lib/util' {
   /**
    * Clones an object, array, Map, Set, or string/number. If a typed JavaScript

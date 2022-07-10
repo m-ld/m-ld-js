@@ -3,12 +3,13 @@ import {
   Atom, isPropertyObject, isReference, isSet, isValueObject, isVocabReference, Reference, Subject,
   SubjectPropertyObject, VocabReference
 } from '../jrql-support';
-import { canonicalDouble, expandTerm } from './jsonld';
+import {
+  ActiveContext, canonicalDouble, expandTerm, getContextValue, isBoolean, isDouble, isNumber,
+  isString
+} from './jsonld';
 import { Quad, Quad_Object, Quad_Subject, RdfFactory } from './quads';
 import { JRQL, RDF, XS } from '../ns';
 import { JrqlMode, ListIndex, listItems, toIndexDataUrl } from './jrql-util';
-import { ActiveContext, getContextValue } from 'jsonld/lib/context';
-import { isBoolean, isDouble, isNumber, isString } from 'jsonld/lib/types';
 import { isArray, lazy } from './util';
 import { array } from '../util';
 

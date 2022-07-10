@@ -5,8 +5,7 @@ import { JRQL, RDF, XS } from '../ns';
 import { GraphSubject, GraphSubjects } from '../api';
 import { deepValues, isArray, setAtPath } from './util';
 import { addPropertyObject, toIndexNumber } from './jrql-util';
-import { ActiveContext, getContextValue } from 'jsonld/lib/context';
-import { compactIri } from './jsonld';
+import { ActiveContext, compactIri, getContextValue } from './jsonld';
 
 export type GraphAliases =
   (subject: Iri | null, property: '@id' | string) => Iri | SubjectProperty | undefined;

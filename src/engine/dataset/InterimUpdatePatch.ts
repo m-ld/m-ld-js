@@ -4,9 +4,8 @@ import { PatchQuads } from '.';
 import { JrqlGraph } from './JrqlGraph';
 import { GraphAliases, SubjectGraph } from '../SubjectGraph';
 import { Iri } from 'jsonld/jsonld-spec';
-import { ActiveContext } from 'jsonld/lib/context';
 import { Quad } from '../quads';
-import { compactIri } from '../jsonld';
+import { ActiveContext, compactIri } from '../jsonld';
 import { array } from '../../util';
 
 export class InterimUpdatePatch implements InterimUpdate {

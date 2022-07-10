@@ -20,8 +20,7 @@ import { DatasetSnapshot } from '../src/engine/dataset/SuSetDataset';
 import { ClockHolder } from '../src/engine/messages';
 import { DomainContext } from '../src/engine/MeldEncoding';
 import { JrqlGraph } from '../src/engine/dataset/JrqlGraph';
-import { ActiveContext } from 'jsonld/lib/context';
-import { activeCtx } from '../src/engine/jsonld';
+import { ActiveContext, activeCtx } from '../src/engine/jsonld';
 import { InterimUpdatePatch } from '../src/engine/dataset/InterimUpdatePatch';
 
 export function testConfig(config?: Partial<MeldConfig>): MeldConfig {

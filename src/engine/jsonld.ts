@@ -1,3 +1,10 @@
+// Ambient module declarations being re-exported
+/// <reference path="../types/jsonld.ts" />
+/// <reference path="../types/jsonld-context.ts" />
+/// <reference path="../types/jsonld-util.ts" />
+/// <reference path="../types/jsonld-url.ts" />
+/// <reference path="../types/jsonld-types.ts" />
+
 import { Options, processContext } from 'jsonld';
 import { Context, Iri } from 'jsonld/jsonld-spec';
 import { compactIri as _compactIri } from 'jsonld/lib/compact';
@@ -10,6 +17,7 @@ import { array } from '../util';
 export { hasProperty, hasValue } from 'jsonld/lib/util';
 export { ActiveContext, getContextValue } from 'jsonld/lib/context';
 export { isAbsolute } from 'jsonld/lib/url';
+export { isBoolean, isDouble, isNumber, isString } from 'jsonld/lib/types';
 
 export function compareValues(v1: any, v2: any): boolean {
   const jsonldEqual = _compareValues(v1, v2);
@@ -24,7 +32,9 @@ export function compareValues(v1: any, v2: any): boolean {
   return jsonldEqual;
 }
 
-export function expandTerm(value: string, ctx: ActiveContext,
+export function expandTerm(
+  value: string,
+  ctx: ActiveContext,
   options?: Options.Expand & { vocab?: boolean }
 ): Iri {
   return expandIri(ctx, value, {
@@ -32,7 +42,9 @@ export function expandTerm(value: string, ctx: ActiveContext,
   }, options ?? {});
 }
 
-export function compactIri(iri: Iri, ctx?: ActiveContext,
+export function compactIri(
+  iri: Iri,
+  ctx?: ActiveContext,
   options?: Options.CompactIri & { vocab?: boolean }
 ): string {
   return ctx != null ? _compactIri({

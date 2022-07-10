@@ -1,8 +1,14 @@
+// noinspection JSUnusedGlobalSymbols
+
+/**
+ * This declaration file is stored as .ts so that it is emitted
+ */
+
 declare module 'jsonld/lib/types' {
   /**
    * Returns true if the given value is an Array.
    *
-   * @param v the value to check.
+   * @param arg the value to check.
    *
    * @return true if the value is an Array, false if not.
    */
@@ -11,7 +17,7 @@ declare module 'jsonld/lib/types' {
   /**
    * Returns true if the given value is a Boolean.
    *
-   * @param v the value to check.
+   * @param arg the value to check.
    *
    * @return true if the value is a Boolean, false if not.
    */
@@ -20,7 +26,7 @@ declare module 'jsonld/lib/types' {
   /**
    * Returns true if the given value is a double.
    *
-   * @param v the value to check.
+   * @param arg the value to check.
    *
    * @return true if the value is a double, false if not.
    */
@@ -29,7 +35,7 @@ declare module 'jsonld/lib/types' {
   /**
    * Returns true if the given value is an empty Object.
    *
-   * @param v the value to check.
+   * @param arg the value to check.
    *
    * @return true if the value is an empty Object, false if not.
    */
@@ -38,7 +44,7 @@ declare module 'jsonld/lib/types' {
   /**
    * Returns true if the given value is a Number.
    *
-   * @param v the value to check.
+   * @param arg the value to check.
    *
    * @return true if the value is a Number, false if not.
    */
@@ -47,7 +53,7 @@ declare module 'jsonld/lib/types' {
   /**
    * Returns true if the given value is numeric.
    *
-   * @param v the value to check.
+   * @param arg the value to check.
    *
    * @return true if the value is numeric, false if not.
    */
@@ -57,7 +63,7 @@ declare module 'jsonld/lib/types' {
   /**
    * Returns true if the given value is an Object.
    *
-   * @param v the value to check.
+   * @param arg the value to check.
    *
    * @return true if the value is an Object, false if not.
    */
@@ -66,7 +72,7 @@ declare module 'jsonld/lib/types' {
   /**
    * Returns true if the given value is a String.
    *
-   * @param v the value to check.
+   * @param arg the value to check.
    *
    * @return true if the value is a String, false if not.
    */
@@ -75,7 +81,7 @@ declare module 'jsonld/lib/types' {
   /**
    * Returns true if the given value is undefined.
    *
-   * @param v the value to check.
+   * @param arg the value to check.
    *
    * @return true if the value is undefined, false if not.
    */
