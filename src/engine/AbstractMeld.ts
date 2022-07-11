@@ -54,8 +54,6 @@ export abstract class AbstractMeld implements Meld {
   };
   protected pauseOperations = (until: PromiseLike<unknown>) => this.operationSource.pause(until);
 
-  protected warnError = (err: any) => this.log.warn(err);
-
   protected setLive(live: boolean | null) {
     return this.liveSource.next(live);
   };

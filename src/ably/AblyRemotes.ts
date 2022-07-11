@@ -53,7 +53,7 @@ export class AblyRemotes extends PubsubRemotes {
     this.directChannel = this.channel(config['@id']);
     // Ensure we are fully subscribed before we make any presence claims
     this.subscribed = Promise.all([
-      this.traffic.subscribe(this.opsChannel, data => this.onOperation(data)),
+      this.traffic.subscribe(this.opsChannel, data => this.onOperation(Buffer.from(data))),
       this.opsChannel.presence.subscribe(() => this.onPresenceChange()),
       this.traffic.subscribe(this.directChannel, this.onDirectMessage)
     ]).catch(err => this.close(err));
@@ -63,7 +63,8 @@ export class AblyRemotes extends PubsubRemotes {
     // This is so we don't miss messages that are immediately sent to us.
     // https://support.ably.com/support/solutions/articles/3000067435
     this.client.connection.on('connected', () =>
-      this.subscribed.then(() => this.onConnect()).catch(this.warnError));
+      this.subscribed.then(() => this.onConnect())
+        .catch(err => this.log.warn('Connect handler failed', err)));
     // Ably has connection recovery with no message loss for 2min. During that
     // time we treat the remotes as live. After that, the connection becomes
     // suspended and we are offline.
@@ -87,19 +88,19 @@ export class AblyRemotes extends PubsubRemotes {
       const params = { fromId: clientId, toId: this.id };
       switch (type) {
         case '__send':
-          await this.onSent(data, { messageId: id, ...params });
+          await this.onSent(Buffer.from(data), { messageId: id, ...params });
           break;
         case '__reply':
-          await this.onReply(data, { messageId: id, sentMessageId, ...params });
+          await this.onReply(Buffer.from(data), { messageId: id, sentMessageId, ...params });
           break;
         case '__notify':
-          this.onNotify(id, data);
+          this.onNotify(id, Buffer.from(data));
           break;
         case '__signal':
           this.onSignal(id, clientId, data);
       }
     } catch (err) {
-      this.warnError(err);
+      this.log.warn('Direct message handler failed', err);
     }
   };
 
@@ -197,7 +198,8 @@ export class AblyRemotes extends PubsubRemotes {
     // If someone is saying they are unavailable for peering, that's OK with us
     if (!('unavailable' in data))
       // Otherwise someone is trying to peer with us, but we can't
-      this.signal(fromId, channelId, { unavailable: true }).catch(this.warnError);
+      this.signal(fromId, channelId, { unavailable: true })
+        .catch(err => this.log.warn('Unable to signal peer', err));
   }
 }
 

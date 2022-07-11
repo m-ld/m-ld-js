@@ -1,3 +1,7 @@
+/**
+ * This declaration file is stored as .ts so that it is emitted
+ */
+
 declare module 'jsonld/lib/context' {
   import { Context, Iri } from 'jsonld/jsonld-spec';
   import { ExpandedTermDefinition, Options } from 'jsonld';

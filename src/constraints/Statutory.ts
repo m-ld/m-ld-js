@@ -213,7 +213,12 @@ export class Statute extends OrmSubject implements MeldConstraint, AgreementCond
 }
 
 class AffectedUpdate {
-  affected: { [id: string]: Partial<DeleteInsert<Subject & Reference>> } = {};
+  affected: {
+    [id: string]: {
+      '@delete'?: Subject & Reference;
+      '@insert'?: Subject & Reference;
+    }
+  } = {};
 
   constructor(update?: GraphUpdate) {
     if (update != null)
@@ -243,9 +248,9 @@ class AffectedUpdate {
 
   private addKey(key: keyof DeleteInsert<any>, update: GraphUpdate) {
     for (let subject of update[key]) {
-      this.affected[subject['@id']] ??= { [key]: { '@id': subject['@id'] } };
+      (this.affected[subject['@id']] ??= {})[key] ??= { '@id': subject['@id'] };
       // FIXME: this assumes the values are irrelevant!
-      Object.assign(this.affected[subject['@id']][key], subject);
+      Object.assign(this.affected[subject['@id']][key]!, subject);
     }
   }
 

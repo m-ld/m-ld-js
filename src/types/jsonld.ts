@@ -1,3 +1,7 @@
+/**
+ * This declaration file is stored as .ts so that it is emitted
+ */
+
 import { Context, Url } from 'jsonld/jsonld-spec';
 import { ActiveContext } from 'jsonld/lib/context';
 

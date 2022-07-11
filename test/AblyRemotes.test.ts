@@ -8,6 +8,7 @@ import { BehaviorSubject, Subject as Source } from 'rxjs';
 import { Future, isArray } from '../src/engine/util';
 import { TreeClock } from '../src/engine/clocks';
 import { NewClockRequest, NewClockResponse } from '../src/engine/remotes/ControlMessage';
+import { DeepMockProxy } from 'jest-mock-extended/lib/Mock';
 
 /**
  * These tests use a fully mocked Ably to avoid incurring costs. The behaviour
@@ -15,8 +16,8 @@ import { NewClockRequest, NewClockResponse } from '../src/engine/remotes/Control
  */
 describe('Ably remotes', () => {
   let connect: jest.Mock<MockProxy<Ably.Types.RealtimePromise>>;
-  let client: MockProxy<Ably.Types.RealtimePromise>;
-  let operations: MockProxy<Ably.Types.RealtimeChannelPromise>;
+  let client: DeepMockProxy<Ably.Types.RealtimePromise>;
+  let operations: DeepMockProxy<Ably.Types.RealtimeChannelPromise>;
   let control: MockProxy<Ably.Types.RealtimeChannelPromise>;
   let connCallbacks: { [key: string]: Ably.Types.connectionEventCallback | undefined } = {};
   const config: MeldAblyConfig = {

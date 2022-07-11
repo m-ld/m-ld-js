@@ -181,17 +181,18 @@ describe('SU-Set Dataset', () => {
 
         test('answers a snapshot with fused last operations', async () => {
           const firstTick = local.time.ticks;
-          await ssd.transact(async () => [
+          const tid2 = (await ssd.transact(async () => [
             local.tick().time,
             await ssd.write({ '@insert': wilma })
-          ]);
+          ]))!.time.hash;
           const snapshot = await ssd.takeSnapshot();
           expect(snapshot.gwc.equals(local.gwc)).toBe(true);
           const data = await firstValueFrom(snapshot.data.pipe(toArray()));
           expect(data.length).toBe(2);
-          // noinspection LongLine
-          const reifiedFlintstoneJson = new RegExp( // Not a great check but must have all properties
-            `(.+("s":"fred"|"s":"wilma"|"p":"#name"|"o":"Fred"|"o":"Wilma"|"tid":"${firstTid}|"tid":"${local.time.hash}")){8}`);
+          const expectReifiedJson = expect.arrayContaining([
+            { '@id': expect.any(String), 's': 'fred', 'p': '#name', 'o': 'Fred', 'tid': firstTid },
+            { '@id': expect.any(String), 's': 'wilma', 'p': '#name', 'o': 'Wilma', 'tid': tid2 }
+          ]);
           expect(data.every(v => {
             if ('operation' in v) {
               const [ver, from, time, upd, enc] = v.operation;
@@ -200,11 +201,48 @@ describe('SU-Set Dataset', () => {
               expect(TreeClock.fromJson(time).equals(local.time)).toBe(true);
               const [del, ins] = MeldEncoder.jsonFromBuffer(upd, enc);
               expect(del).toEqual({});
-              expect(JSON.stringify(ins)).toMatch(reifiedFlintstoneJson);
+              expect(ins).toEqual(expectReifiedJson);
+              expect(ins.length).toBe(2);
               return true;
             } else if ('inserts' in v) {
-              expect(JSON.stringify(MeldEncoder.jsonFromBuffer(v.inserts, v.encoding)))
-                .toMatch(reifiedFlintstoneJson);
+              const ins = MeldEncoder.jsonFromBuffer<[]>(v.inserts, v.encoding);
+              expect(ins).toEqual(expectReifiedJson);
+              expect(ins.length).toBe(2);
+              expect(v.encoding).toEqual([BufferEncoding.MSGPACK]);
+              return true;
+            }
+          })).toBe(true);
+        });
+
+        test('answers a snapshot with fused duplicating operations', async () => {
+          const firstTick = local.time.ticks;
+          const tid2 = (await ssd.transact(async () => [
+            local.tick().time,
+            await ssd.write({ '@insert': fred }) // again
+          ]))!.time.hash;
+          const snapshot = await ssd.takeSnapshot();
+          const data = await firstValueFrom(snapshot.data.pipe(toArray()));
+          expect(data.length).toBe(2);
+          const expectReifiedJson = {
+            '@id': expect.any(String),
+            's': 'fred',
+            'p': '#name',
+            'o': 'Fred',
+            'tid': expect.arrayContaining([firstTid, tid2])
+          };
+          expect(data.every(v => {
+            if ('operation' in v) {
+              const [ver, from, time, upd, enc] = v.operation;
+              expect(ver).toBe(4);
+              expect(from).toBe(firstTick);
+              expect(TreeClock.fromJson(time).equals(local.time)).toBe(true);
+              const [del, ins] = MeldEncoder.jsonFromBuffer(upd, enc);
+              expect(del).toEqual({});
+              expect(ins).toEqual(expectReifiedJson);
+              return true;
+            } else if ('inserts' in v) {
+              const ins = MeldEncoder.jsonFromBuffer<[]>(v.inserts, v.encoding);
+              expect(ins).toEqual(expectReifiedJson);
               expect(v.encoding).toEqual([BufferEncoding.MSGPACK]);
               return true;
             }
@@ -334,6 +372,47 @@ describe('SU-Set Dataset', () => {
           await expect(drain(ssd.read<Describe>({
             '@describe': 'http://test.m-ld.org/barney'
           }))).resolves.toEqual([barney]);
+        });
+
+        test('deletes a duplicated insert', async () => {
+          const tid2 = (await ssd.transact(async () => [
+            local.tick().time,
+            await ssd.write({ '@insert': fred })
+          ]))!.time.hash;
+          const msg = (await ssd.transact(async () => [
+            local.tick().time,
+            await ssd.write({ '@delete': fred })
+          ]))!;
+          const [del] = MeldEncoder.jsonFromBuffer(
+            msg.data[EncodedOperation.Key.update],
+            msg.data[EncodedOperation.Key.encoding]);
+          expect(del).toEqual({
+            '@id': expect.any(String),
+            's': 'fred', 'p': '#name', 'o': 'Fred',
+            'tid': expect.arrayContaining([firstTid, tid2])
+          });
+        });
+
+        test('deletes a duplicated insert after snapshot', async () => {
+          const tid2 = (await ssd.transact(async () => [
+            local.tick().time,
+            await ssd.write({ '@insert': fred })
+          ]))!.time.hash;
+          const snapshot = await ssd.takeSnapshot();
+          const staticData = await firstValueFrom(snapshot.data.pipe(toArray()));
+          await ssd.applySnapshot(local.snapshot(staticData), local.tick().time);
+          const msg = (await ssd.transact(async () => [
+            local.tick().time,
+            await ssd.write({ '@delete': fred })
+          ]))!;
+          const [del] = MeldEncoder.jsonFromBuffer(
+            msg.data[EncodedOperation.Key.update],
+            msg.data[EncodedOperation.Key.encoding]);
+          expect(del).toEqual({
+            '@id': expect.any(String),
+            's': 'fred', 'p': '#name', 'o': 'Fred',
+            'tid': expect.arrayContaining([firstTid, tid2])
+          });
         });
 
         test('transacts a duplicating insert', async () => {

@@ -30,6 +30,18 @@ describe('TIDs Store', () => {
       .toEqual([[fredName, []]]);
   });
 
+  test('adds multiple tids for a triple', async () => {
+    const loadTidsSpy = jest.spyOn(tidsStore, 'findTripleTids');
+    const kvps = await tidsStore.commit(new PatchTids(tidsStore, {
+      inserts: [[fredName, 'tid1'], [fredName, 'tid2']]
+    }));
+    await kvpStore.transact({ prepare: () => ({ kvps }) });
+    // Check that we're not doing more work than we ought to
+    expect(loadTidsSpy).toHaveBeenCalledTimes(1);
+    await expect(tidsStore.findTripleTids(fredName))
+      .resolves.toEqual(expect.arrayContaining(['tid1', 'tid2']));
+  });
+
   describe('with inserted TID', () => {
     beforeEach(async () => {
       const kvps = await tidsStore.commit(new PatchTids(tidsStore, {
@@ -43,7 +55,8 @@ describe('TIDs Store', () => {
     });
 
     test('Finds inserted TIDs for triples', async () => {
-      expect([...await tidsStore.findTriplesTids([fredName])]).toEqual([[fredName, ['tid1']]]);
+      expect([...await tidsStore.findTriplesTids([fredName])])
+        .toEqual([[fredName, ['tid1']]]);
     });
 
     test('Replaces inserted TID for triple', async () => {
@@ -54,6 +67,21 @@ describe('TIDs Store', () => {
       await kvpStore.transact({ prepare: () => ({ kvps }) });
 
       await expect(tidsStore.findTripleTids(fredName)).resolves.toEqual(['tid2']);
+    });
+
+    test('Adds inserted TID for another triple', async () => {
+      const fredHeight = rdf.quad(
+        rdf.namedNode('http://ex.org/fred'),
+        rdf.namedNode('http://ex.org/#height'),
+        rdf.literal('6'));
+      const patchTids = new PatchTids(tidsStore, {
+        inserts: [[fredHeight, 'tid2']]
+      });
+      const kvps = await tidsStore.commit(patchTids);
+      await kvpStore.transact({ prepare: () => ({ kvps }) });
+
+      await expect(tidsStore.findTripleTids(fredName)).resolves.toEqual(['tid1']);
+      await expect(tidsStore.findTripleTids(fredHeight)).resolves.toEqual(['tid2']);
     });
   });
 });

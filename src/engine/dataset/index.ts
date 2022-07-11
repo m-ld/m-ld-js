@@ -1,8 +1,8 @@
 import {
-  DataFactory, DefaultGraph, NamedNode, Quad, Quad_Object, Quad_Predicate, Quad_Subject, QuadSet,
-  QuadSource, RdfFactory
+  Bindings, DataFactory, DefaultGraph, NamedNode, Quad, Quad_Object, Quad_Predicate, Quad_Subject,
+  QuadSet, QuadSource, RdfFactory, toBinding
 } from '../quads';
-import { Quadstore } from 'quadstore';
+import { BatchOpts, Binding, Quadstore, ResultType } from 'quadstore';
 import {
   AbstractChainedBatch, AbstractIterator, AbstractIteratorOptions, AbstractLevelDOWN
 } from 'abstract-leveldown';
@@ -10,17 +10,17 @@ import { Observable } from 'rxjs';
 import { generate as uuid } from 'short-uuid';
 import { check, Stopwatch } from '../util';
 import { LockManager } from '../locks';
-import { BatchOpts, Binding, ResultType } from 'quadstore/dist/lib/types';
 import { Context, Iri } from 'jsonld/jsonld-spec';
 import { ActiveContext, activeCtx, compactIri, expandTerm } from '../jsonld';
 import { Algebra } from 'sparqlalgebrajs';
-import { newEngine } from 'quadstore-comunica';
+import { Engine } from 'quadstore-comunica';
 import { DataFactory as RdfDataFactory } from 'rdf-data-factory';
 import { JRQL, M_LD, RDF, XS } from '../../ns';
-import { AsyncIterator, empty, EmptyIterator, TransformIterator, wrap } from 'asynciterator';
+import { AsyncIterator, empty, EmptyIterator, SimpleTransformIterator } from 'asynciterator';
 import { MutableOperation } from '../ops';
 import { MeldError } from '../MeldError';
-import { CountableRdf, QueryableRdfSource } from '../../rdfjs-support';
+import { BaseStream, CountableRdf, QueryableRdfSource } from '../../rdfjs-support';
+import { AllMetadataSupport, Query } from '@rdfjs/types';
 import type EventEmitter = require('events');
 
 /**
@@ -139,6 +139,7 @@ export class QuadStoreDataset implements Dataset {
   readonly location: string;
   /* readonly */
   store: Quadstore;
+  engine: Engine;
   private readonly activeCtx?: Promise<ActiveContext>;
   readonly lock = new LockManager;
   private isClosed: boolean = false;
@@ -160,7 +161,6 @@ export class QuadStoreDataset implements Dataset {
     sw?.next('open-store');
     this.store = new Quadstore({
       backend: this.backend,
-      comunica: newEngine(),
       dataFactory: new RdfDataFactory(),
       indexes: [
         ['graph', 'subject', 'predicate', 'object'],
@@ -172,6 +172,7 @@ export class QuadStoreDataset implements Dataset {
         compactIri: iri => compactIri(iri, activeCtx)
       }
     });
+    this.engine = new Engine(this.store);
     await this.store.open();
     return this;
   }
@@ -376,34 +377,33 @@ class QuadStoreGraph implements Graph {
   query(
     ...args: Parameters<QuadSource['match']> | [Algebra.Operation]
   ): AsyncIterator<Binding | Quad> {
-    const source = (async () => {
+    const source: Promise<BaseStream<Quad | Bindings>> = (async () => {
       try {
-        const [query] = args;
-        if (query != null && 'type' in query) {
-          const stream = await this.dataset.store.sparqlStream(query);
-          if (stream.type === ResultType.BINDINGS || stream.type === ResultType.QUADS)
-            return stream.iterator;
+        const [algebra] = args;
+        if (algebra != null && 'type' in algebra) {
+          const query = <Query<AllMetadataSupport>>await this.dataset.engine.query(algebra);
+          if (query.resultType === ResultType.BINDINGS || query.resultType === ResultType.QUADS)
+            return query.execute();
         } else {
-          return wrap<Quad>(this.match(...<Parameters<QuadSource['match']>>args));
+          return this.match(...<Parameters<QuadSource['match']>>args);
         }
       } catch (err) {
         // TODO: Comunica bug? Cannot read property 'close' of undefined, if stream empty
         if (err instanceof TypeError)
-          return new EmptyIterator<Quad | Binding>();
+          return new EmptyIterator<Quad | Bindings>();
         throw err;
       }
       throw new Error('Expected bindings or quads');
     })();
-    return new TransformIterator<Binding | Quad>(
-      this.dataset.lock.extend('state', 'query', source));
+    return new SimpleTransformIterator<Bindings | Quad, Binding | Quad>(
+      // A transform iterator is actually capable of taking a base stream, despite typings
+      this.dataset.lock.extend('state', 'query', <any>source), {
+        map: item => ('type' in item && item.type === 'bindings') ? toBinding(item) : <Quad>item
+      });
   }
 
-  async ask(query: Algebra.Ask): Promise<boolean> {
-    const result = await this.dataset.store.sparql(query);
-    if (result.type === 'boolean')
-      return result.value;
-    else
-      throw new TypeError('ASK query returned a non-boolean result');
+  ask(algebra: Algebra.Ask): Promise<boolean> {
+    return this.dataset.engine.queryBoolean(algebra);
   }
 
   skolem = () => this.dataset.rdf.namedNode(
@@ -414,6 +414,7 @@ class QuadStoreGraph implements Graph {
   literal = this.dataset.rdf.literal;
 
   variable = this.dataset.rdf.variable;
+  // noinspection JSUnusedGlobalSymbols
   defaultGraph = this.dataset.rdf.defaultGraph;
   quad = (subject: Quad_Subject, predicate: Quad_Predicate, object: Quad_Object) =>
     this.dataset.rdf.quad(subject, predicate, object, this.name);

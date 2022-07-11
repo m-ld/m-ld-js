@@ -3,11 +3,10 @@ import { flatten, lazy, MsgPack } from './util';
 import { Context, ExpandedTermDef, Reference } from '../jrql-support';
 import { Iri } from 'jsonld/jsonld-spec';
 import { RdfFactory, Triple } from './quads';
-import { activeCtx, compactIri, expandTerm } from './jsonld';
+import { ActiveContext, activeCtx, compactIri, expandTerm } from './jsonld';
 import { M_LD, RDF, XS } from '../ns';
 import { SubjectGraph } from './SubjectGraph';
 import { SubjectQuads } from './SubjectQuads';
-import { ActiveContext } from 'jsonld/lib/context';
 import { MeldError } from './MeldError';
 // TODO: Switch to fflate. Node.js zlib uses Pako in the browser
 import { gunzipSync, gzipSync } from 'zlib';
