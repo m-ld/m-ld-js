@@ -377,7 +377,7 @@ describe('Tree clock', () => {
     for (let i = 0; i < 10; i++) {
       const { left, right } = time.forked();
       time = right.update(left.ticked(0xFFFFFFFF));
-      expect(time.hash.length).toBeLessThanOrEqual(22);
+      expect(time.hash.length).toBeLessThanOrEqual(28);
     }
   });
 

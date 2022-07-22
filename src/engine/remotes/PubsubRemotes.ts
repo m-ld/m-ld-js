@@ -4,7 +4,6 @@ import {
   Observer, of, onErrorResumeNext, race, Subject as Source, Subscription, switchMap, throwError
 } from 'rxjs';
 import { TreeClock } from '../clocks';
-import { generate as uuid } from 'short-uuid';
 import {
   ControlMessage, NewClockRequest, NewClockResponse, RejectedResponse, Request, Response,
   RevupRequest, RevupResponse, SnapshotRequest, SnapshotResponse
@@ -13,7 +12,7 @@ import { Future, MsgPack, Stopwatch, toJSON } from '../util';
 import { delay, first, ignoreElements, map, reduce, tap, timeout, toArray } from 'rxjs/operators';
 import { MeldError, MeldErrorStatus } from '../MeldError';
 import { AbstractMeld } from '../AbstractMeld';
-import { MeldExtensions, MeldReadState, noTransportSecurity, shortId } from '../../index';
+import { MeldExtensions, MeldReadState, noTransportSecurity, shortId, uuid } from '../../index';
 import { JsonNotification, NotifyParams, ReplyParams, SendParams } from './PubsubParams';
 import { consume } from 'rx-flowable/consume';
 import { MeldMessageType } from '../../ns/m-ld';
@@ -232,7 +231,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
   }
 
   async newClock(): Promise<TreeClock> {
-    const sw = new Stopwatch('clock', shortId(4));
+    const sw = new Stopwatch('clock', shortId());
     const req = new NewClockRequest;
     const { res } = await this.send<NewClockResponse>(
       await this.wireRequest(req, null),
@@ -243,7 +242,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
 
   async snapshot(state: MeldReadState): Promise<Snapshot> {
     const readyToAck = new Future;
-    const sw = new Stopwatch('snapshot', shortId(4));
+    const sw = new Stopwatch('snapshot', shortId());
     const req = new SnapshotRequest;
     const { res, fromId } = await this.send<SnapshotResponse>(
       await this.wireRequest(req, state),
@@ -268,7 +267,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
 
   async revupFrom(time: TreeClock, state: MeldReadState): Promise<Revup | undefined> {
     const readyToAck = new Future;
-    const sw = new Stopwatch('revup', shortId(4));
+    const sw = new Stopwatch('revup', shortId());
     const req = new RevupRequest(time);
     const { res, fromId: from } = await this.send<RevupResponse>(
       await this.wireRequest(req, state), {
@@ -351,7 +350,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
       // Keep track of long-running activity so that we can shut down cleanly
       const done = new Future, clone = this.clone;
       this.active.next(Promise.all([this.active.value, done]));
-      const sw = new Stopwatch('reply', shortId(4));
+      const sw = new Stopwatch('reply', shortId());
       try {
         // The local state is required to prepare the response and to send it
         const replied = await clone.latch(async state => {

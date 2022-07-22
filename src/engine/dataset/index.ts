@@ -7,7 +7,6 @@ import {
   AbstractChainedBatch, AbstractIterator, AbstractIteratorOptions, AbstractLevelDOWN
 } from 'abstract-leveldown';
 import { Observable } from 'rxjs';
-import { generate as uuid } from 'short-uuid';
 import { check, Stopwatch } from '../util';
 import { LockManager } from '../locks';
 import { Context, Iri } from 'jsonld/jsonld-spec';
@@ -21,6 +20,7 @@ import { MutableOperation } from '../ops';
 import { MeldError } from '../MeldError';
 import { BaseStream, CountableRdf, QueryableRdfSource } from '../../rdfjs-support';
 import { AllMetadataSupport, Query } from '@rdfjs/types';
+import { uuid } from '../../util';
 import type EventEmitter = require('events');
 
 /**

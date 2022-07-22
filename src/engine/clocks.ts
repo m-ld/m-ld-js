@@ -1,5 +1,5 @@
 import { MsgPack } from './util';
-import { uuid } from '../util';
+import { sha1 } from './local';
 
 const inspect = Symbol.for('nodejs.util.inspect.custom');
 
@@ -202,8 +202,9 @@ export class TreeClock extends TickTree<boolean> implements CausalClock {
   get hash() {
     if (this._hash == null) {
       const buf = MsgPack.encode(this.toJSON('forHash'));
-      // Hash if longer than a short UUID (22 characters = 16 bytes in base64)
-      this._hash = buf.length > 16 ? uuid(buf) : buf.toString('base64');
+      // Hash if longer than a SHA-1 (20 bytes)
+      this._hash = (buf.length > 20 ? sha1().update(buf).digest() : buf)
+        .toString('base64');
     }
     return this._hash;
   }
