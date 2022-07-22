@@ -92,8 +92,17 @@ describe('New MQTT remotes', () => {
 
     test('emits remote operations', async () => {
       const time = TreeClock.GENESIS.forked().left;
-      mqtt.mockPublish('test.m-ld.org/operations/client2',
-        OperationMessage.fromOperation(time.ticks, testOp(time.ticked()), null).toBuffer());
+      const op = OperationMessage.fromOperation(time.ticks, testOp(time.ticked()), null);
+      mqtt.mockPublish('test.m-ld.org/operations/client2', op.toBuffer());
+      await expect(new Promise((resolve) => {
+        remotes.operations.subscribe({ next: resolve });
+      })).resolves.toHaveProperty('data');
+    });
+
+    test('emits remote operations as Uint8Array', async () => {
+      const time = TreeClock.GENESIS.forked().left;
+      const op = OperationMessage.fromOperation(time.ticks, testOp(time.ticked()), null);
+      mqtt.mockPublish('test.m-ld.org/operations/client2', new Uint8Array(op.toBuffer()));
       await expect(new Promise((resolve) => {
         remotes.operations.subscribe({ next: resolve });
       })).resolves.toHaveProperty('data');
@@ -235,7 +244,8 @@ describe('New MQTT remotes', () => {
       mqtt.mockSubscribe((topic, payload) => {
         const [type, toId, fromId, messageId, domain] = topic.split('/');
         const json = Buffer.isBuffer(payload) && MsgPack.decode(payload);
-        if (type === '__send' && MsgPack.decode(json.enc)['@type'] === 'http://control.m-ld.org/request/clock') {
+        if (type === '__send' && MsgPack.decode(json.enc)['@type'] ===
+          'http://control.m-ld.org/request/clock') {
           expect(toId).toBe('consumer2');
           expect(fromId).toBe('client1');
           expect(domain).toBe('test.m-ld.org');
@@ -262,7 +272,8 @@ describe('New MQTT remotes', () => {
       mqtt.mockSubscribe((topic, payload) => {
         const [type, toId, , messageId] = topic.split('/');
         const json = Buffer.isBuffer(payload) && MsgPack.decode(payload);
-        if (type === '__send' && MsgPack.decode(json.enc)['@type'] === 'http://control.m-ld.org/request/clock') {
+        if (type === '__send' && MsgPack.decode(json.enc)['@type'] ===
+          'http://control.m-ld.org/request/clock') {
           if (first) {
             first = false;
             mqtt.mockPublish(`__reply/client1/${toId}/reply1/` + messageId, MsgPack.encode({
@@ -297,7 +308,8 @@ describe('New MQTT remotes', () => {
       mqtt.mockSubscribe((topic, payload) => {
         const [type, toId, fromId, messageId, domain] = topic.split('/');
         const json = Buffer.isBuffer(payload) && MsgPack.decode(payload);
-        if (type === '__send' && MsgPack.decode(json.enc)['@type'] === 'http://control.m-ld.org/request/revup') {
+        if (type === '__send' && MsgPack.decode(json.enc)['@type'] ===
+          'http://control.m-ld.org/request/revup') {
           expect(toId).toBe('consumer2');
           expect(fromId).toBe('client1');
           expect(domain).toBe('test.m-ld.org');
@@ -321,7 +333,8 @@ describe('New MQTT remotes', () => {
       mqtt.mockSubscribe((topic, payload) => {
         const [type, , , messageId] = topic.split('/');
         const json = Buffer.isBuffer(payload) && MsgPack.decode(payload);
-        if (type === '__send' && MsgPack.decode(json.enc)['@type'] === 'http://control.m-ld.org/request/revup') {
+        if (type === '__send' && MsgPack.decode(json.enc)['@type'] ===
+          'http://control.m-ld.org/request/revup') {
           mqtt.mockPublish('__reply/client1/consumer2/reply1/' + messageId, MsgPack.encode({
             enc: MsgPack.encode({
               '@type': 'http://control.m-ld.org/response/revup',
@@ -346,7 +359,8 @@ describe('New MQTT remotes', () => {
       mqtt.mockSubscribe((topic, payload) => {
         const [type, toId, , messageId] = topic.split('/');
         const json = Buffer.isBuffer(payload) && MsgPack.decode(payload);
-        if (type === '__send' && MsgPack.decode(json.enc)['@type'] === 'http://control.m-ld.org/request/revup') {
+        if (type === '__send' && MsgPack.decode(json.enc)['@type'] ===
+          'http://control.m-ld.org/request/revup') {
           if (first) {
             first = false;
             mqtt.mockPublish(`__reply/client1/${toId}/reply1/${messageId}`, MsgPack.encode({

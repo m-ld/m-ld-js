@@ -329,7 +329,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
    * Call from the subclass when an operation message has arrived.
    * @param payload the operation message payload
    */
-  protected onOperation(payload: Buffer) {
+  protected onOperation(payload: Uint8Array) {
     const update = OperationMessage.fromBuffer(payload);
     if (update)
       this.nextOperation(update, 'remote');
@@ -345,7 +345,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
    *   identity), and message identity
    * @see sender
    */
-  protected async onSent(payload: Buffer, sentParams: SendParams) {
+  protected async onSent(payload: Uint8Array, sentParams: SendParams) {
     // Ignore control messages before we have a clone
     if (this.clone) {
       // Keep track of long-running activity so that we can shut down cleanly
@@ -359,7 +359,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
             // Unsecure the message if required
             const transportSecurity = await this.transportSecurity;
             const unwired = await transportSecurity.wire(
-              payload, MeldMessageType.request, 'in', state);
+              Buffer.from(payload), MeldMessageType.request, 'in', state);
             const req = Request.fromBuffer(unwired);
             // Verify the message if necessary
             await transportSecurity.verify?.(req.enc, req.attr, state);
@@ -409,13 +409,13 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
    *   identity), original sent message identity and reply message identity
    * @see replier
    */
-  protected async onReply(payload: Buffer, replyParams: ReplyParams) {
+  protected async onReply(payload: Uint8Array, replyParams: ReplyParams) {
     if (replyParams.sentMessageId in this.replyResolvers && this.clone != null) {
       const { received, state, readyToAck } = this.replyResolvers[replyParams.sentMessageId];
       try {
         const transportSecurity = await this.transportSecurity;
         const unwired = await transportSecurity.wire(
-          payload, MeldMessageType.response, 'in', state);
+          Buffer.from(payload), MeldMessageType.response, 'in', state);
         if (ACK_PAYLOAD.equals(unwired)) {
           received.resolve(ACK);
         } else {
@@ -441,7 +441,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
    * @param payload the notified message payload
    * @see notifier
    */
-  protected onNotify(channelId: string, payload: Buffer) {
+  protected onNotify(channelId: string, payload: Uint8Array) {
     if (channelId in this.consuming) {
       const json = MsgPack.decode(payload);
       this.log.debug(`Notified ${Object.keys(json)[0]} on channel ${channelId}`);
@@ -591,7 +591,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
   private async consume<T>(
     fromId: string,
     channelId: string,
-    datumFromPayload: (payload: Buffer) => T,
+    datumFromPayload: (payload: Uint8Array) => T,
     failIfSlow?: 'failIfSlow'
   ): Promise<Observable<T>> {
     const notifier = await this.notifier({ fromId, toId: this.id, channelId });

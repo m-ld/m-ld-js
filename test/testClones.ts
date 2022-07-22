@@ -232,8 +232,8 @@ export class MockProcess implements ClockHolder<TreeClock> {
 export interface MockMqtt extends AsyncMqttClient {
   mockConnect(): void;
   mockClose(): void;
-  mockPublish(topic: string, payload: Buffer | string): Promise<void>;
-  mockSubscribe(subscriber: (topic: string, payload: Buffer) => void): void;
+  mockPublish(topic: string, payload: any): Promise<void>;
+  mockSubscribe(subscriber: (topic: string, payload: any) => void): void;
   lastPublish(): Promise<IPublishPacket>;
 }
 
@@ -247,13 +247,13 @@ export function mockMqtt(): MockMqtt & MockProxy<AsyncMqttClient> {
     mqtt.connected = false;
     mqtt.emit('close');
   };
-  mqtt.mockPublish = (topic: string, payload: Buffer | string) => {
+  mqtt.mockPublish = (topic: string, payload: any) => {
     return new Promise<void>(resolve => setImmediate(mqtt => {
       mqtt.emit('message', topic, payload);
       resolve();
     }, mqtt)); // Pass current mqtt in case of sync test
   };
-  mqtt.mockSubscribe = (subscriber: (topic: string, payload: Buffer) => void) => {
+  mqtt.mockSubscribe = (subscriber: (topic: string, payload: any) => void) => {
     mqtt.on('message', (topic, payload) => subscriber(topic, payload));
   };
   mqtt.lastPublish = () => mqtt.publish.mock.results.slice(-1)[0].value;

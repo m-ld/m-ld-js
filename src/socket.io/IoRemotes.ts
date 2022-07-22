@@ -41,10 +41,11 @@ export class IoRemotes extends PubsubRemotes {
       .on('connect', () => this.onConnect())
       .on('disconnect', () => this.onDisconnect())
       .on('presence', () => this.onPresenceChange())
-      .on('operation', (payload: Buffer) => this.onOperation(payload))
-      .on('send', (params: SendParams, msg: Buffer) => this.onSent(msg, params))
-      .on('reply', (params: ReplyParams, msg: Buffer) => this.onReply(msg, params))
-      .on('notify', (params: NotifyParams, msg: Buffer) => this.onNotify(params.channelId, msg));
+      .on('operation', (payload: Uint8Array) => this.onOperation(payload))
+      .on('send', (params: SendParams, msg: Uint8Array) => this.onSent(msg, params))
+      .on('reply', (params: ReplyParams, msg: Uint8Array) => this.onReply(msg, params))
+      .on('notify', (params: NotifyParams, msg: Uint8Array) =>
+        this.onNotify(params.channelId, msg));
   }
 
   async close(err?: any): Promise<void> {

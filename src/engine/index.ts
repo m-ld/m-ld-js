@@ -30,7 +30,7 @@ export class OperationMessage implements Message<TreeClock, EncodedOperation> {
       prev, EncodedOperation.toBuffer(data), attr, data, time);
   }
 
-  static fromBuffer(payload: Buffer): OperationMessage {
+  static fromBuffer(payload: Uint8Array): OperationMessage {
     const json = MsgPack.decode(payload);
     if (typeof json == 'object' && typeof json.prev == 'number' &&
       Buffer.isBuffer(json.enc) && typeof json.attr == 'object') {

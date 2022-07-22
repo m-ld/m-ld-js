@@ -171,7 +171,8 @@ describe('Ably remotes', () => {
       // Object assign overcomes mocking of the buffer which borks Buffer.equals
       setImmediate(() => subscriber(Object.assign(mock<Ably.Types.Message>(), {
         clientId: 'other',
-        data: new NewClockResponse(newClock).toBuffer(),
+        // Check that the remotes can cope with non-Buffers
+        data: new Uint8Array(new NewClockResponse(newClock).toBuffer()),
         name: `__reply:reply1:${splitName[1]}`
       })));
       return Promise.resolve();
