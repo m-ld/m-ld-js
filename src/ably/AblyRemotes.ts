@@ -53,7 +53,7 @@ export class AblyRemotes extends PubsubRemotes {
     this.directChannel = this.channel(config['@id']);
     // Ensure we are fully subscribed before we make any presence claims
     this.subscribed = Promise.all([
-      this.traffic.subscribe(this.opsChannel, data => this.onOperation(Buffer.from(data))),
+      this.traffic.subscribe(this.opsChannel, data => this.onOperation(data)),
       this.opsChannel.presence.subscribe(() => this.onPresenceChange()),
       this.traffic.subscribe(this.directChannel, this.onDirectMessage)
     ]).catch(err => this.close(err));
@@ -88,13 +88,13 @@ export class AblyRemotes extends PubsubRemotes {
       const params = { fromId: clientId, toId: this.id };
       switch (type) {
         case '__send':
-          await this.onSent(Buffer.from(data), { messageId: id, ...params });
+          await this.onSent(data, { messageId: id, ...params });
           break;
         case '__reply':
-          await this.onReply(Buffer.from(data), { messageId: id, sentMessageId, ...params });
+          await this.onReply(data, { messageId: id, sentMessageId, ...params });
           break;
         case '__notify':
-          this.onNotify(id, Buffer.from(data));
+          this.onNotify(id, data);
           break;
         case '__signal':
           this.onSignal(id, clientId, data);
