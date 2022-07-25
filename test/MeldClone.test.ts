@@ -11,7 +11,7 @@ import { Binding } from 'quadstore';
 import { Subscription } from 'rxjs';
 import { MeldMemDown } from '../src/memdown/index';
 
-describe('Meld State API', () => {
+describe('MeldClone', () => {
   let api: MeldClone;
   let captureUpdate: Future<MeldUpdate>;
 
@@ -26,7 +26,8 @@ describe('Meld State API', () => {
     await expect(captureUpdate).resolves.toEqual({
       '@ticks': 1,
       '@insert': new SubjectGraph([{ '@id': 'fred', name: 'Fred' }]),
-      '@delete': new SubjectGraph([])
+      '@delete': new SubjectGraph([]),
+      trace: expect.any(Function)
     });
     await expect(api.get('fred'))
       .resolves.toEqual({ '@id': 'fred', name: 'Fred' });
@@ -47,7 +48,8 @@ describe('Meld State API', () => {
       await expect(captureUpdate).resolves.toEqual({
         '@ticks': 2,
         '@delete': [{ '@id': 'fred', name: 'Fred' }],
-        '@insert': []
+        '@insert': [],
+        trace: expect.any(Function)
       });
     });
 
@@ -60,7 +62,8 @@ describe('Meld State API', () => {
       await expect(captureUpdate).resolves.toEqual({
         '@ticks': 2,
         '@delete': [{ '@id': 'fred', height: 5 }],
-        '@insert': []
+        '@insert': [],
+        trace: expect.any(Function)
       });
     });
 
@@ -83,7 +86,8 @@ describe('Meld State API', () => {
       await expect(captureUpdate).resolves.toEqual({
         '@ticks': 2,
         '@delete': [{ '@id': 'fred', height: 5 }],
-        '@insert': [{ '@id': 'fred', height: 6 }]
+        '@insert': [{ '@id': 'fred', height: 6 }],
+        trace: expect.any(Function)
       });
     });
 
@@ -139,7 +143,8 @@ describe('Meld State API', () => {
       await expect(captureUpdate).resolves.toEqual({
         '@ticks': 1,
         '@delete': [],
-        '@insert': [{ '@id': 'fred', name: 'Fred' }]
+        '@insert': [{ '@id': 'fred', name: 'Fred' }],
+        trace: expect.any(Function)
       });
     });
 
@@ -151,7 +156,8 @@ describe('Meld State API', () => {
       await expect(captureUpdate).resolves.toEqual({
         '@ticks': 2,
         '@delete': [{ '@id': 'fred', name: 'Fred' }],
-        '@insert': []
+        '@insert': [],
+        trace: expect.any(Function)
       });
     });
 

@@ -9,8 +9,8 @@ import { AsyncMqttClient, IPublishPacket } from 'async-mqtt';
 import { EventEmitter } from 'events';
 import { observeOn } from 'rxjs/operators';
 import {
-  Context, InterimUpdate, MeldConfig, MeldConstraint, MeldExtensions, MeldPreUpdate, MeldReadState,
-  MeldUpdate, StateManaged, StateProc, Write
+  Attribution, Context, InterimUpdate, MeldConfig, MeldConstraint, MeldExtensions, MeldPreUpdate,
+  MeldReadState, StateManaged, StateProc, Write
 } from '../src';
 import { AbstractLevelDOWN } from 'abstract-leveldown';
 import { LiveValue } from '../src/engine/api-support';
@@ -222,10 +222,14 @@ export class MockProcess implements ClockHolder<TreeClock> {
     return new MockProcess(right, this.prev, this.gwc);
   }
 
-  sentOperation(deletes: object, inserts: object, agree?: true) {
+  sentOperation(
+    deletes: object,
+    inserts: object,
+    { agree, attr }: { agree?: true, attr?: Attribution } = {}
+  ) {
     // Do not inline: this sets prev
     const op = this.operated(deletes, inserts, agree);
-    return MeldOperationMessage.fromOperation(this.prev, op, null);
+    return MeldOperationMessage.fromOperation(this.prev, op, attr ?? null);
   }
 
   operated(deletes: object, inserts: object, agree?: any): EncodedOperation {
@@ -281,7 +285,7 @@ export function mockMqtt(): MockMqtt & MockProxy<AsyncMqttClient> {
   return mqtt;
 }
 
-export function mockInterim(update: MeldUpdate) {
+export function mockInterim(update: MeldPreUpdate) {
   // Passing an implementation into the mock adds unwanted properties
   return Object.assign(mock<InterimUpdate>(), { update: Promise.resolve(update) });
 }

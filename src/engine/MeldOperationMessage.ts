@@ -1,6 +1,6 @@
 import { TreeClock } from './clocks';
 import { Future, MsgPack } from './util';
-import { Attribution } from '../api';
+import { Attribution, AuditOperation } from '../api';
 import { MeldError } from './MeldError';
 import { levels } from 'loglevel';
 import { MeldEncoder } from './MeldEncoding';
@@ -66,6 +66,10 @@ export class MeldOperationMessage implements OperationMessage {
   get size() {
     const { pid, sig } = this.attr ?? {};
     return 8 + this.enc.length + (pid?.length ?? 0) + (sig?.length ?? 0);
+  }
+
+  toAuditOperation(): AuditOperation {
+    return { attribution: this.attr, data: this.enc, operation: this.data }
   }
 
   static enc(msg: OperationMessage) {

@@ -2,7 +2,7 @@ import { GlobalClock, GlobalClockJson, TreeClock, TreeClockJson } from '../clock
 import { Kvps } from '../dataset';
 import { JournalEntry } from './JournalEntry';
 import { EncodedOperation } from '../index';
-import { EntryIndex, Journal, tickKey } from '.';
+import { Journal, tickKey } from '.';
 import { MeldOperation } from '../MeldOperation';
 import { TripleMap } from '../quads';
 import { UUID } from '../MeldEncoding';
@@ -42,6 +42,7 @@ export interface EntryBuilder {
     attribution: Attribution | null
   ): this;
   void(entry: JournalEntry): this;
+  deleteEntries: JournalEntry[];
   appendEntries: JournalEntry[];
   state: JournalState;
   commit: Kvps;
@@ -87,7 +88,7 @@ export class JournalState {
 
   builder(): EntryBuilder {
     return new (class implements EntryBuilder {
-      deleteEntries: EntryIndex[] = [];
+      deleteEntries: JournalEntry[] = [];
       appendEntries: JournalEntry[] = [];
 
       constructor(
@@ -122,7 +123,7 @@ export class JournalState {
         // reset to the previous external tick and tid for the process.
         const [prevTick, prevTid] = entry.prev;
         const prevTime = entry.operation.time.ticked(prevTick);
-        this.deleteEntries.push(entry.index);
+        this.deleteEntries.push(entry);
         this.state = this.state.withTime(
           this.state.time.ticked(prevTime),
           this.state.gwc.set(prevTime, prevTid));
@@ -132,7 +133,7 @@ export class JournalState {
       /** Commits the changed journal */
       commit: Kvps = async batch => {
         this.state.journal.spliceEntries(
-          this.deleteEntries,
+          this.deleteEntries.map(entry => entry.index),
           this.appendEntries,
           { appending: true }
         )(batch);

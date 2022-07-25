@@ -27,7 +27,8 @@ describe('State Engine', () => {
       this.dataUpdates.next({
         '@delete': new SubjectGraph([]),
         '@insert': new SubjectGraph([]),
-        '@ticks': ++this.tick
+        '@ticks': ++this.tick,
+        trace: jest.fn()
       });
       return this;
     };

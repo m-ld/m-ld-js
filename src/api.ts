@@ -9,6 +9,7 @@ import { QueryableRdfSource } from './rdfjs-support';
 import { Consumable, Flowable } from 'rx-flowable';
 import { MeldMessageType } from './ns/m-ld';
 import { MeldApp } from './config';
+import { EncodedOperation } from './engine/index';
 
 /**
  * A convenience type for a struct with a `@insert` and `@delete` property, like
@@ -280,6 +281,11 @@ export interface MeldUpdate extends MeldPreUpdate {
    * @see MeldStatus.ticks
    */
   readonly '@ticks': number;
+  /**
+   * Traces through to the underlying **m-ld** protocol information that gave
+   * rise to this update.
+   */
+  trace(): UpdateTrace;
 }
 
 /**
@@ -672,6 +678,61 @@ export interface Attribution {
    * @see AppPrincipal.sign
    */
   sig: Buffer;
+}
+
+/**
+ * Underlying Protocol information that gave rise to an update
+ */
+export interface AuditOperation {
+  /**
+   * The (possibly signed) operation encoded according to the **m-ld** protocol
+   * as a binary buffer
+   */
+  data: Buffer;
+  /**
+   * The operation attribution; may contain a binary signature of the
+   * {@link data} Buffer
+   */
+  attribution: Attribution | null;
+  /**
+   * The operation content in the protocol JSON tuple format
+   */
+  operation: EncodedOperation;
+}
+
+/**
+ * Auditable trace of an {@link MeldUpdate app update}. The properties of this
+ * object represent a number of possible relationships among updates and
+ * operations, each of which is well-defined in the **m-ld** protocol. This
+ * means that a sufficiently sophisticated auditing system would be able to
+ * re-create, and therefore verify, the trace provided.
+ */
+export interface UpdateTrace {
+  /**
+   * The operation that directly triggered an app update, either a local write
+   * or an arriving remote operation. This operation always exists but is not
+   * necessarily recorded in the clone journal.
+   */
+  readonly trigger: AuditOperation;
+  /**
+   * The triggering operation, adjusted to remove any parts of it that have
+   * already been applied. This is relevant if the trigger is remote and a
+   * fusion. This operation is always recorded in the clone journal.
+   */
+  readonly applicable?: AuditOperation;
+  /**
+   * If the applicable operation violated a constraint, then the update will
+   * combine it with a resolution. This property gives access to the raw
+   * resolution, which is also recorded in the journal.
+   */
+  readonly resolution?: AuditOperation;
+  /**
+   * If the applicable operation is an agreement, it may have caused some
+   * operations to have been voided. This property gives access to precisely
+   * which operations were removed, in reverse order (as if each was undone).
+   * These operations will have already been removed from the journal.
+   */
+  readonly voids: AuditOperation[]
 }
 
 /**
