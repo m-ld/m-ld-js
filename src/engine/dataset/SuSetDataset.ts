@@ -29,6 +29,7 @@ import { MeldOperation } from '../MeldOperation';
 import { ClockHolder } from '../messages';
 import { Iri } from 'jsonld/jsonld-spec';
 import { M_LD } from '../../ns';
+import { MeldOperationMessage } from '../MeldOperationMessage';
 
 export type DatasetSnapshot = Omit<Snapshot, 'updates'>;
 
@@ -318,7 +319,7 @@ export class SuSetDataset extends MeldEncoder {
       encoded[OpKey.encoding].push(BufferEncoding.SECURE);
     }
     // Re-package the encoded operation with the wire security applied
-    const operationMsg = OperationMessage.fromOperation(prevTick, encoded, attribution, time);
+    const operationMsg = MeldOperationMessage.fromOperation(prevTick, encoded, attribution, time);
     if (operationMsg.size > this.maxOperationSize)
       throw new MeldError('Delta too big');
     return operationMsg;
@@ -346,7 +347,7 @@ export class SuSetDataset extends MeldEncoder {
         EncodedOperation.toBuffer(encoded), msg.attr, this.readState);
     } else {
       // Signature applies to the already-encoded message data
-      await transportSecurity.verify?.(msg.enc, msg.attr, this.readState);
+      await transportSecurity.verify?.(MeldOperationMessage.enc(msg), msg.attr, this.readState);
     }
     return encoded;
   }

@@ -27,6 +27,7 @@ import { AsyncIterator, TransformIterator, wrap } from 'asynciterator';
 import { BaseStream } from '../../rdfjs-support';
 import { Consumable } from 'rx-flowable';
 import { MeldApp, MeldConfig } from '../../config';
+import { MeldOperationMessage } from '../MeldOperationMessage';
 
 enum ConnectStyle {
   SOFT, HARD
@@ -57,7 +58,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
 
   private readonly dataset: SuSetDataset;
   private messageService: TreeClockMessageService;
-  private readonly orderingBuffer: OperationMessage[] = [];
+  private readonly orderingBuffer: MeldOperationMessage[] = [];
   private readonly remotes: Omit<MeldRemotes, 'operations'>;
   private readonly remoteOps: RemoteOperations;
   private subs = new Subscription;
@@ -240,7 +241,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
       .pipe(tap(() => this.remoteOps.detach('outdated')));
   }
 
-  private async acceptRemoteOperation(op: OperationMessage): Promise<OperationOutcome> {
+  private async acceptRemoteOperation(op: MeldOperationMessage): Promise<OperationOutcome> {
     const logBody = this.log.getLevel() < levels.DEBUG ? op : `${op.time}`;
     this.log.debug('Receiving', logBody);
     // Grab the state lock, per CloneEngine contract and to ensure that all
@@ -490,7 +491,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
           gwc: await gwc,
           updates: merge(
             operations.pipe(tapComplete(operationsSent), tap(msg =>
-              this.log.debug('Sending rev-up', msg.toString(this.log.getLevel())))),
+              this.log.debug('Sending rev-up', this.msgString(msg)))),
             maybeMissed.pipe(delayUntil(operationsSent)))
         };
     });
@@ -509,7 +510,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
         filter(op => op.time.anyLt(now)),
         takeUntil(from(until)))
     ).pipe(tap((msg: OperationMessage) => {
-      this.log.debug('Forwarding update', msg.toString(this.log.getLevel()));
+      this.log.debug('Forwarding update', this.msgString(msg));
     }));
   }
 

@@ -8,10 +8,11 @@ import {
 } from '../src';
 import { jsonify } from './testUtil';
 import { MeldEncoder } from '../src/engine/MeldEncoding';
-import { BufferEncoding, EncodedOperation, OperationMessage } from '../src/engine';
+import { BufferEncoding, EncodedOperation } from '../src/engine';
 import { drain } from 'rx-flowable';
 import { MeldError } from '../src/engine/MeldError';
 import { mockFn } from 'jest-mock-extended';
+import { MeldOperationMessage } from '../src/engine/MeldOperationMessage';
 
 const fred = {
   '@id': 'http://test.m-ld.org/fred',
@@ -557,7 +558,7 @@ describe('SU-Set Dataset', () => {
           // Finally the local gets the remote fusion (as a rev-up), which still
           // includes the insert of wilma
           remote.tick();
-          await ssd.apply(OperationMessage.fromOperation(one.time.ticks, testOp(remote.time, {}, [
+          await ssd.apply(MeldOperationMessage.fromOperation(one.time.ticks, testOp(remote.time, {}, [
             { 'tid': oneTid, 'o': 'Wilma', 'p': '#name', 's': 'wilma' },
             {
               'tid': remote.time.hash,
@@ -584,7 +585,7 @@ describe('SU-Set Dataset', () => {
           // Finally the local gets the remote fusion (as a rev-up), which still
           // includes the insert of wilma but not betty
           remote.tick();
-          await ssd.apply(OperationMessage.fromOperation(one.time.ticks, testOp(remote.time, {}, [
+          await ssd.apply(MeldOperationMessage.fromOperation(one.time.ticks, testOp(remote.time, {}, [
             { 'tid': oneTid, 'o': 'Wilma', 'p': '#name', 's': 'wilma' },
             {
               'tid': remote.time.hash,
@@ -614,7 +615,7 @@ describe('SU-Set Dataset', () => {
           // includes the insert of fred, plus barney who it forgot about
           const firstTick = local.time.ticks;
           local.tick();
-          await ssd.apply(OperationMessage.fromOperation(0, testOp(local.time, {}, [
+          await ssd.apply(MeldOperationMessage.fromOperation(0, testOp(local.time, {}, [
             { 'tid': firstTid, 'o': 'Fred', 'p': '#name', 's': 'fred' },
             {
               'tid': local.time.hash,

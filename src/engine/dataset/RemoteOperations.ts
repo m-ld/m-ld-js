@@ -3,17 +3,18 @@ import { LiveValue } from '../api-support';
 import { BehaviorSubject, endWith, merge, NEVER, Observable } from 'rxjs';
 import { delayUntil, Future, HotSwitch, onErrorNever, tapLast } from '../util';
 import { ignoreElements, map, takeUntil } from 'rxjs/operators';
+import { MeldOperationMessage } from '../MeldOperationMessage';
 
 export class RemoteOperations {
   private readonly outdatedState = new BehaviorSubject<boolean>(true);
-  private readonly operations = new HotSwitch<OperationMessage>();
+  private readonly operations = new HotSwitch<MeldOperationMessage>();
   private _period = -1;
 
   constructor(
     private readonly remotes: MeldRemotes) {
   }
 
-  get receiving(): Observable<[OperationMessage, number]> {
+  get receiving(): Observable<[MeldOperationMessage, number]> {
     return this.operations.pipe(map(op => [op, this._period]));
   }
 
@@ -40,16 +41,20 @@ export class RemoteOperations {
   };
 
   attach(revups: Observable<OperationMessage>): Promise<unknown> {
-    const captureLastRevup = new Future<OperationMessage | undefined>();
+    const captureLastRevup = new Future<MeldOperationMessage | undefined>();
     // Push the rev-up to next tick - probably only for unit tests' sake
     setImmediate(() => {
       // Errors should be handled in the returned promise
       this.nextPeriod(onErrorNever(merge(
-        revups.pipe(tapLast(captureLastRevup)),
+        revups.pipe(
+          map(MeldOperationMessage.fromMessage),
+          tapLast(captureLastRevup)),
         // Operations must be paused during revups because the collaborator
         // might send an update while also sending revups of its own prior
         // operations. That would break the fifo guarantee.
-        this.remotes.operations.pipe(delayUntil(captureLastRevup))
+        this.remotes.operations.pipe(
+          map(MeldOperationMessage.fromMessage),
+          delayUntil(captureLastRevup))
       )).pipe(
         // If the remote operations finalise, mirror that
         takeUntil(this.remotes.operations.pipe(ignoreElements(), endWith(0)))
@@ -68,7 +73,7 @@ export class RemoteOperations {
     return Promise.resolve(captureLastRevup);
   }
 
-  private nextPeriod(ops: Observable<OperationMessage>) {
+  private nextPeriod(ops: Observable<MeldOperationMessage>) {
     this._period++;
     this.operations.switch(ops);
   }

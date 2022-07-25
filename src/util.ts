@@ -24,7 +24,8 @@ export function array<T>(value?: T | T[] | null): T[] {
  */
 export function shortId(spec?: string) {
   if (spec == null) {
-    return cuid.slug()
+    // Slug is not guaranteed to start with a letter
+    return 's' + cuid.slug()
   } else {
     let hashCode = Math.abs(Array.from(spec).reduce((hash, char) => {
       hash = ((hash << 5) - hash) + char.charCodeAt(0);

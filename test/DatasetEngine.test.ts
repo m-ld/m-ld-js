@@ -9,7 +9,7 @@ import {
 import { comesAlive } from '../src/engine/AbstractMeld';
 import { count, map, observeOn, take, toArray } from 'rxjs/operators';
 import { TreeClock } from '../src/engine/clocks';
-import { MeldRemotes, OperationMessage, Snapshot } from '../src/engine';
+import { MeldRemotes, Snapshot } from '../src/engine';
 import {
   Describe, GraphSubject, MeldConfig, MeldReadState, Read, Subject, Update, Write
 } from '../src';
@@ -20,6 +20,7 @@ import { Consumable } from 'rx-flowable';
 import { inflateFrom } from '../src/engine/util';
 import { MeldError } from '../src/engine/MeldError';
 import { Dataset } from '../src/engine/dataset/index';
+import { MeldOperationMessage } from '../src/engine/MeldOperationMessage';
 
 describe('Dataset engine', () => {
   const extensions = testExtensions();
@@ -157,7 +158,7 @@ describe('Dataset engine', () => {
   describe('as genesis with remote clone', () => {
     let clone: DatasetEngine;
     let remote: MockProcess;
-    let remoteUpdates: Source<OperationMessage>;
+    let remoteUpdates: Source<MeldOperationMessage>;
 
     beforeEach(async () => {
       remoteUpdates = new Source;
@@ -231,10 +232,10 @@ describe('Dataset engine', () => {
 
   describe('as new clone', () => {
     let remotes: MeldRemotes;
-    let remoteUpdates: Source<OperationMessage>;
+    let remoteUpdates: Source<MeldOperationMessage>;
     let snapshot: jest.Mock<Promise<Snapshot>, [MeldReadState]>;
     let collaborator: MockProcess;
-    let collabPrevOp: OperationMessage;
+    let collabPrevOp: MeldOperationMessage;
     let remotesLive: BehaviorSubject<boolean | null>;
 
     beforeEach(async () => {
@@ -242,7 +243,7 @@ describe('Dataset engine', () => {
       collaborator = new MockProcess(right);
       collabPrevOp = collaborator.sentOperation(
         {}, { '@id': 'http://test.m-ld.org/wilma', 'http://test.m-ld.org/#name': 'Wilma' });
-      remoteUpdates = new Source<OperationMessage>();
+      remoteUpdates = new Source<MeldOperationMessage>();
       remotesLive = hotLive([true]);
       remotes = mockRemotes(remoteUpdates, remotesLive, left);
       snapshot = jest.fn().mockReturnValueOnce(Promise.resolve<Snapshot>({
@@ -426,7 +427,7 @@ describe('Dataset engine', () => {
       await clone.close();
       // Need a remote with rev-ups to share
       const remotes = mockRemotes(NEVER, [true]);
-      const revUps = new Source<OperationMessage>();
+      const revUps = new Source<MeldOperationMessage>();
       const revupCalled = new Promise<void>(resolve => {
         remotes.revupFrom = async () => {
           resolve();
@@ -456,7 +457,7 @@ describe('Dataset engine', () => {
 
     test('immediately re-connects after out of order operation', async () => {
       // Re-start on the same data
-      const remoteUpdates = new Source<OperationMessage>();
+      const remoteUpdates = new Source<MeldOperationMessage>();
       const remotes = mockRemotes(remoteUpdates, [true]);
       remotes.revupFrom = async () => ({ gwc: remote.gwc, updates: EMPTY });
       const clone = new DatasetEngine({
@@ -482,7 +483,7 @@ describe('Dataset engine', () => {
 
     test('ignores outdated operation', async () => {
       // Re-start on the same data
-      const remoteUpdates = new Source<OperationMessage>();
+      const remoteUpdates = new Source<MeldOperationMessage>();
       const remotes = mockRemotes(remoteUpdates, [true]);
       remotes.revupFrom = async () => ({ gwc: remote.gwc, updates: EMPTY });
       const clone = new TestDatasetEngine(await memStore({ backend }), { remotes });
@@ -495,7 +496,7 @@ describe('Dataset engine', () => {
         {}, { '@id': 'http://test.m-ld.org/wilma', 'http://test.m-ld.org/#name': 'Wilma' });
       remoteUpdates.next(op);
       // Push the same operation again
-      op = OperationMessage.fromOperation(op.prev, op.data, null, op.time);
+      op = MeldOperationMessage.fromOperation(op.prev, op.data, null, op.time);
       remoteUpdates.next(op);
       // Delivered OK, but need additional check below to see ignored
       await expect(op.delivered).resolves.toBeUndefined();

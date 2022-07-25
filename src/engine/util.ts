@@ -63,10 +63,8 @@ export class Future<T = void> implements PromiseLike<T> {
   constructor(value?: T) {
     this._promise = firstValueFrom(this.subject);
     this._promise.catch(() => {}); // Suppress UnhandledPromiseRejection
-    if (value !== undefined) {
-      this.subject.next(value);
-      this.subject.complete();
-    }
+    if (value !== undefined)
+      this.resolve(value);
   }
 
   get pending() {

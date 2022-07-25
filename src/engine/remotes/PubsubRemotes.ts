@@ -1,4 +1,4 @@
-import { MeldLocal, MeldRemotes, OperationMessage, Revup, Snapshot } from '../index';
+import { MeldLocal, MeldRemotes, Revup, Snapshot } from '../index';
 import {
   BehaviorSubject, concatWith, defer, EMPTY, firstValueFrom, from, identity, NEVER, Observable,
   Observer, of, onErrorResumeNext, race, Subject as Source, Subscription, switchMap, throwError
@@ -17,6 +17,7 @@ import { JsonNotification, NotifyParams, ReplyParams, SendParams } from './Pubsu
 import { consume } from 'rx-flowable/consume';
 import { MeldMessageType } from '../../ns/m-ld';
 import { MeldConfig } from '../../config';
+import { MeldOperationMessage } from '../MeldOperationMessage';
 
 /**
  * A sub-publisher, used to temporarily address unicast messages to one peer clone. Sub-publishers
@@ -112,7 +113,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
           try {
             if (this.connected.value) {
               // Operation received from the local clone. Relay to the domain
-              await this.publishOperation(msg.toBuffer());
+              await this.publishOperation(MeldOperationMessage.toBuffer(msg));
             }
           } catch (err) {
             // Failed to send an update while (probably) connected
@@ -121,8 +122,6 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
             // fails, something catastrophic must have happened. Signal
             // failure of this service and allow the clone to deal with it.
             this.closeSafely(err);
-          } finally {
-            msg.delivered.resolve();
           }
         },
         // Local m-ld clone has stopped. It will no longer accept messages.
@@ -251,7 +250,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     // Subscribe in parallel (subscription can be slow)
     const [data, updates] = await Promise.all([
       this.consume(fromId, res.dataAddress, MsgPack.decode, 'failIfSlow'),
-      this.consume(fromId, res.updatesAddress, OperationMessage.fromBuffer)
+      this.consume(fromId, res.updatesAddress, MeldOperationMessage.fromBuffer)
     ]);
     sw.stop();
     return {
@@ -277,7 +276,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     if (res.gwc != null) {
       sw.next('consume');
       const updates = await this.consume(
-        from, res.updatesAddress, OperationMessage.fromBuffer, 'failIfSlow');
+        from, res.updatesAddress, MeldOperationMessage.fromBuffer, 'failIfSlow');
       sw.stop();
       return {
         gwc: res.gwc, updates: defer(() => {
@@ -329,7 +328,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
    * @param payload the operation message payload
    */
   protected onOperation(payload: Uint8Array) {
-    const update = OperationMessage.fromBuffer(payload);
+    const update = MeldOperationMessage.fromBuffer(payload);
     if (update)
       this.nextOperation(update, 'remote');
     else
@@ -561,7 +560,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     return {
       after: Promise.all([
         this.produce(data, dataNotifier, MsgPack.encode, 'snapshot'),
-        this.produce(updates, updatesNotifier, msg => msg.toBuffer(), 'updates')
+        this.produce(updates, updatesNotifier, MeldOperationMessage.toBuffer, 'updates')
       ])
     };
   }
@@ -580,7 +579,8 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
         after: this.produce(
           revup.updates,
           notifier,
-            msg => msg.toBuffer(), 'updates')
+          MeldOperationMessage.toBuffer,
+          'updates')
       };
     } else if (this.clone) {
       await this.reply(sentParams, state, new RevupResponse(null, this.id));

@@ -78,8 +78,8 @@ test('short Id is always different', () => {
 });
 
 test('short Id is about the right length', () => {
-  expect(shortId().length).toBeGreaterThanOrEqual(7);
-  expect(shortId().length).toBeLessThanOrEqual(10);
+  expect(shortId().length).toBeGreaterThanOrEqual(8);
+  expect(shortId().length).toBeLessThanOrEqual(11);
 });
 
 test('short Id for a string is always the same', () => {

@@ -1,5 +1,5 @@
 import {
-  BufferEncoding, EncodedOperation, MeldLocal, MeldRemotes, OperationMessage, Snapshot
+  BufferEncoding, EncodedOperation, MeldLocal, MeldRemotes, Revup, Snapshot
 } from '../src/engine';
 import { mock, MockProxy } from 'jest-mock-extended';
 import { asapScheduler, BehaviorSubject, from, NEVER, Observable, Observer } from 'rxjs';
@@ -22,6 +22,7 @@ import { DomainContext } from '../src/engine/MeldEncoding';
 import { JrqlGraph } from '../src/engine/dataset/JrqlGraph';
 import { ActiveContext, activeCtx } from '../src/engine/jsonld';
 import { InterimUpdatePatch } from '../src/engine/dataset/InterimUpdatePatch';
+import { MeldOperationMessage } from '../src/engine/MeldOperationMessage';
 
 export function testConfig(config?: Partial<MeldConfig>): MeldConfig {
   return { '@id': 'test', '@domain': 'test.m-ld.org', genesis: true, ...config };
@@ -34,7 +35,7 @@ export const testExtensions = (ext?: MeldExtensions): StateManaged<MeldExtension
 });
 
 export function mockRemotes(
-  updates: Observable<OperationMessage> = NEVER,
+  updates: Observable<MeldOperationMessage> = NEVER,
   lives: Array<boolean | null> | LiveValue<boolean | null> = [false],
   newClock: TreeClock = TreeClock.GENESIS
 ): MeldRemotes {
@@ -46,6 +47,19 @@ export function mockRemotes(
     live: Array.isArray(lives) ? hotLive(lives) : lives,
     newClock: () => Promise.resolve(newClock)
   };
+}
+
+export class MockRemotes implements MeldRemotes {
+  live: LiveValue<boolean>;
+  operations: Observable<MeldOperationMessage>;
+  newClock: () => Promise<TreeClock>;
+  revupFrom: (time: TreeClock, state: MeldReadState) => Promise<Revup | undefined>;
+  snapshot: (state: MeldReadState) => Promise<Snapshot>;
+  setLocal: (clone: MeldLocal | null) => void;
+
+  constructor() {
+    Object.assign(this, mockRemotes());
+  }
 }
 
 export function hotLive(lives: Array<boolean | null>): BehaviorSubject<boolean | null> {
@@ -211,7 +225,7 @@ export class MockProcess implements ClockHolder<TreeClock> {
   sentOperation(deletes: object, inserts: object, agree?: true) {
     // Do not inline: this sets prev
     const op = this.operated(deletes, inserts, agree);
-    return OperationMessage.fromOperation(this.prev, op, null);
+    return MeldOperationMessage.fromOperation(this.prev, op, null);
   }
 
   operated(deletes: object, inserts: object, agree?: any): EncodedOperation {

@@ -3,7 +3,6 @@
 import { MqttRemotes } from '../src/mqtt';
 import { mock, MockProxy } from 'jest-mock-extended';
 import { AsyncMqttClient } from 'async-mqtt';
-import { OperationMessage } from '../src/engine';
 import { GlobalClock, TreeClock } from '../src/engine/clocks';
 import { firstValueFrom, of, Subject as Source } from 'rxjs';
 import { mockLocal, MockMqtt, mockMqtt, MockProcess, testOp } from './testClones';
@@ -14,6 +13,7 @@ import { Response, RevupRequest, RevupResponse } from '../src/engine/remotes/Con
 import { Future, MsgPack } from '../src/engine/util';
 import { JsonNotification } from '../src/engine/remotes';
 import { once } from 'events';
+import { MeldOperationMessage } from '../src/engine/MeldOperationMessage';
 
 /**
  * These tests also test the abstract base class, PubsubRemotes
@@ -92,8 +92,8 @@ describe('New MQTT remotes', () => {
 
     test('emits remote operations', async () => {
       const time = TreeClock.GENESIS.forked().left;
-      const op = OperationMessage.fromOperation(time.ticks, testOp(time.ticked()), null);
-      mqtt.mockPublish('test.m-ld.org/operations/client2', op.toBuffer());
+      const op = MeldOperationMessage.fromOperation(time.ticks, testOp(time.ticked()), null);
+      mqtt.mockPublish('test.m-ld.org/operations/client2', MeldOperationMessage.toBuffer(op));
       await expect(new Promise((resolve) => {
         remotes.operations.subscribe({ next: resolve });
       })).resolves.toHaveProperty('data');
@@ -101,8 +101,9 @@ describe('New MQTT remotes', () => {
 
     test('emits remote operations as Uint8Array', async () => {
       const time = TreeClock.GENESIS.forked().left;
-      const op = OperationMessage.fromOperation(time.ticks, testOp(time.ticked()), null);
-      mqtt.mockPublish('test.m-ld.org/operations/client2', new Uint8Array(op.toBuffer()));
+      const op = MeldOperationMessage.fromOperation(time.ticks, testOp(time.ticked()), null);
+      mqtt.mockPublish('test.m-ld.org/operations/client2',
+        new Uint8Array(MeldOperationMessage.toBuffer(op)));
       await expect(new Promise((resolve) => {
         remotes.operations.subscribe({ next: resolve });
       })).resolves.toHaveProperty('data');
@@ -134,7 +135,7 @@ describe('New MQTT remotes', () => {
       await comesAlive(remotes);
 
       const entry = new MockProcess(TreeClock.GENESIS.forked().left).sentOperation({}, {});
-      const operations = new Source<OperationMessage>();
+      const operations = new Source<MeldOperationMessage>();
       remotes.setLocal(mockLocal({ operations }));
       // Setting retained presence on the channel
       expect(mqtt.publish).lastCalledWith(
@@ -144,7 +145,6 @@ describe('New MQTT remotes', () => {
       operations.next(entry);
       expect(mqtt.publish).toBeCalled();
       await mqtt.lastPublish();
-      await expect(entry.delivered).resolves.toBeUndefined();
     });
 
     test('closes if publish fails', async () => {
@@ -153,7 +153,7 @@ describe('New MQTT remotes', () => {
         '{"consumer2":"test.m-ld.org/control"}');
       await comesAlive(remotes);
 
-      const operations = new Source<OperationMessage>();
+      const operations = new Source<MeldOperationMessage>();
       remotes.setLocal(mockLocal({ operations }));
 
       mqtt.publish.mockReturnValueOnce(<any>Promise.reject('Delivery failed'));
@@ -169,7 +169,7 @@ describe('New MQTT remotes', () => {
     });
 
     test('closes with local clone', async () => {
-      const operations = new Source<OperationMessage>();
+      const operations = new Source<MeldOperationMessage>();
       remotes.setLocal(mockLocal({ operations }));
       operations.complete();
       remotes.setLocal(null);
@@ -219,7 +219,7 @@ describe('New MQTT remotes', () => {
       await complete;
       expect(firstRevupBuffer).not.toBeNull();
       if (firstRevupBuffer != null)
-        expect(revupUpdate.toBuffer().equals(firstRevupBuffer)).toBe(true);
+        expect(MeldOperationMessage.toBuffer(revupUpdate).equals(firstRevupBuffer)).toBe(true);
     });
   });
 

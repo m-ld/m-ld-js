@@ -2,13 +2,13 @@ import * as Ably from 'ably';
 import { mockDeep as mock, MockProxy } from 'jest-mock-extended';
 import { AblyRemotes, MeldAblyConfig } from '../src/ably';
 import { comesAlive } from '../src/engine/AbstractMeld';
-import { OperationMessage } from '../src/engine';
 import { mockLocal, testOp } from './testClones';
 import { BehaviorSubject, Subject as Source } from 'rxjs';
 import { Future, isArray } from '../src/engine/util';
 import { TreeClock } from '../src/engine/clocks';
 import { NewClockRequest, NewClockResponse } from '../src/engine/remotes/ControlMessage';
 import { DeepMockProxy } from 'jest-mock-extended/lib/Mock';
+import { MeldOperationMessage } from '../src/engine/MeldOperationMessage';
 
 /**
  * These tests use a fully mocked Ably to avoid incurring costs. The behaviour
@@ -144,11 +144,12 @@ describe('Ably remotes', () => {
     otherPresent();
     await comesAlive(remotes);
     const prevTime = TreeClock.GENESIS.forked().left, time = prevTime.ticked();
-    const entry = OperationMessage.fromOperation(prevTime.ticks, testOp(time, {}, {}), null);
-    const updates = new Source<OperationMessage>();
+    const entry = MeldOperationMessage.fromOperation(prevTime.ticks, testOp(time, {}, {}), null);
+    const updates = new Source<MeldOperationMessage>();
     remotes.setLocal(mockLocal({ operations: updates }));
     updates.next(entry);
-    expect(operations.publish).toHaveBeenCalledWith('__op', entry.toBuffer());
+    expect(operations.publish).toHaveBeenCalledWith(
+      '__op', MeldOperationMessage.toBuffer(entry));
   });
 
   test('sends a new clock request', async () => {
