@@ -1,5 +1,5 @@
 import { MeldRemotes, OperationMessage } from '..';
-import { LiveValue } from '../LiveValue';
+import { LiveValue } from '../api-support';
 import { BehaviorSubject, endWith, merge, NEVER, Observable } from 'rxjs';
 import { delayUntil, Future, HotSwitch, onErrorNever, tapLast } from '../util';
 import { ignoreElements, map, takeUntil } from 'rxjs/operators';

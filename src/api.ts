@@ -2,14 +2,11 @@ import * as spec from '@m-ld/m-ld-spec';
 import type {
   Query, Read, Reference, Subject, SubjectProperty, Update, Variable, Write
 } from './jrql-support';
-import { firstValueFrom, Observable, Subscription } from 'rxjs';
-import { toArray } from 'rxjs/operators';
+import { Subscription } from 'rxjs';
 import { shortId } from './util';
 import { Iri } from 'jsonld/jsonld-spec';
-import { SubjectGraph } from './engine/SubjectGraph';
 import { QueryableRdfSource } from './rdfjs-support';
-import { Consumable, each, flow, Flowable } from 'rx-flowable';
-import { Future, tapComplete } from './engine/util';
+import { Consumable, Flowable } from 'rx-flowable';
 import { MeldMessageType } from './ns/m-ld';
 import { MeldApp } from './config';
 
@@ -112,28 +109,6 @@ export interface ReadResult extends Flowable<GraphSubject>, PromiseLike<GraphSub
    * @param handle a handler for each subject
    */
   each(handle: (value: GraphSubject) => any): Promise<unknown>;
-}
-
-/** @internal */
-export function readResult(result: Consumable<GraphSubject>): ReadResult {
-  return new class extends Observable<GraphSubject> implements ReadResult {
-    readonly completed = new Future;
-    // Everything should flow through this consumable so that completed is fired
-    readonly consume = result.pipe(tapComplete(this.completed));
-
-    constructor() {
-      super(subs => flow(this.consume, subs));
-    }
-
-    each(handle: (value: GraphSubject) => any) {
-      return each(this.consume, handle);
-    }
-
-    then: PromiseLike<GraphSubjects>['then'] =
-      (onFulfilled, onRejected) =>
-        firstValueFrom(this.pipe(toArray<GraphSubject>())).then(onFulfilled == null ?
-          null : graph => onFulfilled(new SubjectGraph(graph)), onRejected);
-  };
 }
 
 /**
@@ -278,6 +253,13 @@ export interface GraphUpdate extends DeleteInsert<GraphSubjects> {
  */
 export interface MeldPreUpdate extends GraphUpdate {
   /**
+   * An identified security principal (user or machine) that is responsible for
+   * this update.
+   *
+   * @experimental
+   */
+  readonly '@principal'?: Reference;
+  /**
    * If this key is included and the value is truthy, this update is an
    * _agreement_. The value may include serialisable proof that applicable
    * agreement conditions have been met, such as a key to a ledger entry.
@@ -285,13 +267,6 @@ export interface MeldPreUpdate extends GraphUpdate {
    * @experimental
    */
   readonly '@agree'?: any;
-  /**
-   * An identified security principal (user or machine) that is responsible for
-   * this update.
-   *
-   * @experimental
-   */
-  readonly '@principal'?: Reference;
 }
 
 /**

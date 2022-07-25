@@ -2,7 +2,7 @@ import {
   GraphSubject, LiveStatus, MeldExtensions, MeldReadState, MeldStatus, StateManaged, StateProc
 } from '../../api';
 import { MeldLocal, MeldRemotes, OperationMessage, Recovery, Revup, Snapshot } from '..';
-import { liveRollup } from '../LiveValue';
+import { liveRollup } from '../api-support';
 import { Context, isUpdate, Pattern, Query, Read, Write } from '../../jrql-support';
 import {
   BehaviorSubject, concat, concatMap, defaultIfEmpty, EMPTY, firstValueFrom, from, interval, merge,

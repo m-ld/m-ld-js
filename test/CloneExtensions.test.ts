@@ -1,4 +1,3 @@
-import { CloneExtensions } from '../src/engine/index';
 import { MockGraphState, testConfig, testContext } from './testClones';
 import { DefaultList } from '../src/constraints/DefaultList';
 import { SingleValued } from '../src/constraints/SingleValued';
@@ -6,6 +5,7 @@ import { MeldConstraint, MeldExtensions, MeldTransportSecurity, StateManaged } f
 import { mock } from 'jest-mock-extended';
 import { M_LD } from '../src/ns';
 import { ExtensionEnvironment } from '../src/orm';
+import { CloneExtensions } from '../src/engine/CloneExtensions';
 
 const thisModuleId = require.resolve('./CloneExtensions.test');
 

@@ -1,14 +1,14 @@
-import { QuadStoreDataset } from './engine/dataset';
-import { DatasetEngine } from './engine/dataset/DatasetEngine';
-import { ApiStateMachine } from './engine/MeldState';
-import { DomainContext } from './engine/MeldEncoding';
 import { MeldClone, MeldExtensions } from './api';
-import { CloneExtensions, MeldRemotes } from './engine';
-import type { LiveStatus } from '@m-ld/m-ld-spec';
-import type { MeldConfig } from './config';
-import { InitialApp } from './config';
-import type { AbstractLevelDOWN } from 'abstract-leveldown';
+import { QuadStoreDataset } from './engine/dataset';
+import { CloneExtensions } from './engine/CloneExtensions';
+import { ApiStateMachine } from './engine/MeldState';
+import { DatasetEngine } from './engine/dataset/DatasetEngine';
+import { DomainContext } from './engine/MeldEncoding';
+import type { InitialApp, MeldConfig } from './config';
 import { Stopwatch } from './engine/util';
+import type { MeldRemotes } from './engine';
+import type { LiveStatus } from '@m-ld/m-ld-spec';
+import type { AbstractLevelDOWN } from 'abstract-leveldown';
 
 /**
  * Core API exports. Extension exports can be found in package.json/exports

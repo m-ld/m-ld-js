@@ -1,5 +1,5 @@
 import { Meld, OperationMessage, Revup, Snapshot } from '.';
-import { LiveValue } from './LiveValue';
+import { LiveValue } from './api-support';
 import { TreeClock } from './clocks';
 import { asapScheduler, BehaviorSubject, firstValueFrom, Observable, of } from 'rxjs';
 import { catchError, distinctUntilChanged, filter, observeOn, skip } from 'rxjs/operators';

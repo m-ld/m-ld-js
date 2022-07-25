@@ -5,7 +5,7 @@ import { GlobalClock, TreeClock, TreeClockJson } from './clocks';
 import { Observable } from 'rxjs';
 import { Message } from './messages';
 import { Future, MsgPack } from './util';
-import { LiveValue } from './LiveValue';
+import { LiveValue } from './api-support';
 import { Attribution, MeldReadState, StateProc } from '../api';
 import { levels } from 'loglevel';
 import { MeldEncoder } from './MeldEncoding';
@@ -185,10 +185,11 @@ export type EncodedOperation = [
   encoding: BufferEncoding[],
   /**
    * The identity Iri compacted against the canonical domain context of the
-   * principal responsible for this operation, if available; or `null`. Note
-   * that this principal is not necessarily the same as the attribution of a
-   * sent operation message if the operation has been processed in some way,
-   * such as with a fusion.
+   * principal originally responsible for this operation, if available; or
+   * `null`. Note that this principal is not necessarily the same as the
+   * attribution of a sent operation message if the operation has been processed
+   * in some way, such as with a fusion.
+   *
    * @see AppPrincipal
    * @since 4
    */
@@ -319,5 +320,3 @@ export interface ReadLatchable {
    */
   latch<T>(procedure: StateProc<MeldReadState, T>): Promise<T>;
 }
-
-export { CloneExtensions } from './CloneExtensions';

@@ -13,7 +13,7 @@ import {
   MeldUpdate, StateManaged, StateProc, Write
 } from '../src';
 import { AbstractLevelDOWN } from 'abstract-leveldown';
-import { LiveValue } from '../src/engine/LiveValue';
+import { LiveValue } from '../src/engine/api-support';
 import { MeldMemDown } from '../src/memdown';
 import { Future, MsgPack } from '../src/engine/util';
 import { DatasetSnapshot } from '../src/engine/dataset/SuSetDataset';

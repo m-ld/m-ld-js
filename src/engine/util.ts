@@ -93,15 +93,6 @@ export class Future<T = void> implements PromiseLike<T> {
   };
 }
 
-export function tapCount<T>(done: Future<number>): OperatorFunction<T, T> {
-  let n = 0;
-  return tap({
-    next: () => n++,
-    complete: () => done.resolve(n),
-    error: done.reject
-  });
-}
-
 export function tapLast<T>(done: Future<T | undefined>): OperatorFunction<T, T> {
   let last: T | undefined;
   return tap({
