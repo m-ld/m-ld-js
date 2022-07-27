@@ -80,7 +80,6 @@ describe('Statutory', () => {
       expect.hasAssertions();
       for (let constraint of (await statutory.ready()).constraints ?? [])
         await expect(constraint.check(state.graph.asReadState, mockInterim({
-          '@ticks': 0,
           '@delete': new SubjectGraph([]),
           '@insert': new SubjectGraph([{
             '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Fred'
@@ -102,7 +101,6 @@ describe('Statutory', () => {
       expect.hasAssertions();
       for (let constraint of (await statutory.ready()).constraints ?? [])
         await expect(constraint.check(state.graph.asReadState, mockInterim({
-          '@ticks': 0,
           '@delete': new SubjectGraph([]),
           '@insert': new SubjectGraph([{
             '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#height': 6
@@ -129,7 +127,6 @@ describe('Statutory', () => {
       for (let constraint of (await statutory.ready()).constraints ?? [])
         await expect(constraint.check(state.graph.asReadState, mockInterim({
           '@principal': { '@id': 'http://test.m-ld.org/hanna' },
-          '@ticks': 0,
           '@delete': new SubjectGraph([]),
           '@insert': new SubjectGraph([{
             '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Fred'
@@ -159,7 +156,6 @@ describe('Statutory', () => {
       for (let constraint of (await statutory.ready()).constraints ?? [])
         await expect(constraint.check(state.graph.asReadState, mockInterim({
           '@principal': { '@id': 'http://test.m-ld.org/hanna' },
-          '@ticks': 0,
           '@delete': new SubjectGraph([]),
           '@insert': new SubjectGraph([{
             '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Fred'
@@ -185,7 +181,6 @@ describe('Statutory', () => {
       expect.hasAssertions();
       for (let constraint of (await statutory.ready()).constraints ?? [])
         await expect(constraint.check(state.graph.asReadState, mockInterim({
-          '@ticks': 0,
           '@delete': new SubjectGraph([]),
           '@insert': new SubjectGraph([{
             '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Fred'
@@ -216,7 +211,6 @@ describe('Statutory', () => {
       for (let constraint of (await statutory.ready()).constraints ?? [])
         await expect(constraint.check(state.graph.asReadState, mockInterim({
           '@principal': { '@id': 'http://test.m-ld.org/hanna' },
-          '@ticks': 0,
           '@delete': new SubjectGraph([]),
           '@insert': new SubjectGraph([{
             '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Fred'
@@ -252,7 +246,6 @@ describe('Statutory', () => {
       for (let constraint of (await statutory.ready()).constraints ?? [])
         await expect(constraint.check(state.graph.asReadState, mockInterim({
           '@principal': { '@id': 'http://test.m-ld.org/hanna' },
-          '@ticks': 0,
           '@delete': new SubjectGraph([]),
           '@insert': new SubjectGraph([{
             '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Fred'
@@ -285,7 +278,6 @@ describe('Statutory', () => {
       for (let constraint of (await statutory.ready()).constraints ?? []) {
         const update = mockInterim({
           '@principal': { '@id': 'http://test.m-ld.org/hanna' },
-          '@ticks': 0,
           '@delete': new SubjectGraph([]),
           '@insert': new SubjectGraph([{
             '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Fred'
@@ -336,7 +328,7 @@ describe('Statutory', () => {
       };
       await expect(statute.test(state.graph.asReadState, update)).resolves.not.toThrow();
       await expect(statute.check(state.graph.asReadState,
-        mockInterim({ ...update, '@ticks': 0 }))).resolves.not.toThrow();
+        mockInterim(update))).resolves.not.toThrow();
     });
 
     test('agrees an insert of a property statute', async () => {
@@ -356,7 +348,7 @@ describe('Statutory', () => {
           '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Fred'
         }])
       };
-      const interim = mockInterim({ ...update, '@ticks': 0 });
+      const interim = mockInterim(update);
       await statute.check(state.graph.asReadState, interim);
       expect(interim.assert).toBeCalledWith({ '@agree': true });
       await expect(statute.test(state.graph.asReadState,
@@ -380,7 +372,7 @@ describe('Statutory', () => {
         }]),
         '@insert': new SubjectGraph([])
       };
-      const interim = mockInterim({ ...update, '@ticks': 0 });
+      const interim = mockInterim(update);
       await statute.check(state.graph.asReadState, interim);
       expect(interim.assert).toBeCalledWith({ '@agree': true });
       await expect(statute.test(state.graph.asReadState,
@@ -409,7 +401,7 @@ describe('Statutory', () => {
           '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Fred'
         }])
       };
-      const interim = mockInterim({ ...update, '@ticks': 0 });
+      const interim = mockInterim(update);
       await statute.check(state.graph.asReadState, interim);
       expect(interim.assert).toBeCalledWith({ '@agree': true });
       await expect(statute.test(state.graph.asReadState,
@@ -437,7 +429,7 @@ describe('Statutory', () => {
           '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Fred'
         }])
       };
-      const interim = mockInterim({ ...update, '@ticks': 0 });
+      const interim = mockInterim(update);
       await expect(statute.check(state.graph.asReadState, interim)).rejects.toBeDefined();
       await expect(statute.test(state.graph.asReadState,
         { ...update, '@agree': true })).rejects.toBeDefined();

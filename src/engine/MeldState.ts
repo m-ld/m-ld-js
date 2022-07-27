@@ -1,7 +1,7 @@
 import { Query, Read, Subject, SubjectProperty, Update, Write } from '../jrql-support';
 import { Subscription } from 'rxjs';
 import {
-  any, GraphSubject, MeldState, MeldStateMachine, readResult, ReadResult, StateProc, UpdateProc
+  any, GraphSubject, MeldState, MeldStateMachine, ReadResult, StateProc, UpdateProc
 } from '../api';
 import { CloneEngine, EngineState, EngineUpdateProc, StateEngine } from './StateEngine';
 import { QueryableRdfSourceProxy } from './quads';
@@ -9,6 +9,7 @@ import { Consumable } from 'rx-flowable';
 import { first, Future, inflateFrom } from './util';
 import { QueryableRdfSource } from '../rdfjs-support';
 import { constructProperties, describeId } from './jrql-util';
+import { readResult } from './api-support';
 
 abstract class ApiState extends QueryableRdfSourceProxy implements MeldState {
   constructor(

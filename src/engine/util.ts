@@ -63,10 +63,8 @@ export class Future<T = void> implements PromiseLike<T> {
   constructor(value?: T) {
     this._promise = firstValueFrom(this.subject);
     this._promise.catch(() => {}); // Suppress UnhandledPromiseRejection
-    if (value !== undefined) {
-      this.subject.next(value);
-      this.subject.complete();
-    }
+    if (value !== undefined)
+      this.resolve(value);
   }
 
   get pending() {
@@ -91,15 +89,6 @@ export class Future<T = void> implements PromiseLike<T> {
   then: Promise<T>['then'] = (onfulfilled, onrejected) => {
     return this._promise.then(onfulfilled, onrejected);
   };
-}
-
-export function tapCount<T>(done: Future<number>): OperatorFunction<T, T> {
-  let n = 0;
-  return tap({
-    next: () => n++,
-    complete: () => done.resolve(n),
-    error: done.reject
-  });
 }
 
 export function tapLast<T>(done: Future<T | undefined>): OperatorFunction<T, T> {

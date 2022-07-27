@@ -17,7 +17,6 @@ describe('Default list constraint', () => {
   test('Passes an empty update', async () => {
     const constraint = new DefaultList('test');
     const update = mockInterim({
-      '@ticks': 0,
       '@delete': new SubjectGraph([]),
       '@insert': new SubjectGraph([])
     });
@@ -28,7 +27,6 @@ describe('Default list constraint', () => {
   test('Rewrites a list insert', async () => {
     const constraint = new DefaultList('test');
     const update = mockInterim({
-      '@ticks': 0,
       '@delete': new SubjectGraph([]),
       '@insert': new SubjectGraph([{
         '@id': 'http://test.m-ld.org/shopping',
@@ -91,7 +89,6 @@ describe('Default list constraint', () => {
     });
     const constraint = new DefaultList('test');
     const update = mockInterim({
-      '@ticks': 0,
       '@delete': new SubjectGraph([]),
       '@insert': new SubjectGraph([{
         '@id': 'http://test.m-ld.org/shopping',
@@ -128,7 +125,6 @@ describe('Default list constraint', () => {
     });
     const constraint = new DefaultList('test');
     const update = mockInterim({
-      '@ticks': 0,
       '@delete': new SubjectGraph([]),
       '@insert': new SubjectGraph([{
         '@id': 'http://test.m-ld.org/shopping',
@@ -170,7 +166,6 @@ describe('Default list constraint', () => {
     });
     const constraint = new DefaultList('test');
     const update = mockInterim({
-      '@ticks': 0,
       '@delete': new SubjectGraph([]),
       '@insert': new SubjectGraph([{
         '@id': 'http://test.m-ld.org/shopping',

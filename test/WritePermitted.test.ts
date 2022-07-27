@@ -23,7 +23,6 @@ describe('Write permissions', () => {
     await writePermitted.initialise(state.graph.asReadState);
     for (let constraint of (await writePermitted.ready()).constraints ?? [])
       await expect(constraint.check(state.graph.asReadState, mockInterim({
-        '@ticks': 0,
         '@delete': new SubjectGraph([]),
         '@insert': new SubjectGraph([{
           '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Fred'
@@ -39,7 +38,6 @@ describe('Write permissions', () => {
     expect.hasAssertions();
     for (let constraint of (await writePermitted.ready()).constraints ?? [])
       await expect(constraint.check(state.graph.asReadState, mockInterim({
-        '@ticks': 0,
         '@delete': new SubjectGraph([]),
         '@insert': new SubjectGraph([{
           '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#height': 6
@@ -55,7 +53,6 @@ describe('Write permissions', () => {
     expect.hasAssertions();
     for (let constraint of (await writePermitted.ready()).constraints ?? [])
       await expect(constraint.check(state.graph.asReadState, mockInterim({
-        '@ticks': 0,
         '@delete': new SubjectGraph([]),
         '@insert': new SubjectGraph([{
           '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Fred'
@@ -75,7 +72,6 @@ describe('Write permissions', () => {
     for (let constraint of (await writePermitted.ready()).constraints ?? [])
       await expect(constraint.check(state.graph.asReadState, mockInterim({
         '@principal': { '@id': 'http://test.m-ld.org/hanna' },
-        '@ticks': 0,
         '@delete': new SubjectGraph([]),
         '@insert': new SubjectGraph([{
           '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Fred'

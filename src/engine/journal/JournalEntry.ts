@@ -6,7 +6,7 @@ import { UUID } from '../MeldEncoding';
 import { TripleMap } from '../quads';
 import { Iri } from 'jsonld/jsonld-spec';
 import { Attribution } from '../../api';
-import { OperationMessage } from '../index';
+import { MeldOperationMessage } from '../MeldOperationMessage';
 
 /**
  * Identifies an entry or operation by both tick and TID.
@@ -89,7 +89,7 @@ export class JournalEntry {
 
   asMessage() {
     const [prevTick] = this.prev;
-    return OperationMessage.fromOperation(
+    return MeldOperationMessage.fromOperation(
       prevTick, this.operation.encoded, this.attribution, this.operation.time);
   }
 }

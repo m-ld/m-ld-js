@@ -3,82 +3,10 @@
  */
 import { GlobalClock, TreeClock, TreeClockJson } from './clocks';
 import { Observable } from 'rxjs';
-import { Message } from './messages';
-import { Future, MsgPack } from './util';
-import { LiveValue } from './LiveValue';
+import { MsgPack } from './util';
+import { LiveValue } from './api-support';
 import { Attribution, MeldReadState, StateProc } from '../api';
-import { levels } from 'loglevel';
-import { MeldEncoder } from './MeldEncoding';
-import { MeldError } from './MeldError';
-
-const inspect = Symbol.for('nodejs.util.inspect.custom');
-
-/**
- * An operation on domain data, expressed such that it can be causally-ordered
- * using its logical clock time, with a message service.
- */
-export class OperationMessage implements Message<TreeClock, EncodedOperation> {
-  readonly delivered = new Future;
-
-  static fromOperation(
-    prev: number,
-    data: EncodedOperation,
-    attr: Attribution | null,
-    time?: TreeClock
-  ) {
-    return new OperationMessage(
-      prev, EncodedOperation.toBuffer(data), attr, data, time);
-  }
-
-  static fromBuffer(payload: Uint8Array): OperationMessage {
-    const json = MsgPack.decode(payload);
-    if (typeof json == 'object' && typeof json.prev == 'number' &&
-      Buffer.isBuffer(json.enc) && typeof json.attr == 'object') {
-      return new OperationMessage(json.prev, json.enc, json.attr);
-    } else {
-      throw new MeldError('Bad update');
-    }
-  }
-
-  /**
-   * @param prev Previous public tick from the operation source
-   * @param enc MessagePack-encoded enclosed update operation
-   * @param attr Attribution of the operation to a security principal
-   * @param [data] the actual update operation (decoded if not provided)
-   * @param [time] the update time (decoded of not provided)
-   */
-  private constructor(
-    readonly prev: number,
-    readonly enc: Buffer,
-    readonly attr: Attribution | null,
-    readonly data: EncodedOperation = EncodedOperation.fromBuffer(enc),
-    readonly time = TreeClock.fromJson(data[EncodedOperation.Key.time])
-  ) {}
-
-  /** Approximate length of serialised message, in bytes */
-  get size() {
-    const { pid, sig } = this.attr ?? {};
-    return 8 + this.enc.length + (pid?.length ?? 0) + (sig?.length ?? 0);
-  }
-
-  toBuffer() {
-    const { prev, enc, attr } = this;
-    return MsgPack.encode({ prev, enc, attr });
-  }
-
-  toString(logLevel: number = levels.INFO) {
-    const [v, from, time, updateData, encoding] = this.data;
-    const update = logLevel <= levels.DEBUG ?
-      encoding.includes(BufferEncoding.SECURE) ? '---ENCRYPTED---' :
-        MeldEncoder.jsonFromBuffer(updateData, encoding) :
-      { length: updateData.length, encoding };
-    return `${JSON.stringify({ v, from, time, update })}
-    @ ${this.time}, prev ${this.prev}`;
-  }
-
-  // v8(chrome/nodejs) console
-  [inspect] = () => this.toString();
-}
+import { Message } from './messages';
 
 /**
  * Primary internal m-ld engine-to-engine interface, used both as an interface
@@ -137,6 +65,22 @@ export interface Meld {
 }
 
 /**
+ * An operation on domain data, expressed such that it can be causally-ordered
+ * using its logical clock time, with a message service.
+ */
+export interface OperationMessage extends Message<TreeClock, EncodedOperation> {
+  /**
+   * Previous public tick from the operation source. Used to detect FIFO
+   * violations in message delivery.
+   */
+  readonly prev: number;
+  /**
+   * Attribution of the operation to a security principal
+   */
+  readonly attr: Attribution | null;
+}
+
+/**
  * Encodings that take object or buffer input and produce a buffer.
  */
 export enum BufferEncoding {
@@ -185,10 +129,11 @@ export type EncodedOperation = [
   encoding: BufferEncoding[],
   /**
    * The identity Iri compacted against the canonical domain context of the
-   * principal responsible for this operation, if available; or `null`. Note
-   * that this principal is not necessarily the same as the attribution of a
-   * sent operation message if the operation has been processed in some way,
-   * such as with a fusion.
+   * principal originally responsible for this operation, if available; or
+   * `null`. Note that this principal is not necessarily the same as the
+   * attribution of a sent operation message if the operation has been processed
+   * in some way, such as with a fusion.
+   *
    * @see AppPrincipal
    * @since 4
    */
@@ -319,5 +264,3 @@ export interface ReadLatchable {
    */
   latch<T>(procedure: StateProc<MeldReadState, T>): Promise<T>;
 }
-
-export { CloneExtensions } from './CloneExtensions';

@@ -1,9 +1,7 @@
 import {
-  any, Construct, Describe, Group, MeldUpdate, Reference, Select, Subject, Update
+  any, clone, Construct, Describe, Group, MeldClone, MeldUpdate, Reference, Select, Subject, Update
 } from '../src';
-import { ApiStateMachine } from '../src/engine/MeldState';
-import { memStore, mockRemotes, testConfig, testContext, testExtensions } from './testClones';
-import { DatasetEngine } from '../src/engine/dataset/DatasetEngine';
+import { MockRemotes, testConfig } from './testClones';
 import { Future } from '../src/engine/util';
 import { blankRegex, genIdRegex } from './testUtil';
 import { SubjectGraph } from '../src/engine/SubjectGraph';
@@ -11,24 +9,14 @@ import { DataFactory as RdfDataFactory, Quad } from 'rdf-data-factory';
 import { Factory as SparqlFactory } from 'sparqlalgebrajs';
 import { Binding } from 'quadstore';
 import { Subscription } from 'rxjs';
-import { DefaultList } from '../src/constraints/DefaultList';
+import { MeldMemDown } from '../src/memdown/index';
 
-describe('Meld State API', () => {
-  let api: ApiStateMachine;
+describe('MeldClone', () => {
+  let api: MeldClone;
   let captureUpdate: Future<MeldUpdate>;
 
   beforeEach(async () => {
-    const ext = { constraints: [new DefaultList('test')] };
-    let clone = new DatasetEngine({
-      dataset: await memStore({ context: testContext }),
-      remotes: mockRemotes(),
-      extensions: testExtensions(ext),
-      config: testConfig(),
-      app: {},
-      context: testContext
-    });
-    await clone.initialise();
-    api = new ApiStateMachine(clone);
+    api = await clone(new MeldMemDown, MockRemotes, testConfig());
     captureUpdate = new Future;
   });
 
@@ -38,7 +26,8 @@ describe('Meld State API', () => {
     await expect(captureUpdate).resolves.toEqual({
       '@ticks': 1,
       '@insert': new SubjectGraph([{ '@id': 'fred', name: 'Fred' }]),
-      '@delete': new SubjectGraph([])
+      '@delete': new SubjectGraph([]),
+      trace: expect.any(Function)
     });
     await expect(api.get('fred'))
       .resolves.toEqual({ '@id': 'fred', name: 'Fred' });
@@ -59,7 +48,8 @@ describe('Meld State API', () => {
       await expect(captureUpdate).resolves.toEqual({
         '@ticks': 2,
         '@delete': [{ '@id': 'fred', name: 'Fred' }],
-        '@insert': []
+        '@insert': [],
+        trace: expect.any(Function)
       });
     });
 
@@ -72,7 +62,8 @@ describe('Meld State API', () => {
       await expect(captureUpdate).resolves.toEqual({
         '@ticks': 2,
         '@delete': [{ '@id': 'fred', height: 5 }],
-        '@insert': []
+        '@insert': [],
+        trace: expect.any(Function)
       });
     });
 
@@ -95,7 +86,8 @@ describe('Meld State API', () => {
       await expect(captureUpdate).resolves.toEqual({
         '@ticks': 2,
         '@delete': [{ '@id': 'fred', height: 5 }],
-        '@insert': [{ '@id': 'fred', height: 6 }]
+        '@insert': [{ '@id': 'fred', height: 6 }],
+        trace: expect.any(Function)
       });
     });
 
@@ -151,7 +143,8 @@ describe('Meld State API', () => {
       await expect(captureUpdate).resolves.toEqual({
         '@ticks': 1,
         '@delete': [],
-        '@insert': [{ '@id': 'fred', name: 'Fred' }]
+        '@insert': [{ '@id': 'fred', name: 'Fred' }],
+        trace: expect.any(Function)
       });
     });
 
@@ -163,7 +156,8 @@ describe('Meld State API', () => {
       await expect(captureUpdate).resolves.toEqual({
         '@ticks': 2,
         '@delete': [{ '@id': 'fred', name: 'Fred' }],
-        '@insert': []
+        '@insert': [],
+        trace: expect.any(Function)
       });
     });
 

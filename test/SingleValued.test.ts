@@ -14,7 +14,6 @@ describe('Single-valued constraint', () => {
   test('Passes an empty update', async () => {
     const constraint = new SingleValued('http://test.m-ld.org/#name');
     await expect(constraint.check(state.graph.asReadState, mockInterim({
-      '@ticks': 0,
       '@delete': new SubjectGraph([]),
       '@insert': new SubjectGraph([])
     }))).resolves.toBeUndefined();
@@ -23,7 +22,6 @@ describe('Single-valued constraint', () => {
   test('Passes a missing property update', async () => {
     const constraint = new SingleValued('http://test.m-ld.org/#name');
     await expect(constraint.check(state.graph.asReadState, mockInterim({
-      '@ticks': 0,
       '@delete': new SubjectGraph([]),
       '@insert': new SubjectGraph([{
         '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#height': 5
@@ -34,7 +32,6 @@ describe('Single-valued constraint', () => {
   test('Passes a single-valued property update', async () => {
     const constraint = new SingleValued('http://test.m-ld.org/#name');
     await expect(constraint.check(state.graph.asReadState, mockInterim({
-      '@ticks': 0,
       '@delete': new SubjectGraph([]),
       '@insert': new SubjectGraph([{
         '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Fred'
@@ -45,7 +42,6 @@ describe('Single-valued constraint', () => {
   test('Fails a multi-valued property update', async () => {
     const constraint = new SingleValued('http://test.m-ld.org/#name');
     await expect(constraint.check(state.graph.asReadState, mockInterim({
-      '@ticks': 0,
       '@delete': new SubjectGraph([]),
       '@insert': new SubjectGraph([{
         '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': ['Fred', 'Flintstone']
@@ -59,7 +55,6 @@ describe('Single-valued constraint', () => {
     });
     const constraint = new SingleValued('http://test.m-ld.org/#name');
     await expect(constraint.check(state.graph.asReadState, mockInterim({
-      '@ticks': 0,
       '@delete': new SubjectGraph([]),
       '@insert': new SubjectGraph([{
         '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Flintstone'
@@ -70,7 +65,6 @@ describe('Single-valued constraint', () => {
   test('does not apply to a single-valued property update', async () => {
     const constraint = new SingleValued('http://test.m-ld.org/#name');
     const update = mockInterim({
-      '@ticks': 0,
       '@delete': new SubjectGraph([]),
       '@insert': new SubjectGraph([{
         '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Fred'
@@ -84,7 +78,6 @@ describe('Single-valued constraint', () => {
   test('applies to a multi-valued property update', async () => {
     const constraint = new SingleValued('http://test.m-ld.org/#name');
     const update = mockInterim({
-      '@ticks': 0,
       '@delete': new SubjectGraph([]),
       '@insert': new SubjectGraph([{
         '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': ['Fred', 'Flintstone']
@@ -105,7 +98,6 @@ describe('Single-valued constraint', () => {
     });
     const constraint = new SingleValued('http://test.m-ld.org/#name');
     const update = mockInterim({
-      '@ticks': 0,
       '@delete': new SubjectGraph([]),
       '@insert': new SubjectGraph([{
         '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Flintstone'
@@ -130,7 +122,6 @@ describe('Single-valued constraint', () => {
     });
     const constraint = new SingleValued('http://test.m-ld.org/#name');
     const update = mockInterim({
-      '@ticks': 0,
       '@delete': new SubjectGraph([]),
       '@insert': new SubjectGraph([{
         '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Flintstone'

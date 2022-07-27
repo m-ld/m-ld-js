@@ -15,7 +15,7 @@ import { Algebra, Factory as SparqlFactory } from 'sparqlalgebrajs';
 import { JRQL } from '../../ns';
 import { JrqlQuads } from './JrqlQuads';
 import { MeldError } from '../MeldError';
-import { GraphSubject, MeldReadState, ReadResult, readResult } from '../../api';
+import { GraphSubject, MeldReadState, ReadResult } from '../../api';
 import { binaryFold, first, flatten, Future, inflate, isArray } from '../util';
 import { ConstructTemplate } from './ConstructTemplate';
 import { Binding, QueryableRdfSource } from '../../rdfjs-support';
@@ -24,6 +24,7 @@ import { flatMap, ignoreIf } from 'rx-flowable/operators';
 import { consume } from 'rx-flowable/consume';
 import { constructSubject } from '../jrql-util';
 import { array } from '../../util';
+import { readResult } from '../api-support';
 
 /**
  * A graph wrapper that provides low-level json-rql handling for queries. The
