@@ -7,7 +7,7 @@ import { M_LD } from '../ns';
 import { Describe, isPropertyObject, isReference, Reference, Subject } from '../jrql-support';
 import { ExtensionEnvironment, ExtensionSubject, OrmDomain, OrmState, OrmSubject } from '../orm';
 import { MeldError } from '../engine/MeldError';
-import { Iri } from 'jsonld/jsonld-spec';
+import { Iri } from '@m-ld/jsonld';
 import { array } from '../util';
 import { SubjectGraph } from '../engine/SubjectGraph';
 import { asSubjectUpdates } from '../updates';

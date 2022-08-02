@@ -2,9 +2,8 @@
  * This declaration file is stored as .ts so that it is emitted
  */
 
-declare module 'jsonld/lib/context' {
-  import { Context, Iri } from 'jsonld/jsonld-spec';
-  import { ExpandedTermDefinition, Options } from 'jsonld';
+declare module '@m-ld/jsonld/lib/context' {
+  import { Context, ExpandedTermDefinition, Iri, Options } from '@m-ld/jsonld';
 
   // Using the 'protected' field to prevent type mistakes
   type ActiveContext = Context & { protected: {} };

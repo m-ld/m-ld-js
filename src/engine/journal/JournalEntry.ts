@@ -4,7 +4,7 @@ import { EntryIndex } from '.';
 import { MeldOperation } from '../MeldOperation';
 import { UUID } from '../MeldEncoding';
 import { TripleMap } from '../quads';
-import { Iri } from 'jsonld/jsonld-spec';
+import { Iri } from '@m-ld/jsonld';
 import { Attribution } from '../../api';
 import { MeldOperationMessage } from '../MeldOperationMessage';
 

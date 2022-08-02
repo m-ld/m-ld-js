@@ -3,7 +3,7 @@ import { Triple, tripleIndexKey, TripleMap } from './quads';
 import { TreeClock } from './clocks';
 import { EncodedOperation } from '.';
 import { MeldEncoder, RefTriple } from './MeldEncoding';
-import { Iri } from 'jsonld/jsonld-spec';
+import { Iri } from '@m-ld/jsonld';
 
 /**
  * The 'range' of an operation comprises the information required to determine

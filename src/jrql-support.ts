@@ -1,5 +1,5 @@
 import * as jrql from 'json-rql';
-import { Iri } from 'jsonld/jsonld-spec';
+import { Iri } from '@m-ld/jsonld';
 
 /**
  * This module defines the sub-types of json-rql supported by JrqlGraph.

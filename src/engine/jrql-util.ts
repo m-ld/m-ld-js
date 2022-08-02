@@ -1,4 +1,4 @@
-import { Url } from 'jsonld/jsonld-spec';
+import { Url } from '@m-ld/jsonld';
 import {
   Construct, Describe, Subject, SubjectProperty, SubjectPropertyObject, Value
 } from '../jrql-support';

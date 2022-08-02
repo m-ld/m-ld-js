@@ -1,6 +1,6 @@
 import { GraphSubject, GraphUpdate, MeldReadState, StateProc } from '../api';
 import { SharedPromise } from '../engine/locks';
-import { Iri } from 'jsonld/jsonld-spec';
+import { Iri } from '@m-ld/jsonld';
 import { OrmSubject } from './OrmSubject';
 import { isArray, settled } from '../engine/util';
 import { isReference } from '../jrql-support';

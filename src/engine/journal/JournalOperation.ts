@@ -3,7 +3,7 @@ import { TreeClock } from '../clocks';
 import { Kvps } from '../dataset';
 import type { Journal } from '.';
 import { MeldOperation, MeldOperationRange, OperationAgreedSpec } from '../MeldOperation';
-import { Iri } from 'jsonld/jsonld-spec';
+import { Iri } from '@m-ld/jsonld';
 
 /**
  * Immutable _partial_ expansion of EncodedOperation. This does not interpret

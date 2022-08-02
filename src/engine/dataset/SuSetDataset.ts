@@ -27,7 +27,7 @@ import { MeldMessageType } from '../../ns/m-ld';
 import { MeldApp, MeldConfig } from '../../config';
 import { MeldOperation } from '../MeldOperation';
 import { ClockHolder } from '../messages';
-import { Iri } from 'jsonld/jsonld-spec';
+import { Iri } from '@m-ld/jsonld';
 import { M_LD } from '../../ns';
 import { MeldOperationMessage } from '../MeldOperationMessage';
 

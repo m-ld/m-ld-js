@@ -4,7 +4,7 @@ import type {
 } from './jrql-support';
 import { Subscription } from 'rxjs';
 import { shortId } from './util';
-import { Iri } from 'jsonld/jsonld-spec';
+import { Iri } from '@m-ld/jsonld';
 import { QueryableRdfSource } from './rdfjs-support';
 import { Consumable, Flowable } from 'rx-flowable';
 import { MeldMessageType } from './ns/m-ld';

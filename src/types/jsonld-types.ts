@@ -4,7 +4,7 @@
  * This declaration file is stored as .ts so that it is emitted
  */
 
-declare module 'jsonld/lib/types' {
+declare module '@m-ld/jsonld/lib/types' {
   /**
    * Returns true if the given value is an Array.
    *

@@ -7,7 +7,7 @@ import { M_LD, XS } from '../ns';
 import { getRandomValues, subtle } from '../engine/local';
 import { MeldError } from '../engine/MeldError';
 import { MeldConfig } from '../config';
-import { Iri } from 'jsonld/jsonld-spec';
+import { Iri } from '@m-ld/jsonld';
 import { Write } from '../jrql-support';
 
 /** @internal */

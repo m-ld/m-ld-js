@@ -9,7 +9,7 @@ import {
 import { Observable } from 'rxjs';
 import { check, Stopwatch } from '../util';
 import { LockManager } from '../locks';
-import { Context, Iri } from 'jsonld/jsonld-spec';
+import { Context, Iri } from '@m-ld/jsonld';
 import { ActiveContext, activeCtx, compactIri, expandTerm } from '../jsonld';
 import { Algebra } from 'sparqlalgebrajs';
 import { Engine } from 'quadstore-comunica';

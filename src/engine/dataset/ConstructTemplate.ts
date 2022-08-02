@@ -1,4 +1,4 @@
-import { Iri } from 'jsonld/jsonld-spec';
+import { Iri } from '@m-ld/jsonld';
 import { Binding } from 'quadstore';
 import { anyName, blank, GraphSubject } from '../../api';
 import {

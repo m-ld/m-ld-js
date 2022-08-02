@@ -2,7 +2,7 @@
  * This declaration file is stored as .ts so that it is emitted
  */
 
-declare module 'jsonld/lib/url' {
+declare module '@m-ld/jsonld/lib/url' {
 
   /**
    * Returns true if the given value is an absolute IRI or blank node IRI, false

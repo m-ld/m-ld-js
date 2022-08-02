@@ -1,4 +1,4 @@
-import { Iri } from 'jsonld/jsonld-spec';
+import { Iri } from '@m-ld/jsonld';
 import {
   Constraint, Expression, Group, isConstraint, isConstruct, isDescribe, isGroup, isSelect,
   isSubject, isUpdate, operators, Query, Read, Result, Subject, SubjectProperty, Update, Variable,

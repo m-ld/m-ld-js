@@ -2,7 +2,7 @@ import { Subject, VocabReference } from '../jrql-support';
 import { GraphSubject, GraphUpdate, MeldReadState } from '../api';
 import { SH } from '../ns/index';
 import { OrmSubject } from '../orm';
-import { Iri } from 'jsonld/jsonld-spec';
+import { Iri } from '@m-ld/jsonld';
 import { SubjectGraph } from '../engine/SubjectGraph';
 import { array } from '../util';
 

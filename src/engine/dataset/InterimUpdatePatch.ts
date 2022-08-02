@@ -3,7 +3,7 @@ import { Subject, SubjectProperty, Update } from '../../jrql-support';
 import { PatchQuads } from '.';
 import { JrqlGraph } from './JrqlGraph';
 import { GraphAliases, SubjectGraph } from '../SubjectGraph';
-import { Iri } from 'jsonld/jsonld-spec';
+import { Iri } from '@m-ld/jsonld';
 import { Quad } from '../quads';
 import { ActiveContext, compactIri } from '../jsonld';
 import { array } from '../../util';

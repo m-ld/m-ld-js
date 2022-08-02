@@ -1,7 +1,7 @@
 import { BufferEncoding } from '.';
 import { flatten, lazy, MsgPack } from './util';
 import { Context, ExpandedTermDef, Reference } from '../jrql-support';
-import { Iri } from 'jsonld/jsonld-spec';
+import { Iri } from '@m-ld/jsonld';
 import { RdfFactory, Triple } from './quads';
 import { ActiveContext, activeCtx, compactIri, expandTerm } from './jsonld';
 import { M_LD, RDF, XS } from '../ns';

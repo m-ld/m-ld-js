@@ -1,7 +1,7 @@
 import { SingleValued, SingleValuedConfig } from './SingleValued';
 import { Context, Reference } from '../jrql-support';
 import { MeldConstraint } from '../api';
-import { compact } from 'jsonld';
+import { compact } from '@m-ld/jsonld';
 
 /**
  * Configuration of the clone data constraint. The supported constraints are:

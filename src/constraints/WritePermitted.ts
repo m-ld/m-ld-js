@@ -6,7 +6,7 @@ import { Shape } from '../shacl/index';
 import { Describe, Reference, Subject } from '../jrql-support';
 import { M_LD } from '../ns';
 import { MeldError } from '../engine/MeldError';
-import { Iri } from 'jsonld/jsonld-spec';
+import { Iri } from '@m-ld/jsonld';
 
 export class WritePermitted extends OrmDomain implements StateManaged<MeldExtensions> {
   /**

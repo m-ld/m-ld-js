@@ -1,4 +1,4 @@
-import { Iri } from 'jsonld/jsonld-spec';
+import { Iri } from '@m-ld/jsonld';
 import { GraphSubject, InterimUpdate, MeldConstraint, MeldReadState } from '../api';
 import { LseqDef, LseqIndexRewriter, PosItem } from '../engine/lseq';
 import * as meld from '../ns/m-ld';
