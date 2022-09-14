@@ -195,7 +195,7 @@ describe('SU-Set Dataset', () => {
               expect(ver).toBe(4);
               expect(from).toBe(firstTick);
               expect(TreeClock.fromJson(time).equals(local.time)).toBe(true);
-              const [del, ins] = MeldEncoder.jsonFromBuffer(upd, enc);
+              const [del, ins]: [{}, []] = MeldEncoder.jsonFromBuffer(upd, enc);
               expect(del).toEqual({});
               expect(ins).toEqual(expectReifiedJson);
               expect(ins.length).toBe(2);
@@ -232,7 +232,7 @@ describe('SU-Set Dataset', () => {
               expect(ver).toBe(4);
               expect(from).toBe(firstTick);
               expect(TreeClock.fromJson(time).equals(local.time)).toBe(true);
-              const [del, ins] = MeldEncoder.jsonFromBuffer(upd, enc);
+              const [del, ins]: [{}, []] = MeldEncoder.jsonFromBuffer(upd, enc);
               expect(del).toEqual({});
               expect(ins).toEqual(expectReifiedJson);
               return true;
@@ -402,7 +402,7 @@ describe('SU-Set Dataset', () => {
             local.tick().time,
             await ssd.write({ '@delete': fred })
           ]))!;
-          const [del] = MeldEncoder.jsonFromBuffer(
+          const [del]: [{}] = MeldEncoder.jsonFromBuffer(
             msg.data[EncodedOperation.Key.update],
             msg.data[EncodedOperation.Key.encoding]);
           expect(del).toEqual({
@@ -424,7 +424,7 @@ describe('SU-Set Dataset', () => {
             local.tick().time,
             await ssd.write({ '@delete': fred })
           ]))!;
-          const [del] = MeldEncoder.jsonFromBuffer(
+          const [del]: [{}] = MeldEncoder.jsonFromBuffer(
             msg.data[EncodedOperation.Key.update],
             msg.data[EncodedOperation.Key.encoding]);
           expect(del).toEqual({

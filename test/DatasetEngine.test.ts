@@ -13,9 +13,9 @@ import { MeldRemotes, Snapshot } from '../src/engine';
 import {
   Describe, GraphSubject, MeldConfig, MeldReadState, Read, Subject, Update, Write
 } from '../src';
-import { AbstractLevelDOWN } from 'abstract-leveldown';
+import { AbstractLevel } from 'abstract-level';
 import { jsonify } from './testUtil';
-import { MeldMemDown } from '../src/memdown';
+import { MemoryLevel } from 'memory-level';
 import { Consumable } from 'rx-flowable';
 import { inflateFrom } from '../src/engine/util';
 import { MeldError } from '../src/engine/MeldError';
@@ -290,12 +290,12 @@ describe('Dataset engine', () => {
   });
 
   describe('as post-genesis clone', () => {
-    let backend: AbstractLevelDOWN;
+    let backend: AbstractLevel<any>;
     let config: MeldConfig;
     let remote: MockProcess;
 
     beforeEach(async () => {
-      backend = new MeldMemDown;
+      backend = new MemoryLevel();
       config = testConfig();
       // Start a temporary genesis clone to initialise the store
       let clone = new DatasetEngine({

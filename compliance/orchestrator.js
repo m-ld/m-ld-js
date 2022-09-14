@@ -6,17 +6,15 @@ const { BadRequestError, InternalServerError, NotFoundError } = require('restify
 const { createServer } = require('net');
 const { once } = require('events');
 const LOG = require('loglevel');
-const inspector = require('inspector');
 const aedes = require('aedes')();
 const genericPool = require('generic-pool');
 const {promisify} = require('util');
 
 ////////////////////////////////////////////////////////////////////////////////
 // Global arguments handling
-const [, , nextDebugPort, logLevel] = process.argv;
+const [, , logLevel] = process.argv;
 LOG.setLevel(Number(logLevel));
 LOG.getLogger('aedes').setLevel(LOG.levels.WARN);
-global.nextDebugPort = Number(nextDebugPort);
 
 ////////////////////////////////////////////////////////////////////////////////
 // Tracking of domains, clones, requests and clone workers
@@ -28,7 +26,6 @@ const pool = genericPool.createPool({
     const process = fork(join(__dirname, 'clone.js'), {
       // Strictly disallow unhandled promise rejections for compliance testing
       execArgv: ['--unhandled-rejections=strict']
-        .concat(inspector.url() ? [`--inspect-brk=${global.nextDebugPort++}`] : [])
     });
     // Wait for the 'active' message
     return once(process, 'message').then(() => process);

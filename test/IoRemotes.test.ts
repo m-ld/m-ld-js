@@ -31,7 +31,7 @@ describe('Socket.io Remotes', () => {
   });
 
   beforeEach(() => {
-    domain = `${(expect.getState().currentTestName.replace(/\W/g, ''))}.m-ld.org`;
+    domain = `${(expect.getState().currentTestName?.replace(/\W/g, ''))}.m-ld.org`;
     remoteRemotes = new IoRemotes({
       '@id': 'remote-remotes', '@domain': domain, genesis: true,
       io: { uri: `http://localhost:${port}` }

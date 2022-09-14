@@ -11,7 +11,6 @@ module.exports = {
     './src/types/**',
     './src/ns/**',
     './src/ably/**',
-    './src/memdown/**',
     './src/mqtt/**',
     './src/wrtc/**',
     './src/socket.io/**'

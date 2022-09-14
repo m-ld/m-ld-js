@@ -8,7 +8,7 @@ import type { InitialApp, MeldConfig } from './config';
 import { Stopwatch } from './engine/util';
 import type { MeldRemotes } from './engine';
 import type { LiveStatus } from '@m-ld/m-ld-spec';
-import type { AbstractLevelDOWN } from 'abstract-leveldown';
+import type { AbstractLevel } from 'abstract-level';
 
 /**
  * Core API exports. Extension exports can be found in package.json/exports
@@ -44,7 +44,7 @@ type ConstructRemotes = new (
  * @category API
  */
 export async function clone(
-  backend: AbstractLevelDOWN,
+  backend: AbstractLevel<any, any, any>,
   constructRemotes: ConstructRemotes,
   config: MeldConfig,
   app: InitialApp = {}

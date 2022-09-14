@@ -194,7 +194,7 @@ export interface MeldState extends MeldReadState {
    * @typeParam W one of the {@link Write} types
    * @returns the next state of the domain, changed by this write operation only
    */
-  write<W = Write>(request: W): Promise<MeldState>;
+  write<W extends Write = Write>(request: W): Promise<MeldState>;
   /**
    * Shorthand method for deleting a single Subject by its `@id`. This will also
    * remove references to the given Subject from other Subjects.

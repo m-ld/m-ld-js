@@ -30,14 +30,14 @@ There are two starter projects available:
 
 ### Data Persistence
 
-**m-ld** uses [levelup](https://github.com/level/levelup) to interface with a
+**m-ld** uses [abstract-level](https://github.com/Level/abstract-level) to interface with a
 LevelDB-compatible storage backend.
 
-For the fastest in-memory responses, this library provides `MeldMemDown`, an optimised variant of [memdown](https://github.com/level/memdown), which can be imported from `'@m-ld/m-ld/ext/memdown'` as shown in the example below. To use, you must also install the [`memdown`](https://www.npmjs.com/package/memdown) package as a peer of `@m-ld/m-ld`.
+For the fastest in-memory responses, use [memory-level](https://github.com/Level/memory-level).
 
-In a service or native application, use [leveldown](https://github.com/level/leveldown/) (file system storage).
+In a service or native application, use [classic-level](https://github.com/Level/classic-level) (file system storage).
 
-In a browser, you can use [level-js](https://github.com/Level/level-js) (browser-local storage).
+In a browser, you can use [browser-level](https://github.com/Level/browser-level) (browser-local storage).
 
 ### Connecting to Other Clones
 
@@ -57,7 +57,7 @@ and the clone [configuration](interfaces/meldconfig.html).
 
 ```typescript
 import { clone, uuid } from '@m-ld/m-ld';
-import { MeldMemDown } from '@m-ld/m-ld/ext/memdown';
+import { MemoryLevel } from 'memory-level';
 import { MqttRemotes, MeldMqttConfig } from '@m-ld/m-ld/ext/mqtt';
 
 const config: MeldMqttConfig = {
@@ -67,7 +67,7 @@ const config: MeldMqttConfig = {
   mqtt: { hostname: 'mqtt.example.org' }
 };
 
-const meld = await clone(new MemDown, MqttRemotes, config);
+const meld = await clone(new MemoryLevel, MqttRemotes, config);
 ```
 
 The `clone` function returns control as soon as it is safe to start making data

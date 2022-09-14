@@ -25,7 +25,7 @@ abstract class ApiState extends QueryableRdfSourceProxy implements MeldState {
     return readResult(this.state.read(request));
   }
 
-  async write<W = Write>(request: W): Promise<MeldState> {
+  async write<W extends Write = Write>(request: W): Promise<MeldState> {
     return this.construct(await this.state.write(request));
   }
 

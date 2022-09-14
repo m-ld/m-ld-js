@@ -720,7 +720,7 @@ export class SuSetDataset extends MeldEncoder {
 
   /**
    * Takes a snapshot of data, including transaction IDs and latest operations.
-   * The data will be loaded from the same consistent snapshot per LevelDown.
+   * The data will be loaded from the same consistent snapshot per abstract-level.
    */
   @SuSetDataset.checkNotClosed.async
   async takeSnapshot(): Promise<DatasetSnapshot> {

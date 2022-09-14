@@ -1,7 +1,18 @@
-Version with a major version number of 0 are developer pre-releases. Unless
-otherwise stated, pre-release versions are not backwards-compatible with prior
-versions for storage or network transmission, so they must be used with data
-persisted using the same version, and other clones of the same version.
+Version with a major version number of 0 are developer pre-releases.
+
+> ⚠️ Unless otherwise stated, pre-release versions are not backwards-compatible
+with prior versions for storage or network transmission, so they must be used
+with data persisted using the same version, and other clones of the same
+version. Please [get in touch](https://m-ld.org/hello) if you need help upgrading.
+
+## v0.9
+
+- _[new]_ API improvements
+  - `propertyValue` type options include explicit `Subject`, `Reference` and `VocabReference` (**[breaking]**: `Object` is no longer allowed)
+  - `ask` query in a read state to optimally discover if some pattern exists
+- **[breaking]** upgraded to the new generation of `*-level` packages (https://github.com/Level/community#how-do-i-upgrade-to-abstract-level)
+  - `MeldMemDown` is no longer required or available, instead please use `MemoryLevel` from [`memory-level`](https://github.com/Level/memory-level).
+- **[breaking]** the `dist` package, containing remotes and other extensions, has been renamed to `ext`. For example, now use `import '@m-ld/m-ld/ext/socket.io'`.
 
 ## v0.8
 

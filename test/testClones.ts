@@ -12,9 +12,9 @@ import {
   Attribution, Context, InterimUpdate, MeldConfig, MeldConstraint, MeldExtensions, MeldPreUpdate,
   MeldReadState, StateManaged, StateProc, Write
 } from '../src';
-import { AbstractLevelDOWN } from 'abstract-leveldown';
+import { AbstractLevel } from 'abstract-level';
 import { LiveValue } from '../src/engine/api-support';
-import { MeldMemDown } from '../src/memdown';
+import { MemoryLevel } from 'memory-level';
 import { Future, MsgPack } from '../src/engine/util';
 import { DatasetSnapshot } from '../src/engine/dataset/SuSetDataset';
 import { ClockHolder } from '../src/engine/messages';
@@ -69,11 +69,11 @@ export function hotLive(lives: Array<boolean | null>): BehaviorSubject<boolean |
 }
 
 export async function memStore(opts?: {
-  backend?: AbstractLevelDOWN,
+  backend?: AbstractLevel<any>,
   context?: Context
 }): Promise<Dataset> {
   return new QuadStoreDataset(
-    opts?.backend ?? new MeldMemDown,
+    opts?.backend ?? new MemoryLevel(),
     opts?.context).initialise();
 }
 
