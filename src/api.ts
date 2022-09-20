@@ -427,13 +427,13 @@ export interface StateManaged<T> {
    */
   ready(): Promise<T>;
   /**
-   * Initialises the extensions against the given clone state. This method could
+   * Initialises the component against the given clone state. This method could
    * be used to read significant state into memory for the efficient
-   * implementation of an extension's function.
+   * implementation of a component's function.
    */
   readonly initialise?: StateProc;
   /**
-   * Called to inform the extensions of an update to the state, _after_ it has
+   * Called to inform the component of an update to the state, _after_ it has
    * been applied. If available, this procedure will be called for every state
    * after that passed to {@link initialise}.
    */

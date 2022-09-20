@@ -6,10 +6,10 @@ import { constraintFromConfig } from '../constraints';
 import { DefaultList } from '../constraints/DefaultList';
 import { InitialApp, MeldApp, MeldConfig } from '../config';
 import { M_LD } from '../ns';
-import { getIdLogger } from './util';
 import { Logger } from 'loglevel';
-import { OrmDomain, OrmState, OrmSubject } from '../orm/index';
+import { OrmDomain, OrmSubject, OrmUpdating } from '../orm/index';
 import { ExtensionSubject } from '../orm';
+import { getIdLogger } from './logging';
 
 /**
  * Top-level aggregation of extensions. Created from the configuration and
@@ -67,21 +67,20 @@ export class CloneExtensions extends OrmDomain implements StateManaged<MeldExten
     this.extensionSubjects = [];
   }
 
-  async initialise(state: MeldReadState) {
-    await this.updating(state, async orm => {
+  initialise(state: MeldReadState) {
+    return this.updating(state, async orm => {
       // Load the top-level extensions subject into our cache
       await this.loadExtensions(orm);
-      await orm.update();
       // Now initialise all extensions
       for (let extSubject of this.extensionSubjects)
         await extSubject.initialiseOrUpdate(state);
     });
   }
 
-  async onUpdate(update: MeldPreUpdate, state: MeldReadState) {
-    await this.updating(state, async orm => {
+  onUpdate(update: MeldPreUpdate, state: MeldReadState) {
+    return this.updating(state, async orm => {
       // This will update the extension list and all the extension subjects
-      await orm.update(update, deleted => {
+      await orm.updated(update, deleted => {
         if (deleted.src['@id'] === M_LD.extensions)
           // The whole extensions object has been deleted!
           this.extensionSubjects.length = 0;
@@ -97,19 +96,21 @@ export class CloneExtensions extends OrmDomain implements StateManaged<MeldExten
     });
   }
 
-  private loadExtensions(orm: OrmState) {
-    return orm.get({ '@id': M_LD.extensions }, src => {
+  private async loadExtensions(orm: OrmUpdating) {
+    await orm.get({ '@id': M_LD.extensions }, src => {
       const { config, app, extensionSubjects } = this;
       return new class extends OrmSubject {
         constructor(src: GraphSubject) {
           super(src);
-          this.initList(src, Subject, extensionSubjects,
-            i => extensionSubjects[i].src,
-            async (i, v: GraphSubject) => extensionSubjects[i] = await orm.get(v,
-              src => new ManagedExtensionSubject(src, { config, app })));
+          this.initList(src, Subject, extensionSubjects, {
+            get: i => extensionSubjects[i].src,
+            set: async (i, v: GraphSubject) => extensionSubjects[i] = await orm.get(v,
+              src => new ManagedExtensionSubject(src, { config, app }))
+          });
         }
       }(src);
     });
+    await orm.updated();
   }
 
   private *extensions() {
@@ -129,6 +130,7 @@ class ManagedExtensionSubject extends ExtensionSubject<StateManaged<MeldExtensio
   }
 
   async initialiseOrUpdate(state: MeldReadState, update?: MeldPreUpdate) {
+    await this.updated;
     if (!this.initialised) {
       await this.instance.initialise?.(state);
       this.initialised = true;

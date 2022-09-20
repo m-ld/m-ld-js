@@ -21,12 +21,9 @@ export class ExtensionSubject<T> extends OrmSubject {
     readonly env: ExtensionEnvironment
   ) {
     super(src);
-    this.initSrcProperty(src, '@type', [Array, String],
-      () => this.moduleType, v => this.moduleType = v);
-    this.initSrcProperty(src, M_LD.JS.require, [Optional, String],
-      () => this.cjsModule, v => this.cjsModule = v);
-    this.initSrcProperty(src, M_LD.JS.className, String,
-      () => this.className, v => this.className = v);
+    this.initSrcProperty(src, '@type', [Array, String], { local: 'moduleType' });
+    this.initSrcProperty(src, M_LD.JS.require, [Optional, String], { local: 'cjsModule' });
+    this.initSrcProperty(src, M_LD.JS.className, String, { local: 'className' });
   }
 
   /**

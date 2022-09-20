@@ -5,10 +5,10 @@ import { ApiStateMachine } from './engine/MeldState';
 import { DatasetEngine } from './engine/dataset/DatasetEngine';
 import { DomainContext } from './engine/MeldEncoding';
 import type { InitialApp, MeldConfig } from './config';
-import { Stopwatch } from './engine/util';
 import type { MeldRemotes } from './engine';
 import type { LiveStatus } from '@m-ld/m-ld-spec';
 import type { AbstractLevel } from 'abstract-level';
+import { Stopwatch } from './engine/Stopwatch';
 
 /**
  * Core API exports. Extension exports can be found in package.json/exports

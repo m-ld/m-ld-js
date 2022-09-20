@@ -78,6 +78,13 @@ export class SubjectPropertyValues {
     }
   }
 
+  diff(oldValues: any[]) {
+    return {
+      deletes: SubjectPropertyValues.minus(oldValues, this.values),
+      inserts: SubjectPropertyValues.minus(this.values, oldValues)
+    }
+  }
+
   /** @returns `values` if nothing has changed */
   private static union(values: any[], unionValues: any[]): any[] {
     const newValues = SubjectPropertyValues.minus(unionValues, values);

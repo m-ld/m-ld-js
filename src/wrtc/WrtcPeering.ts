@@ -1,10 +1,10 @@
 import { Logger } from 'loglevel';
 import type { Instance as Peer, Options as PeerOpts, SignalData } from 'simple-peer';
 import * as SimplePeer from 'simple-peer';
-import { getIdLogger } from '../engine/util';
 import { timer } from 'rxjs';
 import type { NotifyParams, SubPub } from '../engine/remotes';
 import { MeldConfig } from '../config';
+import { getIdLogger } from '../engine/logging';
 
 export interface MeldWrtcConfig extends MeldConfig {
   wrtc?: RTCConfiguration;

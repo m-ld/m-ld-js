@@ -1,4 +1,4 @@
-import { OrmDomain, OrmState, OrmSubject } from '../orm';
+import { OrmDomain, OrmSubject, OrmUpdating } from '../orm';
 import {
   GraphSubject, InterimUpdate, MeldExtensions, MeldPreUpdate, MeldReadState, StateManaged
 } from '../api';
@@ -80,9 +80,8 @@ export class WritePermitted extends OrmDomain implements StateManaged<MeldExtens
   private permissions = new Map<Iri, WritePermission>();
 
   checkPermissions = (state: MeldReadState, update: InterimUpdate) =>
-    this.updating(state, () =>
-      Promise.all([...this.permissions.values()]
-        .map(permission => permission.check(state, update))));
+    Promise.all(Array.from(this.permissions.values(),
+      permission => permission.check(state, update)));
 
   ready(): Promise<MeldExtensions> {
     return this.upToDate().then(() => ({
@@ -93,31 +92,28 @@ export class WritePermitted extends OrmDomain implements StateManaged<MeldExtens
     }));
   }
 
-  async initialise(state: MeldReadState) {
-    await this.updating(state, async orm => {
-      // Read the available permissions
-      await state.read<Describe>({
+  initialise(state: MeldReadState) {
+    // Read the available permissions
+    return this.updating(state, orm =>
+      state.read<Describe>({
         '@describe': '?permission',
         '@where': { '@id': '?permission', '@type': M_LD.WritePermission }
-      }).each(src => this.loadPermission(src, orm));
-      await orm.update();
-    });
+      }).each(src => this.loadPermission(src, orm)));
   }
 
   onUpdate(update: MeldPreUpdate, state: MeldReadState) {
-    return this.updating(state, async orm => {
-      await orm.update(update, deleted => {
+    return this.updating(state, orm =>
+      orm.updated(update, deleted => {
         // Remove any deleted permissions
         this.permissions.delete(deleted.src['@id']);
       }, async insert => {
         // Capture any new permissions
         if (insert['@type'] === M_LD.WritePermission)
           await this.loadPermission(insert, orm);
-      });
-    });
+      }));
   }
 
-  private async loadPermission(src: GraphSubject, orm: OrmState) {
+  private async loadPermission(src: GraphSubject, orm: OrmUpdating) {
     // Putting into both our permissions map and the domain cache
     this.permissions.set(src['@id'], await orm.get(src, src => new WritePermission(src, orm)));
   }
@@ -125,12 +121,14 @@ export class WritePermitted extends OrmDomain implements StateManaged<MeldExtens
 
 export class WritePermission extends OrmSubject {
   controlledShapes: Shape[];
+  domain: OrmDomain;
 
-  constructor(src: GraphSubject, readonly orm: OrmState) {
+  constructor(src: GraphSubject, readonly orm: OrmUpdating) {
     super(src);
-    this.initSrcProperty(src, M_LD.controlledShape, [Array, Subject],
-      () => this.controlledShapes.map(s => s.src),
-      async (v: GraphSubject[]) => this.controlledShapes = await orm.get(v, Shape.from));
+    this.initSrcProperty(src, M_LD.controlledShape, [Array, Subject], {
+      local: 'controlledShapes', orm, construct: Shape.from
+    });
+    this.domain = orm.domain;
   }
 
   async check(state: MeldReadState, interim: InterimUpdate) {
@@ -138,17 +136,21 @@ export class WritePermission extends OrmSubject {
     for (let shape of this.controlledShapes) {
       const affected = await shape.affected(state, update);
       if (affected['@delete'].length > 0 || affected['@insert'].length > 0)
-        return this.checkPrincipal(update['@principal'], shape);
+        return this.checkPrincipal(state, update['@principal'], shape);
     }
   }
 
-  private async checkPrincipal(principalRef: Reference | undefined, shape: Shape) {
+  private async checkPrincipal(
+    state: MeldReadState,
+    principalRef: Reference | undefined,
+    shape: Shape
+  ) {
     if (principalRef == null)
       throw new MeldError('Unauthorised',
         `No identified principal for controlled shape ${shape}`);
     // Load the principal's permissions if we don't already have them
-    const principal = await this.orm.get(
-      principalRef, src => new Principal(src));
+    const principal = await this.domain.updating(state, orm => orm.get(
+      principalRef, src => new Principal(src)));
     if (!principal.permissions.has(this.src['@id']))
       throw new MeldError('Unauthorised');
   }
@@ -159,8 +161,9 @@ class Principal extends OrmSubject {
 
   constructor(src: GraphSubject) {
     super(src);
-    this.initSrcProperty(src, M_LD.hasPermission, [Array, Reference],
-      () => [...this.permissions].map(id => ({ '@id': id })),
-      v => this.permissions = new Set(v.map(ref => ref['@id'])));
+    this.initSrcProperty(src, M_LD.hasPermission, [Array, Reference], {
+      get: () => [...this.permissions].map(id => ({ '@id': id })),
+      set: v => this.permissions = new Set(v.map(ref => ref['@id']))
+    });
   }
 }

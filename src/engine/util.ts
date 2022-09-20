@@ -1,20 +1,11 @@
 import {
-  AsyncSubject, BehaviorSubject, concat, defaultIfEmpty, EMPTY, firstValueFrom, from, NEVER,
-  Observable, ObservableInput, ObservedValueOf, Observer, onErrorResumeNext, OperatorFunction,
-  Subject, Subscription, throwError
+  BehaviorSubject, concat, defaultIfEmpty, EMPTY, firstValueFrom, from, NEVER, Observable,
+  ObservableInput, ObservedValueOf, Observer, onErrorResumeNext, OperatorFunction, Subject,
+  Subscription
 } from 'rxjs';
-import { mergeMap, publish, switchAll, tap } from 'rxjs/operators';
-import { getLogger, getLoggers, LogLevelDesc } from 'loglevel';
-import * as performance from 'marky';
-import { decode as rawDecode, encode as rawEncode } from '@ably/msgpack-js';
-import { EventEmitter } from 'events';
+import { mergeMap, publish, switchAll } from 'rxjs/operators';
 
 export const isArray = Array.isArray;
-
-export namespace MsgPack {
-  export const encode = (value: any) => Buffer.from(rawEncode(value).buffer);
-  export const decode = (buffer: Uint8Array) => rawDecode(Buffer.from(buffer));
-}
 
 export function flatten<T>(bumpy: T[][]): T[] {
   return ([] as T[]).concat(...bumpy);
@@ -55,60 +46,6 @@ export function completed(observable: Observable<unknown>): Promise<void> {
     observable.subscribe({ complete: resolve, error: reject }));
 }
 
-export class Future<T = void> implements PromiseLike<T> {
-  private readonly subject = new AsyncSubject<T>();
-  private _pending = true;
-  private _promise: Promise<T>;
-
-  constructor(value?: T) {
-    this._promise = firstValueFrom(this.subject);
-    this._promise.catch(() => {}); // Suppress UnhandledPromiseRejection
-    if (value !== undefined)
-      this.resolve(value);
-  }
-
-  get pending() {
-    return this._pending;
-  }
-
-  get settle() {
-    return [this.resolve, this.reject];
-  }
-
-  resolve = (value: T) => {
-    this._pending = false;
-    this.subject.next(value);
-    this.subject.complete();
-  };
-
-  reject = (err: any) => {
-    this._pending = false;
-    this.subject.error(err);
-  };
-
-  then: Promise<T>['then'] = (onfulfilled, onrejected) => {
-    return this._promise.then(onfulfilled, onrejected);
-  };
-}
-
-export function tapLast<T>(done: Future<T | undefined>): OperatorFunction<T, T> {
-  let last: T | undefined;
-  return tap({
-    next: item => {
-      last = item;
-    },
-    complete: () => done.resolve(last),
-    error: done.reject
-  });
-}
-
-/**
- * CAUTION: the future will not be resolved if the subscriber unsubscribes.
- * To capture unsubscription, use the RxJS `finalize` operator.
- */
-export function tapComplete<T>(done: Future): OperatorFunction<T, T> {
-  return tap({ complete: () => done.resolve(), error: done.reject });
-}
 /**
  * Delays notifications from a source until a signal is received from a notifier.
  * @see https://ncjamieson.com/how-to-write-delayuntil/
@@ -194,73 +131,6 @@ export class PauseableSource<T> extends Observable<T> implements Observer<T> {
 
   pause(until: ObservableInput<unknown>) {
     this.switch.switch(this.subject.pipe(delayUntil(until)));
-  }
-}
-
-export function getIdLogger(ctor: Function, id: string, logLevel: LogLevelDesc = 'info') {
-  const loggerName = `${ctor.name}.${id}`;
-  const loggerInitialised = loggerName in getLoggers();
-  const log = getLogger(loggerName);
-  if (!loggerInitialised) {
-    const originalFactory = log.methodFactory;
-    log.methodFactory = (methodName, logLevel, loggerName) => {
-      const method = originalFactory(methodName, logLevel, loggerName);
-      return (...msg: any[]) => method.apply(undefined, [new Date().toISOString(), id, ctor.name].concat(msg));
-    };
-  }
-  log.setLevel(logLevel);
-  return log;
-}
-
-type SyncMethod<T> = (this: T, ...args: any[]) => any;
-type AsyncMethod<T> = (this: T, ...args: any[]) => Promise<any>;
-type RxMethod<T> = (this: T, ...args: any[]) => Observable<any>;
-
-export function check<T>(assertion: (t: T) => boolean, otherwise: () => Error) {
-  return {
-    sync: checkWith<T, SyncMethod<T>>(assertion, otherwise, err => { throw err; }),
-    async: checkWith<T, AsyncMethod<T>>(assertion, otherwise, Promise.reject.bind(Promise)),
-    rx: checkWith<T, RxMethod<T>>(assertion, otherwise, throwError)
-  };
-}
-
-export function checkWith<T, M extends (this: T, ...args: any[]) => any>(
-  assertion: (t: T) => boolean, otherwise: () => Error, reject: (err: any) => any) {
-  return function (_t: any, _p: string, descriptor: TypedPropertyDescriptor<M>) {
-    const method = <M>descriptor.value;
-    descriptor.value = <M>function (this: T, ...args: any[]) {
-      if (assertion(this))
-        return method.apply(this, args);
-      else
-        return reject(otherwise());
-    };
-  };
-}
-
-export class Stopwatch {
-  readonly name: string;
-  lap: Stopwatch;
-  laps: { [name: string]: Stopwatch } = {};
-  static timingEvents = new EventEmitter();
-
-  constructor(
-    scope: string, name: string) {
-    performance.mark(this.name = `${scope}-${name}`);
-    this.lap = this;
-  }
-
-  next(name: string): Stopwatch {
-    this.lap.stop();
-    this.lap = this.laps[name] = new Stopwatch(this.name, name);
-    return this;
-  }
-
-  stop(): PerformanceEntry {
-    if (this.lap !== this)
-      this.lap.stop();
-    const event = performance.stop(this.name);
-    Stopwatch.timingEvents.emit('timing', event);
-    return event;
   }
 }
 

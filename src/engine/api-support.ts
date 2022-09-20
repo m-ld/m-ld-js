@@ -1,9 +1,10 @@
 import { defer, firstValueFrom, Observable } from 'rxjs';
 import { map, toArray } from 'rxjs/operators';
-import { Future, inflate, tapComplete } from './util';
+import { inflate } from './util';
 import { Consumable, each, flow } from 'rx-flowable';
 import { SubjectGraph } from './SubjectGraph';
 import { GraphSubject, GraphSubjects, ReadResult } from '../api';
+import { Future, tapComplete } from './Future';
 
 export interface LiveValue<T> extends Observable<T> {
   readonly value: T;

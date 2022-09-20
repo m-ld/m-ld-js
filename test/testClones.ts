@@ -15,7 +15,7 @@ import {
 import { AbstractLevel } from 'abstract-level';
 import { LiveValue } from '../src/engine/api-support';
 import { MemoryLevel } from 'memory-level';
-import { Future, MsgPack } from '../src/engine/util';
+import * as MsgPack from '../src/engine/msgPack';
 import { DatasetSnapshot } from '../src/engine/dataset/SuSetDataset';
 import { ClockHolder } from '../src/engine/messages';
 import { DomainContext } from '../src/engine/MeldEncoding';
@@ -23,6 +23,7 @@ import { JrqlGraph } from '../src/engine/dataset/JrqlGraph';
 import { ActiveContext, activeCtx } from '../src/engine/jsonld';
 import { InterimUpdatePatch } from '../src/engine/dataset/InterimUpdatePatch';
 import { MeldOperationMessage } from '../src/engine/MeldOperationMessage';
+import { Future } from '../src/engine/Future';
 
 export function testConfig(config?: Partial<MeldConfig>): MeldConfig {
   return { '@id': 'test', '@domain': 'test.m-ld.org', genesis: true, ...config };

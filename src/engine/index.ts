@@ -3,7 +3,7 @@
  */
 import { GlobalClock, TreeClock, TreeClockJson } from './clocks';
 import { Observable } from 'rxjs';
-import { MsgPack } from './util';
+import * as MsgPack from './msgPack';
 import { LiveValue } from './api-support';
 import { Attribution, MeldReadState, StateProc } from '../api';
 import { Message } from './messages';

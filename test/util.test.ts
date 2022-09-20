@@ -1,5 +1,6 @@
-import { deepValues, Future, setAtPath } from '../src/engine/util';
+import { deepValues, setAtPath } from '../src/engine/util';
 import { any, array, shortId } from '../src';
+import { Future } from '../src/engine/Future';
 
 test('Future can be resolved', async () => {
   const f = new Future<string>();

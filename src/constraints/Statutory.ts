@@ -5,14 +5,14 @@ import {
 import { Shape } from '../shacl';
 import { M_LD } from '../ns';
 import { Describe, isPropertyObject, isReference, Reference, Subject } from '../jrql-support';
-import { ExtensionEnvironment, ExtensionSubject, OrmDomain, OrmState, OrmSubject } from '../orm';
+import { ExtensionEnvironment, ExtensionSubject, OrmDomain, OrmSubject, OrmUpdating } from '../orm';
 import { MeldError } from '../engine/MeldError';
 import { Iri } from '@m-ld/jsonld';
 import { array } from '../util';
 import { SubjectGraph } from '../engine/SubjectGraph';
 import { asSubjectUpdates } from '../updates';
-import { getIdLogger } from '../engine/util';
 import { Logger } from 'loglevel';
+import { getIdLogger } from '../engine/logging';
 
 export class Statutory extends OrmDomain implements StateManaged<MeldExtensions> {
   /**
@@ -100,46 +100,43 @@ export class Statutory extends OrmDomain implements StateManaged<MeldExtensions>
   ready(): Promise<MeldExtensions> {
     return this.upToDate().then(() => ({
       constraints: [{
-        check: (state, update) => this.updating(state, () =>
-          Promise.all([...this.statutes.values()].map(statute => statute.check(state, update))))
+        check: (state, update) => Promise.all(Array.from(this.statutes.values(),
+          statute => statute.check(state, update)))
       }],
       agreementConditions: [{
-        test: (state, update) => this.updating(state, () =>
-          Promise.all([...this.statutes.values()].map(statute => statute.test(state, update))))
+        test: (state, update) => Promise.all(Array.from(this.statutes.values(),
+          statute => statute.test(state, update)))
       }]
     }));
   }
 
-  async initialise(state: MeldReadState) {
-    await this.updating(state, async orm => {
-      // Read the available statutes
-      await state.read<Describe>({
+  initialise(state: MeldReadState) {
+    // Read the available statutes
+    return this.updating(state, orm =>
+      state.read<Describe>({
         '@describe': '?statute',
         '@where': { '@id': '?statute', '@type': M_LD.Statute }
-      }).each(src => this.loadStatute(src, orm));
-      await orm.update();
-    });
+      }).each(src => this.loadStatute(src, orm)));
   }
 
   onUpdate(update: MeldPreUpdate, state: MeldReadState) {
-    return this.updating(state, async orm => {
-      await orm.update(update, deleted => {
+    return this.updating(state, orm =>
+      orm.updated(update, deleted => {
         // Remove any deleted statutes
         this.statutes.delete(deleted.src['@id']);
       }, async insert => {
         // Capture any new statutes (the type has been inserted)
         if (insert['@type'] === M_LD.Statute)
           await this.loadStatute(insert, orm);
-      });
-    });
+      }));
   }
 
-  private async loadStatute(src: GraphSubject, orm: OrmState) {
+  private async loadStatute(src: GraphSubject, orm: OrmUpdating) {
     // Putting into both our statutes map and the domain cache
     this.statutes.set(src['@id'], await orm.get(src, src =>
       new Statute(src, orm, src => {
         if (src['@id'] === M_LD.hasAuthority)
-          return new HasAuthority(src, orm, this.log);
+          return new HasAuthority(src, this, this.log);
         else if (array(src['@type']).includes(M_LD.JS.commonJsModule))
           return new ExtensionCondition(src, this.env, this.log);
         else
@@ -158,17 +155,17 @@ export class Statute extends OrmSubject implements MeldConstraint, AgreementCond
 
   constructor(
     src: GraphSubject,
-    orm: OrmState,
+    orm: OrmUpdating,
     // Substitutable for unit tests
     prover: (src: GraphSubject) => ShapeAgreementCondition & OrmSubject
   ) {
     super(src);
-    this.initSrcProperty(src, M_LD.statutoryShape, [Array, Subject],
-      () => this.statutoryShapes.map(s => s.src),
-      async (v: GraphSubject[]) => this.statutoryShapes = await orm.get(v, Shape.from));
-    this.initSrcProperty(src, M_LD.sufficientCondition, [Array, Subject],
-      () => this.sufficientConditions.map(c => c.src),
-      async (v: GraphSubject[]) => this.sufficientConditions = await orm.get(v, prover));
+    this.initSrcProperty(src, M_LD.statutoryShape, [Array, Subject], {
+      local: 'statutoryShapes', orm, construct: Shape.from
+    });
+    this.initSrcProperty(src, M_LD.sufficientCondition, [Array, Subject], {
+      local: 'sufficientConditions', orm, construct: prover
+    });
   }
 
   async check(state: MeldReadState, interim: InterimUpdate) {
@@ -260,7 +257,7 @@ class AffectedUpdate {
       if (ourSubject != null) {
         // FIXME: this assumes the values are irrelevant!
         for (let property in subject)
-          if (isPropertyObject(property, subject))
+          if (isPropertyObject(property, subject[property]))
             delete ourSubject[property];
         if (isReference(ourSubject))
           delete this.affected[subject['@id']][key];
@@ -296,7 +293,7 @@ export interface ShapeAgreementCondition {
 }
 
 export class HasAuthority extends OrmSubject implements ShapeAgreementCondition {
-  constructor(src: GraphSubject, readonly orm: OrmState, readonly log?: Logger) {
+  constructor(src: GraphSubject, readonly domain: OrmDomain, readonly log?: Logger) {
     super(src);
   }
 
@@ -308,9 +305,8 @@ export class HasAuthority extends OrmSubject implements ShapeAgreementCondition 
     if (principalRef == null)
       throw new MeldError('Unauthorised', 'No identified principal');
     // Load the principal's authorities if we don't already have them
-    const principal = await this.orm.get(
-      principalRef, src => new Principal(src, this.orm));
-    await this.orm.update();
+    const principal = await this.domain.updating(state, orm => orm.get(
+      principalRef, src => new Principal(src, orm)));
     if (!principal.deleted) {
       // Every affected subject must be covered by an authority assignment.
       // For each authority, subtract anything affected by that authority.
@@ -333,11 +329,11 @@ export class HasAuthority extends OrmSubject implements ShapeAgreementCondition 
 class Principal extends OrmSubject {
   hasAuthority: Shape[];
 
-  constructor(src: GraphSubject, orm: OrmState) {
+  constructor(src: GraphSubject, orm: OrmUpdating) {
     super(src);
-    this.initSrcProperty(src, M_LD.hasAuthority, [Array, Subject],
-      () => this.hasAuthority.map(s => s.src),
-      async (v: GraphSubject[]) => this.hasAuthority = await orm.get(v, Shape.from));
+    this.initSrcProperty(src, M_LD.hasAuthority, [Array, Subject], {
+      local: 'hasAuthority', orm, construct: Shape.from
+    });
   }
 }
 

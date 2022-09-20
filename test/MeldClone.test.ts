@@ -2,7 +2,6 @@ import {
   any, clone, Construct, Describe, Group, MeldClone, MeldUpdate, Reference, Select, Subject, Update
 } from '../src';
 import { MockRemotes, testConfig } from './testClones';
-import { Future } from '../src/engine/util';
 import { blankRegex, genIdRegex } from './testUtil';
 import { SubjectGraph } from '../src/engine/SubjectGraph';
 import { DataFactory as RdfDataFactory, Quad } from 'rdf-data-factory';
@@ -10,6 +9,7 @@ import { Factory as SparqlFactory } from 'sparqlalgebrajs';
 import { Binding } from 'quadstore';
 import { Subscription } from 'rxjs';
 import { MemoryLevel } from 'memory-level';
+import { Future } from '../src/engine/Future';
 
 describe('MeldClone', () => {
   let api: MeldClone;

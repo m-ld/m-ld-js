@@ -10,7 +10,7 @@ import { JrqlGraph } from './JrqlGraph';
 import { MeldEncoder, UUID } from '../MeldEncoding';
 import { EMPTY, merge, mergeMap, Observable, of, Subject as Source } from 'rxjs';
 import { expand, filter, map, takeWhile } from 'rxjs/operators';
-import { check, completed, Future, getIdLogger, inflate } from '../util';
+import { completed, inflate } from '../util';
 import { Logger } from 'loglevel';
 import { MeldError } from '../MeldError';
 import { Quad, Triple, tripleIndexKey, TripleMap } from '../quads';
@@ -30,6 +30,9 @@ import { ClockHolder } from '../messages';
 import { Iri } from '@m-ld/jsonld';
 import { M_LD } from '../../ns';
 import { MeldOperationMessage } from '../MeldOperationMessage';
+import { check } from '../check';
+import { getIdLogger } from '../logging';
+import { Future } from '../Future';
 
 export type DatasetSnapshot = Omit<Snapshot, 'updates'>;
 

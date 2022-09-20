@@ -4,11 +4,13 @@ import { TreeClock } from './clocks';
 import { asapScheduler, BehaviorSubject, firstValueFrom, Observable, of } from 'rxjs';
 import { catchError, distinctUntilChanged, filter, observeOn, skip } from 'rxjs/operators';
 import { Logger } from 'loglevel';
-import { check, getIdLogger, PauseableSource } from './util';
+import { PauseableSource } from './util';
 import { MeldError } from './MeldError';
 import { MeldReadState } from '../api';
 import { MeldConfig } from '../config';
 import { MeldOperationMessage } from './MeldOperationMessage';
+import { check } from './check';
+import { getIdLogger } from './logging';
 
 export abstract class AbstractMeld implements Meld {
   protected static checkLive =

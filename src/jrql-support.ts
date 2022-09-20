@@ -1,5 +1,6 @@
 import * as jrql from 'json-rql';
 import { Iri } from '@m-ld/jsonld';
+import { isArray } from './engine/util';
 
 /**
  * This module defines the sub-types of json-rql supported by JrqlGraph.
@@ -209,12 +210,19 @@ export function isValueObject(value: SubjectPropertyObject): value is ValueObjec
   return typeof value == 'object' && '@value' in value;
 }
 
-/** @internal */
+/**
+ * Determines if the given object contains the given key, and nothing else which
+ * would translate to a graph edge.
+ * @internal
+ */
 function isUnaryObject(value: SubjectPropertyObject, theKey: string) {
-  return value != null && typeof value == 'object'
+  return value != null // typeof null === 'object' too
+    && typeof value == 'object'
     && theKey in value
     && Object.entries(value).every(
-      ([key, value]) => key === theKey || value === undefined);
+      ([key, value]) => key === theKey ||
+        value === null || // or undefined
+        (isArray(value) && value.length === 0));
 }
 
 /** @internal */

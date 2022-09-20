@@ -1,6 +1,6 @@
 import { EncodedOperation } from '../index';
 import { GlobalClock, TreeClock } from '../clocks';
-import { MsgPack } from '../util';
+import * as MsgPack from '../msgPack';
 import { KvpResult, Kvps, KvpStore, TxnContext } from '../dataset';
 import { MeldEncoder } from '../MeldEncoding';
 import { CausalOperator } from '../ops';

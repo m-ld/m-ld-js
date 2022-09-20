@@ -1,7 +1,7 @@
 import { AppPrincipal, Attribution, MeldReadState, MeldTransportSecurity } from '../api';
 import { propertyValue } from '../index';
 import { MeldMessageType } from '../ns/m-ld';
-import { getIdLogger, MsgPack } from '../engine/util';
+import * as MsgPack from '../engine/msgPack';
 import { Logger } from 'loglevel';
 import { M_LD, XS } from '../ns';
 import { getRandomValues, subtle } from '../engine/local';
@@ -9,6 +9,7 @@ import { MeldError } from '../engine/MeldError';
 import { MeldConfig } from '../config';
 import { Iri } from '@m-ld/jsonld';
 import { Write } from '../jrql-support';
+import { getIdLogger } from '../engine/logging';
 
 /** @internal */
 const ALGO = {

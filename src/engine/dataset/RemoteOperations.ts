@@ -1,9 +1,10 @@
 import { MeldRemotes, OperationMessage } from '..';
 import { LiveValue } from '../api-support';
 import { BehaviorSubject, endWith, merge, NEVER, Observable } from 'rxjs';
-import { delayUntil, Future, HotSwitch, onErrorNever, tapLast } from '../util';
+import { delayUntil, HotSwitch, onErrorNever } from '../util';
 import { ignoreElements, map, takeUntil } from 'rxjs/operators';
 import { MeldOperationMessage } from '../MeldOperationMessage';
+import { Future, tapLast } from '../Future';
 
 export class RemoteOperations {
   private readonly outdatedState = new BehaviorSubject<boolean>(true);

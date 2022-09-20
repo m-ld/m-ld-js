@@ -16,7 +16,7 @@ import {
   debounceTime, delayWhen, distinctUntilChanged, expand, filter, finalize, ignoreElements, map,
   share, skipWhile, takeUntil, tap, toArray
 } from 'rxjs/operators';
-import { check, delayUntil, Future, inflateFrom, poisson, Stopwatch, tapComplete } from '../util';
+import { delayUntil, inflateFrom, poisson } from '../util';
 import { LockManager } from '../locks';
 import { levels } from 'loglevel';
 import { AbstractMeld, comesAlive } from '../AbstractMeld';
@@ -28,6 +28,9 @@ import { BaseStream } from '../../rdfjs-support';
 import { Consumable } from 'rx-flowable';
 import { MeldApp, MeldConfig } from '../../config';
 import { MeldOperationMessage } from '../MeldOperationMessage';
+import { Stopwatch } from '../Stopwatch';
+import { check } from '../check';
+import { Future, tapComplete } from '../Future';
 
 enum ConnectStyle {
   SOFT, HARD

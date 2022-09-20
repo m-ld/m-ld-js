@@ -1,29 +1,28 @@
 import { MockGraphState, testContext } from './testClones';
-import { GraphSubject, Optional, Subject, updateSubject } from '../src';
+import { GraphSubject, updateSubject } from '../src';
 import { DefaultList } from '../src/constraints/DefaultList';
-import { OrmSubject } from '../src/orm';
+import { OrmSubject, OrmUpdating } from '../src/orm';
+import { mock } from 'jest-mock-extended';
+import { Episode, Flintstone, Series } from './ormFixtures';
 
-describe('Object-RDF Mapping', () => {
+describe('Object-RDF Mapping Subjects', () => {
   let state: MockGraphState;
+  let orm: OrmUpdating;
 
   beforeEach(async () => {
     state = await MockGraphState.create({ context: testContext });
+    orm = mock<OrmUpdating>({
+      async get(src, construct) {
+        if (Array.isArray(src))
+          throw 'mock cannot load arrays';
+        // Here we always load because we don't have an OrmDomain in the test
+        return construct((await state.graph.get(
+          typeof src == 'string' ? src : src['@id'], state.ctx))!, this);
+      }
+    });
   });
 
   afterEach(() => state.close());
-
-  class Flintstone extends OrmSubject {
-    name: string;
-    height?: number;
-
-    constructor(src: GraphSubject) {
-      super(src);
-      this.initSrcProperty(src, 'name', String,
-        () => this.name, v => this.name = v);
-      this.initSrcProperty(src, 'height', [Optional, Number],
-        () => this.height, (v?: number) => this.height = v);
-    }
-  }
 
   test('updates a subject string property', async () => {
     const fredSrc = { '@id': 'fred', name: 'Fred' };
@@ -40,10 +39,46 @@ describe('Object-RDF Mapping', () => {
   });
 
   test('source property reflects changes', () => {
-    const fredSrc = { '@id': 'fred', name: 'Fred' };
-    const fred = new Flintstone(fredSrc);
+    const fred = new Flintstone({ '@id': 'fred', name: 'Fred' });
     fred.name = 'Fred Flintstone';
     expect(fred.src.name).toBe('Fred Flintstone');
+  });
+
+  test('commit property change', () => {
+    const fred = new Flintstone({ '@id': 'fred', name: 'Fred' });
+    fred.name = 'Fred Flintstone';
+    expect(fred.commit()).toEqual({
+      '@delete': { '@id': 'fred', name: ['Fred'] },
+      '@insert': { '@id': 'fred', name: ['Fred Flintstone'] }
+    });
+    expect(fred.name).toBe('Fred');
+  });
+
+  test('commit property added', () => {
+    const fred = new Flintstone({ '@id': 'fred', name: 'Fred' });
+    fred.height = 6;
+    expect(fred.commit()).toEqual({
+      '@insert': { '@id': 'fred', height: [6] }
+    });
+    expect(fred.height).toBeUndefined();
+  });
+
+  test('commit property deleted', () => {
+    const fred = new Flintstone({ '@id': 'fred', name: 'Fred', height: 6 });
+    delete fred.height;
+    expect(fred.commit()).toEqual({
+      '@delete': { '@id': 'fred', height: [6] }
+    });
+    expect(fred.height).toBe(6);
+  });
+
+  test('commit property undefined', () => {
+    const fred = new Flintstone({ '@id': 'fred', name: 'Fred', height: 6 });
+    fred.height = undefined;
+    expect(fred.commit()).toEqual({
+      '@delete': { '@id': 'fred', height: [6] }
+    });
+    expect(fred.height).toBe(6);
   });
 
   test('update rejects if invariant broken', async () => {
@@ -74,8 +109,9 @@ describe('Object-RDF Mapping', () => {
 
     constructor(src: GraphSubject) {
       super(src);
-      this.initList(src, String, this.list,
-        i => this.list[i], (i, v) => this.list[i] = v);
+      this.initList(src, String, this.list, {
+        get: i => this.list[i], set: (i, v) => this.list[i] = v
+      });
     }
   }
 
@@ -99,41 +135,59 @@ describe('Object-RDF Mapping', () => {
     expect(episodes.deleted).toBe(true);
   });
 
-  class Episode extends OrmSubject {
-    title: string;
-
-    constructor(src: GraphSubject, title?: string) {
-      super(src);
-      this.initSrcProperty(src, 'title', String,
-        () => this.title, v => this.title = v, title);
-    }
-  }
-
-  class Episodes extends OrmSubject {
-    list: Episode[] = [];
-
-    constructor(src: GraphSubject) {
-      super(src);
-      this.initList(src, Subject, this.list,
-        i => this.list[i].src, async (i, v: GraphSubject) =>
-          // Here we always load because we don't have an OrmDomain in the test
-          this.list[i] = new Episode((await state.graph.get(v['@id'], state.ctx))!));
-    }
-  }
-
   test('updates a list subject', async () => {
     const tff = { '@id': 'tff', title: 'The Flintstone Flyer' };
     const episodesSrc = { '@id': 'episodes', '@list': [tff] };
     const constraint = new DefaultList('test');
     await state.write(episodesSrc, constraint);
-    const episodes = new Episodes(episodesSrc);
-    await episodes.updated;
+    const series = new Series(episodesSrc, orm);
+    await series.updated;
     const hlh = { '@id': 'hlh', title: 'Hot Lips Hannigan' };
     const update = await state.write({
       '@insert': { '@id': 'episodes', '@list': { 1: hlh } }
     }, { updateType: 'user', constraint });
-    updateSubject(episodes.src, update);
-    await episodes.updated;
-    expect(episodes.list.map(e => e.src)).toEqual([tff, hlh]);
+    updateSubject(series.src, update);
+    await series.updated;
+    expect(series.episodes.map(e => e.src)).toEqual([tff, hlh]);
+  });
+
+  test('commits a list append', async () => {
+    const tff = { '@id': 'tff', title: 'The Flintstone Flyer' };
+    const hlh = { '@id': 'hlh', title: 'Hot Lips Hannigan' };
+    await state.write({ '@insert': [tff, hlh] });
+    const series = new Series({ '@id': 'episodes', '@list': [tff] }, orm);
+    await series.updated;
+    series.episodes.push(new Episode(hlh, orm));
+    expect(series.commit()).toEqual({
+      '@insert': { '@id': 'episodes', '@list': { 1: [{ '@id': 'hlh' }] } }
+    });
+    expect(series.episodes.length).toBe(1);
+  });
+
+  test('commits a list remove', async () => {
+    const tff = { '@id': 'tff', title: 'The Flintstone Flyer' };
+    const hlh = { '@id': 'hlh', title: 'Hot Lips Hannigan' };
+    await state.write({ '@insert': [tff, hlh] });
+    const series = new Series({ '@id': 'episodes', '@list': [tff, hlh] }, orm);
+    await series.updated;
+    series.episodes.pop();
+    expect(series.commit()).toEqual({
+      '@delete': { '@id': 'episodes', '@list': { 1: { '@id': 'hlh' } } }
+    });
+    expect(series.episodes.length).toBe(2);
+  });
+
+  test('commits a list replace', async () => {
+    const tff = { '@id': 'tff', title: 'The Flintstone Flyer' };
+    const hlh = { '@id': 'hlh', title: 'Hot Lips Hannigan' };
+    await state.write({ '@insert': [tff, hlh] });
+    const series = new Series({ '@id': 'episodes', '@list': [tff] }, orm);
+    await series.updated;
+    series.episodes = [new Episode(hlh, orm)];
+    expect(series.commit()).toEqual({
+      '@delete': { '@id': 'episodes', '@list': { 0: { '@id': 'tff' } } },
+      '@insert': { '@id': 'episodes', '@list': { 1: [{ '@id': 'hlh' }] } }
+    });
+    expect(series.episodes.length).toBe(1);
   });
 });

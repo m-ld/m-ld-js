@@ -444,64 +444,55 @@ describe('Statutory', () => {
     });
 
     test('throws if no principal', async () => {
-      expect.hasAssertions();
-      return appState.updating(state.graph.asReadState, async orm => {
-        const prover = new HasAuthority({ '@id': M_LD.hasAuthority }, orm);
-        const update = {
-          '@delete': new SubjectGraph([]),
-          '@insert': new SubjectGraph([{
-            '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Fred'
-          }])
-        };
-        await expect(prover.prove(state.graph.asReadState, update, undefined))
-          .rejects.toThrow(MeldError);
-        await expect(prover.test(
-          state.graph.asReadState,
-          update,
-          undefined,
-          undefined
-        )).rejects.toThrow(MeldError);
-      });
+      const prover = new HasAuthority({ '@id': M_LD.hasAuthority }, appState);
+      const update = {
+        '@delete': new SubjectGraph([]),
+        '@insert': new SubjectGraph([{
+          '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Fred'
+        }])
+      };
+      await expect(prover.prove(state.graph.asReadState, update, undefined))
+        .rejects.toThrow(MeldError);
+      await expect(prover.test(
+        state.graph.asReadState,
+        update,
+        undefined,
+        undefined
+      )).rejects.toThrow(MeldError);
     });
 
     test('returns falsey if principal not found', async () => {
-      expect.hasAssertions();
-      return appState.updating(state.graph.asReadState, async orm => {
-        const prover = new HasAuthority({ '@id': M_LD.hasAuthority }, orm);
-        const update = {
-          '@delete': new SubjectGraph([]),
-          '@insert': new SubjectGraph([{
-            '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Fred'
-          }])
-        };
-        const principalRef = { '@id': 'http://test.m-ld.org/hanna' };
-        await expect(prover.prove(state.graph.asReadState, update, principalRef))
-          .resolves.toBe(false);
-        await expect(prover.test(state.graph.asReadState, update, true, principalRef))
-          .resolves.toBe('Principal does not have authority');
-      });
+      const prover = new HasAuthority({ '@id': M_LD.hasAuthority }, appState);
+      const update = {
+        '@delete': new SubjectGraph([]),
+        '@insert': new SubjectGraph([{
+          '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Fred'
+        }])
+      };
+      const principalRef = { '@id': 'http://test.m-ld.org/hanna' };
+      await expect(prover.prove(state.graph.asReadState, update, principalRef))
+        .resolves.toBe(false);
+      await expect(prover.test(state.graph.asReadState, update, true, principalRef))
+        .resolves.toBe('Principal does not have authority');
     });
 
     test('returns truthy if principal has authority', async () => {
-      expect.hasAssertions();
-      return appState.updating(state.graph.asReadState, async orm => {
-        const prover = new HasAuthority({ '@id': M_LD.hasAuthority }, orm);
-        await state.write({
-          '@id': 'http://test.m-ld.org/hanna',
-          [M_LD.hasAuthority]: nameShape
-        });
-        const update = {
-          '@delete': new SubjectGraph([]),
-          '@insert': new SubjectGraph([{
-            '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Fred'
-          }])
-        };
-        const principalRef = { '@id': 'http://test.m-ld.org/hanna' };
-        await expect(prover.prove(state.graph.asReadState, update, principalRef))
-          .resolves.toBe(true);
-        await expect(prover.test(state.graph.asReadState, update, true, principalRef))
-          .resolves.toBe(true);
+      const prover = new HasAuthority({ '@id': M_LD.hasAuthority }, appState);
+      await state.write({
+        '@id': 'http://test.m-ld.org/hanna',
+        [M_LD.hasAuthority]: nameShape
       });
+      const update = {
+        '@delete': new SubjectGraph([]),
+        '@insert': new SubjectGraph([{
+          '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Fred'
+        }])
+      };
+      const principalRef = { '@id': 'http://test.m-ld.org/hanna' };
+      await expect(prover.prove(state.graph.asReadState, update, principalRef))
+        .resolves.toBe(true);
+      await expect(prover.test(state.graph.asReadState, update, true, principalRef))
+        .resolves.toBe(true);
     });
   });
 });

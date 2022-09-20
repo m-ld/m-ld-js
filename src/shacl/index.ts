@@ -22,8 +22,10 @@ export abstract class Shape extends OrmSubject {
 
   protected constructor(src: GraphSubject, targetClass?: Set<VocabReference>) {
     super(src);
-    this.initSrcProperty(src, SH.targetClass, [Set, VocabReference],
-      () => this.targetClass, v => this.targetClass = v, targetClass);
+    this.initSrcProperty(src, SH.targetClass, [Set, VocabReference], {
+      local: 'targetClass',
+      init: targetClass
+    });
   }
 
   /**
@@ -59,11 +61,15 @@ export class PropertyShape extends Shape {
     init?: Partial<PropertyShape>
   ) {
     super(src, init?.targetClass);
-    this.initSrcProperty(src, SH.path, VocabReference,
-      () => ({ '@vocab': this.path }), v => this.path = v['@vocab'],
-      init?.path ? { '@vocab': init.path } : undefined);
-    this.initSrcProperty(src, SH.name, [Array, String],
-      () => this.name, v => this.name = v, init?.name);
+    this.initSrcProperty(src, SH.path, VocabReference, {
+      get: () => ({ '@vocab': this.path }),
+      set: v => this.path = v['@vocab'],
+      init: init?.path ? { '@vocab': init.path } : undefined
+    });
+    this.initSrcProperty(src, SH.name, [Array, String], {
+      local: 'name',
+      init: init?.name
+    });
   }
 
   /**

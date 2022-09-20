@@ -8,7 +8,8 @@ import {
   ControlMessage, NewClockRequest, NewClockResponse, RejectedResponse, Request, Response,
   RevupRequest, RevupResponse, SnapshotRequest, SnapshotResponse
 } from './ControlMessage';
-import { Future, MsgPack, Stopwatch, toJSON } from '../util';
+import { toJSON } from '../util';
+import * as MsgPack from '../msgPack';
 import { delay, first, ignoreElements, map, reduce, tap, timeout, toArray } from 'rxjs/operators';
 import { MeldError, MeldErrorStatus } from '../MeldError';
 import { AbstractMeld } from '../AbstractMeld';
@@ -18,6 +19,8 @@ import { consume } from 'rx-flowable/consume';
 import { MeldMessageType } from '../../ns/m-ld';
 import { MeldConfig } from '../../config';
 import { MeldOperationMessage } from '../MeldOperationMessage';
+import { Stopwatch } from '../Stopwatch';
+import { Future } from '../Future';
 
 /**
  * A sub-publisher, used to temporarily address unicast messages to one peer clone. Sub-publishers

@@ -1,5 +1,6 @@
 import { BufferEncoding } from '.';
-import { flatten, lazy, MsgPack } from './util';
+import { flatten, lazy } from './util';
+import * as MsgPack from './msgPack';
 import { Context, ExpandedTermDef, Reference } from '../jrql-support';
 import { Iri } from '@m-ld/jsonld';
 import { RdfFactory, Triple } from './quads';

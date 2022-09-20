@@ -144,7 +144,7 @@ export function castPropertyValue<T, S>(
   subType?: AtomType<S>,
   property?: string
 ): ValueConstructed<T, S> {
-  switch (type) {
+  outer: switch (type) {
     case Set:
     case Array:
     case Optional:
@@ -160,7 +160,7 @@ export function castPropertyValue<T, S>(
         default: // Optional
           if (values.length <= 1)
             return values[0];
-          else break;
+          else break outer;
       }
     default:
       // Expecting a single value
@@ -172,7 +172,8 @@ export function castPropertyValue<T, S>(
         return castValue(value, <any>type);
       }
   }
-  throw new TypeError(`${property ?? 'Property'} has multiple values: ${JSON.stringify(value)}}`);
+  throw new TypeError(
+    `${property ?? 'Property'} has multiple values: ${JSON.stringify(value)}}`);
 }
 
 /**@internal*/
@@ -294,9 +295,15 @@ function normaliseAtomValue(
       return value;
     case 'object':
       if (value instanceof Date)
-        return { '@type': XS.dateTime, '@value': value.toISOString() };
+        return {
+          '@type': XS.dateTime,
+          '@value': value.toISOString()
+        };
       else if (value instanceof Uint8Array)
-        return { '@type': XS.base64Binary, '@value': Buffer.from(value).toString('base64') };
+        return {
+          '@type': XS.base64Binary,
+          '@value': Buffer.from(value).toString('base64')
+        };
       else if (value != null)
         return <Subject>value; // Could also be a reference or a value object
   }

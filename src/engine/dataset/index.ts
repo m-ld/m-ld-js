@@ -7,7 +7,6 @@ import {
   AbstractChainedBatch, AbstractIterator, AbstractIteratorOptions, AbstractLevel
 } from 'abstract-level';
 import { Observable } from 'rxjs';
-import { check, Stopwatch } from '../util';
 import { LockManager } from '../locks';
 import { Context, Iri } from '@m-ld/jsonld';
 import { ActiveContext, activeCtx, compactIri, expandTerm } from '../jsonld';
@@ -20,6 +19,8 @@ import { MutableOperation } from '../ops';
 import { MeldError } from '../MeldError';
 import { BaseStream, CountableRdf, QueryableRdfSource } from '../../rdfjs-support';
 import { uuid } from '../../util';
+import { Stopwatch } from '../Stopwatch';
+import { check } from '../check';
 import type EventEmitter = require('events');
 
 /**
