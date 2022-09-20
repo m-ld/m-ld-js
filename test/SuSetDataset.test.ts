@@ -436,7 +436,7 @@ describe('SU-Set Dataset', () => {
 
         test('transacts a duplicating insert', async () => {
           const willUpdate = firstValueFrom(ssd.updates);
-          const moreFred = { ...fred, height: 6 };
+          const moreFred = { ...fred, 'http://test.m-ld.org/#height': 6 };
           await ssd.transact(async () => [
             local.tick().time,
             await ssd.write(moreFred)

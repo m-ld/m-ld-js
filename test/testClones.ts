@@ -25,11 +25,11 @@ import { InterimUpdatePatch } from '../src/engine/dataset/InterimUpdatePatch';
 import { MeldOperationMessage } from '../src/engine/MeldOperationMessage';
 import { Future } from '../src/engine/Future';
 
+export const testDomain = 'test.m-ld.org';
+export const testContext = new DomainContext(testDomain);
 export function testConfig(config?: Partial<MeldConfig>): MeldConfig {
-  return { '@id': 'test', '@domain': 'test.m-ld.org', genesis: true, ...config };
+  return { '@id': 'test', '@domain': testDomain, genesis: true, ...config };
 }
-
-export const testContext = new DomainContext('test.m-ld.org');
 
 export const testExtensions = (ext?: MeldExtensions): StateManaged<MeldExtensions> => ({
   ready: () => Promise.resolve(ext ?? {})
@@ -71,16 +71,17 @@ export function hotLive(lives: Array<boolean | null>): BehaviorSubject<boolean |
 
 export async function memStore(opts?: {
   backend?: AbstractLevel<any>,
-  context?: Context
+  domain?: string
 }): Promise<Dataset> {
   return new QuadStoreDataset(
-    opts?.backend ?? new MemoryLevel(),
-    opts?.context).initialise();
+    opts?.domain ?? testDomain,
+    opts?.backend ?? new MemoryLevel()
+    ).initialise();
 }
 
 export class MockState {
-  static async create({ dataset, context }: { dataset?: Dataset, context?: Context } = {}) {
-    dataset ??= await memStore({ context });
+  static async create({ dataset, domain }: { dataset?: Dataset, domain?: string } = {}) {
+    dataset ??= await memStore({ domain });
     return new MockState(dataset,
       await dataset.lock.acquire('state', 'test', 'share'));
   }
@@ -100,10 +101,12 @@ export class MockState {
 type GraphStateWriteOpts = { updateType?: 'user' | 'internal', constraint?: MeldConstraint };
 
 export class MockGraphState {
-  static async create({ dataset, context }: { dataset?: Dataset, context?: Context } = {}) {
+  static async create({ dataset, context, domain }: {
+    dataset?: Dataset, context?: Context, domain?: string
+  } = {}) {
     context ??= testContext;
     return new MockGraphState(
-      await MockState.create({ dataset, context }),
+      await MockState.create({ dataset, domain }),
       await activeCtx(context ?? {}));
   }
 

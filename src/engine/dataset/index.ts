@@ -126,6 +126,26 @@ export interface Graph extends RdfFactory, QueryableRdfSource {
 }
 
 /**
+ * Default mapping of a domain name to a base URL
+ * @param domain IETF domain name
+ */
+export function domainBase(domain: string) {
+  if (!/^[a-z0-9_]+([\-.][a-z0-9_]+)*\.[a-z]{2,6}$/.test(domain))
+    throw new RangeError('Domain not specified or not valid');
+  return `http://${domain}/`;
+}
+
+/**
+ * Default vocabulary IRI for a given base IRI. Note this ties the vocabulary in
+ * use to the base which precludes sharing of data; so should only be used as a
+ * default and not for linked data applications.
+ * @param base base IRI
+ */
+export function baseVocab(base: Iri) {
+  return new URL('/#', base).href;
+}
+
+/**
  * Context for Quadstore dataset storage. Mix in with a domain context to
  * optimise (minimise) both control and user content.
  */
@@ -147,13 +167,18 @@ export class QuadStoreDataset implements Dataset {
   readonly base: Iri | undefined;
 
   constructor(
+    domain: string,
     private readonly backend: AbstractLevel<any>,
-    context?: Context,
-    private readonly events?: EventEmitter) {
+    private readonly events?: EventEmitter
+  ) {
     // Internal of ClassicLevel and BrowserLevel
     this.location = (<any>backend).location ?? uuid();
-    this.activeCtx = activeCtx({ ...STORAGE_CONTEXT, ...context });
-    this.base = context?.['@base'] ?? undefined;
+    this.base = domainBase(domain);
+    this.activeCtx = activeCtx({
+      '@base': this.base,
+      '@vocab': baseVocab(this.base),
+      ...STORAGE_CONTEXT
+    });
   }
 
   async initialise(sw?: Stopwatch): Promise<QuadStoreDataset> {
@@ -232,7 +257,7 @@ export class QuadStoreDataset implements Dataset {
   private kvpBatch(batch: ReturnType<Quadstore['db']['batch']>): KvpBatch {
     return {
       put(key: string, value: Buffer, options?: object) {
-        batch.put(key, value, { valueEncoding: 'buffer', ...options })
+        batch.put(key, value, { valueEncoding: 'buffer', ...options });
         return this;
       },
       del(key: string) {
@@ -361,7 +386,8 @@ export class QuadStoreDataset implements Dataset {
 class QuadStoreGraph implements Graph {
   constructor(
     readonly dataset: QuadStoreDataset,
-    readonly name: GraphName) {
+    readonly name: GraphName
+  ) {
   }
 
   get lock() {

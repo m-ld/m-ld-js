@@ -61,7 +61,7 @@ export async function clone(
 
   sw.next('dataset');
   const dataset = await new QuadStoreDataset(
-    backend, context, backendEvents).initialise(sw.lap);
+    config['@domain'], backend, backendEvents).initialise(sw.lap);
   const engine = new DatasetEngine({
     dataset, remotes, extensions, config, app, context
   });

@@ -11,6 +11,7 @@ import { SubjectQuads } from './SubjectQuads';
 import { MeldError } from './MeldError';
 // TODO: Switch to fflate. Node.js zlib uses Pako in the browser
 import { gunzipSync, gzipSync } from 'zlib';
+import { baseVocab, domainBase } from './dataset/index';
 
 const COMPRESS_THRESHOLD_BYTES = 1024;
 
@@ -22,13 +23,9 @@ export class DomainContext implements Context {
   [key: string]: string | ExpandedTermDef;
 
   constructor(domain: string, context?: Context) {
-    if (!/^[a-z0-9_]+([\-.][a-z0-9_]+)*\.[a-z]{2,6}$/.test(domain))
-      throw new Error('Domain not specified or not valid');
     Object.assign(this, context);
-    if (this['@base'] == null)
-      this['@base'] = `http://${domain}/`;
-    if (this['@vocab'] == null)
-      this['@vocab'] = new URL('/#', this['@base']).href;
+    this['@base'] ??= domainBase(domain);
+    this['@vocab'] ??= baseVocab(this['@base']);
   }
 }
 
