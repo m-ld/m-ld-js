@@ -38,6 +38,14 @@
     "title": "Security"
   },
   {
+    "url": "#extensions",
+    "title": "Extensions"
+  },
+  {
+    "url": "/classes/ormdomain.html",
+    "title": "ORM"
+  },
+  {
     "url": "https://github.com/m-ld/m-ld-js",
     "title": "Source"
   }

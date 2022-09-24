@@ -6,6 +6,12 @@ import { isArray } from './engine/util';
 import { XS } from './ns';
 import { asValues, isAbsolute } from './engine/jsonld';
 
+/**
+ * Javascript atom constructors for types that can be obtained from graph
+ * subject properties.
+ *
+ * @category Utility
+ */
 export type JsAtomValueConstructor =
   typeof String |
   typeof Number |
@@ -16,17 +22,31 @@ export type JsAtomValueConstructor =
   typeof Reference |
   typeof VocabReference
 
+/**
+ * Javascript container constructors for types that can be obtained from graph
+ * subject properties.
+ *
+ * @category Utility
+ */
 export type JsContainerValueConstructor =
   typeof Array |
   typeof Set |
   typeof Optional
 
+/**
+ * Javascript constructors for types that can be obtained from graph subject
+ * properties.
+ *
+ * @category Utility
+ */
 export type JsValueConstructor = JsAtomValueConstructor | JsContainerValueConstructor;
 
 /**
  * Symbolic object for missing Javascript Optional monad
+ * @category Utility
  */
 export const Optional = {} as { new<T>(value: T): T | undefined; };
+/** @internal */
 export type Optional = typeof Optional;
 
 /** @internal */
@@ -270,6 +290,7 @@ function castValue<T>(value: Value, type: JsAtomValueConstructor): T {
 /**
  * Reverse of {@link castPropertyValue}: normalises a JavaScript value to a
  * JSON-LD value suitable for use in a {@link Subject}.
+ * @category Utility
  */
 export function normaliseValue(
   value: ValueConstructed<unknown>

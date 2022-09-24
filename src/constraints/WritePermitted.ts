@@ -8,6 +8,20 @@ import { M_LD } from '../ns';
 import { MeldError } from '../engine/MeldError';
 import { Iri } from '@m-ld/jsonld';
 
+/**
+ * This extension allows an app to declare that certain security principals
+ * (users) have permission to change certain data, identified by data {@link
+  * Shape shapes}.
+ *
+ * - The extension can be declared in the data using {@link declare}.
+ * - Controlled shapes can be declared in the data using {@link declareControlled}.
+ * - Permissions can be assigned to principals using {@link declarePermission}.
+ *
+ * @see [the white paper](https://github.com/m-ld/m-ld-security-spec/blob/main/design/suac.md)
+ * @category Experimental
+ * @experimental
+ * @noInheritDoc
+ */
 export class WritePermitted extends OrmDomain implements StateManaged<MeldExtensions> {
   /**
    * Extension declaration. Insert into the domain data to install the
@@ -25,7 +39,7 @@ export class WritePermitted extends OrmDomain implements StateManaged<MeldExtens
     '@list': {
       [priority]: {
         '@id': `${M_LD.EXT.$base}constraints/WritePermitted`,
-        '@type': M_LD.JS.commonJsModule,
+        '@type': M_LD.JS.commonJsExport,
         [M_LD.JS.require]: '@m-ld/m-ld/ext/constraints/WritePermitted',
         [M_LD.JS.className]: 'WritePermitted'
       }
@@ -79,10 +93,12 @@ export class WritePermitted extends OrmDomain implements StateManaged<MeldExtens
 
   private permissions = new Map<Iri, WritePermission>();
 
+  /** @internal */
   checkPermissions = (state: MeldReadState, update: InterimUpdate) =>
     Promise.all(Array.from(this.permissions.values(),
       permission => permission.check(state, update)));
 
+  /** @internal */
   ready(): Promise<MeldExtensions> {
     return this.upToDate().then(() => ({
       constraints: [{
@@ -92,6 +108,7 @@ export class WritePermitted extends OrmDomain implements StateManaged<MeldExtens
     }));
   }
 
+  /** @internal */
   initialise(state: MeldReadState) {
     // Read the available permissions
     return this.updating(state, orm =>
@@ -101,6 +118,7 @@ export class WritePermitted extends OrmDomain implements StateManaged<MeldExtens
       }).each(src => this.loadPermission(src, orm)));
   }
 
+  /** @internal */
   onUpdate(update: MeldPreUpdate, state: MeldReadState) {
     return this.updating(state, orm =>
       orm.updated(update, deleted => {
@@ -115,10 +133,12 @@ export class WritePermitted extends OrmDomain implements StateManaged<MeldExtens
 
   private async loadPermission(src: GraphSubject, orm: OrmUpdating) {
     // Putting into both our permissions map and the domain cache
-    this.permissions.set(src['@id'], await orm.get(src, src => new WritePermission(src, orm)));
+    this.permissions.set(src['@id'],
+      await orm.get(src, src => new WritePermission(src, orm)));
   }
 }
 
+/** @internal */
 export class WritePermission extends OrmSubject {
   controlledShapes: Shape[];
   domain: OrmDomain;
@@ -156,6 +176,7 @@ export class WritePermission extends OrmSubject {
   }
 }
 
+/** @internal */
 class Principal extends OrmSubject {
   permissions: Set<Iri>;
 

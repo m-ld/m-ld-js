@@ -5,15 +5,30 @@ import {
 import { Shape } from '../shacl';
 import { M_LD } from '../ns';
 import { Describe, isPropertyObject, isReference, Reference, Subject } from '../jrql-support';
-import { ExtensionEnvironment, ExtensionSubject, OrmDomain, OrmSubject, OrmUpdating } from '../orm';
+import { ExtensionSubject, OrmDomain, OrmSubject, OrmUpdating } from '../orm';
 import { MeldError } from '../engine/MeldError';
 import { Iri } from '@m-ld/jsonld';
-import { array } from '../util';
 import { SubjectGraph } from '../engine/SubjectGraph';
 import { asSubjectUpdates } from '../updates';
 import { Logger } from 'loglevel';
 import { getIdLogger } from '../engine/logging';
+import { MeldApp, MeldConfig } from '../config';
 
+/**
+ * This extension allows an app to require that certain changes, such as changes
+ * to access controls, are _agreed_ before they are shared in the domain. This
+ * can be important for security and data integrity. See the white paper link
+ * below for more details.
+ *
+ * - The extension can be declared in the data using {@link declare}.
+ * - _Statutes_ can be declared in the data using {@link declareStatute}.
+ * - _Authorities_ can be declared in the data using {@link declareAuthority}.
+ *
+ * @see [the white paper](https://github.com/m-ld/m-ld-security-spec/blob/main/design/suac.md)
+ * @category Experimental
+ * @experimental
+ * @noInheritDoc
+ */
 export class Statutory extends OrmDomain implements StateManaged<MeldExtensions> {
   /**
    * Extension declaration. Insert into the domain data to install the
@@ -31,7 +46,7 @@ export class Statutory extends OrmDomain implements StateManaged<MeldExtensions>
     '@list': {
       [priority]: {
         '@id': `${M_LD.EXT.$base}constraints/Statutory`,
-        '@type': M_LD.JS.commonJsModule,
+        '@type': M_LD.JS.commonJsExport,
         [M_LD.JS.require]: '@m-ld/m-ld/ext/constraints/Statutory',
         [M_LD.JS.className]: 'Statutory'
       }
@@ -56,7 +71,11 @@ export class Statutory extends OrmDomain implements StateManaged<MeldExtensions>
    * @param statutoryShapes shape Subjects, or References to pre-existing shapes
    * @param sufficientConditions References to pre-existing agreement conditions
    */
-  static declareStatute = ({ statuteId, statutoryShapes, sufficientConditions }: {
+  static declareStatute = ({
+    statuteId,
+    statutoryShapes,
+    sufficientConditions = [{ '@id': M_LD.hasAuthority }]
+  }: {
     statuteId?: Iri,
     statutoryShapes: Subject | Reference | (Subject | Reference)[],
     sufficientConditions: Subject | Reference | (Subject | Reference)[]
@@ -88,15 +107,18 @@ export class Statutory extends OrmDomain implements StateManaged<MeldExtensions>
   });
 
   private statutes = new Map<Iri, Statute>();
-  private readonly env: ExtensionEnvironment;
   private readonly log: Logger;
 
-  constructor({ env }: { env: ExtensionEnvironment }) {
-    super();
-    this.env = env;
-    this.log = getIdLogger(this.constructor, env.config['@id'], env.config.logLevel);
+  /**
+   * @type ExtensionInstanceConstructor
+   * @internal
+   */
+  constructor(config: MeldConfig, app: MeldApp) {
+    super(config, app);
+    this.log = getIdLogger(this.constructor, this.config['@id'], this.config.logLevel);
   }
 
+  /** @internal */
   ready(): Promise<MeldExtensions> {
     return this.upToDate().then(() => ({
       constraints: [{
@@ -110,6 +132,7 @@ export class Statutory extends OrmDomain implements StateManaged<MeldExtensions>
     }));
   }
 
+  /** @internal */
   initialise(state: MeldReadState) {
     // Read the available statutes
     return this.updating(state, orm =>
@@ -119,6 +142,7 @@ export class Statutory extends OrmDomain implements StateManaged<MeldExtensions>
       }).each(src => this.loadStatute(src, orm)));
   }
 
+  /** @internal */
   onUpdate(update: MeldPreUpdate, state: MeldReadState) {
     return this.updating(state, orm =>
       orm.updated(update, deleted => {
@@ -134,30 +158,28 @@ export class Statutory extends OrmDomain implements StateManaged<MeldExtensions>
   private async loadStatute(src: GraphSubject, orm: OrmUpdating) {
     // Putting into both our statutes map and the domain cache
     this.statutes.set(src['@id'], await orm.get(src, src =>
-      new Statute(src, orm, src => {
+      new Statute(src, orm, async src => {
         if (src['@id'] === M_LD.hasAuthority)
           return new HasAuthority(src, this, this.log);
-        else if (array(src['@type']).includes(M_LD.JS.commonJsModule))
-          return new ExtensionCondition(src, this.env, this.log);
         else
-          throw new TypeError(`${src['@id']} is not an agreement condition`);
+          return ExtensionSubject.instance({ src, orm });
       })));
   }
 }
 
 /**
  * A scope of data for which an agreement is required, if the data is to change
+ * @internal
  */
 export class Statute extends OrmSubject implements MeldConstraint, AgreementCondition {
   /** shapes describing statutory graph content */
   statutoryShapes: Shape[];
-  sufficientConditions: (ShapeAgreementCondition & OrmSubject)[];
+  sufficientConditions: ShapeAgreementCondition[];
 
   constructor(
     src: GraphSubject,
     orm: OrmUpdating,
-    // Substitutable for unit tests
-    prover: (src: GraphSubject) => ShapeAgreementCondition & OrmSubject
+    prover: (src: GraphSubject) => Promise<ShapeAgreementCondition & OrmSubject>
   ) {
     super(src);
     this.initSrcProperty(src, M_LD.statutoryShape, [Array, Subject], {
@@ -209,6 +231,7 @@ export class Statute extends OrmSubject implements MeldConstraint, AgreementCond
   }
 }
 
+/** @internal */
 class AffectedUpdate {
   affected: {
     [id: string]: {
@@ -275,6 +298,7 @@ class AffectedUpdate {
   }
 }
 
+/** @internal */
 export interface ShapeAgreementCondition {
   /** @returns a truthy proof, or a falsey lack of proof */
   prove(
@@ -292,6 +316,7 @@ export interface ShapeAgreementCondition {
   ): Promise<true | string>;
 }
 
+/** @internal */
 export class HasAuthority extends OrmSubject implements ShapeAgreementCondition {
   constructor(src: GraphSubject, readonly domain: OrmDomain, readonly log?: Logger) {
     super(src);
@@ -326,6 +351,7 @@ export class HasAuthority extends OrmSubject implements ShapeAgreementCondition 
   }
 }
 
+/** @internal */
 class Principal extends OrmSubject {
   hasAuthority: Shape[];
 
@@ -334,24 +360,5 @@ class Principal extends OrmSubject {
     this.initSrcProperty(src, M_LD.hasAuthority, [Array, Subject], {
       local: 'hasAuthority', orm, construct: Shape.from
     });
-  }
-}
-
-class ExtensionCondition
-  extends ExtensionSubject<ShapeAgreementCondition>
-  implements ShapeAgreementCondition {
-
-  constructor(src: GraphSubject, env: ExtensionEnvironment, readonly log?: Logger) {
-    super(src, env);
-  }
-
-  prove(state: MeldReadState, affected: GraphUpdate, principal?: Reference) {
-    this.log?.debug('Proving condition for', affected);
-    return this.instance.prove(state, affected, principal);
-  }
-
-  test(state: MeldReadState, affected: GraphUpdate, proof: any, principal?: Reference) {
-    this.log?.debug('Testing condition proof', proof, 'for', affected);
-    return this.instance.test(state, affected, proof, principal);
   }
 }

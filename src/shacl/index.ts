@@ -1,23 +1,32 @@
 import { Subject, VocabReference } from '../jrql-support';
 import { GraphSubject, GraphUpdate, MeldReadState } from '../api';
 import { SH } from '../ns/index';
-import { OrmSubject } from '../orm';
+import { ExtensionSubject, OrmSubject, OrmUpdating } from '../orm';
 import { Iri } from '@m-ld/jsonld';
 import { SubjectGraph } from '../engine/SubjectGraph';
 import { array } from '../util';
 
 /**
+ * Shapes are used to define patterns of data, which can be used to match or
+ * validate state and operations.
+ *
+ * Declaration of a shape does not provide any runtime function by itself, but
+ * they can be used by other extensions and app code.
+ *
  * @see https://www.w3.org/TR/shacl/#constraints-section
+ * @noInheritDoc
+ * @category Experimental
+ * @experimental
  */
 export abstract class Shape extends OrmSubject {
   targetClass: Set<VocabReference>;
 
   /** @see https://www.w3.org/TR/shacl/#terminology */
-  static from(src: GraphSubject): Shape {
+  static from(src: GraphSubject, orm: OrmUpdating): Shape | Promise<Shape> {
     if (SH.path in src)
       return new PropertyShape(src);
     else
-      throw new TypeError(`${src['@id']} is not a Shape`);
+      return ExtensionSubject.instance({ src, orm });
   }
 
   protected constructor(src: GraphSubject, targetClass?: Set<VocabReference>) {
@@ -29,14 +38,18 @@ export abstract class Shape extends OrmSubject {
   }
 
   /**
+   * Capture precisely the data being affected by the given update which matches
+   * this shape, either before or after the update is applied to the state.
+   *
    * @returns filtered updates where the affected subject matches this shape
-   * either before or after the update is applied to the state
    */
   abstract affected(state: MeldReadState, update: GraphUpdate): Promise<GraphUpdate>;
 }
 
 /**
  * @see https://www.w3.org/TR/shacl/#property-shapes
+ * @category Experimental
+ * @experimental
  */
 export class PropertyShape extends Shape {
   path: Iri; // | List etc.
@@ -78,6 +91,7 @@ export class PropertyShape extends Shape {
    *
    * @inheritDoc
    * @todo inverse properties: which subject is returned?
+   * @todo respect targetClass
    */
   async affected(state: MeldReadState, update: GraphUpdate): Promise<GraphUpdate> {
     return {

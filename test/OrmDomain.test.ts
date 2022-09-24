@@ -44,12 +44,12 @@ describe('Object-RDF Mapping Domain', () => {
       '@id': 'series-1',
       '@list': [{ '@id': 'tff', title: 'The Flintstone Flyer' }]
     });
-    const show = await new TheFlintstones().initialise(api);
+    const show = await new TheFlintstones(testConfig(), {}).initialise(api);
     expect(show.series1!.episodes[0].title).toBe('The Flintstone Flyer');
   });
 
   test('saves domain to state', async () => {
-    const show = await new TheFlintstones().initialise(api);
+    const show = await new TheFlintstones(testConfig(), {}).initialise(api);
     await api.write(async state => {
       await show.updating(state, async orm => {
         const tff = await orm.get('tff', src =>

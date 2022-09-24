@@ -7,7 +7,7 @@ import {
 import { GraphSubject } from '../src';
 import { MeldError } from '../src/engine/MeldError';
 import { DefaultList } from '../src/constraints/DefaultList';
-import { ExtensionEnvironment, OrmDomain, OrmSubject } from '../src/orm';
+import { ExtensionSubject, OrmDomain, OrmSubject } from '../src/orm';
 
 describe('Statutory', () => {
   let state: MockGraphState;
@@ -34,7 +34,7 @@ describe('Statutory', () => {
       await expect(state.graph.asReadState.get('http://ext.m-ld.org/constraints/Statutory'))
         .resolves.toMatchObject({
           '@id': 'http://ext.m-ld.org/constraints/Statutory',
-          '@type': 'http://js.m-ld.org/CommonJSModule',
+          '@type': 'http://js.m-ld.org/CommonJSExport',
           'http://js.m-ld.org/#require': '@m-ld/m-ld/ext/constraints/Statutory',
           'http://js.m-ld.org/#class': 'Statutory'
         });
@@ -68,14 +68,8 @@ describe('Statutory', () => {
   });
 
   describe('extension', () => {
-    let env: ExtensionEnvironment;
-
-    beforeEach(() => {
-      env = { config: testConfig(), app: {} };
-    });
-
     test('passes an update if no statutes', async () => {
-      const statutory = new Statutory({ env });
+      const statutory = new Statutory(testConfig(), {});
       await statutory.initialise(state.graph.asReadState);
       expect.hasAssertions();
       for (let constraint of (await statutory.ready()).constraints ?? [])
@@ -96,7 +90,7 @@ describe('Statutory', () => {
           [M_LD.sufficientCondition]: { '@id': M_LD.hasAuthority }
         }
       });
-      const statutory = new Statutory({ env });
+      const statutory = new Statutory(testConfig(), {});
       await statutory.initialise(state.graph.asReadState);
       expect.hasAssertions();
       for (let constraint of (await statutory.ready()).constraints ?? [])
@@ -121,7 +115,7 @@ describe('Statutory', () => {
           [M_LD.hasAuthority]: nameShape
         }]
       });
-      const statutory = new Statutory({ env });
+      const statutory = new Statutory(testConfig(), {});
       await statutory.initialise(state.graph.asReadState);
       expect.hasAssertions();
       for (let constraint of (await statutory.ready()).constraints ?? [])
@@ -150,7 +144,7 @@ describe('Statutory', () => {
           }
         }]
       });
-      const statutory = new Statutory({ env });
+      const statutory = new Statutory(testConfig(), {});
       await statutory.initialise(state.graph.asReadState);
       expect.hasAssertions();
       for (let constraint of (await statutory.ready()).constraints ?? [])
@@ -176,7 +170,7 @@ describe('Statutory', () => {
           [M_LD.hasAuthority]: nameShape
         }]
       });
-      const statutory = new Statutory({ env });
+      const statutory = new Statutory(testConfig(), {});
       await statutory.initialise(state.graph.asReadState);
       expect.hasAssertions();
       for (let constraint of (await statutory.ready()).constraints ?? [])
@@ -189,7 +183,7 @@ describe('Statutory', () => {
     });
 
     test('can be initialised on update', async () => {
-      const statutory = new Statutory({ env });
+      const statutory = new Statutory(testConfig(), {});
       await statutory.initialise(state.graph.asReadState);
       const update = await state.write({
         '@insert': [{
@@ -234,7 +228,7 @@ describe('Statutory', () => {
           }
         }]
       });
-      const statutory = new Statutory({ env });
+      const statutory = new Statutory(testConfig(), {});
       await statutory.initialise(state.graph.asReadState);
       const update = await state.write({
         '@id': 'http://test.m-ld.org/hanna',
@@ -265,13 +259,12 @@ describe('Statutory', () => {
           [M_LD.statutoryShape]: nameShape,
           [M_LD.sufficientCondition]: {
             '@id': 'http://test.m-ld.org/extCondition',
-            '@type': M_LD.JS.commonJsModule,
-            [M_LD.JS.require]: require.resolve('./Statutory.test'),
-            [M_LD.JS.className]: 'TestExtProver'
+            '@type': ExtensionSubject.declare(
+              undefined, require.resolve('./Statutory.test'), 'TestExtProver')
           }
         }]
       });
-      const statutory = new Statutory({ env });
+      const statutory = new Statutory(testConfig(), {});
       await statutory.initialise(state.graph.asReadState);
 
       expect.hasAssertions();
@@ -303,10 +296,10 @@ describe('Statutory', () => {
       test = async (state: any, affected: any, proof: any) => proof === this.value || 'BANG';
     }
 
-    const testProver = (src: GraphSubject) => new TestProver(src);
+    const testProver = (src: GraphSubject) => Promise.resolve(new TestProver(src));
 
     beforeEach(() => {
-      appState = new OrmDomain();
+      appState = new OrmDomain(testConfig(), {});
     });
 
     test('passes an update of non-statutes', async () => {
@@ -440,7 +433,7 @@ describe('Statutory', () => {
     let appState: OrmDomain;
 
     beforeEach(() => {
-      appState = new OrmDomain();
+      appState = new OrmDomain(testConfig(), {});
     });
 
     test('throws if no principal', async () => {

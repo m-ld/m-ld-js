@@ -10,15 +10,22 @@ import { BehaviorSubject, firstValueFrom } from 'rxjs';
 import { filter } from 'rxjs/operators';
 import { isPromise } from 'asynciterator';
 import { array } from '../util';
+import { MeldApp, MeldConfig } from '../config';
 
+/**
+ * Standardised constructor type for ORM subjects
+ * @see {@link OrmDomain}
+ * @experimental
+ * @category Experimental
+ */
 export type ConstructOrmSubject<T extends OrmSubject> =
-  (src: GraphSubject, orm: OrmUpdating) => T;
+  (src: GraphSubject, orm: OrmUpdating) => T | Promise<T>;
 
 /**
  * Wraps a {@link MeldReadState read state}, in which some elements of an ORM
  * domain may be loading.
  *
- * @see OrmDomain
+ * @see {@link OrmDomain}
  * @experimental
  * @category Experimental
  */
@@ -80,8 +87,12 @@ export interface OrmUpdating extends ReadLatchable {
 /**
  * The experimental Object-Resource Mapping (ORM) layer is a set of constructs
  * to support idiomatic use of object-oriented Javascript with the core **m-ld**
- * API. Instead of programming with reads and writes to domain graph, you
+ * API. Instead of programming with reads and writes to the domain graph, you
  * manipulate Javascript objects that mirror the domain.
+ *
+ * > 🧪 ORM is currently used internally in extensions and has not yet been
+ * tested in an application. If it sounds like just what you're looking for to
+ * help you with your application, please [let us know](https://m-ld.org/hello)!
  *
  * An ORM domain object is a top-level container for a mutable graph of
  * {@link OrmSubject "subjects"} in-memory, where subjects are instances of
@@ -89,7 +100,7 @@ export interface OrmUpdating extends ReadLatchable {
  *
  * Since read operations like traversal of graph edges are asynchronous in
  * **m-ld**, an ORM domain can be in an "updating" state, in which some edge may
- * not be yet loaded (sometimes called a "fault"). This mode is entered using
+ * not be fully loaded (sometimes called a "fault"). This mode is entered using
  * the {@link updating} method. It gives access to an {@link OrmUpdating} state,
  * from which graph content can be loaded. An updating state is required to
  * create new subject instances attached to the domain object (also since their
@@ -102,7 +113,7 @@ export interface OrmUpdating extends ReadLatchable {
  * of a new subject. Changes to a subject, or to the whole ORM domain, can be
  * {@link commit committed} to a writeable **m-ld** state.
  *
- * @see OrmSubject
+ * @see {@link OrmSubject}
  * @experimental
  * @category Experimental
  */
@@ -115,12 +126,10 @@ export class OrmDomain {
     state: MeldReadState, latch: SharedPromise<unknown>
   } | null>(null);
 
-  private _cache = new Map<Iri, OrmSubject>();
+  private _cache = new Map<Iri, OrmSubject | Promise<OrmSubject>>();
 
   private readonly orm = new class implements OrmUpdating {
-    constructor(
-      readonly domain: OrmDomain
-    ) {}
+    constructor(readonly domain: OrmDomain) {}
 
     async get<T extends OrmSubject>(
       src: GraphSubject | GraphSubject[] | string | string[],
@@ -130,26 +139,28 @@ export class OrmDomain {
         return Promise.all(src.map(src => (<OrmUpdating>this).get(src, construct)));
       } else {
         const id = typeof src == 'string' ? src : src['@id'];
-        return <T>this.domain._cache.get(id) ?? await this.latch(async state => {
-          if (typeof src == 'string' || isReference(src)) {
-            const got = await state.get(id);
-            if (got != null)
-              return this.put(construct(got, this));
-            else
-              // The given constructor might populate some properties or not,
-              // but in any case we're returning the ref, so we need to keep it
-              // at least until it's been deleted for certain
-              return this.put(construct({ '@id': id }, this));
-          } else {
-            return this.put(construct(src, this));
-          }
-        });
+        if (this.domain._cache.has(id)) {
+          // noinspection ES6MissingAwait - getting a promise
+          return <Promise<T>>this.domain._cache.get(id);
+        } else {
+          const subject = this.latch(async state => {
+            if (typeof src == 'string' || isReference(src)) {
+              const got = await state.get(id);
+              if (got != null)
+                return construct(got, this);
+              else
+                // The given constructor might populate some properties or not,
+                // but in any case we're returning the ref, so we need to keep it
+                // at least until it's been deleted for certain
+                return construct({ '@id': id }, this);
+            } else {
+              return construct(src, this);
+            }
+          });
+          this.domain._cache.set(id, subject);
+          return subject;
+        }
       }
-    }
-
-    put<T extends OrmSubject>(subject: T): T {
-      this.domain._cache.set(subject.src['@id'], subject);
-      return subject;
     }
 
     async updated(
@@ -160,13 +171,12 @@ export class OrmDomain {
       if (update != null) {
         const updater = new SubjectUpdater(update);
         for (let subject of this.domain._cache.values()) {
-          updater.update(subject.src);
-          if (subject.deleted) {
-            // Here we make the assumption that a subject which is (still)
-            // deleted after an update is no longer of interest to the app
-            this.domain._cache.delete(subject.src['@id']);
-            deleted?.(subject);
-          }
+          if (isPromise(subject))
+            await subject
+              .then(subject => this.updateSubject(updater, subject, deleted))
+              .catch(); // Error will have been reported by get()
+          else
+            this.updateSubject(updater, subject, deleted);
         }
         if (cacheMiss != null) {
           // Anything new to the ORM domain which is 'got' by the cacheMiss
@@ -177,10 +187,28 @@ export class OrmDomain {
             .map(cacheMiss));
         }
       }
-      // In the course of an update, the cache may mutate. Rely on Map order
-      for (let subject of this.domain._cache.values())
+      // In the course of an update, the cache may mutate. Rely on Map order to
+      // ensure any new subjects are captured and updated.
+      for (let [id, subject] of this.domain._cache.entries()) {
+        if (isPromise(subject))
+          this.domain._cache.set(id, subject = await subject);
         if (isPromise(subject.updated))
           await settled(subject.updated);
+      }
+    }
+
+    private updateSubject(
+      updater: SubjectUpdater,
+      subject: OrmSubject,
+      deleted?: (subject: OrmSubject) => void
+    ) {
+      updater.update(subject.src);
+      if (subject.deleted) {
+        // Here we make the assumption that a subject which is (still)
+        // deleted after an update is no longer of interest to the app
+        this.domain._cache.delete(subject.src['@id']);
+        deleted?.(subject);
+      }
     }
 
     async latch<T>(proc: StateProc<MeldReadState, T>): Promise<T> {
@@ -195,6 +223,11 @@ export class OrmDomain {
         return this.domain._updating.value;
     }
   }(this);
+
+  constructor(
+    readonly config: MeldConfig,
+    readonly app: MeldApp
+  ) {}
 
   /**
    * Call to obtain an {@link OrmUpdating updating} state of the domain, to be
@@ -249,6 +282,8 @@ export class OrmDomain {
   commit(): Update {
     const update = { '@delete': [] as Subject[], '@insert': [] as Subject[] };
     for (let subject of this._cache.values()) {
+      if (isPromise(subject))
+        throw new TypeError('ORM domain has not finished updating');
       const subjectUpdate = subject.commit();
       update['@delete'].push(...array<Subject>(subjectUpdate['@delete']));
       update['@insert'].push(...array<Subject>(subjectUpdate['@insert']));

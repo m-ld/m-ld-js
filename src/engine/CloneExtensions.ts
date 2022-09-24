@@ -33,7 +33,7 @@ export class CloneExtensions extends OrmDomain implements StateManaged<MeldExten
     initial: Iterable<MeldConstraint> | undefined,
     context: Context
   ) {
-    // Take the initial constraints if provided
+    // noinspection JSDeprecatedSymbols - initial constraints, if provided
     return ([...initial ?? []]).concat(await Promise.all((config.constraints ?? [])
       .map(item => constraintFromConfig(item, context))));
   }
@@ -59,10 +59,10 @@ export class CloneExtensions extends OrmDomain implements StateManaged<MeldExten
 
   private constructor(
     private readonly initial: MeldExtensions,
-    private readonly config: MeldConfig,
-    private readonly app: MeldApp
+    config: MeldConfig,
+    app: MeldApp
   ) {
-    super();
+    super(config, app);
     this.log = getIdLogger(this.constructor, config['@id'], config.logLevel);
     this.extensionSubjects = [];
   }
@@ -98,14 +98,14 @@ export class CloneExtensions extends OrmDomain implements StateManaged<MeldExten
 
   private async loadExtensions(orm: OrmUpdating) {
     await orm.get({ '@id': M_LD.extensions }, src => {
-      const { config, app, extensionSubjects } = this;
+      const { extensionSubjects } = this;
       return new class extends OrmSubject {
         constructor(src: GraphSubject) {
           super(src);
           this.initList(src, Subject, extensionSubjects, {
             get: i => extensionSubjects[i].src,
             set: async (i, v: GraphSubject) => extensionSubjects[i] = await orm.get(v,
-              src => new ManagedExtensionSubject(src, { config, app }))
+              src => new ManagedExtensionSubject({ src, orm }))
           });
         }
       }(src);
@@ -115,9 +115,13 @@ export class CloneExtensions extends OrmDomain implements StateManaged<MeldExten
 
   private *extensions() {
     yield this.initial;
-    for (let extSubject of this.extensionSubjects)
-      if (extSubject.instance != null)
-        yield extSubject.instance.ready();
+    for (let extSubject of this.extensionSubjects) {
+      try {
+        yield extSubject.singleton.ready();
+      } catch (e) {
+        this.log.warn('Failed to load extension', extSubject.className, e);
+      }
+    }
   }
 }
 
@@ -132,10 +136,10 @@ class ManagedExtensionSubject extends ExtensionSubject<StateManaged<MeldExtensio
   async initialiseOrUpdate(state: MeldReadState, update?: MeldPreUpdate) {
     await this.updated;
     if (!this.initialised) {
-      await this.instance.initialise?.(state);
+      await this.singleton.initialise?.(state);
       this.initialised = true;
     } else if (update != null) {
-      await this.instance.onUpdate?.(update, state);
+      await this.singleton.onUpdate?.(update, state);
     } else {
       throw new Error('No update available');
     }

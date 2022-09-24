@@ -1,4 +1,4 @@
 export { OrmSubject } from './OrmSubject';
 export { OrmDomain, OrmUpdating } from './OrmDomain';
-export { ExtensionSubject, ExtensionEnvironment } from './ExtensionSubject';
+export { ExtensionSubject } from './ExtensionSubject';
 

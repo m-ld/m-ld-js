@@ -17,6 +17,7 @@ import { isArray } from './engine/util';
  * - {@link Update} (the longhand way to insert or delete data)
  *
  * @see [json-rql pattern](https://json-rql.org/interfaces/pattern.html)
+ * @category json-rql
  */
 export type Pattern = jrql.Pattern;
 /**
@@ -39,6 +40,7 @@ interface ReferenceConstructor {
 
 /**
  * Constructor of references from references: used similarly to e.g. `Number`
+ * @category json-rql
  */
 export const Reference: ReferenceConstructor = class implements Reference {
   readonly '@id': Iri;
@@ -63,6 +65,7 @@ interface VocabReferenceConstructor {
 
 /**
  * Constructor of vocab references from vocab references: used similarly to e.g. `Number`
+ * @category json-rql
  */
 export const VocabReference: VocabReferenceConstructor = class implements VocabReference {
   readonly '@vocab': Iri;
@@ -83,6 +86,7 @@ export type Context = jrql.Context;
 /**
  * An JSON-LD expanded term definition, as part of a domain {@link Context}.
  * @see [json-rql expandedtermdef](https://json-rql.org/interfaces/expandedtermdef.html)
+ * @category json-rql
  */
 export type ExpandedTermDef = jrql.ExpandedTermDef;
 /**
@@ -95,18 +99,22 @@ export type ExpandedTermDef = jrql.ExpandedTermDef;
  * }
  * ```
  * @see [json-rql variable](https://json-rql.org/#variable)
+ * @category json-rql
  */
 export type Variable = jrql.Variable;
 /**
  * @see [json-rql atom](https://json-rql.org/#atom)
+ * @category json-rql
  */
 export type Atom = jrql.Atom;
 /**
  * @see [json-rql value object](https://json-rql.org/interfaces/valueobject.html)
+ * @category json-rql
  */
 export type ValueObject = jrql.ValueObject;
 /**
  * @see [json-rql value](https://json-rql.org/#value)
+ * @category json-rql
  */
 export type Value = Atom | Subject | Reference;
 /**
@@ -114,16 +122,19 @@ export type Value = Atom | Subject | Reference;
  * overloading `Object`. Represents the "object" of a property, in the sense of
  * the object of discourse.
  * @see [json-rql SubjectPropertyObject](https://json-rql.org/#SubjectPropertyObject)
+ * @category json-rql
  */
 export type SubjectPropertyObject = Value | Container | SubjectPropertyObject[];
 /**
  * Used to express an ordered or unordered container of data.
  * @see [json-rql container](https://json-rql.org/interfaces/container.html)
+ * @category json-rql
  */
 export type Container = List | Set;
 /**
  * A stand-in for a Value used as a basis for filtering.
  * @see [json-rql expression](https://json-rql.org/globals.html#expression)
+ * @category json-rql
  */
 export type Expression = jrql.Atom | Constraint;
 /** @internal */
@@ -238,6 +249,7 @@ export function isVocabReference(value: SubjectPropertyObject): value is VocabRe
 /**
  * Result declaration of a {@link Select} query.
  * Use of `'*'` specifies that all variables in the query should be returned.
+ * @category json-rql
  */
 export type Result = '*' | Variable | Variable[];
 
@@ -306,6 +318,7 @@ interface SubjectConstructor {
 
 /**
  * Constructor of subjects from subjects: used similarly to e.g. `Number`
+ * @category json-rql
  */
 export const Subject: SubjectConstructor = class implements Subject {
   [key: string]: Subject['any'];
@@ -320,6 +333,7 @@ export const Subject: SubjectConstructor = class implements Subject {
  * aggregated by the Subject. An `@list` contains numeric indexes (which may be
  * numeric strings or variables). The second optional index is used for multiple
  * items being inserted at the first index, using an array.
+ * @category json-rql
  */
 export type SubjectProperty =
   Iri | Variable | '@item' | '@index' | '@type' | ['@list', number | string, number?];
@@ -354,6 +368,7 @@ export function isSubjectObject(o: SubjectPropertyObject): o is Subject {
  * }`. The key is the operator, and the value is the array of arguments. If the
  * operator is unary, the expression need not be wrapped in an array.
  * @see [json-rql constraint](https://json-rql.org/interfaces/constraint.html)
+ * @category json-rql
  */
 export interface Constraint {
   /**
@@ -479,6 +494,7 @@ export function isWriteGroup(p: Pattern): p is Group {
  * ```json
  * { "?averageSize" : { '@avg' : "?size" } }
  * ```
+ * @category json-rql
  */
 export interface VariableExpression {
   [key: string]: Expression;
@@ -487,6 +503,7 @@ export interface VariableExpression {
 /**
  * A sub-type of Pattern which matches data using a `@where` clause.
  * @see [json-rql query](https://json-rql.org/interfaces/query.html)
+ * @category json-rql
  */
 export interface Query extends Pattern {
   /**
@@ -548,6 +565,7 @@ export function isQuery(p: Pattern): p is Query {
 
 /**
  * A query pattern that reads data from the domain.
+ * @category json-rql
  */
 export interface Read extends Query {
   // No support for @limit, @orderBy etc.
@@ -572,6 +590,7 @@ export function isRead(p: Pattern): p is Read {
  *
  * Note that this type does not fully capture the details above. Use
  * {@link isWrite} to inspect a candidate pattern.
+ * @category json-rql
  */
 export type Write = Subject | Group | Update;
 
@@ -956,7 +975,7 @@ export interface Update extends Query {
    * An update with a falsy flag may be automatically upgraded to an agreement
    * by a constraint.
    *
-   * > 🚧 Agreements are an experimental feature. Please contact us to discuss
+   * > 🧪 Agreements are an experimental feature. Please contact us to discuss
    * your use-case.
    *
    * @experimental
@@ -977,6 +996,7 @@ export function isUpdate(p: Pattern): p is Update {
  * - Optionally, when moving items in a list.
  *
  * @see [m-ld lists specification](https://spec.m-ld.org/#lists)
+ * @category json-rql
  */
 export interface Slot extends Subject {
   /**

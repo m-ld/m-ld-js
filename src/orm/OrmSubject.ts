@@ -11,6 +11,7 @@ import { SubjectPropertyValues } from '../subjects';
 import { isPromise } from 'asynciterator';
 import { ConstructOrmSubject, OrmUpdating } from './OrmDomain';
 
+/** @internal */
 declare namespace PropertyAccess {
   interface Init<T, S> {
     /**
@@ -22,7 +23,7 @@ declare namespace PropertyAccess {
 
   interface Orm {
     /** Used to construct a new ORM subject from state */
-    construct: ConstructOrmSubject<any>;
+    construct: ConstructOrmSubject<OrmSubject>;
     /** The current updating ORM state, used to initialise the subject */
     orm: OrmUpdating,
   }
@@ -48,14 +49,41 @@ declare namespace PropertyAccess {
 }
 
 /**
- * An Object-Resource Mapping (ORM) Subject is a Javascript class associated
- * with a graph node in a **m-ld** domain. Its properties are mapped to graph
- * properties (edges) using {@link initSrcProperty}.
+ * An Object-Resource Mapping (ORM) Subject is a Javascript class used to
+ * represent graph nodes in a **m-ld** domain.
+ *
+ * The constructor of an ORM subject should accept a {@link GraphSubject} from
+ * which derive its initial state. In the case of a new subject, which does not
+ * yet exist in the domain, this will only contain an `@id` (i.e. it's a {@link
+ * Reference}), so the constructor may also accept other values for initialising
+ * properties.
+ *
+ * Local properties properties are then mapped to graph properties (edges) by
+ * calling {@link initSrcProperty} in the constructor. This ensures that any
+ * local changes to the object property values are tracked, and can be committed
+ * to the graph later using {@link commit} (usually called for a batch of
+ * subjects from {@link OrmDomain.commit}). E.g.
+ *
+ * ```
+ * class Flintstone extends OrmSubject {
+ *   name: string;
+ *   height?: number;
+ *
+ *   constructor(src: GraphSubject) {
+ *     super(src);
+ *     this.initSrcProperty(src, 'name', String);
+ *     this.initSrcProperty(src, 'height', [Optional, Number]);
+ *   }
+ * }
+ * ```
  *
  * Note that an ORM subject constructor should only ever be called by the passed
- * `construct` callback of {@link OrmUpdating#get}.
+ * `construct` callback of {@link OrmUpdating.get}, so that the subject is
+ * correctly registered with the ORM domain.
  *
- * @see OrmDomain
+ *
+ *
+ * @see {@link OrmDomain}
  * @experimental
  * @category Experimental
  */
@@ -144,10 +172,11 @@ export abstract class OrmSubject {
       enumerable: true, // JSON-able
       configurable: false // Cannot delete the property
     });
-    if (access.init != null)
-      this.setUpdated(set(access.init));
-    else
+    if (access.init == null || property in src) {
       this.src[property] = src[property]; // Invokes the setter
+    } else {
+      this.setUpdated(set(access.init));
+    }
   }
 
   /**
@@ -271,7 +300,7 @@ export abstract class OrmSubject {
         // Subjects and arrays of subjects can be automatically get/set
         return {
           set: async (v: any) => this[local] =
-            await access.orm.get(v, access.construct),
+            <any>(await access.orm.get(v, access.construct)),
           get: type === Subject ?
             () => (<any>this[local]).src :
             () => (<any>this[local])?.map((s: GraphSubject) => s.src)
@@ -286,6 +315,7 @@ export abstract class OrmSubject {
   }
 }
 
+/** @internal */
 function withArrayLikeKey<T>(
   key: string | symbol,
   withLength: () => T,
@@ -307,6 +337,7 @@ function withArrayLikeKey<T>(
  * Note, something like fast-array-diff generates ordered patches, which don't
  * fit the m-ld requirement that deletes and inserts are unordered.
  * TODO: awful complexity for a prepend
+ * @internal
  */
 function diffArrays(
   olds: any[],

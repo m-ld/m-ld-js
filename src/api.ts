@@ -14,6 +14,7 @@ import { EncodedOperation } from './engine/index';
 /**
  * A convenience type for a struct with a `@insert` and `@delete` property, like
  * a {@link MeldUpdate}.
+ * @category API
  */
 export interface DeleteInsert<T> {
   readonly '@delete': T;
@@ -44,9 +45,15 @@ let nextAny = 0x1111;
 export const anyName = (): string => shortId((nextAny++).toString(16));
 
 // Unchanged from m-ld-spec
-/** @see m-ld [specification](http://spec.m-ld.org/interfaces/livestatus.html) */
+/**
+ * @category API
+ * @see m-ld [specification](http://spec.m-ld.org/interfaces/livestatus.html)
+ */
 export type LiveStatus = spec.LiveStatus;
-/** @see m-ld [specification](http://spec.m-ld.org/interfaces/meldstatus.html) */
+/**
+ * @category API
+ * @see m-ld [specification](http://spec.m-ld.org/interfaces/meldstatus.html)
+ */
 export type MeldStatus = spec.MeldStatus;
 
 /**
@@ -118,6 +125,7 @@ export interface ReadResult extends Flowable<GraphSubject>, PromiseLike<GraphSub
  * Methods are typed to ensure that app code is aware of **m-ld**
  * [data&nbsp;semantics](http://spec.m-ld.org/#data-semantics). See the
  * [Resource](/#resource) type for more details.
+ * @category API
  */
 export interface MeldReadState extends QueryableRdfSource {
   /**
@@ -181,6 +189,7 @@ export interface MeldReadState extends QueryableRdfSource {
  * @see {@link MeldStateMachine.read}
  * @see {@link MeldStateMachine.write}
  * @see m-ld [specification](http://spec.m-ld.org/interfaces/meldupdate.html)
+ * @category API
  */
 export interface MeldState extends MeldReadState {
   /**
@@ -230,6 +239,7 @@ export interface GraphSubjects extends Array<GraphSubject> {
 
 /**
  * An update arising from a write operation to **m-ld** graph data.
+ * @category API
  */
 export interface GraphUpdate extends DeleteInsert<GraphSubjects> {
   /**
@@ -251,6 +261,7 @@ export interface GraphUpdate extends DeleteInsert<GraphSubjects> {
  * has not yet been signalled to the application. Available to triggered rules
  * like {@link MeldConstraint constraints} and
  * {@link AgreementCondition agreement&nbsp;conditions}.
+ * @category API
  */
 export interface MeldPreUpdate extends GraphUpdate {
   /**
@@ -296,6 +307,7 @@ export interface MeldUpdate extends MeldPreUpdate {
  * @typeParam S can be {@link MeldReadState} (default) or {@link MeldState}. If
  * the latter, the state can be transitioned to another immutable state using
  * {@link MeldState.write}.
+ * @category API
  */
 export type StateProc<S extends MeldReadState = MeldReadState, T = unknown> =
   (state: S) => PromiseLike<T> | T;
@@ -305,6 +317,7 @@ export type StateProc<S extends MeldReadState = MeldReadState, T = unknown> =
  * available as immutable following an update. Strictly, the immutable state is
  * guaranteed to remain 'live' until the procedure's return Promise resolves or
  * rejects.
+ * @category API
  */
 export type UpdateProc<U extends MeldPreUpdate = MeldUpdate, T = unknown> =
   (update: U, state: MeldReadState) => PromiseLike<T> | void;
@@ -315,6 +328,7 @@ export type UpdateProc<U extends MeldPreUpdate = MeldUpdate, T = unknown> =
  * consecutive asynchronous reads will not necessarily operate on the same
  * state. To work with immutable state, use the `read` and `write` method
  * overloads taking a procedure.
+ * @category API
  */
 export interface MeldStateMachine extends MeldState {
   /**
@@ -441,23 +455,17 @@ export interface StateManaged<T> {
 }
 
 /**
- * Extensions applied to a **m-ld** clone.
- *
- * In general, extensions should be dynamically selected and loaded based on the
- * clone's (meta)data content – this allows a domain to evolve without
- * necessitating the redeployment of app code.
- *
- * > ⚠ Changing extensions at runtime may require coordination between clones,
- * to prevent outdated clones from acting incorrectly in ways that could cause
- * data corruption or compromise security. Consult the extension's documentation
- * for safe operation.
+ * [Extensions](/#extensions) applied to a **m-ld** clone. These may be provided
+ * by the app when the clone is initialised, or declared in the data and loaded
+ * dynamically.
+ * @experimental
+ * @category Experimental
  */
 export interface MeldExtensions {
   /**
    * Data invariant constraints applicable to the domain.
    *
    * @experimental
-   * @see https://github.com/m-ld/m-ld-spec/issues/73
    */
   readonly constraints?: Iterable<MeldConstraint>;
   /**
@@ -489,7 +497,7 @@ export interface MeldExtensions {
  * In this clone engine, constraints are checked and applied for updates prior
  * to their application to the data (the updates are 'interim'). If the
  * constraint requires to know the final state, it must infer it from the given
- * reader and the update.
+ * state and the update.
  *
  * @see [m-ld concurrency](http://m-ld.org/doc/#concurrency)
  * @experimental
@@ -641,7 +649,7 @@ export interface InterimUpdate {
  * An identified security principal (user or machine) that is responsible for
  * data changes in the clone.
  *
- * > 🚧 Application security extensions using `AppPrincipal` are currently
+ * > 🧪 Application security extensions using `AppPrincipal` are currently
  * experimental. See the [discussion](https://m-ld.org/doc/#security) of general
  * security principles for using **m-ld**, and the
  * [recommendations](/#security) for this engine.
@@ -666,6 +674,8 @@ export interface AppPrincipal {
 /**
  * Attribution of some data to a responsible security principal.
  * @see MeldApp.principal
+ * @category Experimental
+ * @experimental
  */
 export interface Attribution {
   /**
@@ -682,6 +692,8 @@ export interface Attribution {
 
 /**
  * Underlying Protocol information that gave rise to an update
+ * @category Experimental
+ * @experimental
  */
 export interface AuditOperation {
   /**
@@ -706,6 +718,8 @@ export interface AuditOperation {
  * operations, each of which is well-defined in the **m-ld** protocol. This
  * means that a sufficiently sophisticated auditing system would be able to
  * re-create, and therefore verify, the trace provided.
+ * @category Experimental
+ * @experimental
  */
 export interface UpdateTrace {
   /**

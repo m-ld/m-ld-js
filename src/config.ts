@@ -33,6 +33,7 @@ export interface MeldConfig {
   '@context'?: Context;
   /**
    * Semantic constraints to apply to the domain data.
+   * @deprecated see {@link MeldExtensions}
    */
   constraints?: ConstraintConfig[];
   /**
@@ -70,6 +71,8 @@ export interface MeldConfig {
 
 /**
  * **m-ld** clone journal configuration.
+ * @category Experimental
+ * @experimental
  */
 export interface JournalConfig {
   /**
@@ -122,7 +125,7 @@ export type JournalAdmin = {
   /**
    * A stream of prompts for the journal to perform administrative activity.
    *
-   * @see JournalCheckPoint
+   * @see {@link JournalCheckPoint}
    */
   checkpoints?: Observable<JournalCheckPoint>,
   /**

@@ -1,6 +1,9 @@
 import { OrmSubject, OrmUpdating } from '../src/orm/index';
 import { GraphSubject, Optional, Subject } from '../src/index';
 
+////////////////////////////////////////////////////////////////////////////////
+// NOTE These examples are duplicated to the OrmSubject documentation
+
 export class Flintstone extends OrmSubject {
   name: string;
   height?: number;

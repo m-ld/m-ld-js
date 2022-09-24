@@ -4,18 +4,18 @@ import { SingleValued } from '../src/constraints/SingleValued';
 import { MeldConstraint, MeldExtensions, MeldTransportSecurity, StateManaged } from '../src/index';
 import { mock } from 'jest-mock-extended';
 import { M_LD } from '../src/ns';
-import { ExtensionEnvironment } from '../src/orm';
 import { CloneExtensions } from '../src/engine/CloneExtensions';
+import { OrmUpdating } from '../src/orm/index';
 
 const thisModuleId = require.resolve('./CloneExtensions.test');
 
 export class MockExtensions implements StateManaged<MeldExtensions> {
   static mockTs = mock<MeldTransportSecurity>();
   static mockConstraint = mock<MeldConstraint>();
-  static last: ExtensionEnvironment;
+  static last: OrmUpdating;
 
-  constructor(parent: { env: ExtensionEnvironment }) {
-    MockExtensions.last = parent.env;
+  constructor(parent: { orm: OrmUpdating }) {
+    MockExtensions.last = parent.orm;
   }
 
   async ready(): Promise<MeldExtensions> {
@@ -89,7 +89,7 @@ describe('Top-level extensions loading', () => {
       await state.write({
         '@id': M_LD.extensions,
         '@list': [{
-          '@type': M_LD.JS.commonJsModule,
+          '@type': M_LD.JS.commonJsExport,
           [M_LD.JS.require]: thisModuleId,
           [M_LD.JS.className]: 'MockExtensions'
         }]
@@ -101,7 +101,7 @@ describe('Top-level extensions loading', () => {
       expect(constraints.length).toBe(2);
       expect(constraints[0]).toBe(MockExtensions.mockConstraint);
       expect(constraints[1]).toBeInstanceOf(DefaultList);
-      expect(MockExtensions.last.config).toBe(config);
+      expect(MockExtensions.last.domain.config).toBe(config);
     });
 
     test('loads a module on update', async () => {
@@ -111,7 +111,7 @@ describe('Top-level extensions loading', () => {
       const update = await state.write({
         '@id': M_LD.extensions,
         '@list': [{
-          '@type': M_LD.JS.commonJsModule,
+          '@type': M_LD.JS.commonJsExport,
           [M_LD.JS.require]: thisModuleId,
           [M_LD.JS.className]: 'MockExtensions'
         }]
@@ -123,7 +123,7 @@ describe('Top-level extensions loading', () => {
       expect(constraints.length).toBe(2);
       expect(constraints[0]).toBe(MockExtensions.mockConstraint);
       expect(constraints[1]).toBeInstanceOf(DefaultList);
-      expect(MockExtensions.last.config).toBe(config);
+      expect(MockExtensions.last.domain.config).toBe(config);
     });
   });
 });

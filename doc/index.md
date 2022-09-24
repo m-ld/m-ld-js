@@ -33,11 +33,9 @@ There are two starter projects available:
 **m-ld** uses [abstract-level](https://github.com/Level/abstract-level) to interface with a
 LevelDB-compatible storage backend.
 
-For the fastest in-memory responses, use [memory-level](https://github.com/Level/memory-level).
-
-In a service or native application, use [classic-level](https://github.com/Level/classic-level) (file system storage).
-
-In a browser, you can use [browser-level](https://github.com/Level/browser-level) (browser-local storage).
+- For the fastest in-memory responses, use [memory-level](https://github.com/Level/memory-level).
+- In a service or native application, use [classic-level](https://github.com/Level/classic-level) (file system storage).
+- In a browser, you can use [browser-level](https://github.com/Level/browser-level) (browser-local storage).
 
 ### Connecting to Other Clones
 
@@ -95,3 +93,5 @@ await meld.status.becomes({ online: true, outdated: false });
 [[include:concurrency.md]]
 
 [[include:security.md]]
+
+[[include:ext/index.md]]

@@ -8,10 +8,12 @@ import { SubjectPropertyValues } from './subjects';
 
 /**
  * An update to a single graph Subject.
+ * @category Utility
  */
 export type SubjectUpdate = DeleteInsert<GraphSubject | undefined>;
 /**
  * A **m-ld** update notification, indexed by graph Subject ID.
+ * @category Utility
  */
 export type SubjectUpdates = { [id: string]: SubjectUpdate };
 /**
