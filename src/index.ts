@@ -5,10 +5,10 @@ import { ApiStateMachine } from './engine/MeldState';
 import { DatasetEngine } from './engine/dataset/DatasetEngine';
 import { DomainContext } from './engine/MeldEncoding';
 import type { InitialApp, MeldConfig } from './config';
-import { Stopwatch } from './engine/util';
 import type { MeldRemotes } from './engine';
 import type { LiveStatus } from '@m-ld/m-ld-spec';
-import type { AbstractLevelDOWN } from 'abstract-leveldown';
+import type { AbstractLevel } from 'abstract-level';
+import { Stopwatch } from './engine/Stopwatch';
 
 /**
  * Core API exports. Extension exports can be found in package.json/exports
@@ -44,7 +44,7 @@ type ConstructRemotes = new (
  * @category API
  */
 export async function clone(
-  backend: AbstractLevelDOWN,
+  backend: AbstractLevel<any, any, any>,
   constructRemotes: ConstructRemotes,
   config: MeldConfig,
   app: InitialApp = {}
@@ -61,7 +61,7 @@ export async function clone(
 
   sw.next('dataset');
   const dataset = await new QuadStoreDataset(
-    backend, context, backendEvents).initialise(sw.lap);
+    config['@domain'], backend, backendEvents).initialise(sw.lap);
   const engine = new DatasetEngine({
     dataset, remotes, extensions, config, app, context
   });

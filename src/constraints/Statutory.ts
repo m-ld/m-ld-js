@@ -5,15 +5,30 @@ import {
 import { Shape } from '../shacl';
 import { M_LD } from '../ns';
 import { Describe, isPropertyObject, isReference, Reference, Subject } from '../jrql-support';
-import { ExtensionEnvironment, ExtensionSubject, OrmDomain, OrmState, OrmSubject } from '../orm';
+import { ExtensionSubject, OrmDomain, OrmSubject, OrmUpdating } from '../orm';
 import { MeldError } from '../engine/MeldError';
 import { Iri } from '@m-ld/jsonld';
-import { array } from '../util';
 import { SubjectGraph } from '../engine/SubjectGraph';
 import { asSubjectUpdates } from '../updates';
-import { getIdLogger } from '../engine/util';
 import { Logger } from 'loglevel';
+import { getIdLogger } from '../engine/logging';
+import { MeldApp, MeldConfig } from '../config';
 
+/**
+ * This extension allows an app to require that certain changes, such as changes
+ * to access controls, are _agreed_ before they are shared in the domain. This
+ * can be important for security and data integrity. See the white paper link
+ * below for more details.
+ *
+ * - The extension can be declared in the data using {@link declare}.
+ * - _Statutes_ can be declared in the data using {@link declareStatute}.
+ * - _Authorities_ can be declared in the data using {@link declareAuthority}.
+ *
+ * @see [the white paper](https://github.com/m-ld/m-ld-security-spec/blob/main/design/suac.md)
+ * @category Experimental
+ * @experimental
+ * @noInheritDoc
+ */
 export class Statutory extends OrmDomain implements StateManaged<MeldExtensions> {
   /**
    * Extension declaration. Insert into the domain data to install the
@@ -31,7 +46,7 @@ export class Statutory extends OrmDomain implements StateManaged<MeldExtensions>
     '@list': {
       [priority]: {
         '@id': `${M_LD.EXT.$base}constraints/Statutory`,
-        '@type': M_LD.JS.commonJsModule,
+        '@type': M_LD.JS.commonJsExport,
         [M_LD.JS.require]: '@m-ld/m-ld/ext/constraints/Statutory',
         [M_LD.JS.className]: 'Statutory'
       }
@@ -56,7 +71,11 @@ export class Statutory extends OrmDomain implements StateManaged<MeldExtensions>
    * @param statutoryShapes shape Subjects, or References to pre-existing shapes
    * @param sufficientConditions References to pre-existing agreement conditions
    */
-  static declareStatute = ({ statuteId, statutoryShapes, sufficientConditions }: {
+  static declareStatute = ({
+    statuteId,
+    statutoryShapes,
+    sufficientConditions = [{ '@id': M_LD.hasAuthority }]
+  }: {
     statuteId?: Iri,
     statutoryShapes: Subject | Reference | (Subject | Reference)[],
     sufficientConditions: Subject | Reference | (Subject | Reference)[]
@@ -88,87 +107,87 @@ export class Statutory extends OrmDomain implements StateManaged<MeldExtensions>
   });
 
   private statutes = new Map<Iri, Statute>();
-  private readonly env: ExtensionEnvironment;
   private readonly log: Logger;
 
-  constructor({ env }: { env: ExtensionEnvironment }) {
-    super();
-    this.env = env;
-    this.log = getIdLogger(this.constructor, env.config['@id'], env.config.logLevel);
+  /**
+   * @type ExtensionInstanceConstructor
+   * @internal
+   */
+  constructor(config: MeldConfig, app: MeldApp) {
+    super(config, app);
+    this.log = getIdLogger(this.constructor, this.config['@id'], this.config.logLevel);
   }
 
+  /** @internal */
   ready(): Promise<MeldExtensions> {
     return this.upToDate().then(() => ({
       constraints: [{
-        check: (state, update) => this.updating(state, () =>
-          Promise.all([...this.statutes.values()].map(statute => statute.check(state, update))))
+        check: (state, update) => Promise.all(Array.from(this.statutes.values(),
+          statute => statute.check(state, update)))
       }],
       agreementConditions: [{
-        test: (state, update) => this.updating(state, () =>
-          Promise.all([...this.statutes.values()].map(statute => statute.test(state, update))))
+        test: (state, update) => Promise.all(Array.from(this.statutes.values(),
+          statute => statute.test(state, update)))
       }]
     }));
   }
 
-  async initialise(state: MeldReadState) {
-    await this.updating(state, async orm => {
-      // Read the available statutes
-      await state.read<Describe>({
+  /** @internal */
+  initialise(state: MeldReadState) {
+    // Read the available statutes
+    return this.updating(state, orm =>
+      state.read<Describe>({
         '@describe': '?statute',
         '@where': { '@id': '?statute', '@type': M_LD.Statute }
-      }).each(src => this.loadStatute(src, orm));
-      await orm.update();
-    });
+      }).each(src => this.loadStatute(src, orm)));
   }
 
+  /** @internal */
   onUpdate(update: MeldPreUpdate, state: MeldReadState) {
-    return this.updating(state, async orm => {
-      await orm.update(update, deleted => {
+    return this.updating(state, orm =>
+      orm.updated(update, deleted => {
         // Remove any deleted statutes
         this.statutes.delete(deleted.src['@id']);
       }, async insert => {
         // Capture any new statutes (the type has been inserted)
         if (insert['@type'] === M_LD.Statute)
           await this.loadStatute(insert, orm);
-      });
-    });
+      }));
   }
 
-  private async loadStatute(src: GraphSubject, orm: OrmState) {
+  private async loadStatute(src: GraphSubject, orm: OrmUpdating) {
     // Putting into both our statutes map and the domain cache
     this.statutes.set(src['@id'], await orm.get(src, src =>
-      new Statute(src, orm, src => {
+      new Statute(src, orm, async src => {
         if (src['@id'] === M_LD.hasAuthority)
-          return new HasAuthority(src, orm, this.log);
-        else if (array(src['@type']).includes(M_LD.JS.commonJsModule))
-          return new ExtensionCondition(src, this.env, this.log);
+          return new HasAuthority(src, this, this.log);
         else
-          throw new TypeError(`${src['@id']} is not an agreement condition`);
+          return ExtensionSubject.instance({ src, orm });
       })));
   }
 }
 
 /**
  * A scope of data for which an agreement is required, if the data is to change
+ * @internal
  */
 export class Statute extends OrmSubject implements MeldConstraint, AgreementCondition {
   /** shapes describing statutory graph content */
   statutoryShapes: Shape[];
-  sufficientConditions: (ShapeAgreementCondition & OrmSubject)[];
+  sufficientConditions: ShapeAgreementCondition[];
 
   constructor(
     src: GraphSubject,
-    orm: OrmState,
-    // Substitutable for unit tests
-    prover: (src: GraphSubject) => ShapeAgreementCondition & OrmSubject
+    orm: OrmUpdating,
+    prover: (src: GraphSubject) => Promise<ShapeAgreementCondition & OrmSubject>
   ) {
     super(src);
-    this.initSrcProperty(src, M_LD.statutoryShape, [Array, Subject],
-      () => this.statutoryShapes.map(s => s.src),
-      async (v: GraphSubject[]) => this.statutoryShapes = await orm.get(v, Shape.from));
-    this.initSrcProperty(src, M_LD.sufficientCondition, [Array, Subject],
-      () => this.sufficientConditions.map(c => c.src),
-      async (v: GraphSubject[]) => this.sufficientConditions = await orm.get(v, prover));
+    this.initSrcProperty(src, M_LD.statutoryShape, [Array, Subject], {
+      local: 'statutoryShapes', orm, construct: Shape.from
+    });
+    this.initSrcProperty(src, M_LD.sufficientCondition, [Array, Subject], {
+      local: 'sufficientConditions', orm, construct: prover
+    });
   }
 
   async check(state: MeldReadState, interim: InterimUpdate) {
@@ -212,6 +231,7 @@ export class Statute extends OrmSubject implements MeldConstraint, AgreementCond
   }
 }
 
+/** @internal */
 class AffectedUpdate {
   affected: {
     [id: string]: {
@@ -260,7 +280,7 @@ class AffectedUpdate {
       if (ourSubject != null) {
         // FIXME: this assumes the values are irrelevant!
         for (let property in subject)
-          if (isPropertyObject(property, subject))
+          if (isPropertyObject(property, subject[property]))
             delete ourSubject[property];
         if (isReference(ourSubject))
           delete this.affected[subject['@id']][key];
@@ -278,6 +298,7 @@ class AffectedUpdate {
   }
 }
 
+/** @internal */
 export interface ShapeAgreementCondition {
   /** @returns a truthy proof, or a falsey lack of proof */
   prove(
@@ -295,8 +316,9 @@ export interface ShapeAgreementCondition {
   ): Promise<true | string>;
 }
 
+/** @internal */
 export class HasAuthority extends OrmSubject implements ShapeAgreementCondition {
-  constructor(src: GraphSubject, readonly orm: OrmState, readonly log?: Logger) {
+  constructor(src: GraphSubject, readonly domain: OrmDomain, readonly log?: Logger) {
     super(src);
   }
 
@@ -308,9 +330,8 @@ export class HasAuthority extends OrmSubject implements ShapeAgreementCondition 
     if (principalRef == null)
       throw new MeldError('Unauthorised', 'No identified principal');
     // Load the principal's authorities if we don't already have them
-    const principal = await this.orm.get(
-      principalRef, src => new Principal(src, this.orm));
-    await this.orm.update();
+    const principal = await this.domain.updating(state, orm => orm.get(
+      principalRef, src => new Principal(src, orm)));
     if (!principal.deleted) {
       // Every affected subject must be covered by an authority assignment.
       // For each authority, subtract anything affected by that authority.
@@ -330,32 +351,14 @@ export class HasAuthority extends OrmSubject implements ShapeAgreementCondition 
   }
 }
 
+/** @internal */
 class Principal extends OrmSubject {
   hasAuthority: Shape[];
 
-  constructor(src: GraphSubject, orm: OrmState) {
+  constructor(src: GraphSubject, orm: OrmUpdating) {
     super(src);
-    this.initSrcProperty(src, M_LD.hasAuthority, [Array, Subject],
-      () => this.hasAuthority.map(s => s.src),
-      async (v: GraphSubject[]) => this.hasAuthority = await orm.get(v, Shape.from));
-  }
-}
-
-class ExtensionCondition
-  extends ExtensionSubject<ShapeAgreementCondition>
-  implements ShapeAgreementCondition {
-
-  constructor(src: GraphSubject, env: ExtensionEnvironment, readonly log?: Logger) {
-    super(src, env);
-  }
-
-  prove(state: MeldReadState, affected: GraphUpdate, principal?: Reference) {
-    this.log?.debug('Proving condition for', affected);
-    return this.instance.prove(state, affected, principal);
-  }
-
-  test(state: MeldReadState, affected: GraphUpdate, proof: any, principal?: Reference) {
-    this.log?.debug('Testing condition proof', proof, 'for', affected);
-    return this.instance.test(state, affected, proof, principal);
+    this.initSrcProperty(src, M_LD.hasAuthority, [Array, Subject], {
+      local: 'hasAuthority', orm, construct: Shape.from
+    });
   }
 }

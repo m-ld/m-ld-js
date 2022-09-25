@@ -58,7 +58,7 @@ export namespace JS {
   export const $base = 'http://js.m-ld.org/';
 
   /** CommonJS module class */
-  export const commonJsModule = `${$base}CommonJSModule`;
+  export const commonJsExport = `${$base}CommonJSExport`;
 
   /** Property for CommonJS module require id */
   export const require = `${$base}#require`;

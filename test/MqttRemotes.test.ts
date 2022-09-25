@@ -10,10 +10,11 @@ import { take, toArray } from 'rxjs/operators';
 import { comesAlive } from '../src/engine/AbstractMeld';
 import { MeldErrorStatus } from '@m-ld/m-ld-spec';
 import { Response, RevupRequest, RevupResponse } from '../src/engine/remotes/ControlMessage';
-import { Future, MsgPack } from '../src/engine/util';
+import * as MsgPack from '../src/engine/msgPack';
 import { JsonNotification } from '../src/engine/remotes';
 import { once } from 'events';
 import { MeldOperationMessage } from '../src/engine/MeldOperationMessage';
+import { Future } from '../src/engine/Future';
 
 /**
  * These tests also test the abstract base class, PubsubRemotes

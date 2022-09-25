@@ -39,6 +39,9 @@ export class IoRemotes extends PubsubRemotes {
       connect(config.io.uri, optsToUse) : connect(optsToUse);
     this.socket
       .on('connect', () => this.onConnect())
+      .on('connect_error', err => this.close(err))
+      .on('reconnect_error', err => this.log.warn(err))
+      .on('reconnect_failed', () => this.close('IO reconnect failed'))
       .on('disconnect', () => this.onDisconnect())
       .on('presence', () => this.onPresenceChange())
       .on('operation', (payload: Uint8Array) => this.onOperation(payload))

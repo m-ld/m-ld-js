@@ -6,10 +6,11 @@ import {
 import { CloneEngine, EngineState, EngineUpdateProc, StateEngine } from './StateEngine';
 import { QueryableRdfSourceProxy } from './quads';
 import { Consumable } from 'rx-flowable';
-import { first, Future, inflateFrom } from './util';
+import { first, inflateFrom } from './util';
 import { QueryableRdfSource } from '../rdfjs-support';
 import { constructProperties, describeId } from './jrql-util';
 import { readResult } from './api-support';
+import { Future } from './Future';
 
 abstract class ApiState extends QueryableRdfSourceProxy implements MeldState {
   constructor(
@@ -25,7 +26,7 @@ abstract class ApiState extends QueryableRdfSourceProxy implements MeldState {
     return readResult(this.state.read(request));
   }
 
-  async write<W = Write>(request: W): Promise<MeldState> {
+  async write<W extends Write = Write>(request: W): Promise<MeldState> {
     return this.construct(await this.state.write(request));
   }
 

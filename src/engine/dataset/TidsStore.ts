@@ -3,7 +3,7 @@ import { MutableOperation, Operation } from '../ops';
 import { UUID } from '../MeldEncoding';
 import { IndexMatch, IndexSet } from '../indices';
 import { Kvps, KvpStore } from './index';
-import { MsgPack } from '../util';
+import * as MsgPack from '../msgPack';
 
 /**
  * Persists mappings from triples to transaction IDs (TIDs) in a {@link KvpStore}.

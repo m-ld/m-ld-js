@@ -1,5 +1,5 @@
 import { SH } from '../src/ns';
-import { MockGraphState, mockInterim } from './testClones';
+import { MockGraphState, mockInterim, testConfig } from './testClones';
 import { WritePermitted } from '../src/constraints/WritePermitted';
 import { SubjectGraph } from '../src/engine/SubjectGraph';
 import { MeldError } from '../src/engine/MeldError';
@@ -19,7 +19,7 @@ describe('Write permissions', () => {
   };
 
   test('allows anything if no permissions', async () => {
-    const writePermitted = new WritePermitted();
+    const writePermitted = new WritePermitted(testConfig(), {});
     await writePermitted.initialise(state.graph.asReadState);
     for (let constraint of (await writePermitted.ready()).constraints ?? [])
       await expect(constraint.check(state.graph.asReadState, mockInterim({
@@ -33,7 +33,7 @@ describe('Write permissions', () => {
   test('allows anything not subject to permissions', async () => {
     await state.write(WritePermitted.declareControlled(
       'http://test.m-ld.org/namePermission', nameShape));
-    const writePermitted = new WritePermitted();
+    const writePermitted = new WritePermitted(testConfig(), {});
     await writePermitted.initialise(state.graph.asReadState);
     expect.hasAssertions();
     for (let constraint of (await writePermitted.ready()).constraints ?? [])
@@ -48,7 +48,7 @@ describe('Write permissions', () => {
   test('disallows an update without permission', async () => {
     await state.write(WritePermitted.declareControlled(
       'http://test.m-ld.org/namePermission', nameShape));
-    const writePermitted = new WritePermitted();
+    const writePermitted = new WritePermitted(testConfig(), {});
     await writePermitted.initialise(state.graph.asReadState);
     expect.hasAssertions();
     for (let constraint of (await writePermitted.ready()).constraints ?? [])
@@ -66,7 +66,7 @@ describe('Write permissions', () => {
     await state.write(WritePermitted.declarePermission(
       'http://test.m-ld.org/hanna',
       { '@id': 'http://test.m-ld.org/namePermission' }));
-    const writePermitted = new WritePermitted();
+    const writePermitted = new WritePermitted(testConfig(), {});
     await writePermitted.initialise(state.graph.asReadState);
     expect.hasAssertions();
     for (let constraint of (await writePermitted.ready()).constraints ?? [])

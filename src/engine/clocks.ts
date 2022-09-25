@@ -1,4 +1,4 @@
-import { MsgPack } from './util';
+import * as MsgPack from './msgPack';
 import { sha1 } from './local';
 
 const inspect = Symbol.for('nodejs.util.inspect.custom');

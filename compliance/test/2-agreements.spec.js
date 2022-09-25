@@ -19,12 +19,12 @@ describe('ACL Statutes and Permissions', () => {
         '@id': 'mld:extensions',
         '@list': [{
           '@id': 'http://ext.m-ld.org/constraints/Statutory',
-          '@type': 'http://js.m-ld.org/CommonJSModule',
+          '@type': 'http://js.m-ld.org/CommonJSExport',
           'http://js.m-ld.org/#require': '@m-ld/m-ld/ext/constraints/Statutory',
           'http://js.m-ld.org/#class': 'Statutory'
         }, {
           '@id': 'http://ext.m-ld.org/constraints/WritePermitted',
-          '@type': 'http://js.m-ld.org/CommonJSModule',
+          '@type': 'http://js.m-ld.org/CommonJSExport',
           'http://js.m-ld.org/#require': '@m-ld/m-ld/ext/constraints/WritePermitted',
           'http://js.m-ld.org/#class': 'WritePermitted'
         }]

@@ -10,6 +10,7 @@ import { compactIri as _compactIri } from '@m-ld/jsonld/lib/compact';
 import { compareValues as _compareValues } from '@m-ld/jsonld/lib/util';
 import { ActiveContext, expandIri, getInitialContext } from '@m-ld/jsonld/lib/context';
 import { isAbsolute } from '@m-ld/jsonld/lib/url';
+import { isObject } from '@m-ld/jsonld/lib/types';
 import { isSet } from '../jrql-support';
 import { array } from '../util';
 
@@ -94,4 +95,11 @@ export function asValues(value: any) {
 
 export function canonicalDouble(value: number) {
   return value.toExponential(15).replace(/(\d)0*e\+?/, '$1E');
+}
+
+export function minimiseValue(v: any) {
+  if (isObject(v) && ('@id' in v) && Object.keys(v).length > 1)
+    return { '@id': (v as { '@id': string })['@id'] };
+  else
+    return v;
 }

@@ -1,4 +1,4 @@
-const leveldown = require('leveldown');
+const { ClassicLevel } = require('classic-level');
 const { clone, isRead } = require('@m-ld/m-ld');
 const { MqttRemotes } = require('@m-ld/m-ld/ext/mqtt');
 const { createSign } = require('crypto');
@@ -18,7 +18,7 @@ process.on('message', startMsg => {
   const { config, tmpDirName, requestId } = startMsg;
   LOG.setLevel(config.logLevel);
   LOG.debug(logTs(), config['@id'], 'config is', JSON.stringify(config));
-  clone(leveldown(tmpDirName), MqttRemotes, config, createApp(config)).then(meld => {
+  clone(new ClassicLevel(tmpDirName), MqttRemotes, config, createApp(config)).then(meld => {
     send(requestId, 'started', { cloneId: config['@id'] });
 
     const handler = message => {

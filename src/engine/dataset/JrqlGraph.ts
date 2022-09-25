@@ -16,7 +16,7 @@ import { JRQL } from '../../ns';
 import { JrqlQuads } from './JrqlQuads';
 import { MeldError } from '../MeldError';
 import { GraphSubject, MeldReadState, ReadResult } from '../../api';
-import { binaryFold, first, flatten, Future, inflate, isArray } from '../util';
+import { binaryFold, first, flatten, inflate, isArray } from '../util';
 import { ConstructTemplate } from './ConstructTemplate';
 import { Binding, QueryableRdfSource } from '../../rdfjs-support';
 import { Consumable, each } from 'rx-flowable';
@@ -25,6 +25,7 @@ import { consume } from 'rx-flowable/consume';
 import { constructSubject } from '../jrql-util';
 import { array } from '../../util';
 import { readResult } from '../api-support';
+import { Future } from '../Future';
 
 /**
  * A graph wrapper that provides low-level json-rql handling for queries. The

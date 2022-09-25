@@ -6,6 +6,12 @@ import { isArray } from './engine/util';
 import { XS } from './ns';
 import { asValues, isAbsolute } from './engine/jsonld';
 
+/**
+ * Javascript atom constructors for types that can be obtained from graph
+ * subject properties.
+ *
+ * @category Utility
+ */
 export type JsAtomValueConstructor =
   typeof String |
   typeof Number |
@@ -16,17 +22,31 @@ export type JsAtomValueConstructor =
   typeof Reference |
   typeof VocabReference
 
+/**
+ * Javascript container constructors for types that can be obtained from graph
+ * subject properties.
+ *
+ * @category Utility
+ */
 export type JsContainerValueConstructor =
   typeof Array |
   typeof Set |
   typeof Optional
 
+/**
+ * Javascript constructors for types that can be obtained from graph subject
+ * properties.
+ *
+ * @category Utility
+ */
 export type JsValueConstructor = JsAtomValueConstructor | JsContainerValueConstructor;
 
 /**
  * Symbolic object for missing Javascript Optional monad
+ * @category Utility
  */
 export const Optional = {} as { new<T>(value: T): T | undefined; };
+/** @internal */
 export type Optional = typeof Optional;
 
 /** @internal */
@@ -144,7 +164,7 @@ export function castPropertyValue<T, S>(
   subType?: AtomType<S>,
   property?: string
 ): ValueConstructed<T, S> {
-  switch (type) {
+  outer: switch (type) {
     case Set:
     case Array:
     case Optional:
@@ -160,7 +180,7 @@ export function castPropertyValue<T, S>(
         default: // Optional
           if (values.length <= 1)
             return values[0];
-          else break;
+          else break outer;
       }
     default:
       // Expecting a single value
@@ -172,7 +192,8 @@ export function castPropertyValue<T, S>(
         return castValue(value, <any>type);
       }
   }
-  throw new TypeError(`${property ?? 'Property'} has multiple values: ${JSON.stringify(value)}}`);
+  throw new TypeError(
+    `${property ?? 'Property'} has multiple values: ${JSON.stringify(value)}}`);
 }
 
 /**@internal*/
@@ -269,6 +290,7 @@ function castValue<T>(value: Value, type: JsAtomValueConstructor): T {
 /**
  * Reverse of {@link castPropertyValue}: normalises a JavaScript value to a
  * JSON-LD value suitable for use in a {@link Subject}.
+ * @category Utility
  */
 export function normaliseValue(
   value: ValueConstructed<unknown>
@@ -294,9 +316,15 @@ function normaliseAtomValue(
       return value;
     case 'object':
       if (value instanceof Date)
-        return { '@type': XS.dateTime, '@value': value.toISOString() };
+        return {
+          '@type': XS.dateTime,
+          '@value': value.toISOString()
+        };
       else if (value instanceof Uint8Array)
-        return { '@type': XS.base64Binary, '@value': Buffer.from(value).toString('base64') };
+        return {
+          '@type': XS.base64Binary,
+          '@value': Buffer.from(value).toString('base64')
+        };
       else if (value != null)
         return <Subject>value; // Could also be a reference or a value object
   }

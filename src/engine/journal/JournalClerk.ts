@@ -4,7 +4,7 @@ import { EMPTY, merge, NEVER, Observable, of, race, Subject, timer } from 'rxjs'
 import { idling } from '../local';
 import { CausalOperator } from '../ops';
 import { TreeClock } from '../clocks';
-import { completed, getIdLogger, inflate } from '../util';
+import { completed, inflate } from '../util';
 import { array } from '../../util';
 import { JournalAdmin, JournalCheckPoint, MeldConfig } from '../../config';
 import { MeldOperation, MeldOperationSpec } from '../MeldOperation';
@@ -12,6 +12,7 @@ import { TickTid } from './JournalEntry';
 import { TripleMap } from '../quads';
 import { UUID } from '../MeldEncoding';
 import { Attribution } from '../../api';
+import { getIdLogger } from '../logging';
 
 export type JournalClerkConfig = Pick<MeldConfig, '@id' | 'logLevel' | 'journal'>;
 

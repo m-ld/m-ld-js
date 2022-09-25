@@ -2,12 +2,11 @@ import {
   Bindings, DataFactory, DefaultGraph, NamedNode, Quad, Quad_Object, Quad_Predicate, Quad_Subject,
   QuadSet, QuadSource, RdfFactory, toBinding
 } from '../quads';
-import { BatchOpts, Binding, Quadstore, ResultType } from 'quadstore';
+import { BatchOpts, Binding, Quadstore } from 'quadstore';
 import {
-  AbstractChainedBatch, AbstractIterator, AbstractIteratorOptions, AbstractLevelDOWN
-} from 'abstract-leveldown';
+  AbstractChainedBatch, AbstractIterator, AbstractIteratorOptions, AbstractLevel
+} from 'abstract-level';
 import { Observable } from 'rxjs';
-import { check, Stopwatch } from '../util';
 import { LockManager } from '../locks';
 import { Context, Iri } from '@m-ld/jsonld';
 import { ActiveContext, activeCtx, compactIri, expandTerm } from '../jsonld';
@@ -19,8 +18,9 @@ import { AsyncIterator, empty, EmptyIterator, SimpleTransformIterator } from 'as
 import { MutableOperation } from '../ops';
 import { MeldError } from '../MeldError';
 import { BaseStream, CountableRdf, QueryableRdfSource } from '../../rdfjs-support';
-import { AllMetadataSupport, Query } from '@rdfjs/types';
 import { uuid } from '../../util';
+import { Stopwatch } from '../Stopwatch';
+import { check } from '../check';
 import type EventEmitter = require('events');
 
 /**
@@ -52,7 +52,7 @@ export interface KvpStore {
   /** Exact match kvp retrieval */
   has(key: string): Promise<boolean>;
   /** Kvp retrieval by range options */
-  read(range: AbstractIteratorOptions<string>): Observable<[string, Buffer]>;
+  read(range: AbstractIteratorOptions<string, Buffer>): Observable<[string, Buffer]>;
   /**
    * Ensures that write transactions are executed serially against the store.
    * @param txn prepares a write operation to be performed
@@ -81,8 +81,9 @@ export interface Dataset extends KvpStore {
   readonly closed: boolean;
 }
 
+type KvpBatch = Pick<AbstractChainedBatch<any, string, Buffer>, 'put' | 'del'>;
 export type Kvps = // NonNullable<BatchOpts['preWrite']> with strong kv types
-  (batch: Pick<AbstractChainedBatch<string, Buffer>, 'put' | 'del'>) => Promise<unknown> | unknown;
+  (batch: KvpBatch) => Promise<unknown> | unknown;
 
 export interface KvpResult<T = unknown> {
   kvps?: Kvps;
@@ -125,6 +126,26 @@ export interface Graph extends RdfFactory, QueryableRdfSource {
 }
 
 /**
+ * Default mapping of a domain name to a base URL
+ * @param domain IETF domain name
+ */
+export function domainBase(domain: string) {
+  if (!/^[a-z0-9_]+([\-.][a-z0-9_]+)*\.[a-z]{2,6}$/.test(domain))
+    throw new RangeError('Domain not specified or not valid');
+  return `http://${domain}/`;
+}
+
+/**
+ * Default vocabulary IRI for a given base IRI. Note this ties the vocabulary in
+ * use to the base which precludes sharing of data; so should only be used as a
+ * default and not for linked data applications.
+ * @param base base IRI
+ */
+export function baseVocab(base: Iri) {
+  return new URL('/#', base).href;
+}
+
+/**
  * Context for Quadstore dataset storage. Mix in with a domain context to
  * optimise (minimise) both control and user content.
  */
@@ -146,13 +167,18 @@ export class QuadStoreDataset implements Dataset {
   readonly base: Iri | undefined;
 
   constructor(
-    private readonly backend: AbstractLevelDOWN,
-    context?: Context,
-    private readonly events?: EventEmitter) {
-    // Internal of level-js and leveldown
+    domain: string,
+    private readonly backend: AbstractLevel<any>,
+    private readonly events?: EventEmitter
+  ) {
+    // Internal of ClassicLevel and BrowserLevel
     this.location = (<any>backend).location ?? uuid();
-    this.activeCtx = activeCtx({ ...STORAGE_CONTEXT, ...context });
-    this.base = context?.['@base'] ?? undefined;
+    this.base = domainBase(domain);
+    this.activeCtx = activeCtx({
+      '@base': this.base,
+      '@vocab': baseVocab(this.base),
+      ...STORAGE_CONTEXT
+    });
   }
 
   async initialise(sw?: Stopwatch): Promise<QuadStoreDataset> {
@@ -196,7 +222,7 @@ export class QuadStoreDataset implements Dataset {
     // particularly important for SU-Set operation.
     /*
     TODO: This could be improved with snapshots, if all the reads were on the
-    same event loop tick, see https://github.com/Level/leveldown/issues/486
+    same event loop tick, see https://github.com/Level/classic-level/issues/28
     */
     sw.next('lock-wait');
     return this.lock.exclusive(lockKey, 'transaction', async () => {
@@ -204,7 +230,9 @@ export class QuadStoreDataset implements Dataset {
       const result = await txn.prepare({ id, sw: sw.lap });
       sw.next('apply');
       if (result.patch != null)
-        await this.applyQuads(result.patch, { preWrite: result.kvps });
+        await this.applyQuads(result.patch, {
+          preWrite: batch => result.kvps?.(this.kvpBatch(batch))
+        });
       else if (result.kvps != null)
         await this.applyKvps(result.kvps);
       sw.next('after');
@@ -222,9 +250,21 @@ export class QuadStoreDataset implements Dataset {
 
   private async applyKvps(kvps: Kvps) {
     const batch = this.store.db.batch();
-    await kvps(batch);
-    return new Promise<void>((resolve, reject) =>
-      batch.write(err => err ? reject(err) : resolve()));
+    await kvps(this.kvpBatch(batch));
+    return batch.write();
+  }
+
+  private kvpBatch(batch: ReturnType<Quadstore['db']['batch']>): KvpBatch {
+    return {
+      put(key: string, value: Buffer, options?: object) {
+        batch.put(key, value, { valueEncoding: 'buffer', ...options });
+        return this;
+      },
+      del(key: string) {
+        batch.del(key);
+        return this;
+      }
+    };
   }
 
   private async applyQuads(patch: Patch, opts?: BatchOpts) {
@@ -243,7 +283,7 @@ export class QuadStoreDataset implements Dataset {
   @notClosed.async
   get(key: string): Promise<Buffer | undefined> {
     return new Promise<Buffer | undefined>((resolve, reject) =>
-      this.store.db.get(key, { asBuffer: true }, (err, buf) => {
+      this.store.db.get(key, { valueEncoding: 'buffer' }, (err, buf) => {
         if (err) {
           if (err.message.startsWith('NotFound')) {
             resolve(undefined);
@@ -261,7 +301,7 @@ export class QuadStoreDataset implements Dataset {
   has(key: string): Promise<boolean> {
     return new Promise<boolean>((resolve, reject) => {
       const it = this.store.db.iterator({
-        gte: key, limit: 1, values: false, keyAsBuffer: false
+        gte: key, limit: 1, values: false, keyEncoding: 'utf8'
       });
       it.next((err, foundKey: string) => {
         if (err) {
@@ -278,15 +318,15 @@ export class QuadStoreDataset implements Dataset {
   }
 
   @notClosed.rx
-  read(range: AbstractIteratorOptions<string>): Observable<[string, Buffer]> {
+  read(range: AbstractIteratorOptions<string, Buffer>): Observable<[string, Buffer]> {
     return new Observable(subs => {
       const it = this.store.db.iterator({
-        ...range, keyAsBuffer: false, valueAsBuffer: true
+        ...range, keyEncoding: 'utf8', valueEncoding: 'buffer'
       });
       const pull = () => {
-        // In levelDown, calling next on an iterator that is already ended e.g.
-        // by closing the store, causes a truly evil exception which summarily
-        // kills the process
+        // Calling next on an iterator that is already ended e.g. by closing the
+        // store, may cause a truly evil exception which summarily kills the
+        // process
         if (this.closed) {
           const err = new MeldError('Clone has closed');
           subs.error(err);
@@ -338,15 +378,16 @@ export class QuadStoreDataset implements Dataset {
     return this.isClosed;
   }
 
-  private end(it: AbstractIterator<any, any>) {
-    it.end(err => err && this.events?.emit('error', err));
+  private end(it: AbstractIterator<any, any, any>) {
+    it.close().catch(err => err && this.events?.emit('error', err));
   }
 }
 
 class QuadStoreGraph implements Graph {
   constructor(
     readonly dataset: QuadStoreDataset,
-    readonly name: GraphName) {
+    readonly name: GraphName
+  ) {
   }
 
   get lock() {
@@ -381,8 +422,8 @@ class QuadStoreGraph implements Graph {
       try {
         const [algebra] = args;
         if (algebra != null && 'type' in algebra) {
-          const query = <Query<AllMetadataSupport>>await this.dataset.engine.query(algebra);
-          if (query.resultType === ResultType.BINDINGS || query.resultType === ResultType.QUADS)
+          const query = await this.dataset.engine.query(algebra);
+          if (query.resultType === 'bindings' || query.resultType === 'quads')
             return query.execute();
         } else {
           return this.match(...<Parameters<QuadSource['match']>>args);

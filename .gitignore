@@ -40,7 +40,7 @@ jspm_packages/
 .env
 
 # extensions folder
-ext/
+/ext/
 
 # site (documentation) folder & temporary file
 _site/

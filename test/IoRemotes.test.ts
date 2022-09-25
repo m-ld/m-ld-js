@@ -31,7 +31,7 @@ describe('Socket.io Remotes', () => {
   });
 
   beforeEach(() => {
-    domain = `${(expect.getState().currentTestName.replace(/\W/g, ''))}.m-ld.org`;
+    domain = `${(expect.getState().currentTestName?.replace(/\W/g, ''))}.m-ld.org`;
     remoteRemotes = new IoRemotes({
       '@id': 'remote-remotes', '@domain': domain, genesis: true,
       io: { uri: `http://localhost:${port}` }
@@ -44,6 +44,21 @@ describe('Socket.io Remotes', () => {
     // And check disconnection
     serverIo.disconnectSockets();
     await expect(comesAlive(remoteRemotes, null)).resolves.toBe(null);
+  });
+
+  test('closes on middleware error', async () => {
+    serverIo.use((socket, next) => {
+      if (socket.handshake.auth?.bork)
+        next(new Error('bork'));
+      else
+        next();
+    });
+    localRemotes = new IoRemotes({
+      '@id': 'local-remotes', '@domain': domain, genesis: false,
+      io: { uri: `http://localhost:${port}`, opts: { auth: { bork: true } } }
+    }, extensions);
+    await expect(lastValueFrom(localRemotes.operations))
+      .rejects.toThrowError('bork');
   });
 
   test('comes alive with remote clone', async () => {

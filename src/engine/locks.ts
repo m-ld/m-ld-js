@@ -1,4 +1,5 @@
-import { Future, settled } from './util';
+import { settled } from './util';
+import { Future } from './Future';
 
 interface Task {
   name: string;

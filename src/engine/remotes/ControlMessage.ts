@@ -2,7 +2,7 @@ import { GlobalClock, TreeClock } from '../clocks';
 import { MeldError, MeldErrorStatus } from '../MeldError';
 import { MeldRequestType, MeldResponseType } from '../../ns/m-ld';
 import { Attribution } from '../../api';
-import { MsgPack } from '../util';
+import * as MsgPack from '../msgPack';
 import { Buffer } from 'buffer';
 
 const inspect = Symbol.for('nodejs.util.inspect.custom');

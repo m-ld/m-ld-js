@@ -1,10 +1,11 @@
 import { TreeClock } from './clocks';
-import { Future, MsgPack } from './util';
+import * as MsgPack from './msgPack';
 import { Attribution, AuditOperation } from '../api';
 import { MeldError } from './MeldError';
 import { levels } from 'loglevel';
 import { MeldEncoder } from './MeldEncoding';
 import { BufferEncoding, EncodedOperation, OperationMessage } from './index';
+import { Future } from './Future';
 
 const inspect = Symbol.for('nodejs.util.inspect.custom');
 

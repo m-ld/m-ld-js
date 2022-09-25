@@ -1,7 +1,7 @@
 import { AppPrincipal, Attribution, MeldReadState, MeldTransportSecurity } from '../api';
 import { propertyValue } from '../index';
 import { MeldMessageType } from '../ns/m-ld';
-import { getIdLogger, MsgPack } from '../engine/util';
+import * as MsgPack from '../engine/msgPack';
 import { Logger } from 'loglevel';
 import { M_LD, XS } from '../ns';
 import { getRandomValues, subtle } from '../engine/local';
@@ -9,6 +9,7 @@ import { MeldError } from '../engine/MeldError';
 import { MeldConfig } from '../config';
 import { Iri } from '@m-ld/jsonld';
 import { Write } from '../jrql-support';
+import { getIdLogger } from '../engine/logging';
 
 /** @internal */
 const ALGO = {
@@ -17,11 +18,44 @@ const ALGO = {
 };
 
 /**
- * [[include:ext/acl.md]]
+ * This extension allows an app to encrypt and apply digital signatures to m-ld
+ * protocol network traffic.
  *
- * An instance of this class must be included as the `transportSecurity` member
- * of the `MeldApp` for an access-controlled domain. This is because transport
- * security must be available _before_ the clone can connect to the domain.
+ * For encryption, a secret key is included in the domain data (using {@link
+ * declareSecret}, or an equivalent write), and is required to decrypt all
+ * operations on the domain. The secret can only be obtained by joining the
+ * domain, which in turn requires that the requester is registered as a
+ * principal in the domain.
+ *
+ * Registering a principal requires that the user has a public/private key pair.
+ * The public key is registered in the domain using {@link registerPrincipal}
+ * (or an equivalent write), e.g.
+ *
+ * ```typescript
+ * const aliceKeys = generateKeyPairSync('rsa', {
+ *   modulusLength: 2048,
+ *   publicKeyEncoding: { type: 'spki', format: 'der' },
+ *   privateKeyEncoding: { type: 'pkcs1', format: 'pem' }
+ * });
+ * await clone.write(MeldAclTransportSecurity.registerPrincipal(
+ *   'https://alice.example/profile#me', aliceKeys.publicKey));
+ * ```
+ *
+ * To use transport security, **every** local clone in the access-controlled
+ * domain must be initialised with the following members of the `MeldApp`:
+ *
+ * - An instance of this class as the `transportSecurity` member. (This
+ * extension cannot be loaded dynamically because transport security must be
+ * available _before_ the clone can connect to the domain.)
+ * - An {@link AppPrincipal} object as the `principal`, that represents the
+ * current logged-in user. This object will sign data using
+ * [RSASSA-PKCS1-v1_5](https://datatracker.ietf.org/doc/html/rfc3447) on the
+ * extension's request. E.g.:
+ *
+ * ```typescript
+ * sign = (data: Buffer) => createSign('RSA-SHA256')
+ *   .update(data).sign(privateKey);
+ * ```
  *
  * @category Experimental
  * @experimental
@@ -71,12 +105,14 @@ export class MeldAclTransportSecurity implements MeldTransportSecurity {
   private readonly domainId: string;
   private readonly principal: AppPrincipal;
 
+  /** @internal */
   constructor(config: MeldConfig, principal: AppPrincipal) {
     this.log = getIdLogger(this.constructor, config['@id'], config.logLevel ?? 'info');
     this.domainId = `http://${config['@domain']}/`;
     this.principal = principal;
   }
 
+  /** @internal */
   async wire(
     data: Buffer,
     type: MeldMessageType,
@@ -97,6 +133,7 @@ export class MeldAclTransportSecurity implements MeldTransportSecurity {
     return data;
   }
 
+  /** @internal */
   async sign(data: Buffer, state: MeldReadState | null): Promise<Attribution> {
     if (this.principal?.sign == null) {
       throw new Error('No signature possible for request');
@@ -108,6 +145,7 @@ export class MeldAclTransportSecurity implements MeldTransportSecurity {
     }
   }
 
+  /** @internal */
   async verify(
     data: Buffer,
     attr: Attribution | null,

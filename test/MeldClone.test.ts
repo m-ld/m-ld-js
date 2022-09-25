@@ -2,21 +2,21 @@ import {
   any, clone, Construct, Describe, Group, MeldClone, MeldUpdate, Reference, Select, Subject, Update
 } from '../src';
 import { MockRemotes, testConfig } from './testClones';
-import { Future } from '../src/engine/util';
 import { blankRegex, genIdRegex } from './testUtil';
 import { SubjectGraph } from '../src/engine/SubjectGraph';
 import { DataFactory as RdfDataFactory, Quad } from 'rdf-data-factory';
 import { Factory as SparqlFactory } from 'sparqlalgebrajs';
 import { Binding } from 'quadstore';
 import { Subscription } from 'rxjs';
-import { MeldMemDown } from '../src/memdown/index';
+import { MemoryLevel } from 'memory-level';
+import { Future } from '../src/engine/Future';
 
 describe('MeldClone', () => {
   let api: MeldClone;
   let captureUpdate: Future<MeldUpdate>;
 
   beforeEach(async () => {
-    api = await clone(new MeldMemDown, MockRemotes, testConfig());
+    api = await clone(new MemoryLevel, MockRemotes, testConfig());
     captureUpdate = new Future;
   });
 
@@ -190,7 +190,7 @@ describe('MeldClone', () => {
 
     test('counts subject quads', async () => {
       await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
-      // memdown does not provide approximate size measurements, so infinity is expected
+      // MemoryLevel does not provide approximate size measurements, so infinity is expected
       await expect(api.countQuads(rdf.namedNode('http://test.m-ld.org/fred')))
         .resolves.toBe(Infinity);
     });

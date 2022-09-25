@@ -1,7 +1,7 @@
-import { Future } from '../engine/util';
 import * as Ably from 'ably';
-import { Subject, Observable, asyncScheduler, of, SchedulerLike } from 'rxjs';
+import { asyncScheduler, Observable, of, SchedulerLike, Subject } from 'rxjs';
 import { concatMap, delay } from 'rxjs/operators';
+import { Future } from '../engine/Future';
 
 export interface AblyTrafficConfig {
   /**

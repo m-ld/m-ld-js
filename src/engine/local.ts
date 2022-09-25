@@ -55,8 +55,11 @@ if (webcrypto == null)
   console.warn(`No Web Crypto implementation available. Please use a polyfill,
   or add @peculiar/webcrypto as a peer dependency in NodeJS 14 or lower`);
 
-type CryptoType = { subtle: SubtleCrypto, getRandomValues: Crypto['getRandomValues'] };
-export const { subtle, getRandomValues } = webcrypto as CryptoType;
+export const { subtle, getRandomValues } = {
+  subtle: webcrypto!.subtle,
+  // Value of "this" must be of type Crypto in Node 18+
+  getRandomValues: webcrypto!.getRandomValues.bind(webcrypto)
+};
 
 export const sha1: () => Hash = nodeCrypto ?
   () => nodeCrypto.createHash('sha1') :
