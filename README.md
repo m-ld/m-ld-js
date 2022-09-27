@@ -7,6 +7,12 @@
 </p>
 <pre></pre>
 
+[![Project Status: Active – The project has reached a stable, usable state and is being actively developed.](https://www.repostatus.org/badges/latest/active.svg)](https://www.repostatus.org/#active)
+[![GitHub Workflow Status](https://img.shields.io/github/workflow/status/m-ld/m-ld-js/Node.js%20CI)](https://github.com/m-ld/m-ld-js/actions)
+[![npm (tag)](https://img.shields.io/npm/v/@m-ld/m-ld)](https://www.npmjs.com/package/@m-ld/m-ld)
+[![Gitter](https://img.shields.io/gitter/room/m-ld/community)](https://gitter.im/m-ld/community)
+[![GitHub Discussions](https://img.shields.io/github/discussions/m-ld/m-ld-spec)](https://github.com/m-ld/m-ld-spec/discussions)
+
 # **m-ld** Javascript Engine
 **m-ld** is a decentralised live information sharing component with a JSON-based
 API.
@@ -60,8 +66,9 @@ This project uses semantic versioning. There are two main branches.
 Only the unit tests are included in the build. Prior to publish remember to run
 the `compliance` tests script ([ticket](https://github.com/m-ld/m-ld-js/issues/19)).
 
-`VERSION=? npm publish` builds the project, increments the version as specified
-with the VERSION variable (e.g. `patch`), pushes the code and publishes the
-package. *Ensure the repo is up-to-date and on* master *(release) or* edge
-*(pre-release)*
+`npx publish.sh ≪newversion≫` (from
+[m-ld-io-js-build](https://github.com/m-ld/m-ld-io-js-build)) builds the
+project, increments the version as specified (e.g. `patch`), pushes the code and
+publishes the package. *Ensure the repo is up-to-date and on* master *(release)
+or* edge *(pre-release)*.
 
