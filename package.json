@@ -38,7 +38,7 @@
   },
   "homepage": "https://js.m-ld.org/",
   "devDependencies": {
-    "@m-ld/io-js-build": "git+https://gsvarovsky@github.com/m-ld/m-ld-io-js-build.git",
+    "@m-ld/io-js-build": "^0.1.0",
     "@m-ld/typedoc-theme": "^0.1.4",
     "@peculiar/webcrypto": "^1.2.3",
     "@types/jest": "^29.0.1",
