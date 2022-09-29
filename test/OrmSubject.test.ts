@@ -109,7 +109,7 @@ describe('Object-RDF Mapping Subjects', () => {
 
     constructor(src: GraphSubject) {
       super(src);
-      this.initList(src, String, this.list, {
+      this.initSrcList(src, String, this.list, {
         get: i => this.list[i], set: (i, v) => this.list[i] = v
       });
     }

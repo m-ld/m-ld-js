@@ -3,15 +3,20 @@ import {
 } from '../jrql-support';
 import { GraphSubject } from '../api';
 import {
-  AtomType, castPropertyValue, ContainerType, normaliseValue, ValueConstructed
+  AtomType, castPropertyValue, JsProperty, JsType, normaliseValue, ValueConstructed
 } from '../js-support';
-import { isArray, isNaturalNumber } from '../engine/util';
+import { isNaturalNumber } from '../engine/util';
 import { asValues, compareValues, minimiseValue } from '../engine/jsonld';
 import { SubjectPropertyValues } from '../subjects';
 import { isPromise } from 'asynciterator';
 import { ConstructOrmSubject, OrmUpdating } from './OrmDomain';
+import { Iri } from '@m-ld/jsonld';
+import 'reflect-metadata';
 
-/** @internal */
+/**
+ * Runtime property access metadata for ORM subjects
+ * @see {@link OrmSubject}
+ */
 declare namespace PropertyAccess {
   interface Init<T, S> {
     /**
@@ -21,7 +26,7 @@ declare namespace PropertyAccess {
     init?: ValueConstructed<T, S>;
   }
 
-  interface Orm {
+  interface Orm<T, S> extends Init<T, S> {
     /** Used to construct a new ORM subject from state */
     construct: ConstructOrmSubject<OrmSubject>;
     /** The current updating ORM state, used to initialise the subject */
@@ -29,50 +34,66 @@ declare namespace PropertyAccess {
   }
 
   interface GetSet<T, S> extends Init<T, S> {
+    /** Gets the property value from the ORM subject as a JSON-LD value */
     get: () => ValueConstructed<T, S>,
+    /** Sets the property value in the ORM subject from a JSON-LD value */
     set: (v: ValueConstructed<T, S>) => unknown | Promise<unknown>
   }
 
-  interface Local<O extends OrmSubject, T, S> extends Init<T, S> {
-    /** The local property name */
-    local: keyof O;
-  }
+  type Any<T = unknown, S = unknown> = Init<T, S> | Orm<T, S> | GetSet<T, S>;
+}
 
-  /** The graph property is the same as the local property */
-  type This<T, S> = Init<T, S> | (Init<T, S> & Orm);
+/** @internal */
+const propertyMetadataKey = Symbol('__property');
+/** @internal */
+const propertiesMetadataKey = Symbol('__properties');
 
-  /** The graph property is different from the local property */
-  type Graph<O extends OrmSubject, T, S> = GetSet<T, S> | Local<O, T, S> |
-    (Local<O, T, S> & Orm);
-
-  type Any<O extends OrmSubject, T, S> = This<T, S> | Graph<O, T, S>;
+/**
+ * Shorthand annotation to declare an ORM subject field to be mapped to a
+ * JSON-LD graph property (an edge).
+ * @param type the JSON-LD type of the graph subject property
+ * @param name the JSON-LD property. If undefined, the field name will be used
+ */
+export function property(type: JsType<any>, name?: Iri): PropertyDecorator {
+  return (target, property) => {
+    const local = property.toString();
+    Reflect.defineMetadata(
+      propertyMetadataKey,
+      new JsProperty(name ?? local, type),
+      target, property);
+    Reflect.defineMetadata(
+      propertiesMetadataKey,
+      [...Reflect.getMetadata(propertiesMetadataKey, target) ?? [], local],
+      target);
+  };
 }
 
 /**
- * An Object-Resource Mapping (ORM) Subject is a Javascript class used to
- * represent graph nodes in a **m-ld** domain.
+ * An {@link OrmDomain Object-Resource Mapping (ORM)} Subject is a Javascript
+ * class used to reflect graph nodes in a **m-ld** domain.
  *
  * The constructor of an ORM subject should accept a {@link GraphSubject} from
  * which derive its initial state. In the case of a new subject, which does not
  * yet exist in the domain, this will only contain an `@id` (i.e. it's a {@link
- * Reference}), so the constructor may also accept other values for initialising
+  * Reference}), so the constructor may also accept other values for initialising
  * properties.
  *
  * Local properties properties are then mapped to graph properties (edges) by
- * calling {@link initSrcProperty} in the constructor. This ensures that any
+ * calling {@link initSrcProperties} in the constructor. This ensures that any
  * local changes to the object property values are tracked, and can be committed
  * to the graph later using {@link commit} (usually called for a batch of
  * subjects from {@link OrmDomain.commit}). E.g.
  *
- * ```
+ * ```typescript
  * class Flintstone extends OrmSubject {
+ *   @property(JsType.for(String))
  *   name: string;
+ *   @property(JsType.for(Optional, Number))
  *   height?: number;
  *
  *   constructor(src: GraphSubject) {
  *     super(src);
- *     this.initSrcProperty(src, 'name', String);
- *     this.initSrcProperty(src, 'height', [Optional, Number]);
+ *     this.initSrcProperties(src);
  *   }
  * }
  * ```
@@ -80,8 +101,6 @@ declare namespace PropertyAccess {
  * Note that an ORM subject constructor should only ever be called by the passed
  * `construct` callback of {@link OrmUpdating.get}, so that the subject is
  * correctly registered with the ORM domain.
- *
- *
  *
  * @see {@link OrmDomain}
  * @experimental
@@ -91,6 +110,9 @@ export abstract class OrmSubject {
   readonly src: Subject & Reference;
   private readonly propertiesInState = new Map<string, any[]>();
   private _updated: Promise<this> | this = this;
+
+  /** Utility property definition for the JSON-LD `@type` key */
+  static '@type' = new JsProperty('@type', JsType.for(Array, String));
 
   protected constructor(src: GraphSubject) {
     this.src = { '@id': src['@id'] };
@@ -108,63 +130,58 @@ export abstract class OrmSubject {
 
   /**
    * Call from a subclass constructor to initialise the mapping between the
-   * graph and this subject's properties.
+   * graph and this subject's properties, which have been declared with the
+   * {@link property} annotation in Typescript. Additional runtime property
+   * access metadata can be provided in the `access` parameter.
    *
-   * @param src the initial graph subject – only used for its property value
-   * @param property the property IRI in context
-   * @param type the expected type of the property. If the type in the graph
-   * cannot be cast to this type, {@link updated} will be rejected.
-   * @param access access to the subclass property.
-   * @public because the structure of this ORM subject may not necessarily
-   * reflect the graph representation – for example, an aggregation member may
-   * represent data from its parent graph subject.
+   * @param src the initial graph subject – used for its property values
+   * @param access custom property access information
    */
-  initSrcProperty<P extends string, T, S>(
+  initSrcProperties(
     src: GraphSubject,
-    property: string,
-    type: AtomType<T> | [ContainerType<T>, AtomType<S>],
-    access: PropertyAccess.Graph<this, T, S>
-  ): void;
+    access: { [local: string]: PropertyAccess.Any } = {}
+  ) {
+    for (let local of Reflect.getMetadata(propertiesMetadataKey, this)) {
+      const property: JsProperty<any> =
+        Reflect.getMetadata(propertyMetadataKey, this, local);
+      if (property != null && !this.propertyInitialised(property))
+        this.initSrcProperty(src, local, property, access[local]);
+    }
+  }
 
   /**
    * Call from a subclass constructor to initialise the mapping between the
-   * graph and this subject's properties.
+   * graph and this subject's property. This method is for use in Javascript,
+   * and in scenarios where the structure of this ORM subject does not reflect
+   * the graph representation – for example, an aggregation member reflecting
+   * data from its parent graph subject.
    *
    * @param src the initial graph subject – only used for its property value
-   * @param property the property IRI in context
-   * @param type the expected type of the property. If the type in the graph
-   * cannot be cast to this type, {@link updated} will be rejected.
-   * @param access access to the subclass property.
-   * @public because the structure of this ORM subject may not necessarily
-   * reflect the graph representation – for example, an aggregation member may
-   * represent data from its parent graph subject.
+   * @param local the local property name. If the type in the graph
+   * cannot be cast to the property type, {@link updated} will be rejected.
+   * @param property the property definition
+   * @param access custom property access information
+   * @throws {RangeError} if the property has already been initialised
    */
   initSrcProperty<T, S>(
     src: GraphSubject,
-    property: string & keyof this,
-    type: AtomType<T> | [ContainerType<T>, AtomType<S>],
-    access?: PropertyAccess.This<T, S>
-  ): void;
-
-  initSrcProperty<T, S>(
-    src: GraphSubject,
-    property: string,
-    type: AtomType<T> | [ContainerType<T>, AtomType<S>],
-    access: PropertyAccess.Any<this, T, S> = {}
+    local: string & keyof this,
+    property: JsProperty<T, S>,
+    access?: PropertyAccess.Any<T, S>
   ) {
-    const [topType, subType] = isArray(type) ? type : [type];
-    const { get, set } = this.resolveAccess(property, topType, access);
-    Object.defineProperty(this.src, property, {
+    if (this.propertyInitialised(property))
+      throw new RangeError('Property already initialised');
+    const { get, set } = this.resolveAccess(local, property, access);
+    Object.defineProperty(this.src, property.name, {
       get,
       set: v => {
         const srcValues = asValues(v);
         if (srcValues.length > 0)
-          this.propertiesInState.set(property, srcValues);
+          this.propertiesInState.set(property.name, srcValues);
         else
-          this.propertiesInState.delete(property);
+          this.propertiesInState.delete(property.name);
         try {
-          const value = castPropertyValue(v, topType, subType, property);
-          this.setUpdated(set(value));
+          this.setUpdated(set(property.type.cast(v)));
         } catch (e) {
           this.setUpdated(Promise.reject(e));
         }
@@ -172,11 +189,15 @@ export abstract class OrmSubject {
       enumerable: true, // JSON-able
       configurable: false // Cannot delete the property
     });
-    if (access.init == null || property in src) {
-      this.src[property] = src[property]; // Invokes the setter
+    if (access?.init == null || property.name in src) {
+      this.src[property.name] = src[property.name]; // Invokes the setter
     } else {
       this.setUpdated(set(access.init));
     }
+  }
+
+  private propertyInitialised(property: JsProperty<any, any>) {
+    return property.name in this.src;
   }
 
   /**
@@ -190,7 +211,7 @@ export abstract class OrmSubject {
    * 2. numeric indexes, which will only be used to query for existence
    * @param access will be called to get & set JSON-LD values for items in the list
    */
-  initList<T>(
+  initSrcList<T>(
     src: GraphSubject,
     type: AtomType<T>,
     list: { length: number, readonly [i: number]: unknown },
@@ -248,7 +269,8 @@ export abstract class OrmSubject {
     ])) {
       const olds = this.propertiesInState.get(property) ?? [];
       if (property !== '@list') {
-        const { deletes, inserts } = new SubjectPropertyValues(this.src, property).diff(olds);
+        const { deletes, inserts } =
+          new SubjectPropertyValues(this.src, property).diff(olds);
         if (deletes.length > 0)
           mod('@delete')[property] = deletes.map(minimiseValue);
         if (inserts.length > 0)
@@ -285,16 +307,16 @@ export abstract class OrmSubject {
   }
 
   private resolveAccess<T, S>(
-    property: string,
-    type: AtomType<T> | ContainerType<T>,
-    access: PropertyAccess.Any<this, T, S>
+    local: string & keyof this,
+    property: JsProperty<T, S>,
+    access?: PropertyAccess.Any<T, S>
   ): PropertyAccess.GetSet<T, S> {
-    if ('get' in access) {
+    if (access != null && 'get' in access) {
       return access;
     } else {
-      const local = 'local' in access ? access.local : <keyof this>property;
       // TODO: type-assert that this[local] is ValueConstructed<T, S>
-      if ('construct' in access) {
+      if (access != null && 'construct' in access) {
+        const [type] = property.type.type;
         if (type !== Subject && type !== Array)
           throw new TypeError('ORM subjects must be constructed from Subjects');
         // Subjects and arrays of subjects can be automatically get/set

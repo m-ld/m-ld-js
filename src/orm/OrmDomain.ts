@@ -88,11 +88,11 @@ export interface OrmUpdating extends ReadLatchable {
  * The experimental Object-Resource Mapping (ORM) layer is a set of constructs
  * to support idiomatic use of object-oriented Javascript with the core **m-ld**
  * API. Instead of programming with reads and writes to the domain graph, you
- * manipulate Javascript objects that mirror the domain.
+ * manipulate Javascript objects that reflect the domain.
  *
  * > 🧪 ORM is currently used internally in extensions and has not yet been
- * tested in an application. If it sounds like just what you're looking for to
- * help you with your application, please [let us know](https://m-ld.org/hello)!
+ * tested in an application. If it sounds just like what you're looking to do
+ * in your application, please [let us know](https://m-ld.org/hello)!
  *
  * An ORM domain object is a top-level container for a mutable graph of
  * {@link OrmSubject "subjects"} in-memory, where subjects are instances of
@@ -264,8 +264,8 @@ export class OrmDomain {
   /**
    * Allows the caller to wait for any active {@link OrmUpdating updating} state
    * to go out of scope, so that the app is free to mutate ORM subjects without
-   * risk of faults. This method should be used to protect any code that is
-   * called asynchronously, such as an event handler in a user interface.
+   * risk of faults. This method can be used to protect any code that is called
+   * asynchronously, such as an event handler in a user interface.
    */
   upToDate(): Promise<unknown> {
     return firstValueFrom(this._updating.pipe(filter(updating => updating == null)));

@@ -7,6 +7,8 @@ import { Describe, Reference, Subject } from '../jrql-support';
 import { M_LD } from '../ns';
 import { MeldError } from '../engine/MeldError';
 import { Iri } from '@m-ld/jsonld';
+import { JsType } from '../js-support';
+import { property } from '../orm/OrmSubject';
 
 /**
  * This extension allows an app to declare that certain security principals
@@ -140,13 +142,14 @@ export class WritePermitted extends OrmDomain implements StateManaged<MeldExtens
 
 /** @internal */
 export class WritePermission extends OrmSubject {
+  @property(JsType.for(Array, Subject), M_LD.controlledShape)
   controlledShapes: Shape[];
   domain: OrmDomain;
 
   constructor(src: GraphSubject, readonly orm: OrmUpdating) {
     super(src);
-    this.initSrcProperty(src, M_LD.controlledShape, [Array, Subject], {
-      local: 'controlledShapes', orm, construct: Shape.from
+    this.initSrcProperties(src, {
+      controlledShapes: { orm, construct: Shape.from }
     });
     this.domain = orm.domain;
   }
@@ -178,13 +181,16 @@ export class WritePermission extends OrmSubject {
 
 /** @internal */
 class Principal extends OrmSubject {
+  @property(JsType.for(Array, Reference), M_LD.hasPermission)
   permissions: Set<Iri>;
 
   constructor(src: GraphSubject) {
     super(src);
-    this.initSrcProperty(src, M_LD.hasPermission, [Array, Reference], {
-      get: () => [...this.permissions].map(id => ({ '@id': id })),
-      set: v => this.permissions = new Set(v.map(ref => ref['@id']))
+    this.initSrcProperties(src, {
+      permissions: {
+        get: () => [...this.permissions].map(id => ({ '@id': id })),
+        set: (v: Reference[]) => this.permissions = new Set(v.map(ref => ref['@id']))
+      }
     });
   }
 }

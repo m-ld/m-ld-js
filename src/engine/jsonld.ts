@@ -98,8 +98,11 @@ export function canonicalDouble(value: number) {
 }
 
 export function minimiseValue(v: any) {
-  if (isObject(v) && ('@id' in v) && Object.keys(v).length > 1)
-    return { '@id': (v as { '@id': string })['@id'] };
-  else
-    return v;
+  if (isObject(v)) {
+    if (('@id' in v) && Object.keys(v).length > 1)
+      return { '@id': (v as { '@id': string })['@id'] };
+    else if (('@vocab' in v) && Object.keys(v).length > 1)
+      return { '@vocab': (v as { '@vocab': string })['@vocab'] };
+  }
+  return v;
 }

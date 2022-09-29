@@ -1,7 +1,7 @@
-import { OrmSubject } from './OrmSubject';
+import { OrmSubject, property } from './OrmSubject';
 import { GraphSubject } from '../api';
 import { M_LD } from '../ns';
-import { Optional, propertyValue } from '../js-support';
+import { JsAtomType, JsType, noMerge, Optional } from '../js-support';
 import { OrmUpdating } from './OrmDomain';
 import { Subject } from '../jrql-support';
 import { Iri } from '@m-ld/jsonld';
@@ -107,9 +107,9 @@ export class ExtensionSubject<T> extends OrmSubject {
   ): Promise<T> {
     // Look for a type that is a module
     const allTypes = await orm.latch(state => Promise.all(
-      propertyValue(src, '@type', Array, String).map(t => state.get(t))));
+      OrmSubject['@type'].value(src).map(t => state.get(t))));
     const moduleTypes = allTypes.filter((src): src is GraphSubject => src != null &&
-      propertyValue(src, '@type', Array, String).includes(M_LD.JS.commonJsExport));
+      OrmSubject['@type'].value(src).includes(M_LD.JS.commonJsExport));
     if (moduleTypes.length === 1)
       return (await orm.get(moduleTypes[0], src =>
         new ExtensionSubject<T>({ src, orm }))).instance(src);
@@ -117,10 +117,13 @@ export class ExtensionSubject<T> extends OrmSubject {
   }
 
   /** @internal */
+  @property(JsType.for(Array, String), '@type')
   moduleType: string[];
   /** @internal */
+  @property(JsType.for(Optional, String), M_LD.JS.require)
   cjsModule: string | undefined;
   /** @internal */
+  @property(new JsAtomType(String, noMerge), M_LD.JS.className)
   className: string;
 
   private readonly orm: OrmUpdating;
@@ -137,11 +140,9 @@ export class ExtensionSubject<T> extends OrmSubject {
   constructor({ src, orm }: ExtensionInstanceParams) {
     super(src);
     this.orm = orm;
-    this.initSrcProperty(src, '@type', [Array, String], { local: 'moduleType' });
-    this.initSrcProperty(src, M_LD.JS.require, [Optional, String], { local: 'cjsModule' });
-    this.initSrcProperty(src, M_LD.JS.className, String, { local: 'className' });
     // Caution: no async properties are allowed here, so that instance() can be
     // called synchronously
+    this.initSrcProperties(src);
   }
 
   /**

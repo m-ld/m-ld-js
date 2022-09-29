@@ -5,6 +5,8 @@ import { ExtensionSubject, OrmSubject, OrmUpdating } from '../orm';
 import { Iri } from '@m-ld/jsonld';
 import { SubjectGraph } from '../engine/SubjectGraph';
 import { array } from '../util';
+import { JsAtomType, JsType, noMerge } from '../js-support';
+import { property } from '../orm/OrmSubject';
 
 /**
  * Shapes are used to define patterns of data, which can be used to match or
@@ -19,6 +21,8 @@ import { array } from '../util';
  * @experimental
  */
 export abstract class Shape extends OrmSubject {
+  /** @internal */
+  @property(JsType.for(Set, VocabReference), SH.targetClass)
   targetClass: Set<VocabReference>;
 
   /** @see https://www.w3.org/TR/shacl/#terminology */
@@ -27,14 +31,6 @@ export abstract class Shape extends OrmSubject {
       return new PropertyShape(src);
     else
       return ExtensionSubject.instance({ src, orm });
-  }
-
-  protected constructor(src: GraphSubject, targetClass?: Set<VocabReference>) {
-    super(src);
-    this.initSrcProperty(src, SH.targetClass, [Set, VocabReference], {
-      local: 'targetClass',
-      init: targetClass
-    });
   }
 
   /**
@@ -52,7 +48,11 @@ export abstract class Shape extends OrmSubject {
  * @experimental
  */
 export class PropertyShape extends Shape {
+  /** @internal */
+  @property(new JsAtomType(VocabReference, noMerge), SH.path)
   path: Iri; // | List etc.
+  /** @internal */
+  @property(JsType.for(Array, String), SH.name)
   name: string[];
 
   static declare = (spec: Iri | {
@@ -73,15 +73,15 @@ export class PropertyShape extends Shape {
     src: GraphSubject,
     init?: Partial<PropertyShape>
   ) {
-    super(src, init?.targetClass);
-    this.initSrcProperty(src, SH.path, VocabReference, {
-      get: () => ({ '@vocab': this.path }),
-      set: v => this.path = v['@vocab'],
-      init: init?.path ? { '@vocab': init.path } : undefined
-    });
-    this.initSrcProperty(src, SH.name, [Array, String], {
-      local: 'name',
-      init: init?.name
+    super(src);
+    this.initSrcProperties(src, {
+      path: {
+        get: () => ({ '@vocab': this.path }),
+        set: (v: VocabReference) => this.path = v['@vocab'],
+        init: init?.path ? { '@vocab': init.path } : undefined
+      },
+      name: { init: init?.name },
+      targetClass: { init: init?.targetClass }
     });
   }
 

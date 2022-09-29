@@ -13,6 +13,8 @@ import { asSubjectUpdates } from '../updates';
 import { Logger } from 'loglevel';
 import { getIdLogger } from '../engine/logging';
 import { MeldApp, MeldConfig } from '../config';
+import { JsType } from '../js-support';
+import { property } from '../orm/OrmSubject';
 
 /**
  * This extension allows an app to require that certain changes, such as changes
@@ -173,7 +175,9 @@ export class Statutory extends OrmDomain implements StateManaged<MeldExtensions>
  */
 export class Statute extends OrmSubject implements MeldConstraint, AgreementCondition {
   /** shapes describing statutory graph content */
+  @property(JsType.for(Array, Subject), M_LD.statutoryShape)
   statutoryShapes: Shape[];
+  @property(JsType.for(Array, Subject), M_LD.sufficientCondition)
   sufficientConditions: ShapeAgreementCondition[];
 
   constructor(
@@ -182,11 +186,9 @@ export class Statute extends OrmSubject implements MeldConstraint, AgreementCond
     prover: (src: GraphSubject) => Promise<ShapeAgreementCondition & OrmSubject>
   ) {
     super(src);
-    this.initSrcProperty(src, M_LD.statutoryShape, [Array, Subject], {
-      local: 'statutoryShapes', orm, construct: Shape.from
-    });
-    this.initSrcProperty(src, M_LD.sufficientCondition, [Array, Subject], {
-      local: 'sufficientConditions', orm, construct: prover
+    this.initSrcProperties(src, {
+      statutoryShapes: { orm, construct: Shape.from },
+      sufficientConditions: { orm, construct: prover }
     });
   }
 
@@ -353,12 +355,13 @@ export class HasAuthority extends OrmSubject implements ShapeAgreementCondition 
 
 /** @internal */
 class Principal extends OrmSubject {
+  @property(JsType.for(Array, Subject), M_LD.hasAuthority)
   hasAuthority: Shape[];
 
   constructor(src: GraphSubject, orm: OrmUpdating) {
     super(src);
-    this.initSrcProperty(src, M_LD.hasAuthority, [Array, Subject], {
-      local: 'hasAuthority', orm, construct: Shape.from
+    this.initSrcProperties(src, {
+      hasAuthority: { orm, construct: Shape.from }
     });
   }
 }
