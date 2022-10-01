@@ -1,5 +1,4 @@
-import { Binding } from 'quadstore';
-import { Graph } from '.';
+import { Binding, Graph } from '.';
 import { blank, GraphSubject } from '../../api';
 import { Atom, Result, Subject, Value, VocabReference } from '../../jrql-support';
 import { ActiveContext, compactIri } from '../jsonld';

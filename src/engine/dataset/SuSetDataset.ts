@@ -286,8 +286,8 @@ export class SuSetDataset extends MeldEncoder {
   }): Promise<PatchResult<OperationMessage | null>> {
     const commitTids = await this.tidsStore.commit(txn.tidPatch);
     this.log.debug(`patch ${txn.journaling.appendEntries.map(e => e.operation.time)}:
-    deletes: ${[...txn.assertions.deletes].map(tripleIndexKey)}
-    inserts: ${[...txn.assertions.inserts].map(tripleIndexKey)}`);
+    deletes: ${[...txn.assertions.deletes].map(triple => tripleIndexKey(triple))}
+    inserts: ${[...txn.assertions.inserts].map(triple => tripleIndexKey(triple))}`);
     return {
       patch: new PatchQuads(txn.assertions).append(txn.entailments),
       kvps: batch => {

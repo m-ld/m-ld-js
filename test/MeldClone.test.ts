@@ -6,7 +6,7 @@ import { blankRegex, genIdRegex } from './testUtil';
 import { SubjectGraph } from '../src/engine/SubjectGraph';
 import { DataFactory as RdfDataFactory, Quad } from 'rdf-data-factory';
 import { Factory as SparqlFactory } from 'sparqlalgebrajs';
-import { Binding } from 'quadstore';
+import { Binding } from '../src/engine/dataset';
 import { Subscription } from 'rxjs';
 import { MemoryLevel } from 'memory-level';
 import { Future } from '../src/engine/Future';

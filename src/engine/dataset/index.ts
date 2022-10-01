@@ -1,8 +1,8 @@
 import {
-  Bindings, DataFactory, DefaultGraph, NamedNode, Quad, Quad_Object, Quad_Predicate, Quad_Subject,
-  QuadSet, QuadSource, RdfFactory, toBinding
+  Bindings, DataFactory, DefaultGraph, getTermValue, NamedNode, Quad, Quad_Object, Quad_Predicate,
+  Quad_Subject, QuadSet, QuadSource, RdfFactory, toBinding
 } from '../quads';
-import { BatchOpts, Binding, Quadstore } from 'quadstore';
+import { BatchOpts, Binding, Prefixes, Quadstore } from 'quadstore';
 import {
   AbstractChainedBatch, AbstractIterator, AbstractIteratorOptions, AbstractLevel
 } from 'abstract-level';
@@ -21,7 +21,11 @@ import { BaseStream, CountableRdf, QueryableRdfSource } from '../../rdfjs-suppor
 import { uuid } from '../../util';
 import { Stopwatch } from '../Stopwatch';
 import { check } from '../check';
+import { Term } from 'rdf-js';
 import type EventEmitter = require('events');
+
+/** Utility interfaces shared with quadstore */
+export { Binding, Prefixes };
 
 /**
  * Atomically-applied patch to a quad-store.
@@ -62,12 +66,17 @@ export interface KvpStore {
   readonly lock: LockManager<'state' | 'txn' | string>;
 }
 
+export interface TripleKeyStore extends KvpStore {
+  /** @returns the compacted storable value of the term, if applicable */
+  storeValue: getTermValue;
+}
+
 /**
  * Writeable dataset. Transactions are atomically and serially applied.
  * Note that the patch created by a transaction can span Graphs - each
  * Quad in the patch will have a graph property.
  */
-export interface Dataset extends KvpStore {
+export interface Dataset extends TripleKeyStore {
   readonly location: string;
   readonly rdf: Required<DataFactory>;
 
@@ -149,7 +158,7 @@ export function baseVocab(base: Iri) {
  * Context for Quadstore dataset storage. Mix in with a domain context to
  * optimise (minimise) both control and user content.
  */
-export const STORAGE_CONTEXT: Context = {
+const STORAGE_CONTEXT: Context = {
   jrql: JRQL.$base,
   mld: M_LD.$base,
   xs: XS.$base,
@@ -161,7 +170,8 @@ export class QuadStoreDataset implements Dataset {
   /* readonly */
   store: Quadstore;
   engine: Engine;
-  private readonly activeCtx?: Promise<ActiveContext>;
+  prefixes: Prefixes;
+  private readonly activeCtx: Promise<ActiveContext>;
   readonly lock = new LockManager;
   private isClosed: boolean = false;
   readonly base: Iri | undefined;
@@ -185,6 +195,10 @@ export class QuadStoreDataset implements Dataset {
     sw?.next('active-context');
     const activeCtx = await this.activeCtx;
     sw?.next('open-store');
+    this.prefixes = {
+      expandTerm: term => expandTerm(term, activeCtx),
+      compactIri: iri => compactIri(iri, activeCtx)
+    };
     this.store = new Quadstore({
       backend: this.backend,
       dataFactory: new RdfDataFactory(),
@@ -193,10 +207,7 @@ export class QuadStoreDataset implements Dataset {
         ['graph', 'object', 'subject', 'predicate'],
         ['graph', 'predicate', 'object', 'subject']
       ],
-      prefixes: activeCtx == null ? undefined : {
-        expandTerm: term => expandTerm(term, activeCtx),
-        compactIri: iri => compactIri(iri, activeCtx)
-      }
+      prefixes: this.prefixes
     });
     this.engine = new Engine(this.store);
     await this.store.open();
@@ -246,6 +257,12 @@ export class QuadStoreDataset implements Dataset {
       this.events?.emit('error', err);
       throw err;
     });
+  }
+
+  storeValue(term: Term): string {
+    if (term.termType === 'NamedNode')
+      return this.prefixes.compactIri(term.value);
+    return term.value ?? '';
   }
 
   private async applyKvps(kvps: Kvps) {
@@ -447,7 +464,7 @@ class QuadStoreGraph implements Graph {
     return this.dataset.engine.queryBoolean(algebra);
   }
 
-  skolem = () => this.dataset.rdf.namedNode(
+  skolem = () => this.namedNode(
     new URL(`/.well-known/genid/${uuid()}`, this.dataset.base).href);
   namedNode = this.dataset.rdf.namedNode;
   // noinspection JSUnusedGlobalSymbols
