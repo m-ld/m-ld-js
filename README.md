@@ -2,7 +2,13 @@
 <!--suppress HtmlDeprecatedAttribute -->
 <p align="center">
   <a href="https://m-ld.org/">
-    <img alt="m-ld" src="https://m-ld.org/m-ld.svg" width="300em" />
+    <picture>
+      <!--suppress HtmlUnknownTarget -->
+      <source media="(prefers-color-scheme: light)" srcset="https://m-ld.org/m-ld.svg"/>
+      <!--suppress HtmlUnknownTarget -->
+      <source media="(prefers-color-scheme: dark)" srcset="https://m-ld.org/m-ld.inverse.svg"/>
+      <img alt="m-ld" src="https://m-ld.org/m-ld.svg" width="300em" />
+    </picture>
   </a>
 </p>
 <pre></pre>
