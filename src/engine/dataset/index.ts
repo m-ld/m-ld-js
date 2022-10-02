@@ -2,7 +2,7 @@ import {
   Bindings, DataFactory, DefaultGraph, getTermValue, NamedNode, Quad, Quad_Object, Quad_Predicate,
   Quad_Subject, QuadSet, QuadSource, RdfFactory, toBinding
 } from '../quads';
-import { BatchOpts, Binding, Prefixes, Quadstore } from 'quadstore';
+import { BatchOpts, Prefixes, Quadstore } from 'quadstore';
 import {
   AbstractChainedBatch, AbstractIterator, AbstractIteratorOptions, AbstractLevel
 } from 'abstract-level';
@@ -17,7 +17,7 @@ import { JRQL, M_LD, RDF, XS } from '../../ns';
 import { AsyncIterator, empty, EmptyIterator, SimpleTransformIterator } from 'asynciterator';
 import { MutableOperation } from '../ops';
 import { MeldError } from '../MeldError';
-import { BaseStream, CountableRdf, QueryableRdfSource } from '../../rdfjs-support';
+import { BaseStream, Binding, CountableRdf, QueryableRdfSource } from '../../rdfjs-support';
 import { uuid } from '../../util';
 import { Stopwatch } from '../Stopwatch';
 import { check } from '../check';
@@ -25,7 +25,7 @@ import { Term } from 'rdf-js';
 import type EventEmitter = require('events');
 
 /** Utility interfaces shared with quadstore */
-export { Binding, Prefixes };
+export { Prefixes };
 
 /**
  * Atomically-applied patch to a quad-store.

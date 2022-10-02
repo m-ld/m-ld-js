@@ -1,5 +1,4 @@
 import { Iri } from '@m-ld/jsonld';
-import { Binding } from '.';
 import { anyName, blank, GraphSubject } from '../../api';
 import {
   isList, isPropertyObject, isSet, isSubjectObject, Subject, SubjectProperty, SubjectPropertyObject,
@@ -10,9 +9,10 @@ import { array } from '../../util';
 import { addPropertyObject, listItems } from '../jrql-util';
 import { ActiveContext, compactIri } from '../jsonld';
 import { jrqlProperty, jrqlValue } from '../SubjectGraph';
+import { Binding } from '../../rdfjs-support';
 
 export class ConstructTemplate {
-  private templates: SubjectTemplate[];
+  private readonly templates: SubjectTemplate[];
 
   constructor(construct: Subject | Subject[], ctx: ActiveContext) {
     this.templates = array(construct).map(c => new SubjectTemplate(c, ctx));

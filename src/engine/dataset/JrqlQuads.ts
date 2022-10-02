@@ -1,4 +1,4 @@
-import { Binding, Graph } from '.';
+import { Graph } from '.';
 import { blank, GraphSubject } from '../../api';
 import { Atom, Result, Subject, Value, VocabReference } from '../../jrql-support';
 import { ActiveContext, compactIri } from '../jsonld';
@@ -8,6 +8,7 @@ import { SubjectGraph } from '../SubjectGraph';
 import { JrqlMode, toIndexDataUrl } from '../jrql-util';
 import { isArray, mapObject } from '../util';
 import { SubjectQuads } from '../SubjectQuads';
+import { Binding } from '../../rdfjs-support';
 
 export interface JrqlQuadsOptions {
   mode: JrqlMode;
