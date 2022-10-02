@@ -1,3 +1,5 @@
+// noinspection JSUnusedGlobalSymbols
+
 /**
  * This declaration file is stored as .ts so that it is emitted
  */

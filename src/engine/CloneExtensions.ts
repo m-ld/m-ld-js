@@ -102,7 +102,7 @@ export class CloneExtensions extends OrmDomain implements StateManaged<MeldExten
       return new class extends OrmSubject {
         constructor(src: GraphSubject) {
           super(src);
-          this.initList(src, Subject, extensionSubjects, {
+          this.initSrcList(src, Subject, extensionSubjects, {
             get: i => extensionSubjects[i].src,
             set: async (i, v: GraphSubject) => extensionSubjects[i] = await orm.get(v,
               src => new ManagedExtensionSubject({ src, orm }))

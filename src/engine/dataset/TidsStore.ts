@@ -2,11 +2,11 @@ import { Triple, tripleIndexKey, TripleMap } from '../quads';
 import { MutableOperation, Operation } from '../ops';
 import { UUID } from '../MeldEncoding';
 import { IndexMatch, IndexSet } from '../indices';
-import { Kvps, KvpStore } from './index';
+import { Kvps, TripleKeyStore } from './index';
 import * as MsgPack from '../msgPack';
 
 /**
- * Persists mappings from triples to transaction IDs (TIDs) in a {@link KvpStore}.
+ * Persists mappings from triples to transaction IDs (TIDs) in a {@link TripleKeyStore}.
  * Existing mappings are cached, so it's important not to have two of these working against
  * the same underlying store.
  */
@@ -14,7 +14,7 @@ export class TidsStore {
   private cache: TripleMap<UUID[]> = new TripleMap();
 
   constructor(
-    private store: KvpStore) {
+    private store: TripleKeyStore) {
   }
 
   /**
@@ -42,7 +42,7 @@ export class TidsStore {
   async findTripleTids(triple: Triple): Promise<UUID[]> {
     let tids = this.cache.get(triple);
     if (tids == null) { // Not found in cache
-      const encoded = await this.store.get(tripleTidsKey(triple));
+      const encoded = await this.store.get(this.tripleTidsKey(triple));
       tids = encoded != null ? MsgPack.decode(encoded) as UUID[] : [];
       this.cache.set(triple, tids);
     }
@@ -60,16 +60,16 @@ export class TidsStore {
     return batch => {
       for (let [triple, tids] of affected) {
         if (tids.size)
-          batch.put(tripleTidsKey(triple), MsgPack.encode([...tids]));
+          batch.put(this.tripleTidsKey(triple), MsgPack.encode([...tids]));
         else
-          batch.del(tripleTidsKey(triple));
+          batch.del(this.tripleTidsKey(triple));
       }
     };
   }
-}
 
-function tripleTidsKey(triple: Triple) {
-  return `_qs:ttd:${tripleIndexKey(triple)}`;
+  tripleTidsKey(triple: Triple) {
+    return `_qs:ttd:${tripleIndexKey(triple, term => this.store.storeValue(term))}`;
+  }
 }
 
 export class PatchTids extends MutableOperation<[Triple, UUID]> {

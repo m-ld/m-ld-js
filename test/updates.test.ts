@@ -1,7 +1,7 @@
 import { mockFn } from 'jest-mock-extended';
 import {
-  asSubjectUpdates, includesValue, includeValues, Optional, propertyValue, Reference, Subject,
-  updateSubject, VocabReference
+  asSubjectUpdates, includesValue, includeValues, JsAtomType, JsContainerType, JsProperty, maxValue,
+  noMerge, Optional, propertyValue, Reference, Subject, updateSubject, VocabReference
 } from '../src';
 import { SubjectGraph } from '../src/engine/SubjectGraph';
 import { XS } from '../src/ns';
@@ -496,9 +496,13 @@ describe('Update utilities', () => {
       expect(() => propertyValue({
         name: []
       }, 'name', String)).toThrow();
-      expect(() => propertyValue({
+      expect(propertyValue({
         name: ['Fred', 'Flintstone']
-      }, 'name', String)).toThrow();
+      }, 'name', String)).toBe('Fred');
+      expect(() => new JsProperty('name',
+        new JsAtomType(String, noMerge)).value({
+        name: ['Fred', 'Flintstone']
+      })).toThrow();
       expect(() => propertyValue({
         name: 10
       }, 'name', String)).toThrow();
@@ -644,9 +648,12 @@ describe('Update utilities', () => {
       expect(propertyValue({
         hairy: [true]
       }, 'hairy', Optional, Boolean)).toBe(true);
-      expect(() => propertyValue({
+      expect(propertyValue({
         hairy: [true, false]
-      }, 'hairy', Optional, Boolean)).toThrow();
+      }, 'hairy', Optional, Boolean)).toBe(true);
+      expect(() => new JsProperty(
+        'hairy', new JsContainerType(Optional, Boolean, noMerge)
+      ).value({ hairy: [true, false] })).toThrow();
       expect(propertyValue({}, 'hairy', Optional, Boolean)).toBeUndefined();
       expect(propertyValue({
         hairy: []
@@ -663,6 +670,23 @@ describe('Update utilities', () => {
       expect(propertyValue({
         name: 'Fred'
       }, 'ears', Set)).toEqual(new Set([]));
+    });
+  });
+
+  describe('Property value merging', () => {
+    // Note, Some merge examples are included in 'property value casting' above
+
+    test('strings', () => {
+      expect(maxValue(String,'a', 'b')).toBe('b');
+    });
+
+    test('numbers', () => {
+      expect(maxValue(Number, 1, 2)).toBe(2);
+    });
+
+    test('references', () => {
+      expect(maxValue(Reference,{ '@id': '1' }, { '@id': '2' }))
+        .toEqual({ '@id': '2' });
     });
   });
 });
