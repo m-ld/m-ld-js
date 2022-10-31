@@ -552,7 +552,7 @@ export interface MeldConstraint {
  * reference some immutable data such as specific block in a blockchain, or an
  * append-only table row.
  *
- * @see {@link WriteOptions.agree}
+ * @see {@link Update}
  * @todo clone status notification on receipt of a violating remote operation
  * @experimental
  * @category Experimental

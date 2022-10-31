@@ -3,7 +3,7 @@ the [developer preview](http://m-ld.org/#developer-preview) of **m-ld**.*
 
 [![github](https://img.shields.io/badge/m--ld-m--ld--js-red?logo=github)](https://github.com/m-ld/m-ld-js)
 [![licence](https://img.shields.io/github/license/m-ld/m-ld-js)](https://github.com/m-ld/m-ld-js/blob/master/LICENSE)
-[![npm (tag)](https://img.shields.io/npm/v/@m-ld/m-ld/master?label=npm)](https://www.npmjs.com/package/@m-ld/m-ld)
+[![npm (tag)](https://img.shields.io/npm/v/@m-ld/m-ld)](https://www.npmjs.com/package/@m-ld/m-ld)
 [![Gitter](https://img.shields.io/gitter/room/m-ld/community)](https://gitter.im/m-ld/community)
 [![GitHub Discussions](https://img.shields.io/github/discussions/m-ld/m-ld-spec)](https://github.com/m-ld/m-ld-spec/discussions)
 

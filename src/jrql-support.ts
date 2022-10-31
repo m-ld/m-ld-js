@@ -978,6 +978,8 @@ export interface Update extends Query {
    * > 🧪 Agreements are an experimental feature. Please contact us to discuss
    * your use-case.
    *
+   * @see {@link https://github.com/m-ld/m-ld-security-spec/blob/main/design/suac.md the white
+   *   paper}
    * @experimental
    */
   '@agree'?: any;

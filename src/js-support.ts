@@ -85,12 +85,23 @@ export type ValueConstructed<T, S = unknown> =
  */
 export type PropertyType<T> = JsValueConstructor & (new (v: any) => T);
 /**
- * A Javascript container value type constructor
+ * A Javascript container value type constructor, one of:
+ * - `Array`
+ * - `Set`
+ * - `Optional`
  * @category Utility
  */
 export type ContainerType<T> = JsContainerValueConstructor & (new (v: any) => T);
 /**
- * A Javascript atom value type constructor
+ * A Javascript atom value type constructor, one of:
+ * - `String`
+ * - `Number`
+ * - `Boolean`
+ * - `Date`
+ * - `Uint8Array`
+ * - `Subject`
+ * - `Reference`
+ * - `VocabReference`
  * @category Utility
  */
 export type AtomType<T> = JsAtomValueConstructor & (new (v: any) => T);
