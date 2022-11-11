@@ -4,12 +4,17 @@ import { AblyRemotes, MeldAblyConfig } from '../src/ably';
 import { comesAlive } from '../src/engine/AbstractMeld';
 import { mockLocal, testOp } from './testClones';
 import { BehaviorSubject, Subject as Source } from 'rxjs';
-import { isArray } from '../src/engine/util';
 import { TreeClock } from '../src/engine/clocks';
 import { NewClockRequest, NewClockResponse } from '../src/engine/remotes/ControlMessage';
 import { DeepMockProxy } from 'jest-mock-extended/lib/Mock';
 import { MeldOperationMessage } from '../src/engine/MeldOperationMessage';
 import { Future } from '../src/engine/Future';
+import { array } from '../src/index';
+import MockInstance = jest.MockInstance;
+
+/** The connection callback overload used by AblyRemotes */
+type UsedConnCallbackMock =
+  MockInstance<void, [string | string[], Ably.Types.connectionEventCallback]>;
 
 /**
  * These tests use a fully mocked Ably to avoid incurring costs. The behaviour
@@ -54,12 +59,9 @@ describe('Ably remotes', () => {
     control.subscribe.mockReturnValue(Promise.resolve());
 
     // Capture the connection event handlers
-    client.connection.on.mockImplementation((events, cb) => {
-      if (typeof events == 'string')
-        connCallbacks[events] = cb;
-      else if (isArray(events))
-        events.forEach(event => connCallbacks[event] = cb);
-    });
+    (client.connection.on as unknown as UsedConnCallbackMock)
+      .mockImplementation((events, cb) =>
+        array(events).forEach(event => connCallbacks[event] = cb));
   });
 
   test('connects with given config', async () => {
@@ -166,19 +168,20 @@ describe('Ably remotes', () => {
     const other = mock<Ably.Types.RealtimeChannelPromise>();
     client.channels.get.calledWith('test.m-ld.org:other').mockReturnValue(other);
     other.subscribe.mockReturnValue(Promise.resolve());
-    other.publish.mockImplementation((name, data) => {
-      const splitName = name.split(':');
-      expect(splitName[0]).toBe('__send');
-      expect(data.equals(new NewClockRequest().toBuffer())).toBe(true);
-      // Object assign overcomes mocking of the buffer which borks Buffer.equals
-      setImmediate(() => subscriber(Object.assign(mock<Ably.Types.Message>(), {
-        clientId: 'other',
-        // Check that the remotes can cope with non-Buffers
-        data: new Uint8Array(new NewClockResponse(newClock).toBuffer()),
-        name: `__reply:reply1:${splitName[1]}`
-      })));
-      return Promise.resolve();
-    });
+    (other.publish as unknown as MockInstance<Promise<void>, [string, any]>)
+      .mockImplementation((name, data) => {
+        const splitName = name.split(':');
+        expect(splitName[0]).toBe('__send');
+        expect(data.equals(new NewClockRequest().toBuffer())).toBe(true);
+        // Object assign overcomes mocking of the buffer which borks Buffer.equals
+        setImmediate(() => subscriber(Object.assign(mock<Ably.Types.Message>(), {
+          clientId: 'other',
+          // Check that the remotes can cope with non-Buffers
+          data: new Uint8Array(new NewClockResponse(newClock).toBuffer()),
+          name: `__reply:reply1:${splitName[1]}`
+        })));
+        return Promise.resolve();
+      });
     otherPresent();
     await comesAlive(remotes);
     expect((await remotes.newClock()).equals(newClock)).toBe(true);

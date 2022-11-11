@@ -1,4 +1,4 @@
-Version with a major version number of 0 are developer pre-releases.
+Versions with a major version number of 0 are developer pre-releases.
 
 > ⚠️ Unless otherwise stated, pre-release versions are not backwards-compatible
 with prior versions for storage or network transmission, so they must be used
