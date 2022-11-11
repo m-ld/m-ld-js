@@ -6,17 +6,15 @@ const { BadRequestError, InternalServerError, NotFoundError } = require('restify
 const { createServer } = require('net');
 const { once } = require('events');
 const LOG = require('loglevel');
-const inspector = require('inspector');
 const aedes = require('aedes')();
 const genericPool = require('generic-pool');
 const {promisify} = require('util');
 
 ////////////////////////////////////////////////////////////////////////////////
 // Global arguments handling
-const [, , nextDebugPort, logLevel] = process.argv;
+const [, , logLevel] = process.argv;
 LOG.setLevel(Number(logLevel));
 LOG.getLogger('aedes').setLevel(LOG.levels.WARN);
-global.nextDebugPort = Number(nextDebugPort);
 
 ////////////////////////////////////////////////////////////////////////////////
 // Tracking of domains, clones, requests and clone workers
@@ -28,7 +26,6 @@ const pool = genericPool.createPool({
     const process = fork(join(__dirname, 'clone.js'), {
       // Strictly disallow unhandled promise rejections for compliance testing
       execArgv: ['--unhandled-rejections=strict']
-        .concat(inspector.url() ? [`--inspect-brk=${global.nextDebugPort++}`] : [])
     });
     // Wait for the 'active' message
     return once(process, 'message').then(() => process);
@@ -150,7 +147,7 @@ function start(req, res, next) {
         pool.release(process).then(() => {
           process.off('message', msgHandler);
           delete clone.process;
-          releaseCloneBroker(clone, cb);
+          releaseCloneBroker(cloneId, clone, cb);
         }).catch(err => LOG.error(logTs(), cloneId, err));
       }
       const msgHandler = message => {
@@ -266,7 +263,7 @@ function kill(req, res, next) {
     clone.process.on('exit', () => {
       pool.destroy(clone.process).then(() => {
         delete clone.process;
-        releaseCloneBroker(clone, err => {
+        releaseCloneBroker(cloneId, clone, err => {
           if (err) {
             next(new InternalServerError(err));
           } else {
@@ -356,7 +353,7 @@ function withClone(cloneId, op/*(subprocess, tmpDir)*/, next) {
   }
 }
 
-function releaseCloneBroker(clone, cb, opts) {
+function releaseCloneBroker(cloneId, clone, cb, opts) {
   if (clone.mqtt.server.listening) {
     // Give the broker a chance to shut down. If it does not, this usually
     // indicates that the clone has not released its connection. In that case
@@ -366,7 +363,7 @@ function releaseCloneBroker(clone, cb, opts) {
       promisify(clone.mqtt.server.close).call(clone.mqtt.server),
       new Promise(fin => setTimeout(fin, 1000, 'timed out'))
     ]).then(result => {
-      LOG.debug(logTs(), 'Clone broker shutdown', result || 'OK');
+      LOG.debug(logTs(), cloneId, 'Clone broker shutdown', result || 'OK');
       if (result === 'timed out') {
         if (!opts?.unref)
           cb(result);

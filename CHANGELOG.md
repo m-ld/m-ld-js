@@ -1,7 +1,37 @@
-Version with a major version number of 0 are developer pre-releases. Unless
-otherwise stated, pre-release versions are not backwards-compatible with prior
-versions for storage or network transmission, so they must be used with data
-persisted using the same version, and other clones of the same version.
+Versions with a major version number of 0 are developer pre-releases.
+
+> ⚠️ Unless otherwise stated, pre-release versions are not backwards-compatible
+with prior versions for storage or network transmission, so they must be used
+with data persisted using the same version, and other clones of the same
+version. Please [get in touch](https://m-ld.org/hello) if you need help upgrading.
+
+## v0.9
+
+### [new]
+
+- API: `ask` query in a read state to optimally discover if some pattern exists
+- API: `propertyValue` type options include explicit `Subject`, `Reference` and `VocabReference`
+  - **[breaking]**: `Object` is no longer allowed
+ 
+### [breaking]
+
+- Upgraded to the new generation of `*-level` packages (see [upgrade guide](https://github.com/Level/community#how-do-i-upgrade-to-abstract-level))
+  - `MeldMemDown` is no longer required or available, instead please use `MemoryLevel` from [`memory-level`](https://github.com/Level/memory-level).
+- The `dist` package, containing remotes and other extensions, has been renamed to `ext`. For example, now use `import '@m-ld/m-ld/ext/socket.io'`.
+- Various protocol and persistence improvements & fixes.
+
+### [bugfix]
+
+- [#103](https://github.com/m-ld/m-ld-js/issues/103) Pre-snapshot duplicated inserts can cause divergence
+- [#95](https://github.com/m-ld/m-ld-js/issues/95) Cannot change context per-session
+
+### [experimental]
+
+> If these features sound useful, please [contact us](https://m-ld.org/hello/) to discuss your use-case.
+
+- [Object-Resource Mapping](https://edge.js.m-ld.org/classes/ormdomain.html) is a higher-level API to support idiomatic use of object-oriented Javascript with the core m-ld API.
+- [Extensions](https://edge.js.m-ld.org/#extensions) can be declared in the data and loaded dynamically using CommonJS.
+- An [Agreement](https://edge.js.m-ld.org/interfaces/update.html#_agree) is a new concurrency primitive that forces convergence on a specific data state.
 
 ## v0.8
 

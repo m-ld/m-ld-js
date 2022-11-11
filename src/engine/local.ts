@@ -1,4 +1,5 @@
 import { Observable } from 'rxjs';
+import type { Hash } from 'crypto';
 
 export namespace Idle {
   type Handle = number | NodeJS.Immediate;
@@ -32,22 +33,34 @@ export const idling = (opts?: IdleRequestOptions) => new Observable<IdleDeadline
   return () => Idle.cancelCallback(handle);
 });
 
+function requireOptional(id: string) {
+  try {
+    return require(id);
+  } catch (e) {
+    return undefined;
+  }
+}
+
+const nodeCrypto = requireOptional('crypto');
 let webcrypto: Crypto;
 if (typeof Crypto == 'function') {
   webcrypto = crypto;
 } else {
   // The use of a variable is to prevent Browserify from bundling the module
-  let cryptoModule = 'crypto';
-  webcrypto = require(cryptoModule).webcrypto;
-  if (webcrypto == null) {
+  webcrypto = nodeCrypto?.webcrypto ||
     // Fallback to polyfill peer dependency for Node v14 or lower
-    cryptoModule = '@peculiar/webcrypto';
-    webcrypto = new (require(cryptoModule).Crypto)();
-  }
+    new (requireOptional('@peculiar/webcrypto').Crypto)();
 }
 if (webcrypto == null)
   console.warn(`No Web Crypto implementation available. Please use a polyfill,
   or add @peculiar/webcrypto as a peer dependency in NodeJS 14 or lower`);
 
-type CryptoType = { subtle: SubtleCrypto, getRandomValues: Crypto['getRandomValues'] };
-export const { subtle, getRandomValues } = webcrypto as CryptoType;
+export const { subtle, getRandomValues } = {
+  subtle: webcrypto!.subtle,
+  // Value of "this" must be of type Crypto in Node 18+
+  getRandomValues: webcrypto!.getRandomValues.bind(webcrypto)
+};
+
+export const sha1: () => Hash = nodeCrypto ?
+  () => nodeCrypto.createHash('sha1') :
+  () => new (require('sha.js')).sha1();

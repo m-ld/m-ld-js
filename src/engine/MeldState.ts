@@ -1,14 +1,16 @@
-import { Read, Subject, SubjectProperty, Update, Write } from '../jrql-support';
+import { Query, Read, Subject, SubjectProperty, Update, Write } from '../jrql-support';
 import { Subscription } from 'rxjs';
 import {
-  any, GraphSubject, MeldState, MeldStateMachine, readResult, ReadResult, StateProc, UpdateProc
+  any, GraphSubject, MeldState, MeldStateMachine, ReadResult, StateProc, UpdateProc
 } from '../api';
 import { CloneEngine, EngineState, EngineUpdateProc, StateEngine } from './StateEngine';
 import { QueryableRdfSourceProxy } from './quads';
 import { Consumable } from 'rx-flowable';
-import { first, Future, inflateFrom } from './util';
+import { first, inflateFrom } from './util';
 import { QueryableRdfSource } from '../rdfjs-support';
 import { constructProperties, describeId } from './jrql-util';
+import { readResult } from './api-support';
+import { Future } from './Future';
 
 abstract class ApiState extends QueryableRdfSourceProxy implements MeldState {
   constructor(
@@ -24,7 +26,7 @@ abstract class ApiState extends QueryableRdfSourceProxy implements MeldState {
     return readResult(this.state.read(request));
   }
 
-  async write<W = Write>(request: W): Promise<MeldState> {
+  async write<W extends Write = Write>(request: W): Promise<MeldState> {
     return this.construct(await this.state.write(request));
   }
 
@@ -40,6 +42,10 @@ abstract class ApiState extends QueryableRdfSourceProxy implements MeldState {
   async get(id: string, ...properties: SubjectProperty[]) {
     return first(this.read(properties.length === 0 ?
       describeId(id) : constructProperties(id, properties)));
+  }
+
+  ask(pattern: Query): Promise<boolean> {
+    return this.state.ask(pattern);
   }
 
   protected abstract construct(state: EngineState): MeldState;
@@ -70,6 +76,11 @@ export class ApiStateMachine extends ApiState implements MeldStateMachine {
       async write(request: Write): Promise<this> {
         await stateEngine.write(state => state.write(request));
         return this;
+      }
+      ask(pattern: Query): Promise<boolean> {
+        // The read itself must be in a state procedure, so indirect
+        return new Promise((resolve, reject) =>
+          stateEngine.read(state => state.ask(pattern).then(resolve, reject)));
       }
     });
     super(asEngineState);

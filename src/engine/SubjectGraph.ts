@@ -1,12 +1,11 @@
-import { Iri } from 'jsonld/jsonld-spec';
+import { Iri } from '@m-ld/jsonld';
 import { isReference, Reference, Subject, SubjectProperty } from '../jrql-support';
 import { Quad_Predicate, Quad_Subject, Term, Triple } from './quads';
 import { JRQL, RDF, XS } from '../ns';
 import { GraphSubject, GraphSubjects } from '../api';
 import { deepValues, isArray, setAtPath } from './util';
 import { addPropertyObject, toIndexNumber } from './jrql-util';
-import { ActiveContext, getContextValue } from 'jsonld/lib/context';
-import { compactIri } from './jsonld';
+import { ActiveContext, compactIri, getContextValue } from './jsonld';
 
 export type GraphAliases =
   (subject: Iri | null, property: '@id' | string) => Iri | SubjectProperty | undefined;
@@ -129,7 +128,8 @@ export function jrqlValue(property: SubjectProperty, object: Term, ctx?: ActiveC
     } else {
       const type = getContextType(property, ctx);
       const iri = compactIri(object.value, ctx, { vocab: type === '@vocab' });
-      return type === '@id' ? iri : { '@id': iri };
+      // An IRI is always output as a Reference
+      return type === '@id' || type === '@vocab' ? iri : { '@id': iri };
     }
   } else if (object.termType === 'Literal') {
     if (object.language)

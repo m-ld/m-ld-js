@@ -10,6 +10,7 @@ import type { EventEmitter } from 'events';
 /**
  * Bound variable values from a SPARQL projection.
  * Keys include the variable prefix `?`.
+ * @category RDFJS
  */
 export interface Binding {
   [key: string]: Term;
@@ -18,6 +19,7 @@ export interface Binding {
 /**
  * Abstract stream of any type; implicit supertype of an RDFJS
  * [Stream](https://rdf.js.org/stream-spec/#stream-interface)
+ * @category RDFJS
  */
 // Using type not interface so typedoc does not document EventEmitter
 export type BaseStream<T> = EventEmitter & {
@@ -26,6 +28,7 @@ export type BaseStream<T> = EventEmitter & {
 
 /**
  * SPARQL query methods
+ * @category RDFJS
  */
 export interface QueryableRdf<Q extends BaseQuad = Quad> {
   query(query: Algebra.Construct): Stream<Q>;
@@ -39,6 +42,7 @@ export interface QueryableRdf<Q extends BaseQuad = Quad> {
  * count quads, as an optimisation for query engines
  *
  * @see https://github.com/comunica/comunica/tree/master/packages/actor-init-sparql-rdfjs#optimization
+ * @category RDFJS
  */
 export interface CountableRdf {
   countQuads(...args: Parameters<Source['match']>): Promise<number>;

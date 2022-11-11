@@ -1,34 +1,22 @@
 import {
-  any, Construct, Describe, Group, MeldUpdate, Reference, Select, Subject, Update
+  any, clone, Construct, Describe, Group, MeldClone, MeldUpdate, Reference, Select, Subject, Update
 } from '../src';
-import { ApiStateMachine } from '../src/engine/MeldState';
-import { memStore, mockRemotes, testConfig, testExtensions } from './testClones';
-import { DatasetEngine } from '../src/engine/dataset/DatasetEngine';
-import { DomainContext } from '../src/engine/MeldEncoding';
-import { Future } from '../src/engine/util';
+import { MockRemotes, testConfig } from './testClones';
 import { blankRegex, genIdRegex } from './testUtil';
 import { SubjectGraph } from '../src/engine/SubjectGraph';
 import { DataFactory as RdfDataFactory, Quad } from 'rdf-data-factory';
 import { Factory as SparqlFactory } from 'sparqlalgebrajs';
-import { Binding } from 'quadstore';
 import { Subscription } from 'rxjs';
-import { DefaultList } from '../src/constraints/DefaultList';
+import { MemoryLevel } from 'memory-level';
+import { Future } from '../src/engine/Future';
+import { Binding } from '../src/rdfjs-support';
 
-describe('Meld State API', () => {
-  let api: ApiStateMachine;
+describe('MeldClone', () => {
+  let api: MeldClone;
   let captureUpdate: Future<MeldUpdate>;
 
   beforeEach(async () => {
-    const context = new DomainContext('test.m-ld.org');
-    let clone = new DatasetEngine({
-      dataset: await memStore({ context }),
-      remotes: mockRemotes(),
-      extensions: testExtensions({ constraints: [new DefaultList('test')] }),
-      config: testConfig(),
-      context
-    });
-    await clone.initialise();
-    api = new ApiStateMachine(clone);
+    api = await clone(new MemoryLevel, MockRemotes, testConfig());
     captureUpdate = new Future;
   });
 
@@ -38,7 +26,8 @@ describe('Meld State API', () => {
     await expect(captureUpdate).resolves.toEqual({
       '@ticks': 1,
       '@insert': new SubjectGraph([{ '@id': 'fred', name: 'Fred' }]),
-      '@delete': new SubjectGraph([])
+      '@delete': new SubjectGraph([]),
+      trace: expect.any(Function)
     });
     await expect(api.get('fred'))
       .resolves.toEqual({ '@id': 'fred', name: 'Fred' });
@@ -59,7 +48,8 @@ describe('Meld State API', () => {
       await expect(captureUpdate).resolves.toEqual({
         '@ticks': 2,
         '@delete': [{ '@id': 'fred', name: 'Fred' }],
-        '@insert': []
+        '@insert': [],
+        trace: expect.any(Function)
       });
     });
 
@@ -72,7 +62,8 @@ describe('Meld State API', () => {
       await expect(captureUpdate).resolves.toEqual({
         '@ticks': 2,
         '@delete': [{ '@id': 'fred', height: 5 }],
-        '@insert': []
+        '@insert': [],
+        trace: expect.any(Function)
       });
     });
 
@@ -95,7 +86,8 @@ describe('Meld State API', () => {
       await expect(captureUpdate).resolves.toEqual({
         '@ticks': 2,
         '@delete': [{ '@id': 'fred', height: 5 }],
-        '@insert': [{ '@id': 'fred', height: 6 }]
+        '@insert': [{ '@id': 'fred', height: 6 }],
+        trace: expect.any(Function)
       });
     });
 
@@ -151,7 +143,8 @@ describe('Meld State API', () => {
       await expect(captureUpdate).resolves.toEqual({
         '@ticks': 1,
         '@delete': [],
-        '@insert': [{ '@id': 'fred', name: 'Fred' }]
+        '@insert': [{ '@id': 'fred', name: 'Fred' }],
+        trace: expect.any(Function)
       });
     });
 
@@ -163,7 +156,8 @@ describe('Meld State API', () => {
       await expect(captureUpdate).resolves.toEqual({
         '@ticks': 2,
         '@delete': [{ '@id': 'fred', name: 'Fred' }],
-        '@insert': []
+        '@insert': [],
+        trace: expect.any(Function)
       });
     });
 
@@ -196,7 +190,7 @@ describe('Meld State API', () => {
 
     test('counts subject quads', async () => {
       await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
-      // memdown does not provide approximate size measurements, so infinity is expected
+      // MemoryLevel does not provide approximate size measurements, so infinity is expected
       await expect(api.countQuads(rdf.namedNode('http://test.m-ld.org/fred')))
         .resolves.toBe(Infinity);
     });
@@ -231,6 +225,17 @@ describe('Meld State API', () => {
       await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
       await expect(api.get('fred', 'age'))
         .resolves.toBeUndefined();
+    });
+
+    test('asks exists', async () => {
+      await api.write<Subject>({ '@id': 'fred', name: 'Fred', age: 40 });
+      await expect(api.ask({})).resolves.toBe(true);
+      await expect(api.ask({ '@where': { '@id': '?' } })).resolves.toBe(true);
+      await expect(api.ask({ '@where': { '@id': 'fred' } })).resolves.toBe(true);
+      await expect(api.ask({ '@where': { '@id': 'wilma' } })).resolves.toBe(false);
+      await expect(api.ask({ '@where': { '@id': 'fred', age: 100 } })).resolves.toBe(false);
+      await expect(api.ask({ '@where': { '@id': 'fred', name: '?' } })).resolves.toBe(true);
+      await expect(api.ask({ '@where': { '@id': 'fred', height: '?' } })).resolves.toBe(false);
     });
 
     test('selects where', async () => {

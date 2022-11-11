@@ -21,7 +21,11 @@ export interface MeldIoConfig extends MeldConfig {
 export class IoRemotes extends PubsubRemotes {
   private readonly socket: Socket;
 
-  constructor(config: MeldIoConfig, extensions: MeldExtensions, connect = io) {
+  constructor(
+    config: MeldIoConfig,
+    extensions: () => Promise<MeldExtensions>,
+    connect = io
+  ) {
     super(config, extensions);
     const opts = config.io?.opts;
     const optsToUse: Partial<ManagerOptions> = {
@@ -35,12 +39,16 @@ export class IoRemotes extends PubsubRemotes {
       connect(config.io.uri, optsToUse) : connect(optsToUse);
     this.socket
       .on('connect', () => this.onConnect())
+      .on('connect_error', err => this.close(err))
+      .on('reconnect_error', err => this.log.warn(err))
+      .on('reconnect_failed', () => this.close('IO reconnect failed'))
       .on('disconnect', () => this.onDisconnect())
       .on('presence', () => this.onPresenceChange())
-      .on('operation', (payload: Buffer) => this.onOperation(payload))
-      .on('send', (params: SendParams, msg: Buffer) => this.onSent(msg, params))
-      .on('reply', (params: ReplyParams, msg: Buffer) => this.onReply(msg, params))
-      .on('notify', (params: NotifyParams, msg: Buffer) => this.onNotify(params.channelId, msg));
+      .on('operation', (payload: Uint8Array) => this.onOperation(payload))
+      .on('send', (params: SendParams, msg: Uint8Array) => this.onSent(msg, params))
+      .on('reply', (params: ReplyParams, msg: Uint8Array) => this.onReply(msg, params))
+      .on('notify', (params: NotifyParams, msg: Uint8Array) =>
+        this.onNotify(params.channelId, msg));
   }
 
   async close(err?: any): Promise<void> {

@@ -1,27 +1,31 @@
 import {
-  DataFactory, DefaultGraph, NamedNode, Quad, Quad_Object, Quad_Predicate, Quad_Subject, QuadSet,
-  QuadSource, RdfFactory
+  Bindings, DataFactory, DefaultGraph, getTermValue, NamedNode, Quad, Quad_Object, Quad_Predicate,
+  Quad_Subject, QuadSet, QuadSource, RdfFactory, toBinding
 } from '../quads';
-import { Quadstore } from 'quadstore';
+import { BatchOpts, Prefixes, Quadstore } from 'quadstore';
 import {
-  AbstractChainedBatch, AbstractIterator, AbstractIteratorOptions, AbstractLevelDOWN
-} from 'abstract-leveldown';
+  AbstractChainedBatch, AbstractIterator, AbstractIteratorOptions, AbstractLevel
+} from 'abstract-level';
 import { Observable } from 'rxjs';
-import { generate as uuid } from 'short-uuid';
-import { check, Stopwatch } from '../util';
 import { LockManager } from '../locks';
-import { BatchOpts, Binding, ResultType } from 'quadstore/dist/lib/types';
-import { Context, Iri } from 'jsonld/jsonld-spec';
+import { Context, Iri } from '@m-ld/jsonld';
 import { ActiveContext, activeCtx, compactIri, expandTerm } from '../jsonld';
 import { Algebra } from 'sparqlalgebrajs';
-import { newEngine } from 'quadstore-comunica';
+import { Engine } from 'quadstore-comunica';
 import { DataFactory as RdfDataFactory } from 'rdf-data-factory';
 import { JRQL, M_LD, RDF, XS } from '../../ns';
-import { AsyncIterator, empty, EmptyIterator, TransformIterator, wrap } from 'asynciterator';
+import { AsyncIterator, empty, EmptyIterator, SimpleTransformIterator } from 'asynciterator';
 import { MutableOperation } from '../ops';
 import { MeldError } from '../MeldError';
-import { CountableRdf, QueryableRdfSource } from '../../rdfjs-support';
+import { BaseStream, Binding, CountableRdf, QueryableRdfSource } from '../../rdfjs-support';
+import { uuid } from '../../util';
+import { Stopwatch } from '../Stopwatch';
+import { check } from '../check';
+import { Term } from 'rdf-js';
 import type EventEmitter = require('events');
+
+/** Utility interfaces shared with quadstore */
+export { Prefixes };
 
 /**
  * Atomically-applied patch to a quad-store.
@@ -52,12 +56,19 @@ export interface KvpStore {
   /** Exact match kvp retrieval */
   has(key: string): Promise<boolean>;
   /** Kvp retrieval by range options */
-  read(range: AbstractIteratorOptions<string>): Observable<[string, Buffer]>;
+  read(range: AbstractIteratorOptions<string, Buffer>): Observable<[string, Buffer]>;
   /**
    * Ensures that write transactions are executed serially against the store.
    * @param txn prepares a write operation to be performed
    */
   transact<T = unknown>(txn: TxnOptions<KvpResult<T>>): Promise<T>;
+  /** Transaction and state locking, can also be used for other locks */
+  readonly lock: LockManager<'state' | 'txn' | string>;
+}
+
+export interface TripleKeyStore extends KvpStore {
+  /** @returns the compacted storable value of the term, if applicable */
+  storeValue: getTermValue;
 }
 
 /**
@@ -65,10 +76,9 @@ export interface KvpStore {
  * Note that the patch created by a transaction can span Graphs - each
  * Quad in the patch will have a graph property.
  */
-export interface Dataset extends KvpStore {
+export interface Dataset extends TripleKeyStore {
   readonly location: string;
   readonly rdf: Required<DataFactory>;
-  readonly lock: LockManager<'state' | 'txn' | string>;
 
   graph(name?: GraphName): Graph;
 
@@ -80,8 +90,9 @@ export interface Dataset extends KvpStore {
   readonly closed: boolean;
 }
 
+type KvpBatch = Pick<AbstractChainedBatch<any, string, Buffer>, 'put' | 'del'>;
 export type Kvps = // NonNullable<BatchOpts['preWrite']> with strong kv types
-  (batch: Pick<AbstractChainedBatch<string, Buffer>, 'put' | 'del'>) => Promise<unknown> | unknown;
+  (batch: KvpBatch) => Promise<unknown> | unknown;
 
 export interface KvpResult<T = unknown> {
   kvps?: Kvps;
@@ -119,13 +130,35 @@ export interface Graph extends RdfFactory, QueryableRdfSource {
   query(query: Algebra.Describe): AsyncIterator<Quad>;
   query(query: Algebra.Project): AsyncIterator<Binding>;
   query(query: Algebra.Distinct): AsyncIterator<Binding>;
+
+  ask(query: Algebra.Ask): Promise<boolean>;
+}
+
+/**
+ * Default mapping of a domain name to a base URL
+ * @param domain IETF domain name
+ */
+export function domainBase(domain: string) {
+  if (!/^[a-z0-9_]+([\-.][a-z0-9_]+)*\.[a-z]{2,6}$/.test(domain))
+    throw new RangeError('Domain not specified or not valid');
+  return `http://${domain}/`;
+}
+
+/**
+ * Default vocabulary IRI for a given base IRI. Note this ties the vocabulary in
+ * use to the base which precludes sharing of data; so should only be used as a
+ * default and not for linked data applications.
+ * @param base base IRI
+ */
+export function baseVocab(base: Iri) {
+  return new URL('/#', base).href;
 }
 
 /**
  * Context for Quadstore dataset storage. Mix in with a domain context to
  * optimise (minimise) both control and user content.
  */
-export const STORAGE_CONTEXT: Context = {
+const STORAGE_CONTEXT: Context = {
   jrql: JRQL.$base,
   mld: M_LD.$base,
   xs: XS.$base,
@@ -136,39 +169,47 @@ export class QuadStoreDataset implements Dataset {
   readonly location: string;
   /* readonly */
   store: Quadstore;
-  private readonly activeCtx?: Promise<ActiveContext>;
+  engine: Engine;
+  prefixes: Prefixes;
+  private readonly activeCtx: Promise<ActiveContext>;
   readonly lock = new LockManager;
   private isClosed: boolean = false;
   readonly base: Iri | undefined;
 
   constructor(
-    private readonly backend: AbstractLevelDOWN,
-    context?: Context,
-    private readonly events?: EventEmitter) {
-    // Internal of level-js and leveldown
+    domain: string,
+    private readonly backend: AbstractLevel<any>,
+    private readonly events?: EventEmitter
+  ) {
+    // Internal of ClassicLevel and BrowserLevel
     this.location = (<any>backend).location ?? uuid();
-    this.activeCtx = activeCtx({ ...STORAGE_CONTEXT, ...context });
-    this.base = context?.['@base'] ?? undefined;
+    this.base = domainBase(domain);
+    this.activeCtx = activeCtx({
+      '@base': this.base,
+      '@vocab': baseVocab(this.base),
+      ...STORAGE_CONTEXT
+    });
   }
 
   async initialise(sw?: Stopwatch): Promise<QuadStoreDataset> {
     sw?.next('active-context');
     const activeCtx = await this.activeCtx;
     sw?.next('open-store');
+    this.prefixes = {
+      expandTerm: term => expandTerm(term, activeCtx),
+      compactIri: iri => compactIri(iri, activeCtx)
+    };
     this.store = new Quadstore({
       backend: this.backend,
-      comunica: newEngine(),
       dataFactory: new RdfDataFactory(),
       indexes: [
         ['graph', 'subject', 'predicate', 'object'],
         ['graph', 'object', 'subject', 'predicate'],
         ['graph', 'predicate', 'object', 'subject']
       ],
-      prefixes: activeCtx == null ? undefined : {
-        expandTerm: term => expandTerm(term, activeCtx),
-        compactIri: iri => compactIri(iri, activeCtx)
-      }
+      prefixes: this.prefixes
     });
+    this.engine = new Engine(this.store);
     await this.store.open();
     return this;
   }
@@ -192,7 +233,7 @@ export class QuadStoreDataset implements Dataset {
     // particularly important for SU-Set operation.
     /*
     TODO: This could be improved with snapshots, if all the reads were on the
-    same event loop tick, see https://github.com/Level/leveldown/issues/486
+    same event loop tick, see https://github.com/Level/classic-level/issues/28
     */
     sw.next('lock-wait');
     return this.lock.exclusive(lockKey, 'transaction', async () => {
@@ -200,7 +241,9 @@ export class QuadStoreDataset implements Dataset {
       const result = await txn.prepare({ id, sw: sw.lap });
       sw.next('apply');
       if (result.patch != null)
-        await this.applyQuads(result.patch, { preWrite: result.kvps });
+        await this.applyQuads(result.patch, {
+          preWrite: batch => result.kvps?.(this.kvpBatch(batch))
+        });
       else if (result.kvps != null)
         await this.applyKvps(result.kvps);
       sw.next('after');
@@ -216,11 +259,29 @@ export class QuadStoreDataset implements Dataset {
     });
   }
 
+  storeValue(term: Term): string {
+    if (term.termType === 'NamedNode')
+      return this.prefixes.compactIri(term.value);
+    return term.value ?? '';
+  }
+
   private async applyKvps(kvps: Kvps) {
     const batch = this.store.db.batch();
-    await kvps(batch);
-    return new Promise<void>((resolve, reject) =>
-      batch.write(err => err ? reject(err) : resolve()));
+    await kvps(this.kvpBatch(batch));
+    return batch.write();
+  }
+
+  private kvpBatch(batch: ReturnType<Quadstore['db']['batch']>): KvpBatch {
+    return {
+      put(key: string, value: Buffer, options?: object) {
+        batch.put(key, value, { valueEncoding: 'buffer', ...options });
+        return this;
+      },
+      del(key: string) {
+        batch.del(key);
+        return this;
+      }
+    };
   }
 
   private async applyQuads(patch: Patch, opts?: BatchOpts) {
@@ -239,7 +300,7 @@ export class QuadStoreDataset implements Dataset {
   @notClosed.async
   get(key: string): Promise<Buffer | undefined> {
     return new Promise<Buffer | undefined>((resolve, reject) =>
-      this.store.db.get(key, { asBuffer: true }, (err, buf) => {
+      this.store.db.get(key, { valueEncoding: 'buffer' }, (err, buf) => {
         if (err) {
           if (err.message.startsWith('NotFound')) {
             resolve(undefined);
@@ -257,7 +318,7 @@ export class QuadStoreDataset implements Dataset {
   has(key: string): Promise<boolean> {
     return new Promise<boolean>((resolve, reject) => {
       const it = this.store.db.iterator({
-        gte: key, limit: 1, values: false, keyAsBuffer: false
+        gte: key, limit: 1, values: false, keyEncoding: 'utf8'
       });
       it.next((err, foundKey: string) => {
         if (err) {
@@ -274,15 +335,15 @@ export class QuadStoreDataset implements Dataset {
   }
 
   @notClosed.rx
-  read(range: AbstractIteratorOptions<string>): Observable<[string, Buffer]> {
+  read(range: AbstractIteratorOptions<string, Buffer>): Observable<[string, Buffer]> {
     return new Observable(subs => {
       const it = this.store.db.iterator({
-        ...range, keyAsBuffer: false, valueAsBuffer: true
+        ...range, keyEncoding: 'utf8', valueEncoding: 'buffer'
       });
       const pull = () => {
-        // In levelDown, calling next on an iterator that is already ended e.g.
-        // by closing the store, causes a truly evil exception which summarily
-        // kills the process
+        // Calling next on an iterator that is already ended e.g. by closing the
+        // store, may cause a truly evil exception which summarily kills the
+        // process
         if (this.closed) {
           const err = new MeldError('Clone has closed');
           subs.error(err);
@@ -334,15 +395,16 @@ export class QuadStoreDataset implements Dataset {
     return this.isClosed;
   }
 
-  private end(it: AbstractIterator<any, any>) {
-    it.end(err => err && this.events?.emit('error', err));
+  private end(it: AbstractIterator<any, any, any>) {
+    it.close().catch(err => err && this.events?.emit('error', err));
   }
 }
 
 class QuadStoreGraph implements Graph {
   constructor(
     readonly dataset: QuadStoreDataset,
-    readonly name: GraphName) {
+    readonly name: GraphName
+  ) {
   }
 
   get lock() {
@@ -370,38 +432,47 @@ class QuadStoreGraph implements Graph {
   query(query: Algebra.Describe): AsyncIterator<Quad>;
   query(query: Algebra.Project): AsyncIterator<Binding>;
   query(query: Algebra.Distinct): AsyncIterator<Binding>;
-  query(...args: Parameters<QuadSource['match']> |
-    [Algebra.Operation]): AsyncIterator<Binding | Quad> {
-    const source = (async () => {
+  query(
+    ...args: Parameters<QuadSource['match']> | [Algebra.Operation]
+  ): AsyncIterator<Binding | Quad> {
+    const source: Promise<BaseStream<Quad | Bindings>> = (async () => {
       try {
-        const [query] = args;
-        if (query != null && 'type' in query) {
-          const stream = await this.dataset.store.sparqlStream(query);
-          if (stream.type === ResultType.BINDINGS || stream.type === ResultType.QUADS)
-            return stream.iterator;
+        const [algebra] = args;
+        if (algebra != null && 'type' in algebra) {
+          const query = await this.dataset.engine.query(algebra);
+          if (query.resultType === 'bindings' || query.resultType === 'quads')
+            return query.execute();
         } else {
-          return wrap<Quad>(this.match(...<Parameters<QuadSource['match']>>args));
+          return this.match(...<Parameters<QuadSource['match']>>args);
         }
       } catch (err) {
         // TODO: Comunica bug? Cannot read property 'close' of undefined, if stream empty
         if (err instanceof TypeError)
-          return new EmptyIterator<Quad | Binding>();
+          return new EmptyIterator<Quad | Bindings>();
         throw err;
       }
       throw new Error('Expected bindings or quads');
     })();
-    return new TransformIterator<Binding | Quad>(
-      this.dataset.lock.extend('state', 'query', source));
+    return new SimpleTransformIterator<Bindings | Quad, Binding | Quad>(
+      // A transform iterator is actually capable of taking a base stream, despite typings
+      this.dataset.lock.extend('state', 'query', <any>source), {
+        map: item => ('type' in item && item.type === 'bindings') ? toBinding(item) : <Quad>item
+      });
   }
 
-  skolem = () => this.dataset.rdf.namedNode(
+  ask(algebra: Algebra.Ask): Promise<boolean> {
+    return this.dataset.engine.queryBoolean(algebra);
+  }
+
+  skolem = () => this.namedNode(
     new URL(`/.well-known/genid/${uuid()}`, this.dataset.base).href);
   namedNode = this.dataset.rdf.namedNode;
   // noinspection JSUnusedGlobalSymbols
   blankNode = this.dataset.rdf.blankNode;
   literal = this.dataset.rdf.literal;
-  variable = this.dataset.rdf.variable;
 
+  variable = this.dataset.rdf.variable;
+  // noinspection JSUnusedGlobalSymbols
   defaultGraph = this.dataset.rdf.defaultGraph;
   quad = (subject: Quad_Subject, predicate: Quad_Predicate, object: Quad_Object) =>
     this.dataset.rdf.quad(subject, predicate, object, this.name);

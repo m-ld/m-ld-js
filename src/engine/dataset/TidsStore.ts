@@ -1,20 +1,20 @@
 import { Triple, tripleIndexKey, TripleMap } from '../quads';
-import { MutableOperation } from '../ops';
+import { MutableOperation, Operation } from '../ops';
 import { UUID } from '../MeldEncoding';
-import { IndexSet } from '../indices';
-import { Kvps, KvpStore } from './index';
-import { MsgPack } from '../util';
+import { IndexMatch, IndexSet } from '../indices';
+import { Kvps, TripleKeyStore } from './index';
+import * as MsgPack from '../msgPack';
 
 /**
- * Persists mappings from triples to transaction IDs (TIDs) in a {@link KvpStore}.
+ * Persists mappings from triples to transaction IDs (TIDs) in a {@link TripleKeyStore}.
  * Existing mappings are cached, so it's important not to have two of these working against
  * the same underlying store.
  */
 export class TidsStore {
-  private cache: TripleMap<Set<UUID>> = new TripleMap();
+  private cache: TripleMap<UUID[]> = new TripleMap();
 
   constructor(
-    private store: KvpStore) {
+    private store: TripleKeyStore) {
   }
 
   /**
@@ -40,7 +40,13 @@ export class TidsStore {
    * @param triple the triple to retrieve the TIDs for
    */
   async findTripleTids(triple: Triple): Promise<UUID[]> {
-    return [...await this.tripleTids(triple)];
+    let tids = this.cache.get(triple);
+    if (tids == null) { // Not found in cache
+      const encoded = await this.store.get(this.tripleTidsKey(triple));
+      tids = encoded != null ? MsgPack.decode(encoded) as UUID[] : [];
+      this.cache.set(triple, tids);
+    }
+    return tids;
   }
 
   /**
@@ -48,48 +54,87 @@ export class TidsStore {
    * @param patch the patch to be applied
    */
   async commit(patch: PatchTids): Promise<Kvps> {
-    const affected = new TripleMap<Set<UUID>>();
-    const affect = (tripleTids: Iterable<[Triple, UUID]>, effect: Set<UUID>['delete' | 'add']) =>
-      Promise.all([...tripleTids].map(async ([triple, tid]) => {
-        const tids = await this.tripleTids(triple);
-        affected.set(triple, tids);
-        effect.call(tids, tid);
-      }));
-    await affect(patch.deletes, Set.prototype.delete);
-    await affect(patch.inserts, Set.prototype.add);
+    const affected = await patch.affected;
     // TODO: Smarter cache eviction
     this.cache.clear();
     return batch => {
       for (let [triple, tids] of affected) {
         if (tids.size)
-          batch.put(tripleTidsKey(triple), MsgPack.encode([...tids]));
+          batch.put(this.tripleTidsKey(triple), MsgPack.encode([...tids]));
         else
-          batch.del(tripleTidsKey(triple));
+          batch.del(this.tripleTidsKey(triple));
       }
     };
   }
 
-  /**
-   * @returns Set<UUID> mutable set in the cache
-   */
-  private async tripleTids(triple: Triple): Promise<Set<UUID>> {
-    let tids = this.cache.get(triple);
-    if (tids == null) { // Not found in cache
-      const encoded = await this.store.get(tripleTidsKey(triple));
-      tids = new Set<UUID>(encoded != null ? MsgPack.decode(encoded) : []);
-      this.cache.set(triple, tids);
-    }
-    return tids;
+  tripleTidsKey(triple: Triple) {
+    return `_qs:ttd:${tripleIndexKey(triple, term => this.store.storeValue(term))}`;
   }
 }
 
-function tripleTidsKey(triple: Triple) {
-  return `_qs:ttd:${tripleIndexKey(triple)}`;
-}
-
 export class PatchTids extends MutableOperation<[Triple, UUID]> {
+  private _affected?: Promise<TripleMap<Set<UUID>>>;
+
+  constructor(
+    readonly store: TidsStore,
+    patch?: Partial<Operation<[Triple, UUID]>>
+  ) {
+    super(patch);
+  }
+
   protected constructSet(items?: Iterable<[Triple, UUID]>): IndexSet<[Triple, UUID]> {
     return new PatchTidsSet(items);
+  }
+
+  /**
+   * Gathers the resultant TIDs after affecting the store with the given patch
+   */
+  get affected() {
+    return this._affected ??= this.loadAffected();
+  }
+
+  private async loadAffected() {
+    const affected = new TripleMap<Set<UUID>>();
+    // First populate existing TIDs for all triples affected
+    const tidLoads: Promise<void>[] = [];
+    const loadExisting = (triple: Triple) => {
+      const tripleTids = new Set<UUID>();
+      tidLoads.push(this.store.findTripleTids(triple)
+        .then(tids => tids.forEach(tid => tripleTids.add(tid))));
+      return tripleTids;
+    };
+    for (let [triple] of this.deletes)
+      affected.with(triple, loadExisting);
+    for (let [triple] of this.inserts)
+      affected.with(triple, loadExisting);
+    await Promise.all(tidLoads);
+    // Then process modifications
+    for (let [triple, deleted] of this.deletes)
+      affected.get(triple)!.delete(deleted);
+    for (let [triple, inserted] of this.inserts)
+      affected.get(triple)!.add(inserted);
+    return affected;
+  }
+
+  async stateOf(triple: Triple): Promise<UUID[]> {
+    const affectedState = (await this.affected).get(triple);
+    return affectedState != null ?
+      [...affectedState] : await this.store.findTripleTids(triple);
+  }
+
+  /** @override to clear affected cache */
+  append(patch: Partial<Operation<[Triple, UUID]>>): this {
+    super.append(patch);
+    delete this._affected;
+    return this;
+  }
+
+  /** @override to clear affected cache */
+  remove(key: keyof Operation<any>, items: IndexMatch<[Triple, UUID]>): [Triple, UUID][] {
+    const removed = super.remove(key, items);
+    if (removed.length)
+      delete this._affected;
+    return removed;
   }
 }
 

@@ -1,13 +1,16 @@
 import { Meld, OperationMessage, Revup, Snapshot } from '.';
-import { LiveValue } from './LiveValue';
+import { LiveValue } from './api-support';
 import { TreeClock } from './clocks';
 import { asapScheduler, BehaviorSubject, firstValueFrom, Observable, of } from 'rxjs';
 import { catchError, distinctUntilChanged, filter, observeOn, skip } from 'rxjs/operators';
 import { Logger } from 'loglevel';
-import { check, getIdLogger, PauseableSource } from './util';
+import { PauseableSource } from './util';
 import { MeldError } from './MeldError';
 import { MeldReadState } from '../api';
 import { MeldConfig } from '../config';
+import { MeldOperationMessage } from './MeldOperationMessage';
+import { check } from './check';
+import { getIdLogger } from './logging';
 
 export abstract class AbstractMeld implements Meld {
   protected static checkLive =
@@ -49,12 +52,10 @@ export abstract class AbstractMeld implements Meld {
   }
 
   protected nextOperation = (op: OperationMessage, reason: string) => {
-    this.log.debug('has operation', reason, op.toString(this.log.getLevel()));
+    this.log.debug('has operation', reason, this.msgString(op));
     this.operationSource.next(op);
   };
   protected pauseOperations = (until: PromiseLike<unknown>) => this.operationSource.pause(until);
-
-  protected warnError = (err: any) => this.log.warn(err);
 
   protected setLive(live: boolean | null) {
     return this.liveSource.next(live);
@@ -67,6 +68,10 @@ export abstract class AbstractMeld implements Meld {
   abstract newClock(): Promise<TreeClock>;
   abstract snapshot(state: MeldReadState): Promise<Snapshot>;
   abstract revupFrom(time: TreeClock, state: MeldReadState): Promise<Revup | undefined>;
+
+  protected msgString(msg: OperationMessage) {
+    return MeldOperationMessage.toString(msg, this.log.getLevel());
+  }
 
   close(err?: any) {
     this._closed = true;

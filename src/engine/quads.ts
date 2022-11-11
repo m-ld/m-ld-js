@@ -1,13 +1,13 @@
-import type { DataFactory, NamedNode, Quad, Term } from 'rdf-js';
+import type { Bindings, DataFactory, NamedNode, Quad, Term } from 'rdf-js';
 import { IndexMap, IndexSet } from './indices';
-import { QueryableRdfSource } from '../rdfjs-support';
+import { Binding, QueryableRdfSource } from '../rdfjs-support';
 
 export type Triple = Omit<Quad, 'graph'>;
 export type TriplePos = 'subject' | 'predicate' | 'object';
 
 export type {
   DefaultGraph, Quad, Term, DataFactory, NamedNode, Source as QuadSource,
-  Quad_Subject, Quad_Predicate, Quad_Object
+  Quad_Subject, Quad_Predicate, Quad_Object, Bindings, Literal
 } from 'rdf-js';
 
 export abstract class QueryableRdfSourceProxy implements QueryableRdfSource {
@@ -17,12 +17,6 @@ export abstract class QueryableRdfSourceProxy implements QueryableRdfSource {
   countQuads: QueryableRdfSource['countQuads'] = (...args) => this.src.countQuads(...args);
 
   protected abstract get src(): QueryableRdfSource;
-}
-
-export class QuadMap<T> extends IndexMap<Quad, T> {
-  protected getIndex(key: Quad): string {
-    return quadIndexKey(key);
-  }
 }
 
 export class TripleMap<T> extends IndexMap<Triple, T> {
@@ -41,35 +35,43 @@ export class QuadSet extends IndexSet<Quad> {
   }
 }
 
-export function *tripleKey(triple: Triple): Generator<string> {
-  switch (triple.object.termType) {
-    case 'Literal':
-      yield triple.subject.value;
-      yield triple.predicate.value;
-      yield triple.object.termType;
-      yield triple.object.value ?? '';
-      yield triple.object.datatype.value ?? '';
-      yield triple.object.language ?? '';
-      break;
-    default:
-      yield triple.subject.value;
-      yield triple.predicate.value;
-      yield triple.object.termType;
-      yield triple.object.value;
+export type getTermValue = (term: Term) => string;
+
+export function tripleKey(
+  triple: Triple,
+  value: getTermValue = term => term.value
+): string {
+  const key = [
+    value(triple.subject),
+    value(triple.predicate),
+    triple.object.termType,
+    value(triple.object)
+  ];
+  if (triple.object.termType === 'Literal') {
+    key.push(value(triple.object.datatype));
+    if (triple.object.language)
+      key.push(triple.object.language);
   }
+  // JSON.stringify is ~50% faster than .map(replace(delim)).join(delim)
+  return JSON.stringify(key).slice(1, -1);
 }
 
-export function tripleIndexKey(triple: Triple) {
-  const tik = <Triple & { _tik: string }>triple;
-  if (tik._tik == null)
-    tik._tik = [...tripleKey(triple)].join('^');
-  return tik._tik;
+export function tripleIndexKey(triple: Triple, value?: getTermValue) {
+  if (value != null) {
+    // No caching if value function is specified
+    return tripleKey(triple, value);
+  } else {
+    const tik = <Triple & { _tik: string }>triple;
+    if (tik._tik == null)
+      tik._tik = tripleKey(triple);
+    return tik._tik;
+  }
 }
 
 export function quadIndexKey(quad: Quad) {
   const qik = <Quad & { _qik: string }>quad;
   if (qik._qik == null)
-    qik._qik = `${quad.graph.value}^${tripleIndexKey(quad)}`;
+    qik._qik = `${JSON.stringify(quad.graph.value)},${tripleIndexKey(quad)}`;
   return qik._qik;
 }
 
@@ -98,4 +100,11 @@ export interface RdfFactory extends Required<DataFactory> {
    * @see https://www.w3.org/TR/rdf11-concepts/#h3_section-skolemization
    */
   skolem?(): NamedNode;
+}
+
+export function toBinding(bindings: Bindings): Binding {
+  const binding: Binding = {};
+  for (let [variable, term] of bindings)
+    binding[`?${variable.value}`] = term;
+  return binding;
 }

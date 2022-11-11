@@ -1,7 +1,11 @@
-import { Context, Url } from 'jsonld/jsonld-spec';
-import { ActiveContext } from 'jsonld/lib/context';
+/**
+ * This declaration file is stored as .ts so that it is emitted
+ */
 
-declare module 'jsonld' {
+import { Context, Url } from '@m-ld/jsonld';
+import { ActiveContext } from '@m-ld/jsonld/lib/context';
+
+declare module '@m-ld/jsonld' {
   namespace Options {
     export interface CompactIri {
       value?: any, // TODO

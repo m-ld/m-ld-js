@@ -3,12 +3,13 @@ import {
   Atom, isPropertyObject, isReference, isSet, isValueObject, isVocabReference, Reference, Subject,
   SubjectPropertyObject, VocabReference
 } from '../jrql-support';
-import { canonicalDouble, expandTerm } from './jsonld';
+import {
+  ActiveContext, canonicalDouble, expandTerm, getContextValue, isBoolean, isDouble, isNumber,
+  isString
+} from './jsonld';
 import { Quad, Quad_Object, Quad_Subject, RdfFactory } from './quads';
 import { JRQL, RDF, XS } from '../ns';
 import { JrqlMode, ListIndex, listItems, toIndexDataUrl } from './jrql-util';
-import { ActiveContext, getContextValue } from 'jsonld/lib/context';
-import { isBoolean, isDouble, isNumber, isString } from 'jsonld/lib/types';
 import { isArray, lazy } from './util';
 import { array } from '../util';
 
@@ -20,9 +21,11 @@ export class SubjectQuads {
     readonly vars?: Set<string>) {
   }
 
-  *quads(object: SubjectPropertyObject,
+  *quads(
+    object: SubjectPropertyObject,
     outer: Quad_Subject | null = null,
-    property: string | null = null): Iterable<Quad> {
+    property: string | null = null
+  ): Iterable<Quad> {
     // TODO: property is @list in context
     for (let value of array(object))
       if (isArray(value))
@@ -31,7 +34,7 @@ export class SubjectQuads {
       else if (isSet(value))
         // @set is elided
         yield* this.quads(value['@set'], outer, property);
-      else if (typeof value === 'object' && !isValueObject(value))
+      else if (typeof value === 'object' && !isValueObject(value) && !isVocabReference(value))
         // TODO: @json type, nested @context object
         yield* this.subjectQuads(value, outer, property);
       else if (outer != null && property != null)
@@ -40,11 +43,14 @@ export class SubjectQuads {
           this.objectTerm(value, property));
       // TODO: What if the property expands to a keyword in the context?
       else
-        throw new Error('Cannot yield quad from top-level value');
+        throw new Error(`Cannot yield quad from top-level value: ${value}`);
   }
 
   private *subjectQuads(
-    object: Subject | Reference, outer: Quad_Subject | null, property: string | null) {
+    object: Subject | Reference,
+    outer: Quad_Subject | null,
+    property: string | null
+  ) {
     const subject: Subject = object as Subject;
     // If this is a Reference, we treat it as a Subject
     const sid = this.subjectId(subject);
@@ -85,9 +91,11 @@ export class SubjectQuads {
       yield* this.slotQuads(lid, index, item);
   }
 
-  private *slotQuads(lid: Quad_Subject,
+  private *slotQuads(
+    lid: Quad_Subject,
     index: string | ListIndex,
-    item: SubjectPropertyObject): Iterable<Quad> {
+    item: SubjectPropertyObject
+  ): Iterable<Quad> {
     const slot = this.asSlot(item);
     let indexKey: string;
     if (typeof index === 'string') {

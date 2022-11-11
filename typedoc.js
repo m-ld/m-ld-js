@@ -11,14 +11,11 @@ module.exports = {
     './src/types/**',
     './src/ns/**',
     './src/ably/**',
-    './src/memdown/**',
     './src/mqtt/**',
     './src/wrtc/**',
-    './src/socket.io/**',
-    './src/security/**'
+    './src/socket.io/**'
   ],
   excludePrivate: true,
-  excludeProtected: true,
   disableSources: true,
   includeVersion: true,
   stripInternal: true,

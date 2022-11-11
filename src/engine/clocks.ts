@@ -1,5 +1,5 @@
-import { MsgPack } from './util';
-import { uuid } from '../util';
+import * as MsgPack from './msgPack';
+import { sha1 } from './local';
 
 const inspect = Symbol.for('nodejs.util.inspect.custom');
 
@@ -38,7 +38,8 @@ export interface CausalClock {
 export class Fork<T> {
   constructor(
     readonly left: T,
-    readonly right: T) {
+    readonly right: T
+  ) {
   }
 }
 
@@ -51,7 +52,8 @@ export abstract class TickTree<T = unknown> {
 
   protected constructor(
     part: Fork<TickTree<T>> | T,
-    readonly localTicks: number = 0) {
+    readonly localTicks: number = 0
+  ) {
     if (localTicks < 0)
       throw new Error('Tree clock must have positive ticks');
     this._part = part as Fork<this> | T;
@@ -128,8 +130,10 @@ export abstract class TickTree<T = unknown> {
           this.fork.right.equals(that.fork.right)));
   }
 
-  protected updateFromOther<O extends TickTree>(other: O,
-    recurse: (tree: this, that: O) => this): [part: Fork<this> | T, localTicks: number] {
+  protected updateFromOther<O extends TickTree>(
+    other: O,
+    recurse: (tree: this, that: O) => this
+  ): [part: Fork<this> | T, localTicks: number] {
     return [
       other.fork === null ? this._part : new Fork(
         recurse(this.leftBud, other.fork.left),
@@ -156,7 +160,7 @@ export class TreeClock extends TickTree<boolean> implements CausalClock {
    * Ticks for this clock. This includes only ticks for this clock's ID.
    * @see getTicks(filter)
    */
-  // NOTE this field can actually be undefined if this clock has no ID anywhere in it.
+    // NOTE this field can actually be undefined if this clock has no ID anywhere in it.
   readonly ticks: number;
   private _hash: string;
 
@@ -174,6 +178,10 @@ export class TreeClock extends TickTree<boolean> implements CausalClock {
 
   get isId() {
     return this.value === true;
+  }
+
+  get hasId() {
+    return this.ticks != null;
   }
 
   protected bud(isId?: boolean) {
@@ -194,8 +202,9 @@ export class TreeClock extends TickTree<boolean> implements CausalClock {
   get hash() {
     if (this._hash == null) {
       const buf = MsgPack.encode(this.toJSON('forHash'));
-      // Hash if longer than a short UUID (22 characters = 16 bytes in base64)
-      this._hash = buf.length > 16 ? uuid(buf) : buf.toString('base64');
+      // Hash if longer than a SHA-1 (20 bytes)
+      this._hash = (buf.length > 20 ? sha1().update(buf).digest() : buf)
+        .toString('base64');
     }
     return this._hash;
   }
@@ -217,40 +226,54 @@ export class TreeClock extends TickTree<boolean> implements CausalClock {
     return null; // We're all ID
   }
 
-  ticked(ticks?: number): this {
+  /**
+   * Resets a process tick. Unlike {@link update}, this can be used to rewind
+   * our own tick or causal ticks.
+   *
+   * If the tick is in the past and its process identity has forked is this
+   * clock, the fork will be dropped, which does affect any deep processes.
+   *
+   * @param ticks the request ticks. If omitted, sets the ticks for the current
+   * process to `this.ticks + 1`. If a number, sets the ticks for the current
+   * process. If a clock, sets the ticks for the the clock's process ID to the
+   * clock's ticks.
+   */
+  ticked(ticks?: number | TreeClock): this {
     // Note this class cannot be extended
-    return this._ticked(ticks) as this;
+    return (ticks == null ? this._ticked(this.ticks + 1, this) :
+      typeof ticks == 'number' ? this._ticked(ticks, this) :
+        this._ticked(ticks.ticks, ticks)) as this;
   }
 
-  /**
-   * Private variant returns undefined for a tree with no identity in it,
-   * which never arises from the API
-   */
-  private _ticked(ticks: number | null = null): TreeClock | undefined {
-    if (ticks != null && ticks < 0) {
+  private _ticked(ticks: number, process: TreeClock): TreeClock {
+    if (!process.hasId) {
+      return this;
+    } else if (ticks < 0) {
       throw new Error('Trying to set ticks < 0');
-    } else if (this.isId) {
-      if (ticks === this.localTicks)
-        return this;
-      else
-        return new TreeClock(true, ticks ?? this.localTicks + 1);
-    } else if (this.fork) {
-      if (ticks != null && ticks < this.localTicks) {
-        // If ticks < localTicks and we have a buried ID, we can drop the fork
-        if (this.ticks != null)
-          return new TreeClock(true, ticks);
+    } else if (ticks < this.localTicks) {
+      // We are dropping any fork we have
+      return new TreeClock(this.hasId, ticks);
+    } else if (process.isId) {
+      if (this.fork) {
+        if (ticks > this.localTicks) {
+          // We don't know which of our branches matches the process ID
+          throw new Error(`Ambiguous target for ticks in ${this}`);
+        } else {
+          // No more ticks to allocate, maintain our fork
+          return new TreeClock(new Fork(
+            this.leftBud.ticked(0),
+            this.rightBud.ticked(0)
+          ), this.localTicks);
+        }
       } else {
-        const forkTicks = ticks == null ? null : ticks - this.localTicks;
-        const leftResult = this.fork.left._ticked(forkTicks);
-        if (leftResult)
-          return leftResult === this.fork.left ? this :
-            new TreeClock(new Fork(leftResult, this.fork.right), this.localTicks);
-
-        const rightResult = this.fork.right._ticked(forkTicks);
-        if (rightResult)
-          return rightResult === this.fork.right ? this :
-            new TreeClock(new Fork(this.fork.left, rightResult), this.localTicks);
+        return new TreeClock(this.isId, ticks); // Fast-forward
       }
+    } else {
+      // Process is a fork (we might also be)
+      return new TreeClock(new Fork(
+        this.leftBud._ticked(ticks - this.localTicks, process.leftBud),
+        this.rightBud._ticked(ticks - this.localTicks, process.rightBud)
+      ), this.localTicks);
     }
   }
 
@@ -396,6 +419,7 @@ function isZeroId(json: TreeClockJson) {
     return null;
 }
 
+/** @see TreeClock.fromJson */
 export type TreeClockJson =
   number |
   [] |
@@ -409,24 +433,38 @@ export type TreeClockJson =
  * for every process ID (leaf).
  */
 export class GlobalClock extends TickTree<string> {
-  static GENESIS = new GlobalClock('').update(TreeClock.GENESIS);
+  static GENESIS = new GlobalClock('').set(TreeClock.GENESIS);
 
   protected bud(tid?: string): this {
     return new GlobalClock(tid ?? this.value ?? '', 0) as this;
   }
 
-  update(time: TreeClock): GlobalClock {
-    return this._update(time, time.hash);
-  }
-
-  private _update(time: TreeClock, tid: string): GlobalClock {
+  /**
+   * Sets the global clock ticks & TID from the given time. The time need not be
+   * in the future. If the time is in the past and the process identity has
+   * forked in this clock, the fork will be dropped.
+   *
+   * @param time contains the identity and ticks to set to
+   * @param tid the TID to set. Note this will only be `time.hash` at the top level
+   */
+  set(time: TreeClock, tid = time.hash): GlobalClock {
     if (time.isId) {
-      if (this.fork != null)
-        throw new Error('Global clock is in the future');
-      return new GlobalClock(tid, Math.max(this.localTicks, time.ticks));
+      return new GlobalClock(tid, time.ticks);
+    } else if (time.hasId) { // Ignore non-ID time (inc. leaf)
+      // The time is forked with a deep ID. If it has fewer local ticks than we
+      // do, it comes from a different process group in which the fork happened
+      // at a different time. If it has more, we can't know what the TID of the
+      // non-ID branch should be. This should never arise because that would
+      // imply we had accepted a message without its previous.
+      if (this.localTicks !== time.localTicks)
+        throw new Error(`Time ${time} is from a different process group @ ${this}`);
+      // Note, if we're not forked, all non-ID branches get the current TID
+      return new GlobalClock(new Fork(
+        this.leftBud.set(time.leftBud, tid),
+        this.rightBud.set(time.rightBud, tid)
+      ), this.localTicks);
     } else {
-      return new GlobalClock(...this.updateFromOther(time,
-        (tree, time) => tree._update(time, tid) as this));
+      return this;
     }
   }
 

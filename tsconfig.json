@@ -5,12 +5,13 @@
     "target": "es6",
     "module": "commonjs",
     "moduleResolution": "node",
-    "sourceMap": false,
     "inlineSourceMap": true,
-    "inlineSources": true,
     "declaration": true,
     "strictNullChecks": true,
-    "outDir": "dist"
+    "outDir": "ext",
+    "paths": {
+      "quadstore-comunica": ["./src/types/quadstore-comunica.d.ts"]
+    }
   },
   "include": [
     "src/**/*"

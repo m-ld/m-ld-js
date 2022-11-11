@@ -1,20 +1,22 @@
-import { Iri } from 'jsonld/jsonld-spec';
+import { Iri } from '@m-ld/jsonld';
 import {
   Constraint, Expression, Group, isConstraint, isConstruct, isDescribe, isGroup, isSelect,
-  isSubject, isUpdate, operators, Read, Result, Subject, SubjectProperty, Update, Variable,
+  isSubject, isUpdate, operators, Query, Read, Result, Subject, SubjectProperty, Update, Variable,
   VariableExpression, Write
 } from '../../jrql-support';
 import { Graph, PatchQuads } from '.';
 import { finalize, map, mergeMap, reduce } from 'rxjs/operators';
 import { concat, EMPTY, Observable, throwError } from 'rxjs';
-import { canPosition, NamedNode, Quad, QueryableRdfSourceProxy, Term, TriplePos } from '../quads';
+import {
+  canPosition, Literal, NamedNode, Quad, QueryableRdfSourceProxy, Term, TriplePos
+} from '../quads';
 import { ActiveContext, expandTerm, initialCtx, nextCtx } from '../jsonld';
 import { Algebra, Factory as SparqlFactory } from 'sparqlalgebrajs';
 import { JRQL } from '../../ns';
 import { JrqlQuads } from './JrqlQuads';
 import { MeldError } from '../MeldError';
-import { GraphSubject, MeldReadState, ReadResult, readResult } from '../../api';
-import { binaryFold, first, flatten, Future, inflate, isArray } from '../util';
+import { GraphSubject, MeldReadState, ReadResult } from '../../api';
+import { binaryFold, first, flatten, inflate, isArray } from '../util';
 import { ConstructTemplate } from './ConstructTemplate';
 import { Binding, QueryableRdfSource } from '../../rdfjs-support';
 import { Consumable, each } from 'rx-flowable';
@@ -22,6 +24,8 @@ import { flatMap, ignoreIf } from 'rx-flowable/operators';
 import { consume } from 'rx-flowable/consume';
 import { constructSubject } from '../jrql-util';
 import { array } from '../../util';
+import { readResult } from '../api-support';
+import { Future } from '../Future';
 
 /**
  * A graph wrapper that provides low-level json-rql handling for queries. The
@@ -55,21 +59,26 @@ export class JrqlGraph {
         return properties.length === 0 ?
           jrqlGraph.get(id, this.ctx) : jrqlGraph.pick(id, properties, this.ctx);
       }
+      ask(pattern: Query) {
+        return jrqlGraph.ask(pattern, this.ctx);
+      }
     });
   }
 
   read(query: Read, ctx: ActiveContext): Consumable<GraphSubject> {
-    return inflate(this.graph.lock.extend('state', 'read', nextCtx(ctx, query['@context'])), ctx => {
-      if (isDescribe(query))
-        return this.describe(array(query['@describe']), query['@where'], ctx);
-      else if (isSelect(query) && query['@where'] != null)
-        return this.select(query['@select'], query['@where'], ctx);
-      else if (isConstruct(query))
-        return this.construct(query['@construct'], query['@where'], ctx);
-      else
-        return throwError(() => new MeldError(
-          'Unsupported pattern', 'Read type not supported.'));
-    });
+    return inflate(
+      this.graph.lock.extend('state', 'read', nextCtx(ctx, query['@context'])),
+      ctx => {
+        if (isDescribe(query))
+          return this.describe(array(query['@describe']), query['@where'], ctx);
+        else if (isSelect(query) && query['@where'] != null)
+          return this.select(query['@select'], query['@where'], ctx);
+        else if (isConstruct(query))
+          return this.construct(query['@construct'], query['@where'], ctx);
+        else
+          return throwError(() => new MeldError(
+            'Unsupported pattern', 'Read type not supported.'));
+      });
   }
 
   async write(query: Write, ctx: ActiveContext): Promise<PatchQuads> {
@@ -83,6 +92,12 @@ export class JrqlGraph {
       return this.update(query, ctx);
     else
       throw new MeldError('Unsupported pattern', 'Write type not supported.');
+  }
+
+  async ask(query: Query, ctx: ActiveContext): Promise<boolean> {
+    return this.graph.lock.extend('state', 'ask',
+      nextCtx(ctx, query['@context']).then(activeCtx => this.graph.ask(this.sparql.createAsk(
+        this.operation(asGroup(query['@where'] ?? {}), new Set, activeCtx)))));
   }
 
   select(
@@ -265,33 +280,35 @@ export class JrqlGraph {
       const bgp = this.sparql.createBgp(quads.map(this.toPattern));
       const unionOp = binaryFold(union,
         pattern => this.operation(pattern, vars, ctx),
-        (left, right) => this.sparql.createUnion(left, right));
+        (left, right) => this.sparql.createUnion([left, right]));
       const unioned = unionOp && bgp.patterns.length ?
-        this.sparql.createJoin(bgp, unionOp) : unionOp ?? bgp;
+        this.sparql.createJoin([bgp, unionOp]) : unionOp ?? bgp;
       const filtered = filter.length ? this.sparql.createFilter(
         unioned, this.constraintExpr(filter, ctx)) : unioned;
       return values.length ? this.sparql.createJoin(
-        this.valuesExpr(values, ctx), filtered) : filtered;
+        [this.valuesExpr(values, ctx), filtered]) : filtered;
     }
   }
 
   private valuesExpr(
     values: VariableExpression[], ctx: ActiveContext): Algebra.Operation {
     const variableNames = new Set<string>();
-    const variablesTerms = values.map<{ [variable: string]: Term }>(
-      variableExpr => Object.entries(variableExpr).reduce<{ [variable: string]: Term }>(
-        (variableTerms, [variable, expr]) => {
-          const varName = JRQL.matchVar(variable);
-          if (!varName)
-            throw new Error('Variable not specified in a values expression');
-          variableNames.add(varName);
-          if (isConstraint(expr))
-            throw new Error('Cannot use constraint in a values expression');
-          return {
-            ...variableTerms,
-            [variable]: this.jrql.toObjectTerm(expr, ctx)
-          };
-        }, {}));
+    const variablesTerms = values.map(
+      variableExpr => Object.entries(variableExpr)
+        .reduce<{ [variable: string]: Literal | NamedNode }>(
+          (variableTerms, [variable, expr]) => {
+            const varName = JRQL.matchVar(variable);
+            if (!varName)
+              throw new Error('Variable not specified in a values expression');
+            variableNames.add(varName);
+            if (isConstraint(expr))
+              throw new Error('Cannot use constraint in a values expression');
+            const valueTerm = this.jrql.toObjectTerm(expr, ctx);
+            if (valueTerm.termType !== 'NamedNode' && valueTerm.termType !== 'Literal')
+              throw new Error('Invalid value in values expression');
+            variableTerms[variable] = valueTerm;
+            return variableTerms;
+          }, {}));
 
     return this.sparql.createValues(
       [...variableNames].map(this.graph.variable), variablesTerms);
@@ -327,10 +344,7 @@ export class JrqlGraph {
     if (isConstraint(expr)) {
       return this.constraintExpr([expr], ctx);
     } else {
-      // noinspection SuspiciousTypeOfGuard
-      const varName = typeof expr == 'string' && JRQL.matchVar(expr);
-      return this.sparql.createTermExpression(varName ?
-        this.graph.variable(varName) : this.jrql.toObjectTerm(expr, ctx));
+      return this.sparql.createTermExpression(this.jrql.toObjectTerm(expr, ctx));
     }
   }
 

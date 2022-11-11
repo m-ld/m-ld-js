@@ -5,7 +5,7 @@ experiences at scale. It is a managed service, and includes pay-as-you-go
 for global deployments without the need to self-manage a broker.
 
 The `AblyRemotes` class and its companion configuration class `MeldAblyConfig`
-can be imported or required from `'@m-ld/m-ld/dist/ably'`. You must also 
+can be imported or required from `'@m-ld/m-ld/ext/ably'`. You must also 
 install the [ably](https://www.npmjs.com/package/ably) package
 as a peer of `@m-ld/m-ld`.
 

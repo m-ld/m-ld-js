@@ -1,50 +1,42 @@
 import { EncodedOperation } from '../index';
 import { TreeClock } from '../clocks';
-import { MeldOperation } from '../MeldEncoding';
 import { Kvps } from '../dataset';
-import { CausalTimeRange } from '../ops';
 import type { Journal } from '.';
+import { MeldOperation, MeldOperationRange, OperationAgreedSpec } from '../MeldOperation';
+import { Iri } from '@m-ld/jsonld';
 
 /**
- * Identifies an entry or operation by both tick and TID.<br>
- * CAUTION: the tick is that of the operation process clock, not necessarily the local clock.
+ * Immutable _partial_ expansion of EncodedOperation. This does not interpret
+ * the data (triples) content like a `MeldOperation`, just the required
+ * components for operation range, and the derived transaction ID.
  */
-export type TickTid = [
-  tick: number,
-  tid: string
-];
-
-/**
- * Immutable _partial_ expansion of EncodedOperation. This does not interpret the data (triples)
- * content like a `MeldOperation`, just the `from` and `time` components, and the derived
- * transaction ID.
- */
-export class JournalOperation implements CausalTimeRange<TreeClock> {
+export class JournalOperation implements MeldOperationRange {
   static fromJson(journal: Journal, json: EncodedOperation, tid?: string) {
-    // Destructuring fields for convenience
-    const [, from, timeJson] = json;
+    // Destructuring fields for range definition
+    const [, from, timeJson, , , principalId, agreed] = json;
     const time = TreeClock.fromJson(timeJson);
     tid ??= time.hash;
-    return new JournalOperation(journal, tid, from, time, json);
+    return new JournalOperation(
+      journal, tid, from, time, principalId, MeldOperation.agreed(agreed), json);
   }
 
-  static fromOperation(journal: Journal, operation: MeldOperation) {
-    const { from, time, encoded } = operation;
-    return new JournalOperation(journal, time.hash, from, time, encoded, operation);
+  static fromOperation(journal: Journal, op: MeldOperation) {
+    const { from, time, encoded, principalId, agreed } = op;
+    return new JournalOperation(
+      journal, time.hash, from, time, principalId, agreed, encoded, op);
   }
 
+  // noinspection JSUnusedGlobalSymbols: IDE does not recognise fields implementing interface
   constructor(
     private readonly journal: Journal,
     readonly tid: string,
     readonly from: number,
     readonly time: TreeClock,
-    readonly operation: EncodedOperation,
-    private _meldOperation?: MeldOperation) {
-  }
-
-  get json() {
-    return this.operation;
-  }
+    readonly principalId: Iri | null,
+    readonly agreed: OperationAgreedSpec | null,
+    readonly encoded: EncodedOperation,
+    private _meldOperation?: MeldOperation
+  ) {}
 
   commit: Kvps = this.journal.commitOperation(this);
 
@@ -54,20 +46,22 @@ export class JournalOperation implements CausalTimeRange<TreeClock> {
 
   asMeldOperation() {
     if (this._meldOperation == null)
-      this._meldOperation = this.journal.decode(this.operation);
+      this._meldOperation = this.journal.decode(this.encoded);
     return this._meldOperation;
   }
 
   /**
-   * Gets the causally-contiguous history of this operation, fused into a single operation.
-   * @see CausalTimeRange.contiguous
+   * Gets the causally-contiguous history of this operation (inclusive), fused
+   * into a single operation.
    */
   async fusedPast(): Promise<EncodedOperation> {
     return (await this.journal.causalReduce(this, first => first.fusion())).encoded;
   }
 
   /**
-   * Cuts this operation _and all its contiguous causal history_ from the given operation.
+   * Cuts this operation _and all its contiguous causal history_ from the given
+   * operation.
+   *
    * @param op the operation to cut from
    */
   cutSeen(op: MeldOperation): Promise<MeldOperation> {

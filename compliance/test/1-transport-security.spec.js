@@ -21,18 +21,16 @@ const genPrincipalKeys = () => generateKeyPairSync('rsa', {
 });
 
 /**
- * Configuration for transport security. The given module and export will be
+ * Configuration for transport security. The given module and class will be
  * instantiated in the app just prior to creating the [clone](../clone.js). This
  * indirection is only present because the HTTP API is a contrivance for
- * platform-independent compliance testing. Nevertheless, it is suggestive of a
- * data structure to be used in future for registration of the extension in the
- * domain itself.
+ * platform-independent compliance testing.
  *
- * @type {{require: string, export: string}}
+ * @type {{require: string, class: string}}
  */
 const transportSecurity = {
-  require: '@m-ld/m-ld/dist/security',
-  export: 'MeldAccessControlList'
+  require: '@m-ld/m-ld/ext/security',
+  class: 'MeldAclTransportSecurity'
 };
 
 // generateKeySync('aes') was only added in Node 15
@@ -42,7 +40,7 @@ const secret = randomBytes(16).toString('base64');
  * Compliance tests for access control lists using the above transport security
  * extension and principal keys.
  */
-describe('Domain access control', () => {
+describe('ACL Transport Security', () => {
   let aliceClone, bobClone;
   let alice, bob;
 
@@ -98,14 +96,14 @@ describe('Domain access control', () => {
       // adding them in Alice's clone)
       await aliceClone.transact({
         '@id': alice['@id'],
-        'http://m-ld.org/#publicKey': {
+        'http://m-ld.org/#public-key': {
           '@type': 'http://www.w3.org/2001/XMLSchema#base64Binary',
           '@value': alice.publicKey.toString('base64')
         }
       });
       await aliceClone.transact({
         '@id': bob['@id'],
-        'http://m-ld.org/#publicKey': {
+        'http://m-ld.org/#public-key': {
           '@type': 'http://www.w3.org/2001/XMLSchema#base64Binary',
           '@value': bob.publicKey.toString('base64')
         }
@@ -124,6 +122,9 @@ describe('Domain access control', () => {
 
     it('accepts clone for registered user', async () => {
       await expectAsync(bobClone.start()).toBeResolved();
+      // Trivial update check to see that Bob is working
+      await aliceClone.transact({ '@id': 'fred', name: 'Fred' });
+      await expectAsync(bobClone.updated('@insert', 'Fred')).toBeResolved();
     });
 
     describe('with operation encryption secret', () => {

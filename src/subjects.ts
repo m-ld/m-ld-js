@@ -1,14 +1,16 @@
-import {
-  isList, isPropertyObject, isSet, isValueObject, Subject, SubjectPropertyObject, Value
-} from './jrql-support';
+import { isPropertyObject, isSet, Reference, Subject, Value } from './jrql-support';
 import { isArray } from './engine/util';
 import { compareValues, getValues, hasProperty, hasValue } from './engine/jsonld';
-import { array } from './util';
-import { XS } from './ns';
 
-/** @internal */
+export { compareValues, getValues };
+
+/**
+ * @internal
+ * @todo A `@list` property is a property according to `isPropertyObject` but
+ * should have very different behaviour
+ */
 export class SubjectPropertyValues {
-  private readonly wasArray: boolean;
+  private readonly prior: 'atom' | 'array' | 'set';
   private readonly configurable: boolean;
 
   constructor(
@@ -16,7 +18,13 @@ export class SubjectPropertyValues {
     readonly property: string,
     readonly deepUpdater?: (values: Iterable<any>) => void
   ) {
-    this.wasArray = isArray(this.subject[this.property]);
+    const object = this.subject[this.property];
+    if (isArray(object))
+      this.prior = 'array';
+    else if (isPropertyObject(this.property, object) && isSet(object))
+      this.prior = 'set';
+    else
+      this.prior = 'atom';
     this.configurable = Object.getOwnPropertyDescriptor(subject, property)?.configurable ?? false;
   }
 
@@ -24,31 +32,40 @@ export class SubjectPropertyValues {
     return getValues(this.subject, this.property);
   }
 
-  set values(values: any[]) {
-    // Apply deep updates to the final values
-    this.deepUpdater?.(values);
-    // Per contract of updateSubject, this always L-value assigns (no pushing)
-    this.subject[this.property] = values.length === 0 ? [] : // See next
-      // Properties which were not an array before get collapsed
-      values.length === 1 && !this.wasArray ? values[0] : values;
-    if (values.length === 0 && this.configurable)
-      delete this.subject[this.property];
+  insert(...values: any[]) {
+    this.update([], values);
   }
 
   delete(...values: any[]) {
-    this.values = SubjectPropertyValues.minus(this.values, values);
+    this.update(values, []);
   }
 
-  insert(...values: any[]) {
-    const object = this.subject[this.property];
-    if (isPropertyObject(this.property, object) && isSet(object))
-      object['@set'] = SubjectPropertyValues.union(array(object['@set']), values);
-    else
-      this.values = SubjectPropertyValues.union(this.values, values);
+  update(deletes: any[], inserts: any[]) {
+    const oldValues = this.values;
+    let values = SubjectPropertyValues.minus(oldValues, deletes);
+    values = SubjectPropertyValues.union(values, inserts);
+    // Apply deep updates to the final values
+    this.deepUpdater?.(values);
+    // Do not call setter if nothing has changed
+    if (oldValues !== values) {
+      if (this.prior == 'set') {
+        // A JSON-LD Set cannot have any other key than @set
+        this.subject[this.property] = { '@set': values };
+      } else {
+        // Per contract of updateSubject, this always L-value assigns (no pushing)
+        this.subject[this.property] = values.length === 0 ? [] : // See next
+          // Properties which were not an array before get collapsed
+          values.length === 1 && this.prior == 'atom' ? values[0] : values;
+        if (values.length === 0 && this.configurable)
+          delete this.subject[this.property];
+      }
+    }
   }
 
-  exists(value?: any) {
-    if (value != null) {
+  exists(value?: any): boolean {
+    if (isArray(value)) {
+      return value.every(v => this.exists(v));
+    } else if (value != null) {
       const object = this.subject[this.property];
       if (!isPropertyObject(this.property, object))
         return false;
@@ -61,13 +78,26 @@ export class SubjectPropertyValues {
     }
   }
 
-  private static union(values: any[], unionValues: any[]): any[] {
-    return values.concat(SubjectPropertyValues.minus(unionValues, values));
+  diff(oldValues: any[]) {
+    return {
+      deletes: SubjectPropertyValues.minus(oldValues, this.values),
+      inserts: SubjectPropertyValues.minus(this.values, oldValues)
+    }
   }
 
+  /** @returns `values` if nothing has changed */
+  private static union(values: any[], unionValues: any[]): any[] {
+    const newValues = SubjectPropertyValues.minus(unionValues, values);
+    return newValues.length > 0 ? values.concat(newValues) : values;
+  }
+
+  /** @returns `values` if nothing has changed */
   private static minus(values: any[], minusValues: any[]): any[] {
-    return values.filter(value => !minusValues.some(
+    if (values.length === 0 || minusValues.length === 0)
+      return values;
+    const filtered = values.filter(value => !minusValues.some(
       minusValue => compareValues(value, minusValue)));
+    return filtered.length === values.length ? values : filtered;
   }
 }
 
@@ -80,9 +110,14 @@ export class SubjectPropertyValues {
  * @param values the value to add.
  * @category Utility
  */
-export function includeValues(subject: Subject, property: string, ...values: Value[]) {
+export function includeValues(
+  subject: Subject,
+  property: string,
+  ...values: Value[]
+) {
   new SubjectPropertyValues(subject, property).insert(...values);
 }
+
 /**
  * Determines whether the given set of subject property has the given value.
  * This method accounts for the identity semantics of {@link Reference}s and
@@ -90,195 +125,14 @@ export function includeValues(subject: Subject, property: string, ...values: Val
  *
  * @param subject the subject to inspect
  * @param property the property to inspect
- * @param value the value to find in the set. If `undefined`, then wildcard
- * checks for any value at all.
+ * @param value the value or values to find in the set. If `undefined`, then
+ * wildcard checks for any value at all. If an empty array, always returns `true`
  * @category Utility
  */
-export function includesValue(subject: Subject, property: string, value?: Value): boolean {
-  return new SubjectPropertyValues(subject, property).exists(value);
-}
-
-export type NativeAtomConstructor =
-  typeof Number |
-  typeof String |
-  typeof Boolean |
-  typeof Date |
-  typeof Object |
-  typeof Uint8Array
-
-export type NativeContainerConstructor =
-  typeof Array |
-  typeof Set
-
-export type NativeValueConstructor = NativeAtomConstructor | NativeContainerConstructor;
-
-/**
- * Extracts a property value from the given subject with the given type. This is
- * a typesafe cast which will not perform type coercion e.g. strings to numbers.
- *
- * Per **m-ld** [data&nbsp;semantics](https://spec.m-ld.org/#data-semantics), a
- * single value in a field is equivalent to a singleton set (see example), and
- * will also cast successfully to a singleton array.
- *
- * ## Examples:
- *
- * ```js
- * propertyValue({ name: 'Fred' }, 'name', String); // => 'Fred'
- * propertyValue({ name: 'Fred' }, 'name', Number); // => throws TypeError
- * propertyValue({ name: 'Fred' }, 'name', Set, String); // => Set(['Fred'])
- * propertyValue({ name: 'Fred' }, 'age', Set); // => Set([])
- * propertyValue({
- *   shopping: { '@list': ['Bread', 'Milk'] }
- * }, 'shopping', Array, String); // => ['Bread', 'Milk']
- * propertyValue({
- *   birthday: {
- *     '@value': '2022-01-08T16:49:43.572Z',
- *     '@type': 'http://www.w3.org/2001/XMLSchema#dateTime'
- *   }
- * }, 'birthday', Date); // => Javascript Date
- * ```
- *
- * @param subject the subject to inspect
- * @param property the property to inspect
- * @param type the expected type for the returned value
- * @param subType if `type` is `Array` or `Set`, the expected item type. If not
- * provided, values in a multi-valued property will not be cast
- * @throws TypeError if the given property does not have the correct type
- * @category Utility
- */
-export function propertyValue<T>(
+export function includesValue(
   subject: Subject,
   property: string,
-  type: NativeValueConstructor & (new (v: any) => T),
-  subType?: NativeAtomConstructor
-): T {
-  const value = subject[property];
-  if (value == null) {
-    switch (type) {
-      case Set:
-        return <any>new Set;
-      case Array:
-        return <any>[];
-      default:
-        throw new TypeError(`${value} is not a ${type.name}`);
-    }
-  } else if (isPropertyObject(property, value)) {
-    return castPropertyValue(value, type, subType);
-  } else {
-    throw new TypeError(`${property} is not a property`);
-  }
-}
-/**
- * Casts a property value to the given type. This is a typesafe cast which will
- * not perform type coercion e.g. strings to numbers.
- *
- * @param value the value to cast (as from a subject property)
- * @param type the expected type for the returned value
- * @param subType if `type` is `Array` or `Set`, the expected item type. If not
- * provided, values in a multi-valued property will not be cast
- * @throws TypeError if the given property does not have the correct type
- * @category Utility
- */
-export function castPropertyValue<T>(
-  value: SubjectPropertyObject,
-  type: NativeValueConstructor & (new (v: any) => T),
-  subType?: NativeAtomConstructor
-): T {
-  switch (type) {
-    case Set:
-    case Array:
-      // Expecting multiple values
-      let values: any[] = valueAsArray(value);
-      if (subType != null)
-        values = values.map(v => castValue(v, subType));
-      if (type === Set)
-        return <any>new Set(values);
-      else
-        return <any>values;
-    default:
-      // Expecting a single value
-      if (isSet(value) || isList(value) || isArray(value)) {
-        const values = valueAsArray(value);
-        if (values.length == 1)
-          return castPropertyValue(values[0], type, subType);
-        else
-          throw new TypeError('Property has multiple values');
-      }
-      return castValue(value, <any>type);
-  }
-}
-
-/**@internal*/
-function valueAsArray(value: SubjectPropertyObject) {
-  if (isSet(value)) {
-    return array(value['@set']);
-  } else if (isList(value)) {
-    if (isArray(value['@list']))
-      return value['@list'];
-    else
-      return Object.assign([], value['@list']);
-  } else {
-    return array(value);
-  }
-}
-
-/**@internal*/
-function castValue<T>(value: Value, type: NativeAtomConstructor & (new (v: any) => T)): T {
-  if (isValueObject(value)) {
-    switch (type) {
-      case Number:
-        if (value['@type'] === XS.integer || value['@type'] === XS.double)
-          return <any>type(value['@value']);
-        break;
-      case String:
-        if (value['@language'] != null || value['@type'] === XS.string)
-          return <any>type(value['@value']);
-        break;
-      case Boolean:
-        if (value['@type'] === XS.boolean)
-          return <any>type(value['@value']);
-        break;
-      case Date:
-        if (value['@type'] === XS.dateTime)
-          return <any>new Date(String(value['@value']));
-        break;
-      case Uint8Array:
-        if (value['@type'] === XS.base64Binary)
-          return <any>Buffer.from(String(value['@value']), 'base64');
-        break;
-      // Do not support Object here
-    }
-  } else {
-    switch (type) {
-      case Number:
-        // noinspection SuspiciousTypeOfGuard
-        if (typeof value == 'number')
-          return <any>value;
-        break;
-      case String:
-        // noinspection SuspiciousTypeOfGuard
-        if (typeof value == 'string')
-          return <any>value;
-        break;
-      case Boolean:
-        // noinspection SuspiciousTypeOfGuard
-        if (typeof value == 'boolean')
-          return <any>value;
-        break;
-      case Date:
-        // noinspection SuspiciousTypeOfGuard
-        if (typeof value == 'string') {
-          const date = new Date(value);
-          if (date.toString() !== 'Invalid Date')
-            return <any>date;
-        }
-        break;
-      case Object:
-        if (typeof value == 'object')
-          return <any>value;
-        break;
-      // Do not support Buffer here
-    }
-  }
-  throw new TypeError(`${value} is not a ${type.name}`);
+  value?: Value | Value[]
+): boolean {
+  return new SubjectPropertyValues(subject, property).exists(value);
 }

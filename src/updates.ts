@@ -1,5 +1,5 @@
 import { isList, List, Reference, Slot, Subject } from './jrql-support';
-import { DeleteInsert, GraphSubject, GraphSubjects, isDeleteInsert } from './api';
+import { DeleteInsert, GraphSubject, GraphUpdate, isDeleteInsert } from './api';
 import { getValues } from './engine/jsonld';
 import { deepValues, isNaturalNumber, setAtPath } from './engine/util';
 import { array } from './util';
@@ -8,10 +8,12 @@ import { SubjectPropertyValues } from './subjects';
 
 /**
  * An update to a single graph Subject.
+ * @category Utility
  */
 export type SubjectUpdate = DeleteInsert<GraphSubject | undefined>;
 /**
  * A **m-ld** update notification, indexed by graph Subject ID.
+ * @category Utility
  */
 export type SubjectUpdates = { [id: string]: SubjectUpdate };
 /**
@@ -109,7 +111,7 @@ function unReifyRefs(subject: Subject) {
  * @category Utility
  */
 export function updateSubject<T extends Subject & Reference>(
-  subject: T, update: SubjectUpdates | DeleteInsert<GraphSubjects>): T {
+  subject: T, update: SubjectUpdates | GraphUpdate): T {
   return new SubjectUpdater(update).update(subject);
 }
 
@@ -125,7 +127,7 @@ export class SubjectUpdater {
     (subject: GraphSubject, key: keyof DeleteInsert<any>) => GraphSubject | undefined;
   private readonly done = new Set<object>();
 
-  constructor(update: SubjectUpdates | DeleteInsert<GraphSubjects>) {
+  constructor(update: SubjectUpdates | GraphUpdate) {
     if (isDeleteInsert(update))
       this.delOrInsForSubject = (subject, key) =>
         update[key].graph.get(subject['@id']);
@@ -154,8 +156,9 @@ export class SubjectUpdater {
             break;
           default:
             const subjectProperty = new SubjectPropertyValues(subject, property, this.updateValues);
-            subjectProperty.delete(...getValues(deletes ?? {}, property));
-            subjectProperty.insert(...getValues(inserts ?? {}, property));
+            subjectProperty.update(
+              getValues(deletes ?? {}, property),
+              getValues(inserts ?? {}, property));
         }
       }
     }
@@ -171,10 +174,11 @@ export class SubjectUpdater {
 
   private updateList(subject: GraphSubject, deletes?: GraphSubject, inserts?: GraphSubject) {
     if (isList(subject)) {
-      if (isListUpdate(deletes) || isListUpdate(inserts))
+      if (isListUpdate(deletes) || isListUpdate(inserts)) {
         this.updateListIndexes(subject['@list'],
           isListUpdate(deletes) ? deletes['@list'] : {},
           isListUpdate(inserts) ? inserts['@list'] : {});
+      }
       this.updateValues(array(subject['@list']));
     }
   }
@@ -182,8 +186,10 @@ export class SubjectUpdater {
   private updateListIndexes(list: List['@list'], deletes: List['@list'], inserts: List['@list']) {
     const splice = typeof list.splice == 'function' ? list.splice : (() => {
       // Array splice operation must have a length field to behave
-      const maxIndex = Math.max(...Object.keys(list).map(Number).filter(isNaturalNumber));
-      list.length = isFinite(maxIndex) ? maxIndex + 1 : 0;
+      if (!('length' in list)) {
+        const maxIndex = Math.max(...Object.keys(list).map(Number).filter(isNaturalNumber));
+        list.length = isFinite(maxIndex) ? maxIndex + 1 : 0;
+      }
       return [].splice;
     })();
     const splices: { deleteCount: number, items?: any[] }[] = []; // Sparse

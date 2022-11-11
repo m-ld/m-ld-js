@@ -1,4 +1,4 @@
-import { Url } from 'jsonld/jsonld-spec';
+import { Url } from '@m-ld/jsonld';
 import {
   Construct, Describe, Subject, SubjectProperty, SubjectPropertyObject, Value
 } from '../jrql-support';
@@ -33,8 +33,8 @@ export type JrqlMode = 'match' | 'load' | 'graph';
  * is the variable name.
  */
 export function *listItems(
-  list: SubjectPropertyObject, mode: JrqlMode = 'graph'):
-  IterableIterator<[ListIndex | string, SubjectPropertyObject]> {
+  list: SubjectPropertyObject, mode: JrqlMode = 'graph'
+): IterableIterator<[ListIndex | string, SubjectPropertyObject]> {
   if (typeof list === 'object') {
     // This handles arrays as well as hashes
     for (let [indexKey, item] of Object.entries(list)) {
@@ -58,8 +58,10 @@ export function *listItems(
 }
 
 function *subItems(
-  list: SubjectPropertyObject, index: ListIndex, item: SubjectPropertyObject):
-  IterableIterator<[ListIndex, SubjectPropertyObject]> {
+  list: SubjectPropertyObject,
+  index: ListIndex,
+  item: SubjectPropertyObject
+): IterableIterator<[ListIndex, SubjectPropertyObject]> {
   const [topIndex, subIndex] = index;
   if (subIndex == null && isArray(item) && !isArray(list))
     // Object.entries skips empty array positions
@@ -77,7 +79,9 @@ function *subItems(
  * sub-index is always an array if present
  */
 export function addPropertyObject(
-  subject: Subject, property: SubjectProperty, object: Value,
+  subject: Subject,
+  property: SubjectProperty,
+  object: Value,
   createList: () => object = () => ({})
 ): Subject {
   if (typeof property == 'string') {

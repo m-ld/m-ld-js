@@ -9,4 +9,4 @@ To mitigate integrity, confidentiality and availability threats to **m-ld** doma
 
 A more general discussion of security considerations in **m-ld** can be found on the [website](https://m-ld.org/doc/#security).
 
-> 🚧 This library additionally includes an experimental extension for controlling access based on an Access Control List (ACL) in the domain data. Please see our [Security Project](https://github.com/m-ld/m-ld-security-spec) for more details of our ongoing security research, and [contact us](https://m-ld.org/hello/) to discuss your security requirements!
+> 🧪 This library additionally includes an experimental extension for controlling access based on an Access Control List (ACL) in the domain data. Please see our [Security Project](https://github.com/m-ld/m-ld-security-spec) for more details of our ongoing security research, and [contact us](https://m-ld.org/hello/) to discuss your security requirements!

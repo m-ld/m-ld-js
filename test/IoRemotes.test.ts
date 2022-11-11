@@ -4,7 +4,7 @@ import { createServer } from 'http';
 import { Server as ServerIo } from 'socket.io';
 import { AddressInfo } from 'net';
 import { comesAlive } from '../src/engine/AbstractMeld';
-import { mockLocal, MockProcess, testExtensions } from './testClones';
+import { mockLocal, MockProcess } from './testClones';
 import { GlobalClock, TreeClock } from '../src/engine/clocks';
 import { lastValueFrom, of } from 'rxjs';
 import { mock } from 'jest-mock-extended';
@@ -15,6 +15,7 @@ describe('Socket.io Remotes', () => {
   let localRemotes: IoRemotes;
   let domain: string;
   let port: number;
+  const extensions = () => Promise.resolve({});
 
   beforeAll(done => {
     const server = createServer();
@@ -30,11 +31,11 @@ describe('Socket.io Remotes', () => {
   });
 
   beforeEach(() => {
-    domain = `${(expect.getState().currentTestName.replace(/[^\w]/g, ''))}.m-ld.org`;
+    domain = `${(expect.getState().currentTestName?.replace(/\W/g, ''))}.m-ld.org`;
     remoteRemotes = new IoRemotes({
       '@id': 'remote-remotes', '@domain': domain, genesis: true,
       io: { uri: `http://localhost:${port}` }
-    }, testExtensions());
+    }, extensions);
   });
 
   test('remote connects', async () => {
@@ -45,12 +46,27 @@ describe('Socket.io Remotes', () => {
     await expect(comesAlive(remoteRemotes, null)).resolves.toBe(null);
   });
 
+  test('closes on middleware error', async () => {
+    serverIo.use((socket, next) => {
+      if (socket.handshake.auth?.bork)
+        next(new Error('bork'));
+      else
+        next();
+    });
+    localRemotes = new IoRemotes({
+      '@id': 'local-remotes', '@domain': domain, genesis: false,
+      io: { uri: `http://localhost:${port}`, opts: { auth: { bork: true } } }
+    }, extensions);
+    await expect(lastValueFrom(localRemotes.operations))
+      .rejects.toThrowError('bork');
+  });
+
   test('comes alive with remote clone', async () => {
     // This tests presence
     localRemotes = new IoRemotes({
       '@id': 'local-remotes', '@domain': domain, genesis: false,
       io: { uri: `http://localhost:${port}` }
-    }, testExtensions());
+    }, extensions);
     const remoteClone = mockLocal();
     remoteRemotes.setLocal(remoteClone);
     await expect(comesAlive(localRemotes)).resolves.toBe(true);
@@ -64,7 +80,7 @@ describe('Socket.io Remotes', () => {
     localRemotes = new IoRemotes({
       '@id': 'local-remotes', '@domain': domain, genesis: false,
       io: { uri: `http://localhost:${port}` }
-    }, testExtensions());
+    }, extensions);
     localRemotes.setLocal(mockLocal());
     const clock = TreeClock.GENESIS.forked().left;
     remoteRemotes.setLocal(mockLocal({
@@ -80,7 +96,7 @@ describe('Socket.io Remotes', () => {
     localRemotes = new IoRemotes({
       '@id': 'local-remotes', '@domain': domain, genesis: false,
       io: { uri: `http://localhost:${port}` }
-    }, testExtensions());
+    }, extensions);
     localRemotes.setLocal(mockLocal());
     const remote = new MockProcess(TreeClock.GENESIS.forked().right);
     remoteRemotes.setLocal(mockLocal({

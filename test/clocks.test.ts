@@ -71,6 +71,37 @@ describe('Tree clock', () => {
     expect(right.ticked(5).ticks).toBe(5);
   });
 
+  test('Tick one cause', () => {
+    let { left, right } = TreeClock.GENESIS.ticked().forked();
+    expect(left.ticked(right.ticked()).toJSON()).toEqual([1,[],1]);
+  });
+
+  test('Untick one cause', () => {
+    let { left, right } = TreeClock.GENESIS.ticked().forked();
+    left = left.update(right.ticked()); // [1,[],1]
+    // Untick the right back to zero
+    expect(left.ticked(right).toJSON()).toEqual([1,[],0]);
+  });
+
+  test('Untick to fork', () => {
+    const preFork = TreeClock.GENESIS.ticked();
+    let { left } = preFork.forked();
+    left = left.ticked(); // [1,[1],0]
+    expect(left.ticked(preFork).toJSON()).toEqual([1,[],0]);
+  });
+
+  test('Untick past fork', () => {
+    const preFork = TreeClock.GENESIS.ticked();
+    let { left } = preFork.ticked().forked();
+    left = left.ticked(); // [2,[1],0]
+    expect(left.ticked(preFork).toJSON()).toEqual([1]);
+  });
+
+  test('Tick to forked cause', () => {
+    let { left, right } = TreeClock.GENESIS.ticked().forked();
+    expect(left.ticked(right.forked().left.ticked()).toJSON()).toEqual([1,[],[1,0]]);
+  });
+
   test('Tick fork', () => {
     const ticked = TreeClock.GENESIS.ticked();
     const fork = ticked.forked();
@@ -311,7 +342,7 @@ describe('Tree clock', () => {
   test('update from global clock', () => {
     const { left, right } = TreeClock.GENESIS.forked();
     expect(right.update(
-      GlobalClock.GENESIS.update(left.ticked())).toJSON()).toEqual([1, []]);
+      GlobalClock.GENESIS.set(left.ticked())).toJSON()).toEqual([1, []]);
   });
 
   test('hash is stable', () => {
@@ -346,7 +377,7 @@ describe('Tree clock', () => {
     for (let i = 0; i < 10; i++) {
       const { left, right } = time.forked();
       time = right.update(left.ticked(0xFFFFFFFF));
-      expect(time.hash.length).toBeLessThanOrEqual(22);
+      expect(time.hash.length).toBeLessThanOrEqual(28);
     }
   });
 
@@ -370,20 +401,20 @@ describe('Global clock', () => {
   });
 
   test('Update no-op does not change tids', () => {
-    const gwc = GlobalClock.GENESIS.update(TreeClock.GENESIS);
+    const gwc = GlobalClock.GENESIS.set(TreeClock.GENESIS);
     expect(new Set(gwc.tids())).toEqual(new Set([TreeClock.GENESIS.hash]));
   });
 
   test('Ticked changes tids', () => {
     let time = TreeClock.GENESIS.ticked();
-    const gwc = GlobalClock.GENESIS.update(time).update(time = time.ticked());
+    const gwc = GlobalClock.GENESIS.set(time).set(time = time.ticked());
     expect(new Set(gwc.tids())).toEqual(new Set([time.hash]));
     expect(gwc.tid(TreeClock.GENESIS.ticked())).toBe(time.hash);
   });
 
   test('Just-forked have same hash', () => {
     const time = TreeClock.GENESIS;
-    const gwc = GlobalClock.GENESIS.update(time.forked().left);
+    const gwc = GlobalClock.GENESIS.set(time.forked().left);
     expect(new Set(gwc.tids())).toEqual(new Set([time.hash]));
     expect(gwc.tid(time.forked().left.ticked())).toBe(time.hash);
     expect(gwc.tid(time.forked().right.ticked())).toBe(time.hash);
@@ -392,7 +423,7 @@ describe('Global clock', () => {
   test('Forked ticked has both hashes', () => {
     let { left, right } = TreeClock.GENESIS.forked();
     left = left.ticked();
-    const gwc = GlobalClock.GENESIS.update(left).update(right);
+    const gwc = GlobalClock.GENESIS.set(left).set(right);
     expect(new Set(gwc.tids())).toEqual(new Set([left.hash, right.hash]));
     expect(gwc.tid(left.ticked())).toBe(left.hash);
     expect(gwc.tid(right.ticked())).toBe(right.hash);
@@ -402,9 +433,21 @@ describe('Global clock', () => {
     let { left, right } = TreeClock.GENESIS.forked();
     left = left.ticked();
     right = right.ticked(2);
-    const gwc = GlobalClock.GENESIS.update(left).update(right);
+    const gwc = GlobalClock.GENESIS.set(left).set(right);
     expect(new Set(gwc.tids())).toEqual(new Set([left.hash, right.hash]));
     expect(gwc.tid(left.ticked())).toBe(left.hash);
     expect(gwc.tid(right.ticked())).toBe(right.hash);
+  });
+
+  test('Back-tick with prior TID', () => {
+    const one = TreeClock.GENESIS.ticked();
+    const gwc = GlobalClock.GENESIS.set(one).set(one.ticked()).set(one);
+    expect([...gwc.tids()]).toEqual([one.hash]);
+  });
+
+  test('Back-tick past fork', () => {
+    const one = TreeClock.GENESIS.ticked();
+    const gwc = GlobalClock.GENESIS.set(one).set(one.forked().left.ticked()).set(one);
+    expect([...gwc.tids()]).toEqual([one.hash]);
   });
 });

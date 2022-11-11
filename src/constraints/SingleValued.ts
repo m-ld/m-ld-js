@@ -1,5 +1,5 @@
 import { DeleteInsert, GraphSubject, InterimUpdate, MeldConstraint, MeldReadState } from '../api';
-import { Iri } from 'jsonld/jsonld-spec';
+import { Iri } from '@m-ld/jsonld';
 import { concatMap, filter, mergeMap } from 'rxjs/operators';
 import { isValueObject, Subject, Value } from '../jrql-support';
 import { concat, defaultIfEmpty, defer, EMPTY, firstValueFrom, from, Observable } from 'rxjs';

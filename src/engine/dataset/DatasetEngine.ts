@@ -1,9 +1,9 @@
 import {
-  GraphSubject, LiveStatus, MeldExtensions, MeldReadState, MeldStatus, StateProc
+  GraphSubject, LiveStatus, MeldExtensions, MeldReadState, MeldStatus, StateManaged, StateProc
 } from '../../api';
 import { MeldLocal, MeldRemotes, OperationMessage, Recovery, Revup, Snapshot } from '..';
-import { liveRollup } from '../LiveValue';
-import { Context, Pattern, Read, Write } from '../../jrql-support';
+import { liveRollup } from '../api-support';
+import { Context, isUpdate, Pattern, Query, Read, Write } from '../../jrql-support';
 import {
   BehaviorSubject, concat, concatMap, defaultIfEmpty, EMPTY, firstValueFrom, from, interval, merge,
   Observable, of, OperatorFunction, partition, Subscriber, Subscription
@@ -16,7 +16,7 @@ import {
   debounceTime, delayWhen, distinctUntilChanged, expand, filter, finalize, ignoreElements, map,
   share, skipWhile, takeUntil, tap, toArray
 } from 'rxjs/operators';
-import { check, delayUntil, Future, inflateFrom, poisson, Stopwatch, tapComplete } from '../util';
+import { delayUntil, inflateFrom, poisson } from '../util';
 import { LockManager } from '../locks';
 import { levels } from 'loglevel';
 import { AbstractMeld, comesAlive } from '../AbstractMeld';
@@ -26,7 +26,11 @@ import { MeldError, MeldErrorStatus } from '../MeldError';
 import { AsyncIterator, TransformIterator, wrap } from 'asynciterator';
 import { BaseStream } from '../../rdfjs-support';
 import { Consumable } from 'rx-flowable';
-import { MeldConfig } from '../../config';
+import { MeldApp, MeldConfig } from '../../config';
+import { MeldOperationMessage } from '../MeldOperationMessage';
+import { Stopwatch } from '../Stopwatch';
+import { check } from '../check';
+import { Future, tapComplete } from '../Future';
 
 enum ConnectStyle {
   SOFT, HARD
@@ -41,6 +45,15 @@ enum OperationOutcome {
   DISORDERED
 }
 
+export type DatasetEngineParameters = {
+  dataset: Dataset;
+  remotes: MeldRemotes;
+  extensions: StateManaged<MeldExtensions>;
+  config: MeldConfig;
+  app: MeldApp;
+  context?: Context;
+};
+
 export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLocal {
   protected static checkStateLocked =
     check((m: DatasetEngine) => m.lock.state('state') !== null,
@@ -48,7 +61,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
 
   private readonly dataset: SuSetDataset;
   private messageService: TreeClockMessageService;
-  private readonly orderingBuffer: OperationMessage[] = [];
+  private readonly orderingBuffer: MeldOperationMessage[] = [];
   private readonly remotes: Omit<MeldRemotes, 'operations'>;
   private readonly remoteOps: RemoteOperations;
   private subs = new Subscription;
@@ -69,15 +82,10 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
   /*readonly*/
   query: CloneEngine['query'];
 
-  constructor({ dataset, remotes, extensions, config, context }: {
-    dataset: Dataset;
-    remotes: MeldRemotes;
-    extensions: MeldExtensions;
-    config: MeldConfig;
-    context?: Context;
-  }) {
+  constructor({ dataset, remotes, extensions, config, app, context }: DatasetEngineParameters) {
     super(config);
-    this.dataset = new SuSetDataset(dataset, context ?? {}, extensions, config);
+    this.dataset = new SuSetDataset(
+      dataset, context ?? {}, extensions, app, config);
     this.lock = dataset.lock;
     this.subs.add(this.dataUpdates
       .pipe(map(update => update['@ticks']))
@@ -154,6 +162,9 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
         // For a new non-genesis clone, the first connect is essential.
         await comesAlive(this);
       }
+      // Inform the dataset that we're open for business
+      await this.lock.share('state', 'initialised',
+        () => this.dataset.allowTransact());
     } catch (e) {
       // Failed to initialise somehow – this is fatal
       await this.close(e);
@@ -233,7 +244,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
       .pipe(tap(() => this.remoteOps.detach('outdated')));
   }
 
-  private async acceptRemoteOperation(op: OperationMessage): Promise<OperationOutcome> {
+  private async acceptRemoteOperation(op: MeldOperationMessage): Promise<OperationOutcome> {
     const logBody = this.log.getLevel() < levels.DEBUG ? op : `${op.time}`;
     this.log.debug('Receiving', logBody);
     // Grab the state lock, per CloneEngine contract and to ensure that all
@@ -241,10 +252,8 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
     return this.lock.exclusive('state', 'remote operation', async () => {
       try {
         const startTime = this.localTime;
-        // Synchronously gather ticks for transaction applications
-        const applications: [OperationMessage, TreeClock, TreeClock][] = [];
-        const accepted = this.messageService.receive(op, this.orderingBuffer,
-          (msg, prevTime) => {
+        return await this.messageService.receive(op, this.orderingBuffer,
+          async (msg, prevTime) => {
             // Check that we have the previous message from this clock ID
             const ticksSeen = prevTime.getTicks(msg.time);
             if (msg.time.ticks <= ticksSeen) {
@@ -261,20 +270,12 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
               throw outOfOrder;
             } else {
               this.log.debug('Accepting', logBody);
-              // Get the event time just before transacting the change, making an
-              // extra clock tick available for constraints.
-              applications.push([msg, this.messageService.event(), this.messageService.event()]);
+              const cxOp = await this.dataset.apply(msg, this.messageService);
+              if (cxOp != null)
+                this.nextOperation(cxOp, 'constraint');
+              msg.delivered.resolve();
             }
-          });
-        // The applications will enqueue in order on the dataset's transaction lock
-        await Promise.all(applications.map(
-          async ([msg, localTime, cxnTime]) => {
-            const cxOp = await this.dataset.apply(msg, localTime, cxnTime);
-            if (cxOp != null)
-              this.nextOperation(cxOp, 'constraint');
-            msg.delivered.resolve();
-          }));
-        return accepted ? OperationOutcome.ACCEPTED : OperationOutcome.BUFFERED;
+          }) ? OperationOutcome.ACCEPTED : OperationOutcome.BUFFERED;
       } catch (err) {
         if (err instanceof MeldError && err.status === MeldErrorStatus['Update out of order']) {
           this.log.info(err.message);
@@ -457,6 +458,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
       newClock.resolve(fork.right);
       // And re-apply the ticks to our local clock
       const localClock = fork.left.ticked(this.localTime.ticks);
+      // This is synchronous with the fork
       this.messageService.push(localClock);
       return localClock;
     });
@@ -492,7 +494,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
           gwc: await gwc,
           updates: merge(
             operations.pipe(tapComplete(operationsSent), tap(msg =>
-              this.log.debug('Sending rev-up', msg.toString(this.log.getLevel())))),
+              this.log.debug('Sending rev-up', this.msgString(msg)))),
             maybeMissed.pipe(delayUntil(operationsSent)))
         };
     });
@@ -507,10 +509,11 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
       from(this.orderingBuffer),
       // #2 Anything that arrives stamped prior to now
       this.remoteOps.receiving.pipe(
-        filter(([op]) => op.time.anyLt(now)),
+        map(([op]) => op),
+        filter(op => op.time.anyLt(now)),
         takeUntil(from(until)))
     ).pipe(tap((msg: OperationMessage) => {
-      this.log.debug('Forwarding update', msg.toString(this.log.getLevel()));
+      this.log.debug('Forwarding update', this.msgString(msg));
     }));
   }
 
@@ -553,8 +556,11 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
       // Take the send timestamp just before enqueuing the transaction. This
       // ensures that transaction stamps increase monotonically.
       const sendTime = this.messageService.event();
-      const update = await this.dataset.transact(async () =>
-        [sendTime, await this.dataset.write(request)]);
+      const update = await this.dataset.transact(async () => [
+        sendTime,
+        await this.dataset.write(request),
+        isUpdate(request) ? request['@agree'] : undefined
+      ]);
       // Publish the operation
       if (update != null)
         this.nextOperation(update, 'write');
@@ -563,7 +569,15 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
   }
 
   @DatasetEngine.checkNotClosed.async
-  withLocalState<T>(procedure: StateProc<MeldReadState, T>): Promise<T> {
+  @DatasetEngine.checkStateLocked.async
+  ask(pattern: Query): Promise<boolean> {
+    return this.lock.extend('state', 'ask',
+      this.lock.share('live', 'ask',
+        () => this.dataset.ask(pattern)));
+  }
+
+  @DatasetEngine.checkNotClosed.async
+  latch<T>(procedure: StateProc<MeldReadState, T>): Promise<T> {
     return this.lock.share('state', 'protocol',
       () => procedure(this.dataset.readState));
   }

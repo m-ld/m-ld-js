@@ -1,14 +1,14 @@
 import { RemoteOperations } from '../src/engine/dataset/RemoteOperations';
-import { OperationMessage } from '../src/engine/index';
 import { defer, EMPTY, find, firstValueFrom, of, ReplaySubject, Subject, throwError } from 'rxjs';
 import { MockProcess, mockRemotes } from './testClones';
 import { TreeClock } from '../src/engine/clocks';
 import { take, toArray } from 'rxjs/operators';
+import { MeldOperationMessage } from '../src/engine/MeldOperationMessage';
 
 describe('Remote operations relay', () => {
   test('relays nothing before attach', done => {
     const remote = new MockProcess(TreeClock.GENESIS);
-    const operations = new Subject<OperationMessage>();
+    const operations = new Subject<MeldOperationMessage>();
     const ro = new RemoteOperations(mockRemotes(operations));
     ro.receiving.subscribe({
       next: () => done('unexpected op'),
@@ -22,7 +22,7 @@ describe('Remote operations relay', () => {
   test('attaches with no rev-ups', done => {
     const remote = new MockProcess(TreeClock.GENESIS);
     const sentOp = remote.sentOperation({}, {});
-    const operations = new Subject<OperationMessage>();
+    const operations = new Subject<MeldOperationMessage>();
     const ro = new RemoteOperations(mockRemotes(operations));
     ro.receiving.subscribe(([op, period]) => {
       expect(period).toBe(0);
@@ -38,7 +38,7 @@ describe('Remote operations relay', () => {
     const sentOp1 = remote.sentOperation({}, {});
     const sentOp2 = remote.sentOperation({}, {});
     const sentOp3 = remote.sentOperation({}, {});
-    const operations = new Subject<OperationMessage>();
+    const operations = new Subject<MeldOperationMessage>();
     const ro = new RemoteOperations(mockRemotes(operations));
     const received = firstValueFrom(ro.receiving.pipe(take(2), toArray()));
     await ro.attach(EMPTY);
@@ -57,7 +57,7 @@ describe('Remote operations relay', () => {
     const revupOp = remote.sentOperation({}, {});
     const sentOp1 = remote.sentOperation({}, {});
     const sentOp2 = remote.sentOperation({}, {});
-    const operations = new Subject<OperationMessage>();
+    const operations = new Subject<MeldOperationMessage>();
     const ro = new RemoteOperations(mockRemotes(operations));
     const received = firstValueFrom(ro.receiving.pipe(take(3), toArray()));
     await ro.attach(of(revupOp));
@@ -73,7 +73,7 @@ describe('Remote operations relay', () => {
 
   test('detaches if rev-up fails', done => {
     const remote = new MockProcess(TreeClock.GENESIS);
-    const operations = new ReplaySubject<OperationMessage>();
+    const operations = new ReplaySubject<MeldOperationMessage>();
     // This op could sneak through via the replay
     operations.next(remote.sentOperation({}, {}));
     const ro = new RemoteOperations(mockRemotes(operations));
@@ -92,7 +92,7 @@ describe('Remote operations relay', () => {
 
   test('ignores rev-up if operations complete', done => {
     const remote = new MockProcess(TreeClock.GENESIS);
-    const operations = new Subject<OperationMessage>();
+    const operations = new Subject<MeldOperationMessage>();
     const ro = new RemoteOperations(mockRemotes(operations));
     ro.attach(defer(() => {
       operations.complete();
@@ -108,7 +108,7 @@ describe('Remote operations relay', () => {
 
   test('ignores post rev-up op if operations complete', done => {
     const remote = new MockProcess(TreeClock.GENESIS);
-    const operations = new ReplaySubject<OperationMessage>();
+    const operations = new ReplaySubject<MeldOperationMessage>();
     const ro = new RemoteOperations(mockRemotes(operations));
     ro.attach(defer(() => {
       operations.next(remote.sentOperation({}, {}));

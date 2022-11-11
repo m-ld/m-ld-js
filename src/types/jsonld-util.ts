@@ -1,4 +1,8 @@
-declare module 'jsonld/lib/util' {
+/**
+ * This declaration file is stored as .ts so that it is emitted
+ */
+
+declare module '@m-ld/jsonld/lib/util' {
   /**
    * Clones an object, array, Map, Set, or string/number. If a typed JavaScript
    * object is given, such as a Date, it will be converted to a string.

@@ -3,73 +3,17 @@
  */
 import { GlobalClock, TreeClock, TreeClockJson } from './clocks';
 import { Observable } from 'rxjs';
+import * as MsgPack from './msgPack';
+import { LiveValue } from './api-support';
+import { Attribution, MeldReadState, StateProc } from '../api';
 import { Message } from './messages';
-import { Future, MsgPack } from './util';
-import { LiveValue } from './LiveValue';
-import { MeldError } from './MeldError';
-import { MeldReadState, StateProc } from '../api';
-import { levels } from 'loglevel';
-import { MeldEncoder } from './MeldEncoding';
-
-const inspect = Symbol.for('nodejs.util.inspect.custom');
 
 /**
- * An operation on domain data, expressed such that it can be causally-ordered using its
- * logical clock time, with a message service.
- */
-export class OperationMessage implements Message<TreeClock, EncodedOperation> {
-  readonly delivered = new Future;
-  private _encoded: Buffer;
-
-  constructor(
-    /** Previous public tick from the operation source */
-    readonly prev: number,
-    /** Encoded update operation */
-    readonly data: EncodedOperation,
-    /** Message time if you happen to have it, otherwise read from data */
-    readonly time = TreeClock.fromJson(data[2])
-  ) {
-  }
-
-  get encoded(): Buffer {
-    if (this._encoded == null) {
-      const { prev, data } = this;
-      this._encoded = MsgPack.encode({ prev, data });
-    }
-    return this._encoded;
-  }
-
-  static decode(enc: Buffer): OperationMessage {
-    const json = MsgPack.decode(enc);
-    if (typeof json.prev == 'number' && Array.isArray(json.data))
-      return new OperationMessage(json.prev, json.data);
-    else
-      throw new MeldError('Bad update');
-  }
-
-  get size() {
-    return this.encoded.length;
-  }
-
-  toString(logLevel: number = levels.INFO) {
-    const [v, from, time, updateData, encoding] = this.data;
-    const update = logLevel <= levels.DEBUG ?
-      encoding.includes(BufferEncoding.SECURE) ? '---ENCRYPTED---' :
-      MeldEncoder.jsonFromBuffer(updateData, encoding) :
-      { length: updateData.length, encoding };
-    return `${JSON.stringify({ v, from, time, update })}
-    @ ${this.time}, prev ${this.prev}`;
-  }
-
-  // v8(chrome/nodejs) console
-  [inspect] = () => this.toString();
-}
-
-/**
- * Primary internal m-ld engine-to-engine interface, used both as an interface of the local clone,
- * but also, symmetrically, to present remote clones to the local clone. Each member is similarly
- * used symmetrically: outgoing vs. incoming operations; liveness of the local clone vs.
- * is-anyone-out-there; and providing recovery to a peer vs. recovering from a peer.
+ * Primary internal m-ld engine-to-engine interface, used both as an interface
+ * of the local clone, but also, symmetrically, to present remote clones to the
+ * local clone. Each member is similarly used symmetrically: outgoing vs.
+ * incoming operations; liveness of the local clone vs. is-anyone-out-there; and
+ * providing recovery to a peer vs. recovering from a peer.
  */
 export interface Meld {
   /**
@@ -121,6 +65,22 @@ export interface Meld {
 }
 
 /**
+ * An operation on domain data, expressed such that it can be causally-ordered
+ * using its logical clock time, with a message service.
+ */
+export interface OperationMessage extends Message<TreeClock, EncodedOperation> {
+  /**
+   * Previous public tick from the operation source. Used to detect FIFO
+   * violations in message delivery.
+   */
+  readonly prev: number;
+  /**
+   * Attribution of the operation to a security principal
+   */
+  readonly attr: Attribution | null;
+}
+
+/**
  * Encodings that take object or buffer input and produce a buffer.
  */
 export enum BufferEncoding {
@@ -141,14 +101,19 @@ export enum BufferEncoding {
  * MessagePack.
  */
 export type EncodedOperation = [
-  version: 3,
   /**
-   * First tick of causal time range
+   * @since 1
+   */
+  version: 4,
+  /**
+   * First tick of causal time range. If this is less than `time.ticks`, this
+   * operation is a fusion of multiple operations.
    * @since 2
    */
   from: number,
   /**
-   * Time as JSON
+   * Time as JSON. If this operation is a fusion, this is the _last_ time in the
+   * fusion's range.
    * @since 1
    */
   time: TreeClockJson,
@@ -158,29 +123,67 @@ export type EncodedOperation = [
    */
   update: Buffer,
   /**
-   * Encodings applied to the update
+   * Encodings applied to the update, in the order of application
    * @since 3
    */
-  encoding: BufferEncoding[]
+  encoding: BufferEncoding[],
+  /**
+   * The identity Iri compacted against the canonical domain context of the
+   * principal originally responsible for this operation, if available; or
+   * `null`. Note that this principal is not necessarily the same as the
+   * attribution of a sent operation message if the operation has been processed
+   * in some way, such as with a fusion.
+   *
+   * @see AppPrincipal
+   * @since 4
+   */
+  principalId: string | null,
+  /**
+   * The _last_ tick in this operation's range that was an agreement, and any
+   * proof required for applicable agreement conditions, or `null` if this
+   * operation does not contain an agreement.
+   * @see OperationAgreedSpec
+   * @since 4
+   */
+  agreed: [number, any] | null
 ];
 
+export namespace EncodedOperation {
+  /** @internal utility to strongly key into EncodedOperation */
+  export enum Key {
+    // noinspection JSUnusedGlobalSymbols
+    version,
+    from,
+    time,
+    update,
+    encoding,
+    principalId,
+    agreed
+  }
+
+  export const toBuffer: (op: EncodedOperation) => Buffer = MsgPack.encode;
+  export const fromBuffer: (buffer: Buffer) => EncodedOperation = MsgPack.decode;
+}
+
 /**
- * Common components of a clone snapshot and rev-up – both of which provide a 'recovery' mechanism
- * for clones from a 'collaborator' clone. Recovery is required (non-exhaustively):
+ * Common components of a clone snapshot and rev-up – both of which provide a
+ * 'recovery' mechanism for clones from a 'collaborator' clone. Recovery is
+ * required (non-exhaustively):
  * - For a brand new clone (always a snapshot)
  * - If a clone has been partitioned from the network and is now back online
  * - If a clone has detected that it has missed an operation message
  */
 export interface Recovery {
   /**
-   * 'Global Wall Clock' (or 'Great Westminster Clock'), containing the most recent ticks and
-   * transaction IDs seen by the recovery collaborator.
+   * 'Global Wall Clock' (or 'Great Westminster Clock'), containing the most
+   * recent ticks and transaction IDs seen by the recovery collaborator.
    */
   readonly gwc: GlobalClock;
   /**
-   * Operation messages seen by the collaborator. For a rev-up, these include messages from the
-   * collaborator's journal. However for both rev-up and snapshot, a collaborator also relays
-   * relevant operation messages it observes during the recovery process.
+   * Operation messages seen by the collaborator. For a rev-up, these include
+   * messages from the collaborator's journal. However for both rev-up and
+   * snapshot, a collaborator also relays relevant operation messages it
+   * observes during the recovery process.
    */
   readonly updates: Observable<OperationMessage>;
 }
@@ -203,6 +206,10 @@ export interface Snapshot extends Recovery {
    * @see Snapshot.Datum
    */
   readonly data: Observable<Snapshot.Datum>;
+  /**
+   * Time of the last agreement to contribute to the snapshot.
+   */
+  readonly agreed: TreeClock;
 }
 
 export namespace Snapshot {
@@ -241,13 +248,19 @@ export interface MeldRemotes extends Meld {
 /**
  * Local variant of {@link Meld} representing the local clone to remote clones on the same domain.
  */
-export interface MeldLocal extends Meld {
+export interface MeldLocal extends Meld, ReadLatchable {
   /**
    * Make a bounded read-only use of the state of the local clone. This is used
    * in the implementation of the m-ld protocol to inspect metadata, for example
    * for transport security, when external events happen.
    */
-  withLocalState<T>(procedure: StateProc<MeldReadState, T>): Promise<T>;
+  readonly latch: ReadLatchable['latch'];
 }
 
-export { CloneExtensions } from './CloneExtensions';
+export interface ReadLatchable {
+  /**
+   * Make a bounded read-only use of state. The state is guaranteed not to
+   * change until the procedure's returned promise has settled.
+   */
+  latch<T>(procedure: StateProc<MeldReadState, T>): Promise<T>;
+}

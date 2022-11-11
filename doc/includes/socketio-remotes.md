@@ -6,7 +6,7 @@ on reliability and speed. It is convenient to use when the app architecture has
 a live web server or app server, using HTTP.
 
 The `IoRemotes` class and its companion configuration class `MeldIoConfig`
-can be imported or required from `'@m-ld/m-ld/dist/socket.io'`. You must also
+can be imported or required from `'@m-ld/m-ld/ext/socket.io'`. You must also
 install the [`socket.io-client`](https://www.npmjs.com/package/socket.io-client)
 package as a peer of `@m-ld/m-ld`.
 
@@ -24,7 +24,7 @@ having:
 When using Socket.io, the server must correctly route **m-ld** protocol
 operations to their intended recipients. The Javascript engine package bundles a
 class for Node.js servers,  `IoRemotesService`, which can be imported
-from `'@m-ld/m-ld/dist/socket.io/server'`.
+from `'@m-ld/m-ld/ext/socket.io/server'`.
 
 To use, [initialise](https://socket.io/docs/v4/server-initialization/) the
 Socket.io server as normal, and then construct an `IoRemotesService`, passing

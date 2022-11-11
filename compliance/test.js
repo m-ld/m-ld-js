@@ -1,11 +1,9 @@
 const { fork } = require('child_process');
 const { createWriteStream } = require('fs');
-const { join } = require('path');
-const inspector = require('inspector');
+const { dirname, join } = require('path');
 const LOG = require('loglevel');
 
-const COMPLIANCE_DIR = '../node_modules/@m-ld/m-ld-spec/compliance'.split('/');
-const COMPLIANCE_PATH = join(__dirname, ...COMPLIANCE_DIR);
+const COMPLIANCE_PATH = dirname(require.resolve('@m-ld/m-ld-spec/compliance/jasmine.json'));
 const Jasmine = require(require.resolve('jasmine', { paths: [COMPLIANCE_PATH] }));
 const jasmine = new Jasmine();
 
@@ -50,17 +48,11 @@ if (!specs.length)
 console.log('Running specs', specs, 'with config', jasmineConfig);
 
 LOG.setLevel(process.env.LOG_LEVEL = process.env.LOG_LEVEL || LOG.levels.WARN);
-let orchestratorDebugPort, firstCloneDebugPort;
-if (inspector.url() != null) {
-  let debugPort = Number(new URL(inspector.url()).port);
-  orchestratorDebugPort = ++debugPort;
-  firstCloneDebugPort = ++debugPort;
-}
 
 // Fork the orchestrator
 const orchestrator = fork(join(__dirname, 'orchestrator.js'),
-  [firstCloneDebugPort, LOG.getLevel()],
-  { execArgv: inspector.url() ? [`--inspect-brk=${orchestratorDebugPort}`] : [], silent: true });
+  [LOG.getLevel().toString()],
+  { silent: true });
 // Direct orchestrator output to file
 const logFile = createWriteStream(join(__dirname, '.log'));
 orchestrator.stdout.pipe(logFile);

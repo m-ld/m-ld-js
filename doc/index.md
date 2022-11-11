@@ -3,7 +3,9 @@ the [developer preview](http://m-ld.org/#developer-preview) of **m-ld**.*
 
 [![github](https://img.shields.io/badge/m--ld-m--ld--js-red?logo=github)](https://github.com/m-ld/m-ld-js)
 [![licence](https://img.shields.io/github/license/m-ld/m-ld-js)](https://github.com/m-ld/m-ld-js/blob/master/LICENSE)
-[![npm (tag)](https://img.shields.io/npm/v/@m-ld/m-ld/master?label=npm)](https://www.npmjs.com/package/@m-ld/m-ld)
+[![npm (tag)](https://img.shields.io/npm/v/@m-ld/m-ld)](https://www.npmjs.com/package/@m-ld/m-ld)
+[![Gitter](https://img.shields.io/gitter/room/m-ld/community)](https://gitter.im/m-ld/community)
+[![GitHub Discussions](https://img.shields.io/github/discussions/m-ld/m-ld-spec)](https://github.com/m-ld/m-ld-spec/discussions)
 
 # **m-ld** Javascript clone engine
 
@@ -30,14 +32,12 @@ There are two starter projects available:
 
 ### Data Persistence
 
-**m-ld** uses [levelup](https://github.com/level/levelup) to interface with a
+**m-ld** uses [abstract-level](https://github.com/Level/abstract-level) to interface with a
 LevelDB-compatible storage backend.
 
-For the fastest in-memory responses, this library provides `MeldMemDown`, an optimised variant of [memdown](https://github.com/level/memdown), which can be imported from `'@m-ld/m-ld/dist/memdown'` as shown in the example below. To use, you must also install the [`memdown`](https://www.npmjs.com/package/memdown) package as a peer of `@m-ld/m-ld`.
-
-In a service or native application, use [leveldown](https://github.com/level/leveldown/) (file system storage).
-
-In a browser, you can use [level-js](https://github.com/Level/level-js) (browser-local storage).
+- For the fastest in-memory responses, use [memory-level](https://github.com/Level/memory-level).
+- In a service or native application, use [classic-level](https://github.com/Level/classic-level) (file system storage).
+- In a browser, you can use [browser-level](https://github.com/Level/browser-level) (browser-local storage).
 
 ### Connecting to Other Clones
 
@@ -57,8 +57,8 @@ and the clone [configuration](interfaces/meldconfig.html).
 
 ```typescript
 import { clone, uuid } from '@m-ld/m-ld';
-import { MeldMemDown } from '@m-ld/m-ld/dist/memdown';
-import { MqttRemotes, MeldMqttConfig } from '@m-ld/m-ld/dist/mqtt';
+import { MemoryLevel } from 'memory-level';
+import { MqttRemotes, MeldMqttConfig } from '@m-ld/m-ld/ext/mqtt';
 
 const config: MeldMqttConfig = {
   '@id': uuid(),
@@ -67,7 +67,7 @@ const config: MeldMqttConfig = {
   mqtt: { hostname: 'mqtt.example.org' }
 };
 
-const meld = await clone(new MemDown, MqttRemotes, config);
+const meld = await clone(new MemoryLevel, MqttRemotes, config);
 ```
 
 The `clone` function returns control as soon as it is safe to start making data
@@ -95,3 +95,5 @@ await meld.status.becomes({ online: true, outdated: false });
 [[include:concurrency.md]]
 
 [[include:security.md]]
+
+[[include:ext/index.md]]

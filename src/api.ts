@@ -1,20 +1,20 @@
 import * as spec from '@m-ld/m-ld-spec';
 import type {
-  Read, Reference, Subject, SubjectProperty, Update, Variable, Write
+  Query, Read, Reference, Subject, SubjectProperty, Update, Variable, Write
 } from './jrql-support';
-import { firstValueFrom, Observable, Subscription } from 'rxjs';
-import { toArray } from 'rxjs/operators';
+import { Subscription } from 'rxjs';
 import { shortId } from './util';
-import { Iri } from 'jsonld/jsonld-spec';
-import { SubjectGraph } from './engine/SubjectGraph';
+import { Iri } from '@m-ld/jsonld';
 import { QueryableRdfSource } from './rdfjs-support';
-import { Consumable, flow, Flowable } from 'rx-flowable';
-import { Future, tapComplete } from './engine/util';
+import { Consumable, Flowable } from 'rx-flowable';
 import { MeldMessageType } from './ns/m-ld';
+import { MeldApp } from './config';
+import { EncodedOperation } from './engine/index';
 
 /**
  * A convenience type for a struct with a `@insert` and `@delete` property, like
  * a {@link MeldUpdate}.
+ * @category API
  */
 export interface DeleteInsert<T> {
   readonly '@delete': T;
@@ -45,9 +45,15 @@ let nextAny = 0x1111;
 export const anyName = (): string => shortId((nextAny++).toString(16));
 
 // Unchanged from m-ld-spec
-/** @see m-ld [specification](http://spec.m-ld.org/interfaces/livestatus.html) */
+/**
+ * @category API
+ * @see m-ld [specification](http://spec.m-ld.org/interfaces/livestatus.html)
+ */
 export type LiveStatus = spec.LiveStatus;
-/** @see m-ld [specification](http://spec.m-ld.org/interfaces/meldstatus.html) */
+/**
+ * @category API
+ * @see m-ld [specification](http://spec.m-ld.org/interfaces/meldstatus.html)
+ */
 export type MeldStatus = spec.MeldStatus;
 
 /**
@@ -102,24 +108,15 @@ export interface ReadResult extends Flowable<GraphSubject>, PromiseLike<GraphSub
    * subscribers (either to `this`, or to `this.consume`).
    */
   readonly completed: PromiseLike<unknown>;
-}
-
-/** @internal */
-export function readResult(result: Consumable<GraphSubject>): ReadResult {
-  return new class extends Observable<GraphSubject> implements ReadResult {
-    readonly completed = new Future;
-    // Everything should flow through this consumable so that completed is fired
-    readonly consume = result.pipe(tapComplete(this.completed));
-
-    constructor() {
-      super(subs => flow(this.consume, subs));
-    }
-
-    then: PromiseLike<GraphSubjects>['then'] =
-      (onFulfilled, onRejected) =>
-        firstValueFrom(this.pipe(toArray<GraphSubject>())).then(onFulfilled == null ?
-          null : graph => onFulfilled(new SubjectGraph(graph)), onRejected);
-  };
+  /**
+   * Allows handling of each read subject in turn. If the handler returns a
+   * Promise, the next subject will not be handled until the promise has
+   * resolved. If the handler throws or returns a rejected promise, no more
+   * subjects will be handled and the return will be a rejected promise.
+   *
+   * @param handle a handler for each subject
+   */
+  each(handle: (value: GraphSubject) => any): Promise<unknown>;
 }
 
 /**
@@ -128,6 +125,7 @@ export function readResult(result: Consumable<GraphSubject>): ReadResult {
  * Methods are typed to ensure that app code is aware of **m-ld**
  * [data&nbsp;semantics](http://spec.m-ld.org/#data-semantics). See the
  * [Resource](/#resource) type for more details.
+ * @category API
  */
 export interface MeldReadState extends QueryableRdfSource {
   /**
@@ -158,6 +156,16 @@ export interface MeldReadState extends QueryableRdfSource {
    * properties, or `undefined` if not found
    */
   get(id: string, ...properties: SubjectProperty[]): Promise<GraphSubject | undefined>;
+  /**
+   * Shorthand method to test whether or not a query pattern has a solution. No
+   * information is returned about the possible query solutions, just whether or
+   * not a solution exists.
+   *
+   * @param pattern a query with a `@where` pattern to test
+   * @return resolves to `true` if the query's `@where` pattern matches data in the domain
+   * @see https://www.w3.org/TR/sparql11-query/#ask
+   */
+  ask(pattern: Query): Promise<boolean>;
 }
 
 /**
@@ -181,6 +189,7 @@ export interface MeldReadState extends QueryableRdfSource {
  * @see {@link MeldStateMachine.read}
  * @see {@link MeldStateMachine.write}
  * @see m-ld [specification](http://spec.m-ld.org/interfaces/meldupdate.html)
+ * @category API
  */
 export interface MeldState extends MeldReadState {
   /**
@@ -194,7 +203,7 @@ export interface MeldState extends MeldReadState {
    * @typeParam W one of the {@link Write} types
    * @returns the next state of the domain, changed by this write operation only
    */
-  write<W = Write>(request: W): Promise<MeldState>;
+  write<W extends Write = Write>(request: W): Promise<MeldState>;
   /**
    * Shorthand method for deleting a single Subject by its `@id`. This will also
    * remove references to the given Subject from other Subjects.
@@ -229,11 +238,10 @@ export interface GraphSubjects extends Array<GraphSubject> {
 }
 
 /**
- * @see m-ld [specification](http://spec.m-ld.org/interfaces/meldupdate.html)
- *
+ * An update arising from a write operation to **m-ld** graph data.
  * @category API
  */
-export interface MeldUpdate extends DeleteInsert<GraphSubjects> {
+export interface GraphUpdate extends DeleteInsert<GraphSubjects> {
   /**
    * Partial subjects, containing properties that have been deleted from the
    * domain. Note that deletion of a property (even of all properties) does not
@@ -246,11 +254,49 @@ export interface MeldUpdate extends DeleteInsert<GraphSubjects> {
    * domain.
    */
   readonly '@insert': GraphSubjects;
+}
+
+/**
+ * An update that has cleared preliminary checks and been assigned metadata, but
+ * has not yet been signalled to the application. Available to triggered rules
+ * like {@link MeldConstraint constraints} and
+ * {@link AgreementCondition agreement&nbsp;conditions}.
+ * @category API
+ */
+export interface MeldPreUpdate extends GraphUpdate {
+  /**
+   * An identified security principal (user or machine) that is responsible for
+   * this update.
+   *
+   * @experimental
+   */
+  readonly '@principal'?: Reference;
+  /**
+   * If this key is included and the value is truthy, this update is an
+   * _agreement_. The value may include serialisable proof that applicable
+   * agreement conditions have been met, such as a key to a ledger entry.
+   *
+   * @experimental
+   */
+  readonly '@agree'?: any;
+}
+
+/**
+ * @see m-ld [specification](http://spec.m-ld.org/interfaces/meldupdate.html)
+ *
+ * @category API
+ */
+export interface MeldUpdate extends MeldPreUpdate {
   /**
    * Current local clock ticks at the time of the update.
    * @see MeldStatus.ticks
    */
   readonly '@ticks': number;
+  /**
+   * Traces through to the underlying **m-ld** protocol information that gave
+   * rise to this update.
+   */
+  trace(): UpdateTrace;
 }
 
 /**
@@ -261,6 +307,7 @@ export interface MeldUpdate extends DeleteInsert<GraphSubjects> {
  * @typeParam S can be {@link MeldReadState} (default) or {@link MeldState}. If
  * the latter, the state can be transitioned to another immutable state using
  * {@link MeldState.write}.
+ * @category API
  */
 export type StateProc<S extends MeldReadState = MeldReadState, T = unknown> =
   (state: S) => PromiseLike<T> | T;
@@ -270,9 +317,10 @@ export type StateProc<S extends MeldReadState = MeldReadState, T = unknown> =
  * available as immutable following an update. Strictly, the immutable state is
  * guaranteed to remain 'live' until the procedure's return Promise resolves or
  * rejects.
+ * @category API
  */
-export type UpdateProc =
-  (update: MeldUpdate, state: MeldReadState) => PromiseLike<unknown> | void;
+export type UpdateProc<U extends MeldPreUpdate = MeldUpdate, T = unknown> =
+  (update: U, state: MeldReadState) => PromiseLike<T> | void;
 
 /**
  * A m-ld state machine extends the {@link MeldState} API for convenience, but
@@ -280,6 +328,7 @@ export type UpdateProc =
  * consecutive asynchronous reads will not necessarily operate on the same
  * state. To work with immutable state, use the `read` and `write` method
  * overloads taking a procedure.
+ * @category API
  */
 export interface MeldStateMachine extends MeldState {
   /**
@@ -370,10 +419,6 @@ export interface MeldClone extends MeldStateMachine {
    */
   readonly status: LiveStatus;
   /**
-   * Active extensions
-   */
-  readonly extensions: MeldExtensions;
-  /**
    * Closes this clone engine gracefully. Using this method ensures that data
    * has been fully flushed to storage and all transactions have been notified
    * to the domain (if this clone is online).
@@ -384,39 +429,59 @@ export interface MeldClone extends MeldStateMachine {
 }
 
 /**
- * Extensions applied to a **m-ld** clone.
- *
- * In general, extensions should be dynamically selected and loaded based on the
- * clone's (meta)data content – this allows a domain to evolve without
- * necessitating the redeployment of app code. Where applicable, the members of
- * this interface document alternative means of providing behaviour.
- *
- * > ⚠️ Changing extensions at runtime may require coordination between clones,
- * to prevent outdated clones from acting incorrectly in ways that could cause
- * data corruption or compromise security. Consult the extension's documentation
- * for safe operation.
- *
+ * Some component of type `T` that is loaded from domain state. The current
+ * value may change as the domain evolves; and may also be temporarily
+ * unavailable during an update.
+ * @internal
+ */
+export interface StateManaged<T> {
+  /**
+   * Get the current or next available value, ready for use (or a rejection,
+   * e.g. if the clone is shutting down).
+   */
+  ready(): Promise<T>;
+  /**
+   * Initialises the component against the given clone state. This method could
+   * be used to read significant state into memory for the efficient
+   * implementation of a component's function.
+   */
+  readonly initialise?: StateProc;
+  /**
+   * Called to inform the component of an update to the state, _after_ it has
+   * been applied. If available, this procedure will be called for every state
+   * after that passed to {@link initialise}.
+   */
+  readonly onUpdate?: UpdateProc<MeldPreUpdate>;
+}
+
+/**
+ * [Extensions](/#extensions) applied to a **m-ld** clone. These may be provided
+ * by the app when the clone is initialised, or declared in the data and loaded
+ * dynamically.
  * @experimental
  * @category Experimental
  */
 export interface MeldExtensions {
   /**
-   * Constraints declared in the configuration or the data.
+   * Data invariant constraints applicable to the domain.
    *
    * @experimental
-   * @todo provide data-declared constraints
-   * @see https://github.com/m-ld/m-ld-spec/issues/73
    */
-  constraints: MeldConstraint[];
+  readonly constraints?: Iterable<MeldConstraint>;
+  /**
+   * Agreement preconditions applicable to the domain.
+   *
+   * @experimental
+   */
+  readonly agreementConditions?: Iterable<AgreementCondition>;
   /**
    * A transport security interceptor. If the initial transport security is not
    * compatible with the rest of the domain, this clone may not be able to join
    * until the app is updated.
    *
    * @experimental
-   * @todo provide data-declared transport security
    */
-  transportSecurity: MeldTransportSecurity;
+  readonly transportSecurity?: MeldTransportSecurity;
 }
 
 /**
@@ -429,14 +494,10 @@ export interface MeldExtensions {
  * clone. In this case, the constraint must resolve the violation by application
  * of some rule.
  *
- * > 🚧 *Data constraints are currently an experimental feature. Please
- * > [contact&nbsp;us](https://m-ld.org/hello/) to discuss constraints required for
- * > your use-case.*
- *
  * In this clone engine, constraints are checked and applied for updates prior
  * to their application to the data (the updates are 'interim'). If the
  * constraint requires to know the final state, it must infer it from the given
- * reader and the update.
+ * state and the update.
  *
  * @see [m-ld concurrency](http://m-ld.org/doc/#concurrency)
  * @experimental
@@ -458,7 +519,59 @@ export interface MeldConstraint {
    * @param update the interim update, prior to application to the data
    * @returns a rejection only if the constraint application fails
    */
-  apply(state: MeldReadState, update: InterimUpdate): Promise<unknown>;
+  apply?(state: MeldReadState, update: InterimUpdate): Promise<unknown>;
+}
+
+/**
+ * An agreement condition asserts a necessary precondition for an _agreement_.
+ *
+ * Violation of an agreement condition indicates that the source of the
+ * operation is not behaving correctly according to the specification of the
+ * app; for example, it has been replaced by malware (with or without the user's
+ * knowledge). The condition check is therefore made for incoming remote
+ * agreement operations, _not_ for a local write marked as an agreement – it is
+ * the responsibility of the app (and its {@link MeldConstraint constraints}) to
+ * ensure that preconditions are met for a local write.
+ *
+ * The consequence of a violation is that the operation is ignored, and also
+ * _any further operations from the same remote clone_. This causes a permanent
+ * divergence which can only be recovered by creating a new clone for the
+ * violating remote user/device.
+ *
+ * It is therefore imperative that agreement conditions _only consider inputs
+ * that are known to be consistent for all clones_. Generally this _does not_
+ * include the local clone state, because clone state on receipt of an agreement
+ * operation may not be the same as the prior state at the originating clone,
+ * per normal **m-ld** behaviour. Examples of valid inputs include:
+ *
+ * 1. Clone state which is known not to have changed since the _last_ agreement,
+ * for example if access controlled so that it cannot change without agreement.
+ *
+ * 2. External state known to have strong consistency, such as the content of a
+ * ledger or database. In this case it may be necessary for the operation to
+ * reference some immutable data such as specific block in a blockchain, or an
+ * append-only table row.
+ *
+ * @see {@link Update}
+ * @todo clone status notification on receipt of a violating remote operation
+ * @experimental
+ * @category Experimental
+ */
+export interface AgreementCondition {
+  /**
+   * Checking of agreement conditions occurs prior to constraint checks for a
+   * remote operation marked as an agreement.
+   *
+   * > ⚠ Contents of the `state` provided may not always be suitable as an
+   * input for condition checking. See the {@link AgreementCondition}
+   * documentation.
+   *
+   * @param state a read-only view of data from the clone at the moment the
+   * agreement has been received
+   * @param agreement the agreement update, prior to application to the data
+   * @returns a rejection if the condition is violated (or fails)
+   */
+  test(state: MeldReadState, agreement: MeldPreUpdate): Promise<unknown>;
 }
 
 /**
@@ -529,14 +642,14 @@ export interface InterimUpdate {
    * the methods above have affected the `@insert` and `@delete` of the update,
    * they will have been applied.
    */
-  readonly update: Promise<MeldUpdate>;
+  readonly update: Promise<MeldPreUpdate>;
 }
 
 /**
  * An identified security principal (user or machine) that is responsible for
  * data changes in the clone.
  *
- * > 🚧 Application security extensions using `AppPrincipal` are currently
+ * > 🧪 Application security extensions using `AppPrincipal` are currently
  * experimental. See the [discussion](https://m-ld.org/doc/#security) of general
  * security principles for using **m-ld**, and the
  * [recommendations](/#security) for this engine.
@@ -559,33 +672,106 @@ export interface AppPrincipal {
 }
 
 /**
+ * Attribution of some data to a responsible security principal.
+ * @see MeldApp.principal
+ * @category Experimental
+ * @experimental
+ */
+export interface Attribution {
+  /**
+   * The identity of the responsible principal
+   */
+  pid: Iri;
+  /**
+   * Signature provided by the security implementation, binding the principal to
+   * the attributed data.
+   * @see AppPrincipal.sign
+   */
+  sig: Buffer;
+}
+
+/**
+ * Underlying Protocol information that gave rise to an update
+ * @category Experimental
+ * @experimental
+ */
+export interface AuditOperation {
+  /**
+   * The (possibly signed) operation encoded according to the **m-ld** protocol
+   * as a binary buffer
+   */
+  data: Buffer;
+  /**
+   * The operation attribution; may contain a binary signature of the
+   * {@link data} Buffer
+   */
+  attribution: Attribution | null;
+  /**
+   * The operation content in the protocol JSON tuple format
+   */
+  operation: EncodedOperation;
+}
+
+/**
+ * Auditable trace of an {@link MeldUpdate app update}. The properties of this
+ * object represent a number of possible relationships among updates and
+ * operations, each of which is well-defined in the **m-ld** protocol. This
+ * means that a sufficiently sophisticated auditing system would be able to
+ * re-create, and therefore verify, the trace provided.
+ * @category Experimental
+ * @experimental
+ */
+export interface UpdateTrace {
+  /**
+   * The operation that directly triggered an app update, either a local write
+   * or an arriving remote operation. This operation always exists but is not
+   * necessarily recorded in the clone journal.
+   */
+  readonly trigger: AuditOperation;
+  /**
+   * The triggering operation, adjusted to remove any parts of it that have
+   * already been applied. This is relevant if the trigger is remote and a
+   * fusion. This operation is always recorded in the clone journal.
+   */
+  readonly applicable?: AuditOperation;
+  /**
+   * If the applicable operation violated a constraint, then the update will
+   * combine it with a resolution. This property gives access to the raw
+   * resolution, which is also recorded in the journal.
+   */
+  readonly resolution?: AuditOperation;
+  /**
+   * If the applicable operation is an agreement, it may have caused some
+   * operations to have been voided. This property gives access to precisely
+   * which operations were removed, in reverse order (as if each was undone).
+   * These operations will have already been removed from the journal.
+   */
+  readonly voids: AuditOperation[]
+}
+
+/**
  * A transport security interceptor extension. Modifies data buffers sent to
  * other clones via remotes, typically by applying cryptography.
  *
  * Installed transport security can be independent of the actual remoting
  * protocol, and therefore contribute to layered security.
  *
+ * Wire security can be required for bootstrap messages during clone
+ * initialisation, i.e. `type` is `http://control.m-ld.org/request/clock` or
+ * `http://control.m-ld.org/request/snapshot` (and no prior state exists). In
+ * that case the `state` parameter of the methods will be `null`.
+ *
  * @experimental
  * @category Experimental
  */
 export interface MeldTransportSecurity {
-  /**
-   * Initialises this extension with the application security principal. This
-   * method will only be called once.
-   *
-   * @param principal the current application principal (user or machine)
-   */
-  setPrincipal?(principal: AppPrincipal | undefined): void;
   /**
    * Check and/or transform wire data.
    *
    * @param data the data to operate on
    * @param type the message purpose
    * @param direction message direction relative to the local clone
-   * @param state the current state of the clone. This may be `null`, but only
-   * for bootstrap messages, i.e. `type` is
-   * `http://control.m-ld.org/request/clock` or
-   * `http://control.m-ld.org/request/snapshot` (and no prior state exists).
+   * @param state the current state of the clone
    */
   wire(
     data: Buffer,
@@ -593,6 +779,28 @@ export interface MeldTransportSecurity {
     direction: 'in' | 'out',
     state: MeldReadState | null
   ): Buffer | Promise<Buffer>;
+  /**
+   * Create an attribution for wire data
+   *
+   * @param data the data to sign
+   * @param state the current state of the clone
+   */
+  sign?(
+    data: Buffer,
+    state: MeldReadState | null
+  ): Attribution | Promise<Attribution>;
+  /**
+   * Verify the attribution on wire data
+   *
+   * @param data the signed data
+   * @param attr the attribution
+   * @param state the current state of the clone
+   */
+  verify?(
+    data: Buffer,
+    attr: Attribution | null,
+    state: MeldReadState
+  ): void | Promise<unknown>;
 }
 
 /**@internal*/

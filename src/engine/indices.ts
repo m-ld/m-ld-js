@@ -45,10 +45,10 @@ export abstract class IndexMap<K, V> extends Index<K, [K, V]> {
       this.setAll(map);
   }
 
-  with(key: K, factory: () => V): V {
+  with(key: K, factory: (key: K) => V): V {
     let value = this.get(key);
     if (value == null) {
-      value = factory();
+      value = factory(key);
       this.set(key, value);
     }
     return value;
@@ -72,6 +72,8 @@ export abstract class IndexMap<K, V> extends Index<K, [K, V]> {
     return this;
   }
 }
+
+export type IndexMatch<T> = Iterable<T> | Filter<T>;
 
 export abstract class IndexSet<T> extends Index<T, T> {
   constructor(ts?: Iterable<T>) {
@@ -99,7 +101,7 @@ export abstract class IndexSet<T> extends Index<T, T> {
     return this;
   }
 
-  deleteAll(ts: Iterable<T> | Filter<T> | undefined): IndexSet<T> {
+  deleteAll(ts: IndexMatch<T> | undefined): IndexSet<T> {
     const removed = this.construct();
     let filter: Filter<T>;
     if (typeof ts == 'function') {

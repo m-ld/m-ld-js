@@ -1,4 +1,4 @@
-import { Iri } from 'jsonld/jsonld-spec';
+import { Iri } from '@m-ld/jsonld';
 import { GraphSubject, InterimUpdate, MeldConstraint, MeldReadState } from '../api';
 import { LseqDef, LseqIndexRewriter, PosItem } from '../engine/lseq';
 import * as meld from '../ns/m-ld';
@@ -38,8 +38,10 @@ export class DefaultList implements MeldConstraint {
     return this.doListRewrites('apply', update, state);
   }
 
-  private async doListRewrites(mode: keyof MeldConstraint,
-    interim: InterimUpdate, state: MeldReadState
+  private async doListRewrites(
+    mode: keyof MeldConstraint,
+    interim: InterimUpdate,
+    state: MeldReadState
   ) {
     const update = await interim.update;
     // Look for list slots being inserted (only used for check rewrite)

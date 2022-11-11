@@ -1,6 +1,6 @@
-const leveldown = require('leveldown');
+const { ClassicLevel } = require('classic-level');
 const { clone, isRead } = require('@m-ld/m-ld');
-const { MqttRemotes } = require('@m-ld/m-ld/dist/mqtt');
+const { MqttRemotes } = require('@m-ld/m-ld/ext/mqtt');
 const { createSign } = require('crypto');
 const LOG = require('loglevel');
 const { EventEmitter } = require('events');
@@ -18,7 +18,7 @@ process.on('message', startMsg => {
   const { config, tmpDirName, requestId } = startMsg;
   LOG.setLevel(config.logLevel);
   LOG.debug(logTs(), config['@id'], 'config is', JSON.stringify(config));
-  clone(leveldown(tmpDirName), MqttRemotes, config, createApp(config)).then(meld => {
+  clone(new ClassicLevel(tmpDirName), MqttRemotes, config, createApp(config)).then(meld => {
     send(requestId, 'started', { cloneId: config['@id'] });
 
     const handler = message => {
@@ -79,8 +79,8 @@ function createApp(config) {
   // 2. Create transport security
   if (transportSecurity) {
     delete config.transportSecurity;
-    app.transportSecurity =
-      new (require(transportSecurity.require)[transportSecurity.export])(config);
+    const TsClass = require(transportSecurity.require)[transportSecurity.class];
+    app.transportSecurity = new TsClass(config, app.principal);
   }
   // 3. Performance timings
   if (LOG.getLevel() <= LOG.levels.TRACE) {
@@ -92,7 +92,7 @@ function createApp(config) {
       createWriteStream(join(outDir, `${config['@id']}.csv`)));
     out.log(['name', 'startTime', 'duration'].join(','));
     app.backendEvents.on('timing', event => out.log([
-      event.name, Math.ceil(event.startTime), Math.ceil(event.duration)
+      event.names, Math.ceil(event.startTime), Math.ceil(event.duration)
     ].join(',')));
     app.backendEvents.on('error', err => LOG.warn('Backend error', err));
   }
