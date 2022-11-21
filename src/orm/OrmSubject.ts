@@ -8,7 +8,7 @@ import {
 import { isNaturalNumber } from '../engine/util';
 import { asValues, compareValues, minimiseValue } from '../engine/jsonld';
 import { SubjectPropertyValues } from '../subjects';
-import { isPromise } from 'asynciterator';
+import async from '../engine/async';
 import { ConstructOrmSubject, OrmUpdating } from './OrmDomain';
 import { Iri } from '@m-ld/jsonld';
 import 'reflect-metadata';
@@ -300,7 +300,7 @@ export abstract class OrmSubject {
    */
   protected setUpdated(result: unknown | Promise<unknown>) {
     // Don't make unnecessary promises
-    if (this._updated !== this || isPromise(result)) {
+    if (this._updated !== this || async.isPromise(result)) {
       this._updated = Promise.all([this._updated, result]).then(() => this);
       this._updated.catch(() => {}); // Prevents unhandled rejection
     }

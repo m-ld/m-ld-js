@@ -14,7 +14,7 @@ import { Algebra } from 'sparqlalgebrajs';
 import { Engine } from 'quadstore-comunica';
 import { DataFactory as RdfDataFactory } from 'rdf-data-factory';
 import { JRQL, M_LD, RDF, XS } from '../../ns';
-import { AsyncIterator, empty, EmptyIterator, SimpleTransformIterator } from 'asynciterator';
+import async from '../async';
 import { MutableOperation } from '../ops';
 import { MeldError } from '../MeldError';
 import { BaseStream, Binding, CountableRdf, QueryableRdfSource } from '../../rdfjs-support';
@@ -125,11 +125,11 @@ export interface Graph extends RdfFactory, QueryableRdfSource {
   readonly name: GraphName;
   readonly lock: LockManager<'state'>;
 
-  query(...args: Parameters<QuadSource['match']>): AsyncIterator<Quad>;
-  query(query: Algebra.Construct): AsyncIterator<Quad>;
-  query(query: Algebra.Describe): AsyncIterator<Quad>;
-  query(query: Algebra.Project): AsyncIterator<Binding>;
-  query(query: Algebra.Distinct): AsyncIterator<Binding>;
+  query(...args: Parameters<QuadSource['match']>): async.AsyncIterator<Quad>;
+  query(query: Algebra.Construct): async.AsyncIterator<Quad>;
+  query(query: Algebra.Describe): async.AsyncIterator<Quad>;
+  query(query: Algebra.Project): async.AsyncIterator<Binding>;
+  query(query: Algebra.Distinct): async.AsyncIterator<Binding>;
 
   ask(query: Algebra.Ask): Promise<boolean>;
 }
@@ -413,7 +413,7 @@ class QuadStoreGraph implements Graph {
 
   match: Graph['match'] = (subject, predicate, object, graph) => {
     if (graph != null && !graph.equals(this.name))
-      return empty();
+      return async.empty();
     else
       // Must specify graph term due to optimised indexing
       return (<QuadSource>this.dataset.store).match(subject, predicate, object, this.name);
@@ -427,14 +427,14 @@ class QuadStoreGraph implements Graph {
       return (<CountableRdf>this.dataset.store).countQuads(subject, predicate, object, this.name);
   };
 
-  query(...args: Parameters<QuadSource['match']>): AsyncIterator<Quad>;
-  query(query: Algebra.Construct): AsyncIterator<Quad>;
-  query(query: Algebra.Describe): AsyncIterator<Quad>;
-  query(query: Algebra.Project): AsyncIterator<Binding>;
-  query(query: Algebra.Distinct): AsyncIterator<Binding>;
+  query(...args: Parameters<QuadSource['match']>): async.AsyncIterator<Quad>;
+  query(query: Algebra.Construct): async.AsyncIterator<Quad>;
+  query(query: Algebra.Describe): async.AsyncIterator<Quad>;
+  query(query: Algebra.Project): async.AsyncIterator<Binding>;
+  query(query: Algebra.Distinct): async.AsyncIterator<Binding>;
   query(
     ...args: Parameters<QuadSource['match']> | [Algebra.Operation]
-  ): AsyncIterator<Binding | Quad> {
+  ): async.AsyncIterator<Binding | Quad> {
     const source: Promise<BaseStream<Quad | Bindings>> = (async () => {
       try {
         const [algebra] = args;
@@ -448,12 +448,12 @@ class QuadStoreGraph implements Graph {
       } catch (err) {
         // TODO: Comunica bug? Cannot read property 'close' of undefined, if stream empty
         if (err instanceof TypeError)
-          return new EmptyIterator<Quad | Bindings>();
+          return new async.EmptyIterator<Quad | Bindings>();
         throw err;
       }
       throw new Error('Expected bindings or quads');
     })();
-    return new SimpleTransformIterator<Bindings | Quad, Binding | Quad>(
+    return new async.SimpleTransformIterator<Bindings | Quad, Binding | Quad>(
       // A transform iterator is actually capable of taking a base stream, despite typings
       this.dataset.lock.extend('state', 'query', <any>source), {
         map: item => ('type' in item && item.type === 'bindings') ? toBinding(item) : <Quad>item

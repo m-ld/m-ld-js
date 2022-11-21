@@ -3,7 +3,7 @@ import { MeldUpdate } from '../src';
 import { LockManager } from '../src/engine/locks';
 import { CloneEngine, StateEngine } from '../src/engine/StateEngine';
 import { SubjectGraph } from '../src/engine/SubjectGraph';
-import { single } from 'asynciterator';
+import async from '../src/engine/async';
 import { DataFactory as RdfDataFactory, Quad } from 'rdf-data-factory';
 import { drain } from 'rx-flowable';
 import { consume } from 'rx-flowable/consume';
@@ -14,7 +14,7 @@ describe('State Engine', () => {
     readonly lock = new LockManager<'state'>();
     readonly dataUpdates = new Source<MeldUpdate>();
     // noinspection JSUnusedGlobalSymbols
-    match: CloneEngine['match'] = () => single(
+    match: CloneEngine['match'] = () => async.single(
       rdf.quad(rdf.namedNode('state'),
         rdf.namedNode('tick'),
         rdf.literal(this.tick.toString())));
