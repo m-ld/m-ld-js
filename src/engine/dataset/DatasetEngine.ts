@@ -23,7 +23,7 @@ import { AbstractMeld, comesAlive } from '../AbstractMeld';
 import { RemoteOperations } from './RemoteOperations';
 import { CloneEngine } from '../StateEngine';
 import { MeldError, MeldErrorStatus } from '../MeldError';
-import { AsyncIterator, TransformIterator, wrap } from 'asynciterator';
+import async from '../async';
 import { BaseStream } from '../../rdfjs-support';
 import { Consumable } from 'rx-flowable';
 import { MeldApp, MeldConfig } from '../../config';
@@ -523,11 +523,11 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
   }
 
   private wrapStreamFn<P extends any[], T>(
-    fn: (...args: P) => BaseStream<T>): ((...args: P) => AsyncIterator<T>) {
+    fn: (...args: P) => BaseStream<T>): ((...args: P) => async.AsyncIterator<T>) {
     return (...args) => {
-      return new TransformIterator<T>(this.closed ?
+      return new async.TransformIterator<T>(this.closed ?
         Promise.reject(new MeldError('Clone has closed')) :
-        this.lock.share('live', 'sparql', async () => wrap(fn(...args))));
+        this.lock.share('live', 'sparql', async () => async.wrap(fn(...args))));
     };
   }
 

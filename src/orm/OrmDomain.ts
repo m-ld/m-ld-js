@@ -8,7 +8,7 @@ import { SubjectUpdater } from '../updates';
 import { ReadLatchable } from '../engine/index';
 import { BehaviorSubject, firstValueFrom } from 'rxjs';
 import { filter } from 'rxjs/operators';
-import { isPromise } from 'asynciterator';
+import async from '../engine/async';
 import { array } from '../util';
 import { MeldApp, MeldConfig } from '../config';
 
@@ -171,7 +171,7 @@ export class OrmDomain {
       if (update != null) {
         const updater = new SubjectUpdater(update);
         for (let subject of this.domain._cache.values()) {
-          if (isPromise(subject))
+          if (async.isPromise(subject))
             await subject
               .then(subject => this.updateSubject(updater, subject, deleted))
               .catch(); // Error will have been reported by get()
@@ -190,9 +190,9 @@ export class OrmDomain {
       // In the course of an update, the cache may mutate. Rely on Map order to
       // ensure any new subjects are captured and updated.
       for (let [id, subject] of this.domain._cache.entries()) {
-        if (isPromise(subject))
+        if (async.isPromise(subject))
           this.domain._cache.set(id, subject = await subject);
-        if (isPromise(subject.updated))
+        if (async.isPromise(subject.updated))
           await settled(subject.updated);
       }
     }
@@ -282,7 +282,7 @@ export class OrmDomain {
   commit(): Update {
     const update = { '@delete': [] as Subject[], '@insert': [] as Subject[] };
     for (let subject of this._cache.values()) {
-      if (isPromise(subject))
+      if (async.isPromise(subject))
         throw new TypeError('ORM domain has not finished updating');
       const subjectUpdate = subject.commit();
       update['@delete'].push(...array<Subject>(subjectUpdate['@delete']));

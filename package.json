@@ -1,6 +1,6 @@
 {
   "name": "@m-ld/m-ld",
-  "version": "0.9.0",
+  "version": "0.9.1-edge.1",
   "description": "m-ld native Javascript",
   "main": "ext/index.js",
   "types": "ext/index.d.ts",
@@ -98,6 +98,7 @@
     "mqtt-pattern": "^1.2.0",
     "quadstore": "^11.0.3",
     "quadstore-comunica": "^3.0.3",
+    "queue-microtask": "^1.2.3",
     "rdf-data-factory": "^1.0.4",
     "reflect-metadata": "^0.1.13",
     "rx-flowable": "^0.1.0",

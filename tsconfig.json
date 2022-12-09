@@ -8,10 +8,7 @@
     "inlineSourceMap": true,
     "declaration": true,
     "strictNullChecks": true,
-    "outDir": "ext",
-    "paths": {
-      "quadstore-comunica": ["./src/types/quadstore-comunica.d.ts"]
-    }
+    "outDir": "ext"
   },
   "include": [
     "src/**/*"
