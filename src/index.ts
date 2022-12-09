@@ -25,7 +25,7 @@ export * from './jrql-support';
  * Constructor for a driver for connecting to remote m-ld clones on the domain.
  * @internal
  */
-type ConstructRemotes = new (
+export type ConstructRemotes = new (
   config: MeldConfig,
   extensions: () => Promise<MeldExtensions>
 ) => MeldRemotes;
