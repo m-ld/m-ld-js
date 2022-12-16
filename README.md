@@ -14,7 +14,7 @@
 <pre></pre>
 
 [![Project Status: Active – The project has reached a stable, usable state and is being actively developed.](https://www.repostatus.org/badges/latest/active.svg)](https://www.repostatus.org/#active)
-[![GitHub Workflow Status](https://img.shields.io/github/workflow/status/m-ld/m-ld-js/Node.js%20CI)](https://github.com/m-ld/m-ld-js/actions)
+[![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/m-ld/m-ld-js/node.js.yml?branch=master)](https://github.com/m-ld/m-ld-js/actions)
 [![npm (tag)](https://img.shields.io/npm/v/@m-ld/m-ld)](https://www.npmjs.com/package/@m-ld/m-ld)
 [![Gitter](https://img.shields.io/gitter/room/m-ld/community)](https://gitter.im/m-ld/community)
 [![GitHub Discussions](https://img.shields.io/github/discussions/m-ld/m-ld-spec)](https://github.com/m-ld/m-ld-spec/discussions)
