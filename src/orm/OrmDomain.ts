@@ -11,6 +11,7 @@ import { filter } from 'rxjs/operators';
 import async from '../engine/async';
 import { array } from '../util';
 import { MeldApp, MeldConfig } from '../config';
+import { EventEmitter } from 'events';
 
 /**
  * Standardised constructor type for ORM subjects
@@ -20,6 +21,14 @@ import { MeldApp, MeldConfig } from '../config';
  */
 export type ConstructOrmSubject<T extends OrmSubject> =
   (src: GraphSubject, orm: OrmUpdating) => T | Promise<T>;
+
+/**
+ * Event handler for all new ORM subjects, in case they are of interest to the
+ * domain – use {@link get} to translate the raw graph subject to an ORM
+ * subject.
+ */
+export type CacheMissListener =
+  (ref: GraphSubject, orm: OrmUpdating) => void | Promise<unknown>;
 
 /**
  * Wraps a {@link MeldReadState read state}, in which some elements of an ORM
@@ -45,10 +54,12 @@ export interface OrmUpdating extends ReadLatchable {
    *
    * @param src can be a plain IRI or Reference, used to identify the Subject
    * @param construct called as necessary to create a new ORM Subject
+   * @param scope
    */
   get<T extends OrmSubject>(
     src: GraphSubject | string,
-    construct: ConstructOrmSubject<T>
+    construct: ConstructOrmSubject<T>,
+    scope?: OrmScope
   ): Promise<T>;
   /**
    * Get an array of subjects in the domain. This method and its overload are
@@ -60,10 +71,12 @@ export interface OrmUpdating extends ReadLatchable {
    *
    * @param src can be a plain IRI or Reference, used to identify the Subject
    * @param construct called as necessary to create a new ORM Subject
+   * @param scope
    */
   get<T extends OrmSubject>(
     src: GraphSubject[] | string[],
-    construct: ConstructOrmSubject<T>
+    construct: ConstructOrmSubject<T>,
+    scope?: OrmScope
   ): Promise<T[]>;
   /**
    * Updates the ORM domain from the given **m-ld** core API update. Usually
@@ -72,16 +85,31 @@ export interface OrmUpdating extends ReadLatchable {
    * domain subjects.
    *
    * @param update the **m-ld** core update
-   * @param deleted called when an ORM subject has been removed from the domain
-   * @param cacheMiss called for all new ORM subjects, in case they are of
+   */
+  updated(update?: GraphUpdate): Promise<void>;
+}
+
+/**
+ * Utility type for the required m-ld context in which an ORM is operating
+ */
+export interface OrmContext {
+  readonly config: MeldConfig;
+  readonly app: MeldApp;
+}
+
+export interface OrmScope extends EventEmitter {
+  /** The domain to which this scope belongs */
+  readonly domain: OrmDomain;
+  /** Destroys this scope including all cached subjects and event listeners */
+  invalidate(): void;
+  /** emitted when an ORM subject has been removed from the domain */
+  on(eventName: 'deleted', listener: (subject: OrmSubject) => void): this;
+  /**
+   * emitted for all new ORM subjects, in case they are of
    * interest to the domain – use {@link get} to translate the raw graph subject
    * to an ORM subject.
    */
-  updated(
-    update?: GraphUpdate,
-    deleted?: (subject: OrmSubject) => void,
-    cacheMiss?: (ref: GraphSubject) => void | Promise<unknown>
-  ): Promise<void>;
+  on(eventName: 'cacheMiss', listener: CacheMissListener): this;
 }
 
 /**
@@ -117,7 +145,7 @@ export interface OrmUpdating extends ReadLatchable {
  * @experimental
  * @category Experimental
  */
-export class OrmDomain {
+export class OrmDomain implements OrmContext {
   /**
    * Used to delay all attempts to access subjects until after any update.
    * Note that we're "up to date" with no state before the first update.
@@ -126,22 +154,25 @@ export class OrmDomain {
     state: MeldReadState, latch: SharedPromise<unknown>
   } | null>(null);
 
-  private _cache = new Map<Iri, OrmSubject | Promise<OrmSubject>>();
+  private _scopes = new Set<_OrmScope>();
 
   private readonly orm = new class implements OrmUpdating {
     constructor(readonly domain: OrmDomain) {}
 
     async get<T extends OrmSubject>(
       src: GraphSubject | GraphSubject[] | string | string[],
-      construct: ConstructOrmSubject<T>
+      construct: ConstructOrmSubject<T>,
+      scope = this.domain.scope
     ): Promise<T | T[]> {
       if (isArray(src)) {
         return Promise.all(src.map(src => (<OrmUpdating>this).get(src, construct)));
       } else {
+        if (!(scope instanceof _OrmScope) || !this.domain._scopes.has(scope))
+          throw new RangeError('Scope must be obtained from domain');
         const id = typeof src == 'string' ? src : src['@id'];
-        if (this.domain._cache.has(id)) {
+        if (scope._cache.has(id)) {
           // noinspection ES6MissingAwait - getting a promise
-          return <Promise<T>>this.domain._cache.get(id);
+          return <T | Promise<T>>scope._cache.get(id);
         } else {
           const subject = this.latch(async state => {
             if (typeof src == 'string' || isReference(src)) {
@@ -157,57 +188,58 @@ export class OrmDomain {
               return construct(src, this);
             }
           });
-          this.domain._cache.set(id, subject);
+          scope._cache.set(id, subject);
           return subject;
         }
       }
     }
 
-    async updated(
-      update?: GraphUpdate,
-      deleted?: (subject: OrmSubject) => void,
-      cacheMiss?: (ref: GraphSubject) => void | Promise<unknown>
-    ) {
+    async updated(update?: GraphUpdate) {
       if (update != null) {
         const updater = new SubjectUpdater(update);
-        for (let subject of this.domain._cache.values()) {
-          if (async.isPromise(subject))
-            await subject
-              .then(subject => this.updateSubject(updater, subject, deleted))
-              .catch(); // Error will have been reported by get()
-          else
-            this.updateSubject(updater, subject, deleted);
-        }
-        if (cacheMiss != null) {
-          // Anything new to the ORM domain which is 'got' by the cacheMiss
-          // function must be entered into the cache before iterating the
-          // updated-ness, below
-          await Promise.all(update['@insert']
-            .filter(inserted => !this.domain._cache.has(inserted['@id']))
-            .map(cacheMiss));
+        for (let scope of this.domain._scopes) {
+          for (let subject of scope._cache.values()) {
+            if (async.isPromise(subject))
+              await subject
+                .then(subject => this.updateSubject(updater, subject, scope))
+                .catch(); // Error will have been reported by get()
+            else
+              this.updateSubject(updater, subject, scope);
+          }
+          if (scope.hasCacheMissListeners) {
+            // Anything new to the ORM domain which is 'got' by a cacheMiss
+            // listener must be entered into the cache before iterating the
+            // updated-ness, below
+            await Promise.all(update['@insert']
+              .filter(inserted => !scope._cache.has(inserted['@id']))
+              .map(ref => scope.emitCacheMiss(ref, this)));
+          }
         }
       }
       // In the course of an update, the cache may mutate. Rely on Map order to
       // ensure any new subjects are captured and updated.
-      for (let [id, subject] of this.domain._cache.entries()) {
-        if (async.isPromise(subject))
-          this.domain._cache.set(id, subject = await subject);
-        if (async.isPromise(subject.updated))
-          await settled(subject.updated);
+      for (let scope of this.domain._scopes) {
+        for (let [id, subject] of scope._cache.entries()) {
+          if (async.isPromise(subject))
+            scope._cache.set(id, subject = await subject);
+          if (async.isPromise(subject.updated))
+            await settled(subject.updated);
+        }
       }
     }
 
     private updateSubject(
       updater: SubjectUpdater,
       subject: OrmSubject,
-      deleted?: (subject: OrmSubject) => void
+      scope: _OrmScope
     ) {
       updater.update(subject.src);
+      subject.onPropertiesUpdated(this);
       if (subject.deleted) {
         // Here we make the assumption that a subject which is (still)
         // deleted after an update is no longer of interest to the app
-        this.domain._cache.delete(subject.src['@id']);
-        deleted?.(subject);
+        scope._cache.delete(subject.src['@id']);
+        scope.emitDeleted(subject);
       }
     }
 
@@ -224,10 +256,34 @@ export class OrmDomain {
     }
   }(this);
 
-  constructor(
-    readonly config: MeldConfig,
-    readonly app: MeldApp
-  ) {}
+  readonly config: MeldConfig;
+  readonly app: MeldApp;
+  /** Global scope for the domain */
+  readonly scope: OrmScope;
+
+  constructor({ config, app }: OrmContext) {
+    this.app = app;
+    this.config = config;
+    this.scope = this.createScope();
+  }
+
+  /**
+   * A scope allows a code module such as an extension to avoid seeing some
+   * other module's ORM classes when asking for a subject instance. This can be
+   * important if the module's subject scope intersects with another module's.
+   * Note that in such circumstances it's probably a good idea to use
+   * module-specific properties, to avoid interference.
+   */
+  createScope(): OrmScope {
+    const scope = new _OrmScope(this);
+    this._scopes.add(scope);
+    scope.on('invalidated', () => {
+      if (scope !== this.scope)
+        // Cheeky to mutate the domain's Set
+        this._scopes.delete(scope);
+    });
+    return scope;
+  }
 
   /**
    * Call to obtain an {@link OrmUpdating updating} state of the domain, to be
@@ -281,13 +337,62 @@ export class OrmDomain {
    */
   commit(): Update {
     const update = { '@delete': [] as Subject[], '@insert': [] as Subject[] };
-    for (let subject of this._cache.values()) {
-      if (async.isPromise(subject))
-        throw new TypeError('ORM domain has not finished updating');
-      const subjectUpdate = subject.commit();
-      update['@delete'].push(...array<Subject>(subjectUpdate['@delete']));
-      update['@insert'].push(...array<Subject>(subjectUpdate['@insert']));
+    for (let scope of this._scopes) {
+      for (let subject of scope._cache.values()) {
+        if (async.isPromise(subject))
+          throw new TypeError('ORM domain has not finished updating');
+        const subjectUpdate = subject.commit();
+        update['@delete'].push(...array<Subject>(subjectUpdate['@delete']));
+        update['@insert'].push(...array<Subject>(subjectUpdate['@insert']));
+      }
     }
     return update;
   }
+}
+
+/**
+ * Private friend class of OrmDomain for created scopes
+ * @internal
+ */
+class _OrmScope extends EventEmitter implements OrmScope {
+  _cache = new Map<Iri, OrmSubject | Promise<OrmSubject>>();
+
+  constructor(
+    readonly domain: OrmDomain
+  ) {
+    super();
+  }
+
+  invalidate(): void {
+    this.removeAllListeners();
+    this._cache.clear();
+    this.emit('invalidated');
+  }
+
+  /** emitted when an ORM subject has been removed from the domain */
+  on(eventName: 'deleted', listener: (subject: OrmSubject) => void): this;
+  /**
+   * emitted for all new ORM subjects, in case they are of
+   * interest to the domain – use {@link get} to translate the raw graph subject
+   * to an ORM subject.
+   */
+  on(eventName: 'cacheMiss', listener: CacheMissListener): this;
+  /** Internal event for removing scope from domain */
+  on(eventName: 'invalidated', listener: () => void): this;
+  /** @override */
+  on(eventName: string, listener: (...args: any[]) => void): this {
+    return super.on(eventName, listener);
+  }
+
+  emitDeleted = (subject: OrmSubject) =>
+    this.emit('deleted', subject);
+
+  get hasCacheMissListeners() {
+    return this.listenerCount('cacheMiss') > 0;
+  }
+
+  // Manual emission to return promise
+  emitCacheMiss = (ref: GraphSubject, orm: OrmUpdating) =>
+    Promise.all(this.listeners('cacheMiss')
+      .map((listener: CacheMissListener) => listener(ref, orm)));
 }

@@ -1,4 +1,4 @@
-import { minIndexOfSparse } from './util';
+import { minIndexOfSparse } from '../engine/util';
 
 /**
  * LSEQ-like CRDT helper class, for generating list position identifiers.
@@ -111,6 +111,8 @@ class LseqPosId {
    * `this` and `that` must be adjacent in the list.
    * @this is the lower bound for the new position
    * @param that the upper bound for the new position
+   * @param site
+   * @param count
    */
   between(that: LseqPosId, site: string, count: number = 1): LseqPosId[] {
     assert(this.lseq.compatible(that.lseq), 'incompatibleLseq');
@@ -149,7 +151,14 @@ class LseqPosId {
     throw new Error(ERRORS.equalPosId);
   }
 
-  private alloc(level: number, lbound: number, ubound: number, next: LseqPosId, site: string, count: number) {
+  private alloc(
+    level: number,
+    lbound: number,
+    ubound: number,
+    next: LseqPosId,
+    site: string,
+    count: number
+  ) {
     const positions = this.allocIntegers(lbound, ubound, count);
     const posIds = positions.map(pos => this.cloneWith(level, pos, site));
     if (posIds.length < count) {
@@ -310,6 +319,7 @@ export class LseqIndexRewriter<T> {
    * - contiguous (no gaps after first non-empty array position)
    * - index >= domain.index.min
    * - value >= domain.posId.min
+   * @param notify
    */
   rewriteIndexes(existing: PosItem<T>[], notify: LseqIndexNotify<T>) {
     let index = minIndexOfSparse(existing) ?? 0, newIndex = index;

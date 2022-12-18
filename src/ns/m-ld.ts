@@ -34,7 +34,7 @@ export const statutoryShape = `${$base}#statutory-shape`;
 /** Access-controls a set of sh:Shapes */
 export const WritePermission = `${$base}WritePermission`;
 
-/** A reference to a SHACL shape whose targets are permissioned */
+/** A reference to a SHACL shape whose targets are controlled */
 export const controlledShape = `${$base}#controlled-shape`;
 
 /** Principal to Permission link */

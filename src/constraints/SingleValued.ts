@@ -10,7 +10,7 @@ import { asSubjectUpdates, updateSubject } from '../updates';
  * Configuration for a `SingleValued` constraint. The configured property should
  * have only one value.
  *
- * @experimental
+ * @deprecated replaced by SHACL constraints
  * @category Experimental
  */
 export interface SingleValuedConfig {

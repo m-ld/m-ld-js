@@ -1,14 +1,14 @@
-import { OrmDomain, OrmSubject, OrmUpdating } from '../orm';
-import {
-  GraphSubject, InterimUpdate, MeldExtensions, MeldPreUpdate, MeldReadState, StateManaged
-} from '../api';
-import { Shape } from '../shacl/index';
+import { ExtensionSubject, OrmSubject, OrmUpdating } from '../orm/index';
+import { GraphSubject, InterimUpdate, MeldExtensions, MeldReadState } from '../api';
 import { Describe, Reference, Subject } from '../jrql-support';
 import { M_LD } from '../ns';
 import { MeldError } from '../engine/MeldError';
 import { Iri } from '@m-ld/jsonld';
 import { JsType } from '../js-support';
 import { property } from '../orm/OrmSubject';
+import { Shape } from '../shacl/Shape';
+import { ExtensionSubjectInstance } from '../orm/ExtensionSubject';
+import { CacheMissListener, OrmScope } from '../orm/OrmDomain';
 
 /**
  * This extension allows an app to declare that certain security principals
@@ -24,7 +24,7 @@ import { property } from '../orm/OrmSubject';
  * @experimental
  * @noInheritDoc
  */
-export class WritePermitted extends OrmDomain implements StateManaged<MeldExtensions> {
+export class WritePermitted implements ExtensionSubjectInstance, MeldExtensions {
   /**
    * Extension declaration. Insert into the domain data to install the
    * extension. For example (assuming a **m-ld** `clone` object):
@@ -39,12 +39,8 @@ export class WritePermitted extends OrmDomain implements StateManaged<MeldExtens
   static declare = (priority: number): Subject => ({
     '@id': M_LD.extensions,
     '@list': {
-      [priority]: {
-        '@id': `${M_LD.EXT.$base}constraints/WritePermitted`,
-        '@type': M_LD.JS.commonJsExport,
-        [M_LD.JS.require]: '@m-ld/m-ld/ext/constraints/WritePermitted',
-        [M_LD.JS.className]: 'WritePermitted'
-      }
+      [priority]: ExtensionSubject.declareMeldExt(
+        'security', 'WritePermitted')
     }
   });
 
@@ -93,50 +89,52 @@ export class WritePermitted extends OrmDomain implements StateManaged<MeldExtens
     [M_LD.hasPermission]: permission
   });
 
-  private permissions = new Map<Iri, WritePermission>();
-
   /** @internal */
-  checkPermissions = (state: MeldReadState, update: InterimUpdate) =>
-    Promise.all(Array.from(this.permissions.values(),
-      permission => permission.check(state, update)));
-
+  private readonly permissions = new Map<Iri, WritePermission>();
   /** @internal */
-  ready(): Promise<MeldExtensions> {
-    return this.upToDate().then(() => ({
-      constraints: [{
-        check: this.checkPermissions,
-        apply: this.checkPermissions
-      }]
-    }));
-  }
+  private /*readonly*/ scope: OrmScope;
 
-  /** @internal */
-  initialise(state: MeldReadState) {
+  async initialise(src: GraphSubject, orm: OrmUpdating): Promise<this> {
+    this.scope = orm.domain.createScope()
+      .on('deleted', this.onSubjectDeleted)
+      .on('cacheMiss', this.onSubjectInserted);
     // Read the available permissions
-    return this.updating(state, orm =>
+    await orm.latch(state =>
       state.read<Describe>({
         '@describe': '?permission',
         '@where': { '@id': '?permission', '@type': M_LD.WritePermission }
       }).each(src => this.loadPermission(src, orm)));
+    return this;
   }
 
-  /** @internal */
-  onUpdate(update: MeldPreUpdate, state: MeldReadState) {
-    return this.updating(state, orm =>
-      orm.updated(update, deleted => {
-        // Remove any deleted permissions
-        this.permissions.delete(deleted.src['@id']);
-      }, async insert => {
-        // Capture any new permissions
-        if (insert['@type'] === M_LD.WritePermission)
-          await this.loadPermission(insert, orm);
-      }));
+  invalidate(): void {
+    this.scope.invalidate();
   }
+
+  private onSubjectDeleted = (deleted: OrmSubject) =>
+    // Remove any deleted permissions
+    this.permissions.delete(deleted.src['@id']);
+
+  private onSubjectInserted: CacheMissListener = async (insert, orm) => {
+    // Capture any new permissions
+    if (insert['@type'] === M_LD.WritePermission)
+      await this.loadPermission(insert, orm);
+  };
+
+  /** @internal */
+  private checkPermissions = (state: MeldReadState, update: InterimUpdate) =>
+    Promise.all(Array.from(this.permissions.values(),
+      permission => permission.check(state, update)));
+
+  constraints = [{
+    check: this.checkPermissions,
+    apply: this.checkPermissions
+  }];
 
   private async loadPermission(src: GraphSubject, orm: OrmUpdating) {
     // Putting into both our permissions map and the domain cache
-    this.permissions.set(src['@id'],
-      await orm.get(src, src => new WritePermission(src, orm)));
+    this.permissions.set(src['@id'], await orm.get(src,
+      src => new WritePermission(src, orm, this.scope), this.scope));
   }
 }
 
@@ -144,14 +142,16 @@ export class WritePermitted extends OrmDomain implements StateManaged<MeldExtens
 export class WritePermission extends OrmSubject {
   @property(JsType.for(Array, Subject), M_LD.controlledShape)
   controlledShapes: Shape[];
-  domain: OrmDomain;
 
-  constructor(src: GraphSubject, readonly orm: OrmUpdating) {
+  constructor(
+    src: GraphSubject,
+    orm: OrmUpdating,
+    private readonly scope: OrmScope
+  ) {
     super(src);
     this.initSrcProperties(src, {
       controlledShapes: { orm, construct: Shape.from }
     });
-    this.domain = orm.domain;
   }
 
   async check(state: MeldReadState, interim: InterimUpdate) {
@@ -172,8 +172,8 @@ export class WritePermission extends OrmSubject {
       throw new MeldError('Unauthorised',
         `No identified principal for controlled shape ${shape}`);
     // Load the principal's permissions if we don't already have them
-    const principal = await this.domain.updating(state, orm => orm.get(
-      principalRef, src => new Principal(src)));
+    const principal = await this.scope.domain.updating(state, orm => orm.get(
+      principalRef, src => new Principal(src), this.scope));
     if (!principal.permissions.has(this.src['@id']))
       throw new MeldError('Unauthorised');
   }

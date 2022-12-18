@@ -1,13 +1,13 @@
 import { Iri } from '@m-ld/jsonld';
 import { GraphSubject, InterimUpdate, MeldConstraint, MeldReadState } from '../api';
-import { LseqDef, LseqIndexRewriter, PosItem } from '../engine/lseq';
+import { LseqDef, LseqIndexRewriter, PosItem } from '.';
 import * as meld from '../ns/m-ld';
 import { lazy } from '../engine/util';
 import {
   isList, isPropertyObject, isReference, isSlot, isSubjectObject, List, Reference, Select,
   SubjectProperty
 } from '../jrql-support';
-import { SingleValued } from './SingleValued';
+import { SingleValued } from '../constraints/SingleValued';
 import { addPropertyObject, listItems } from '../engine/jrql-util';
 import { includesValue } from '../subjects';
 

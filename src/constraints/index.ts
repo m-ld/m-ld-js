@@ -13,6 +13,7 @@ import { compact } from '@m-ld/jsonld';
  * > constraints required for your use-case.*
  *
  * @category Configuration
+ * @deprecated
  */
 export type ConstraintConfig = SingleValuedConfig;
 

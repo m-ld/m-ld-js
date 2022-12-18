@@ -1,5 +1,5 @@
 import {
-  isPropertyObject, List, Reference, Subject, SubjectPropertyObject, Update
+  isPropertyObject, List, Reference, Subject, SubjectProperty, SubjectPropertyObject, Update
 } from '../jrql-support';
 import { GraphSubject } from '../api';
 import {
@@ -9,7 +9,7 @@ import { isNaturalNumber } from '../engine/util';
 import { asValues, compareValues, minimiseValue } from '../engine/jsonld';
 import { SubjectPropertyValues } from '../subjects';
 import async from '../engine/async';
-import { ConstructOrmSubject, OrmUpdating } from './OrmDomain';
+import { ConstructOrmSubject, OrmScope, OrmUpdating } from './OrmDomain';
 import { Iri } from '@m-ld/jsonld';
 import 'reflect-metadata';
 
@@ -31,6 +31,8 @@ declare namespace PropertyAccess {
     construct: ConstructOrmSubject<OrmSubject>;
     /** The current updating ORM state, used to initialise the subject */
     orm: OrmUpdating,
+    /** The ORM scope to use when initialising subjects */
+    scope?: OrmScope
   }
 
   interface GetSet<T, S> extends Init<T, S> {
@@ -163,15 +165,17 @@ export abstract class OrmSubject {
    * @param access custom property access information
    * @throws {RangeError} if the property has already been initialised
    */
-  initSrcProperty<T, S>(
+  initSrcProperty<T, S, O>(
     src: GraphSubject,
-    local: string & keyof this,
+    local: (string & keyof this) | [obj: O, key: string & keyof O],
     property: JsProperty<T, S>,
     access?: PropertyAccess.Any<T, S>
   ) {
     if (this.propertyInitialised(property))
       throw new RangeError('Property already initialised');
-    const { get, set } = this.resolveAccess(local, property, access);
+    const { get, set } = typeof local == 'string' ?
+      resolveAccess(this, local, property, access) :
+      resolveAccess(...local, property, access);
     Object.defineProperty(this.src, property.name, {
       get,
       set: v => {
@@ -181,9 +185,9 @@ export abstract class OrmSubject {
         else
           this.propertiesInState.delete(property.name);
         try {
-          this.setUpdated(set(property.type.cast(v)));
+          this.onPropertyUpdated(property.name, set(property.type.cast(v)));
         } catch (e) {
-          this.setUpdated(Promise.reject(e));
+          this.onPropertyUpdated(property.name, Promise.reject(e));
         }
       },
       enumerable: true, // JSON-able
@@ -192,7 +196,7 @@ export abstract class OrmSubject {
     if (access?.init == null || property.name in src) {
       this.src[property.name] = src[property.name]; // Invokes the setter
     } else {
-      this.setUpdated(set(access.init));
+      this.onPropertyUpdated(property.name, set(access.init));
     }
   }
 
@@ -245,7 +249,8 @@ export abstract class OrmSubject {
         return true;
       }, i => {
         listPropertyInState()[i] = value;
-        this.setUpdated(access.set(i, castPropertyValue(value, type)));
+        this.onPropertyUpdated(['@list', i],
+          access.set(i, castPropertyValue(value, type)));
         return true;
       }, false)
     });
@@ -293,12 +298,13 @@ export abstract class OrmSubject {
   }
 
   /**
-   * Called when a graph subject (src) property is changing.
+   * Called when a graph subject (src) property is being updated.
    *
+   * @param property The property that is being updated.
    * @param result If any property is asynchronously updated, the final value
    * will only be definitively set when this promise resolves.
    */
-  protected setUpdated(result: unknown | Promise<unknown>) {
+  protected onPropertyUpdated(property: SubjectProperty, result: unknown | Promise<unknown>) {
     // Don't make unnecessary promises
     if (this._updated !== this || async.isPromise(result)) {
       this._updated = Promise.all([this._updated, result]).then(() => this);
@@ -306,33 +312,41 @@ export abstract class OrmSubject {
     }
   }
 
-  private resolveAccess<T, S>(
-    local: string & keyof this,
-    property: JsProperty<T, S>,
-    access?: PropertyAccess.Any<T, S>
-  ): PropertyAccess.GetSet<T, S> {
-    if (access != null && 'get' in access) {
-      return access;
+  /**
+   * Called by the ORM domain when the subject's properties have been fully
+   * updated. The {@link deleted} flag will be set. Any reference properties or
+   * other asynchronous dependencies may not yet be loaded (may be 'faults').
+   */
+  onPropertiesUpdated(orm: OrmUpdating) {}
+}
+
+function resolveAccess<T, S, O>(
+  obj: O,
+  key: string & keyof O,
+  property: JsProperty<T, S>,
+  access?: PropertyAccess.Any<T, S>
+): PropertyAccess.GetSet<T, S> {
+  if (access != null && 'get' in access) {
+    return access;
+  } else {
+    // TODO: type-assert that obj[key] is ValueConstructed<T, S>
+    if (access != null && 'construct' in access) {
+      const [type] = property.type.type;
+      if (type !== Subject && type !== Array)
+        throw new TypeError('ORM subjects must be constructed from Subjects');
+      // Subjects and arrays of subjects can be automatically get/set
+      return {
+        set: async (v: any) => obj[key] =
+          <any>(await access.orm.get(v, access.construct, access.scope)),
+        get: type === Subject ?
+          () => (<any>obj[key]).src :
+          () => (<any>obj[key])?.map((s: GraphSubject) => s.src)
+      };
     } else {
-      // TODO: type-assert that this[local] is ValueConstructed<T, S>
-      if (access != null && 'construct' in access) {
-        const [type] = property.type.type;
-        if (type !== Subject && type !== Array)
-          throw new TypeError('ORM subjects must be constructed from Subjects');
-        // Subjects and arrays of subjects can be automatically get/set
-        return {
-          set: async (v: any) => this[local] =
-            <any>(await access.orm.get(v, access.construct)),
-          get: type === Subject ?
-            () => (<any>this[local]).src :
-            () => (<any>this[local])?.map((s: GraphSubject) => s.src)
-        };
-      } else {
-        return {
-          get: () => <any>this[local],
-          set: (v: any) => this[local] = <any>v
-        };
-      }
+      return {
+        get: () => <any>obj[key],
+        set: (v: any) => obj[key] = <any>v
+      };
     }
   }
 }

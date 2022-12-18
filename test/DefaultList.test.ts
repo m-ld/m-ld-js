@@ -1,6 +1,6 @@
 import { Update } from '../src';
 import { MockGraphState, mockInterim } from './testClones';
-import { DefaultList } from '../src/constraints/DefaultList';
+import { DefaultList } from '../src/lseq/DefaultList';
 import { SubjectGraph } from '../src/engine/SubjectGraph';
 
 // Note that DefaultList is quite heavily tested by MeldState.test.ts but not

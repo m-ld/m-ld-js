@@ -1,6 +1,6 @@
 import { SH } from '../src/ns';
-import { PropertyShape, Shape } from '../src/shacl';
 import { mock } from 'jest-mock-extended';
+import { PropertyShape, Shape } from '../src/shacl/Shape';
 
 describe('SHACL support', () => {
   test('create a property shape from a subject', () => {
