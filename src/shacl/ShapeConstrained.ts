@@ -33,17 +33,15 @@ export class ShapeConstrained implements ExtensionSubjectInstance, MeldExtension
   });
 
   /** @internal */
-  shapes: Shape[];
+  constraints: Shape[];
 
   /** @internal */
   initialise(src: GraphSubject, orm: OrmUpdating, ext: ExtensionSubject<this>): this {
     // We know we're a singleton; add our controlled shapes property
     ext.initSrcProperty(src,
-      [this, 'shapes'],
+      [this, 'constraints'],
       new JsProperty(M_LD.controlledShape, JsType.for(Array, Subject)),
       { orm, construct: Shape.from });
     return this;
   }
-
-  constraints: [];
 }

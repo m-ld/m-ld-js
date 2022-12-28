@@ -77,4 +77,7 @@ describe('Extension subject', () => {
       expect(ExtensionSubject.instance<MyKindOfExtension>(src, orm))
         .rejects.toThrow(TypeError));
   });
+
+  test.todo('Reloads extension on update');
+  test.todo('Passes graph subject to extension initialise on update');
 });

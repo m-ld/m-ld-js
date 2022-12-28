@@ -9,8 +9,8 @@ import { AsyncMqttClient, IPublishPacket } from 'async-mqtt';
 import { EventEmitter } from 'events';
 import { observeOn } from 'rxjs/operators';
 import {
-  Attribution, Context, InterimUpdate, MeldConfig, MeldConstraint, MeldExtensions, MeldPreUpdate,
-  MeldReadState, StateManaged, StateProc, Write
+  Attribution, Context, GraphSubject, GraphSubjects, InterimUpdate, MeldConfig, MeldConstraint,
+  MeldExtensions, MeldPreUpdate, MeldReadState, StateManaged, StateProc, Write
 } from '../src';
 import { AbstractLevel } from 'abstract-level';
 import { LiveValue } from '../src/engine/api-support';
@@ -24,6 +24,7 @@ import { ActiveContext, activeCtx } from '../src/engine/jsonld';
 import { InterimUpdatePatch } from '../src/engine/dataset/InterimUpdatePatch';
 import { MeldOperationMessage } from '../src/engine/MeldOperationMessage';
 import { Future } from '../src/engine/Future';
+import { SubjectGraph } from '../src/engine/SubjectGraph';
 
 export const testDomain = 'test.m-ld.org';
 export const testContext = new DomainContext(testDomain);
@@ -76,7 +77,7 @@ export async function memStore(opts?: {
   return new QuadStoreDataset(
     opts?.domain ?? testDomain,
     opts?.backend ?? new MemoryLevel()
-    ).initialise();
+  ).initialise();
 }
 
 export class MockState {
@@ -289,7 +290,20 @@ export function mockMqtt(): MockMqtt & MockProxy<AsyncMqttClient> {
   return mqtt;
 }
 
-export function mockInterim(update: MeldPreUpdate) {
+export function mockInterim(
+  // Allow undefined or plain array @delete & @insert, for readability
+  update: Partial<{
+    [key in keyof MeldPreUpdate]: MeldPreUpdate[key] extends GraphSubjects ?
+      Array<GraphSubject> : MeldPreUpdate[key]
+  }>
+) {
   // Passing an implementation into the mock adds unwanted properties
-  return Object.assign(mock<InterimUpdate>(), { update: Promise.resolve(update) });
+  return Object.assign(mock<InterimUpdate>(), {
+    update: Promise.resolve({
+      ...update,
+      '@delete': new SubjectGraph(update['@delete'] ?? []),
+      '@insert': new SubjectGraph(update['@insert'] ?? [])
+    })
+  });
 }
+

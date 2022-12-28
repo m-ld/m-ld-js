@@ -225,7 +225,7 @@ export class SingletonExtensionSubject<T extends ExtensionSubjectInstance>
 
   constructor(src: GraphSubject, orm: OrmUpdating) {
     super(src);
-    this.reload(orm);
+    this.reload(src, orm);
   }
 
   get singleton() {
@@ -233,8 +233,7 @@ export class SingletonExtensionSubject<T extends ExtensionSubjectInstance>
   }
 
   onPropertiesUpdated(orm: OrmUpdating) {
-    super.onPropertiesUpdated(orm);
-    this.reload(orm);
+    this.reload({ ...this.src }, orm);
   }
 
   protected invalidate() {
@@ -245,13 +244,10 @@ export class SingletonExtensionSubject<T extends ExtensionSubjectInstance>
     delete this._singleton;
   }
 
-  private reload(orm: OrmUpdating) {
+  private reload(src: GraphSubject, orm: OrmUpdating) {
     if (this.factory.err != null)
       throw this.factory.err;
-    if (this._singleton == null) {
-      const { src } = this;
-      this._singleton =
-        new this.factory.construct!().initialise(src, orm, this);
-    }
+    if (this._singleton == null)
+      this._singleton = new this.factory.construct!().initialise(src, orm, this);
   }
 }

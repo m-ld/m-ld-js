@@ -9,13 +9,13 @@ export { compareValues, getValues };
  * @todo A `@list` property is a property according to `isPropertyObject` but
  * should have very different behaviour
  */
-export class SubjectPropertyValues {
+export class SubjectPropertyValues<S extends Subject = Subject> {
   private readonly prior: 'atom' | 'array' | 'set';
   private readonly configurable: boolean;
 
   constructor(
-    readonly subject: Subject,
-    readonly property: string,
+    readonly subject: S,
+    readonly property: string & keyof S,
     readonly deepUpdater?: (values: Iterable<any>) => void
   ) {
     const object = this.subject[this.property];
@@ -33,11 +33,11 @@ export class SubjectPropertyValues {
   }
 
   insert(...values: any[]) {
-    this.update([], values);
+    return this.update([], values);
   }
 
   delete(...values: any[]) {
-    this.update(values, []);
+    return this.update(values, []);
   }
 
   update(deletes: any[], inserts: any[]) {
@@ -50,6 +50,7 @@ export class SubjectPropertyValues {
     if (oldValues !== values) {
       if (this.prior == 'set') {
         // A JSON-LD Set cannot have any other key than @set
+        // @ts-ignore
         this.subject[this.property] = { '@set': values };
       } else {
         // Per contract of updateSubject, this always L-value assigns (no pushing)
@@ -60,6 +61,7 @@ export class SubjectPropertyValues {
           delete this.subject[this.property];
       }
     }
+    return this;
   }
 
   exists(value?: any): boolean {

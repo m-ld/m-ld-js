@@ -1,2 +1,2 @@
-export { Shape } from './Shape';
+export { Shape, PropertyShape } from './Shape';
 export { ShapeConstrained } from './ShapeConstrained';

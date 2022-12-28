@@ -7,11 +7,11 @@ import { OrmDomain } from '../src/orm/index';
 
 describe('Write permissions', () => {
   let state: MockGraphState;
-  let appState: OrmDomain;
+  let domain: OrmDomain;
 
   beforeEach(async () => {
     state = await MockGraphState.create();
-    appState = new OrmDomain({ config: testConfig(), app: {} });
+    domain = new OrmDomain({ config: testConfig(), app: {} });
   });
 
   afterEach(() => state.close());
@@ -23,8 +23,9 @@ describe('Write permissions', () => {
 
   test('allows anything if no permissions', async () => {
     const writePermitted = new WritePermitted();
-    await appState.updating(state.graph.asReadState, orm =>
+    await domain.updating(state.graph.asReadState, orm =>
       writePermitted.initialise({ '@id': 'security/WritePermitted' }, orm));
+    expect.hasAssertions();
     for (let constraint of writePermitted.constraints)
       await expect(constraint.check(state.graph.asReadState, mockInterim({
         '@delete': new SubjectGraph([]),
@@ -38,7 +39,7 @@ describe('Write permissions', () => {
     await state.write(WritePermitted.declareControlled(
       'http://test.m-ld.org/namePermission', nameShape));
     const writePermitted = new WritePermitted();
-    await appState.updating(state.graph.asReadState, orm =>
+    await domain.updating(state.graph.asReadState, orm =>
       writePermitted.initialise({ '@id': 'security/WritePermitted' }, orm));
     expect.hasAssertions();
     for (let constraint of writePermitted.constraints)
@@ -54,7 +55,7 @@ describe('Write permissions', () => {
     await state.write(WritePermitted.declareControlled(
       'http://test.m-ld.org/namePermission', nameShape));
     const writePermitted = new WritePermitted();
-    await appState.updating(state.graph.asReadState, orm =>
+    await domain.updating(state.graph.asReadState, orm =>
       writePermitted.initialise({ '@id': 'security/WritePermitted' }, orm));
     expect.hasAssertions();
     for (let constraint of writePermitted.constraints)
@@ -73,7 +74,7 @@ describe('Write permissions', () => {
       'http://test.m-ld.org/hanna',
       { '@id': 'http://test.m-ld.org/namePermission' }));
     const writePermitted = new WritePermitted();
-    await appState.updating(state.graph.asReadState, orm =>
+    await domain.updating(state.graph.asReadState, orm =>
       writePermitted.initialise({ '@id': 'security/WritePermitted' }, orm));
     expect.hasAssertions();
     for (let constraint of writePermitted.constraints)

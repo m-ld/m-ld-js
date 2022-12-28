@@ -94,7 +94,7 @@ export class WritePermitted implements ExtensionSubjectInstance, MeldExtensions 
   /** @internal */
   private /*readonly*/ scope: OrmScope;
 
-  async initialise(src: GraphSubject, orm: OrmUpdating): Promise<this> {
+  async initialise(_src: GraphSubject, orm: OrmUpdating): Promise<this> {
     this.scope = orm.domain.createScope()
       .on('deleted', this.onSubjectDeleted)
       .on('cacheMiss', this.onSubjectInserted);
