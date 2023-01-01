@@ -388,23 +388,23 @@ function castValue<T>(value: Value, type: JsAtomValueConstructor): T {
     switch (type) {
       case Number:
         if (value['@type'] === XS.integer || value['@type'] === XS.double)
-          return <any>type(value['@value']);
+          return <T>type(value['@value']);
         break;
       case String:
         if (value['@language'] != null || value['@type'] === XS.string)
-          return <any>type(value['@value']);
+          return <T>type(value['@value']);
         break;
       case Boolean:
         if (value['@type'] === XS.boolean)
-          return <any>type(value['@value']);
+          return <T>type(value['@value']);
         break;
       case Date:
         if (value['@type'] === XS.dateTime)
-          return <any>new Date(String(value['@value']));
+          return <T>new Date(String(value['@value']));
         break;
       case Uint8Array:
         if (value['@type'] === XS.base64Binary)
-          return <any>Buffer.from(String(value['@value']), 'base64');
+          return <T>Buffer.from(String(value['@value']), 'base64');
         break;
       // Do not support Object, Reference or VocabReference here
     }
@@ -413,47 +413,47 @@ function castValue<T>(value: Value, type: JsAtomValueConstructor): T {
       case Number:
         // noinspection SuspiciousTypeOfGuard
         if (typeof value == 'number')
-          return <any>value;
+          return <T>value;
         break;
       case String:
         // noinspection SuspiciousTypeOfGuard
         if (typeof value == 'string')
-          return <any>value;
+          return <T>value;
         break;
       case Boolean:
         // noinspection SuspiciousTypeOfGuard
         if (typeof value == 'boolean')
-          return <any>value;
+          return <T>value;
         break;
       case Date:
         // noinspection SuspiciousTypeOfGuard
         if (typeof value == 'string') {
           const date = new Date(value);
           if (date.toString() !== 'Invalid Date')
-            return <any>date;
+            return <T>date;
         }
         break;
       case Subject:
         if (typeof value == 'object')
-          return <any>value;
+          return <T>value;
         break;
       case Reference:
         if (isReference(value))
-          return <any>value;
+          return <T>value;
         if (isVocabReference(value) && isAbsolute(value['@vocab']))
-          return <any>{ '@id': value['@vocab'] };
+          return <T>{ '@id': value['@vocab'] };
         // noinspection SuspiciousTypeOfGuard
         if (typeof value == 'string')
-          return <any>value;
+          return <T>value;
         break;
       case VocabReference:
         if (isVocabReference(value))
-          return <any>value;
+          return <T>value;
         if (isReference(value) && isAbsolute(value['@id']))
-          return <any>{ '@vocab': value['@id'] };
+          return <T>{ '@vocab': value['@id'] };
         // noinspection SuspiciousTypeOfGuard
         if (typeof value == 'string')
-          return <any>value;
+          return <T>value;
         break;
       // Do not support Buffer here
     }

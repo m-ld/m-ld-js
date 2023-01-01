@@ -1,18 +1,18 @@
 import { Iri } from '@m-ld/jsonld';
-import { isReference, Reference, Subject, SubjectProperty } from '../jrql-support';
+import { isReference, Reference, Subject, SubjectProperty, Value } from '../jrql-support';
 import { Quad_Predicate, Quad_Subject, Term, Triple } from './quads';
 import { JRQL, RDF, XS } from '../ns';
 import { GraphSubject, GraphSubjects } from '../api';
 import { deepValues, isArray, setAtPath } from './util';
 import { addPropertyObject, toIndexNumber } from './jrql-util';
-import { ActiveContext, compactIri, getContextValue } from './jsonld';
+import { JsonldContext } from './jsonld';
 
 export type GraphAliases =
   (subject: Iri | null, property: '@id' | string) => Iri | SubjectProperty | undefined;
 
 interface RdfOptions {
   aliases?: GraphAliases,
-  ctx?: ActiveContext
+  ctx?: JsonldContext
 }
 
 export class SubjectGraph extends Array<GraphSubject> implements GraphSubjects {
@@ -31,35 +31,13 @@ export class SubjectGraph extends Array<GraphSubject> implements GraphSubjects {
   static fromRDF(triples: Triple[], opts: RdfOptions = {}): SubjectGraph {
     return new SubjectGraph(Object.values(
       triples.reduce<{ [id: string]: GraphSubject }>((byId, triple) => {
-        const subjectId = SubjectGraph.identifySubject(triple.subject, opts);
-        const property = SubjectGraph.identifyProperty(
+        const subjectId = identifySubject(triple.subject, opts);
+        const property = identifyProperty(
           triple.subject.value, triple.predicate, opts);
         addPropertyObject(byId[subjectId] ??= { '@id': subjectId },
           property, jrqlValue(property, triple.object, opts.ctx));
         return byId;
       }, {})));
-  }
-
-  private static identifySubject(
-    subject: Quad_Subject, { aliases, ctx }: RdfOptions): Iri {
-    if (subject.termType === 'BlankNode') {
-      return subject.value;
-    } else if (subject.termType === 'NamedNode') {
-      const maybeIri = aliases?.(subject.value, '@id') ?? subject.value;
-      if (!isArray(maybeIri))
-        return compactIri(maybeIri, ctx);
-    }
-    throw new SyntaxError('Subject @id alias must be an IRI or blank');
-  }
-
-  private static identifyProperty(subjectIri: Iri,
-    predicate: Quad_Predicate, { aliases, ctx }: RdfOptions): SubjectProperty {
-    if (predicate.termType !== 'Variable') {
-      const property = aliases?.(subjectIri, predicate.value) ??
-        aliases?.(null, predicate.value) ?? predicate.value;
-      return isArray(property) ? property : jrqlProperty(property, ctx);
-    }
-    throw new SyntaxError('Subject property must be an IRI');
   }
 
   /** numeric parameter is needed for Array constructor compliance */
@@ -114,20 +92,51 @@ export class SubjectGraph extends Array<GraphSubject> implements GraphSubjects {
   }
 }
 
-function getContextType(
-  property: SubjectProperty, ctx: ActiveContext | undefined): string | null {
-  return typeof property == 'string' && ctx != null ?
-    getContextValue(ctx, property, '@type') : null;
+function identifySubject(
+  subject: Quad_Subject,
+  { aliases, ctx }: RdfOptions
+): Iri {
+  if (subject.termType === 'BlankNode') {
+    return subject.value;
+  } else if (subject.termType === 'NamedNode') {
+    const maybeIri = aliases?.(subject.value, '@id') ?? subject.value;
+    if (!isArray(maybeIri))
+      return ctx ? ctx.compactIri(maybeIri) : maybeIri;
+  }
+  throw new SyntaxError('Subject @id alias must be an IRI or blank');
 }
 
-export function jrqlValue(property: SubjectProperty, object: Term, ctx?: ActiveContext) {
+function identifyProperty(
+  subjectIri: Iri,
+  predicate: Quad_Predicate,
+  { aliases, ctx }: RdfOptions
+): SubjectProperty {
+  if (predicate.termType !== 'Variable') {
+    const property = aliases?.(subjectIri, predicate.value) ??
+      aliases?.(null, predicate.value) ?? predicate.value;
+    return isArray(property) ? property : jrqlProperty(property, ctx);
+  }
+  throw new SyntaxError('Subject property must be an IRI');
+}
+
+function getContextType(
+  property: SubjectProperty, ctx = JsonldContext.NONE): string | null {
+  return typeof property == 'string' && ctx != null ?
+    ctx.getTermDetail(property, '@type') : null;
+}
+
+export function jrqlValue(
+  property: SubjectProperty,
+  object: Term,
+  ctx = JsonldContext.NONE
+): Value {
   if (object.termType.endsWith('Node')) {
     if (property === '@type') {
       // @type is implicitly a reference from vocabulary
-      return compactIri(object.value, ctx, { vocab: true });
+      return ctx.compactIri(object.value, { vocab: true });
     } else {
       const type = getContextType(property, ctx);
-      const iri = compactIri(object.value, ctx, { vocab: type === '@vocab' });
+      const iri = ctx.compactIri(object.value, { vocab: type === '@vocab' });
       // An IRI is always output as a Reference
       return type === '@id' || type === '@vocab' ? iri : { '@id': iri };
     }
@@ -146,7 +155,7 @@ export function jrqlValue(property: SubjectProperty, object: Term, ctx?: ActiveC
       else if (type === XS.double)
         return parseFloat(object.value);
       else
-        return { '@value': object.value, '@type': compactIri(type, ctx, { vocab: true }) };
+        return { '@value': object.value, '@type': ctx.compactIri(type, { vocab: true }) };
     }
   } else {
     throw new Error(`Cannot include ${object.termType} in a Subject`);
@@ -154,14 +163,17 @@ export function jrqlValue(property: SubjectProperty, object: Term, ctx?: ActiveC
 }
 
 /** Converts RDF predicate to json-rql keyword, Iri, or list indexes */
-export function jrqlProperty(predicate: Iri, ctx?: ActiveContext): SubjectProperty {
+export function jrqlProperty(predicate: Iri, ctx = JsonldContext.NONE): SubjectProperty {
   switch (predicate) {
-    case RDF.type: return '@type';
-    case JRQL.index: return '@index';
-    case JRQL.item: return '@item';
+    case RDF.type:
+      return '@type';
+    case JRQL.index:
+      return '@index';
+    case JRQL.item:
+      return '@item';
   }
   const index = toIndexNumber(predicate);
   return index != null ? ['@list', ...index] :
-    compactIri(predicate, ctx, { relativeTo: { vocab: true } });
+    ctx.compactIri(predicate, { relativeTo: { vocab: true } });
 }
 

@@ -122,7 +122,7 @@ export type ValueObject = jrql.ValueObject;
  * @see [json-rql value](https://json-rql.org/#value)
  * @category json-rql
  */
-export type Value = Atom | Subject | Reference;
+export type Value = Atom | Subject;
 /**
  * The allowable types for a Subject property value, named awkwardly to avoid
  * overloading `Object`. Represents the "object" of a property, in the sense of

@@ -5,17 +5,21 @@
 /// <reference path="../types/jsonld-url.ts" />
 /// <reference path="../types/jsonld-types.ts" />
 
-import { Context, Iri, Options, processContext } from '@m-ld/jsonld';
+import { Context, ExpandedTermDefinition, Iri, Options, processContext } from '@m-ld/jsonld';
 import { compactIri as _compactIri } from '@m-ld/jsonld/lib/compact';
 import { compareValues as _compareValues } from '@m-ld/jsonld/lib/util';
-import { ActiveContext, expandIri, getInitialContext } from '@m-ld/jsonld/lib/context';
+import {
+  ActiveContext, expandIri, getContextValue, getInitialContext
+} from '@m-ld/jsonld/lib/context';
 import { isAbsolute } from '@m-ld/jsonld/lib/url';
-import { isObject } from '@m-ld/jsonld/lib/types';
-import { isSet } from '../jrql-support';
+import { isBoolean, isDouble, isNumber, isObject, isString } from '@m-ld/jsonld/lib/types';
+import {
+  ExpandedTermDef, isReference, isSet, isValueObject, isVocabReference
+} from '../jrql-support';
 import { array } from '../util';
+import { XS } from '../ns';
 
 export { hasProperty, hasValue } from '@m-ld/jsonld/lib/util';
-export { ActiveContext, getContextValue } from '@m-ld/jsonld/lib/context';
 export { isAbsolute } from '@m-ld/jsonld/lib/url';
 export { isBoolean, isDouble, isNumber, isString } from '@m-ld/jsonld/lib/types';
 
@@ -32,42 +36,72 @@ export function compareValues(v1: any, v2: any): boolean {
   return jsonldEqual;
 }
 
-export function expandTerm(
-  value: string,
-  ctx: ActiveContext,
-  options?: Options.Expand & { vocab?: boolean }
-): Iri {
-  return expandIri(ctx, value, {
-    base: true, vocab: options?.vocab
-  }, options ?? {});
+export interface JsonldTermDefiner {
+  getTermDetail(key: string, type: keyof ExpandedTermDef): string | null;
 }
 
-export function compactIri(
-  iri: Iri,
-  ctx?: ActiveContext,
-  options?: Options.CompactIri & { vocab?: boolean }
-): string {
-  return ctx != null ? _compactIri({
-    activeCtx: ctx, iri, ...options,
-    ...options?.vocab ? { relativeTo: { vocab: options.vocab } } : null
-  }) : iri;
+export interface JsonldCompacter extends JsonldTermDefiner {
+  compactIri(
+    iri: Iri,
+    options?: Options.CompactIri & { vocab?: boolean }
+  ): string;
 }
 
-export async function activeCtx(
-  context: Context,
-  options?: Options.DocLoader
-): Promise<ActiveContext> {
-  return nextCtx(initialCtx(), context, options);
+export interface JsonldExpander extends JsonldTermDefiner {
+  expandTerm(
+    value: string,
+    options?: Options.Expand & { vocab?: boolean }
+  ): Iri;
 }
 
-export function initialCtx(): ActiveContext {
-  return getInitialContext({});
-}
+/**
+ * Type-compatible with MeldContext
+ */
+export class JsonldContext implements JsonldCompacter, JsonldExpander {
+  static initial() {
+    return new JsonldContext(getInitialContext({}));
+  }
 
-export async function nextCtx(ctx: ActiveContext, context?: Context,
-  options?: Options.DocLoader
-): Promise<ActiveContext> {
-  return context != null ? processContext(ctx, context, options ?? {}) : ctx;
+  static active(context: Context, options?: Options.DocLoader) {
+    return this.initial().next(context, options);
+  }
+
+  static NONE: JsonldCompacter = {
+    compactIri: (iri: Iri) => iri,
+    getTermDetail: () => null
+  };
+
+  private constructor(
+    private readonly ctx: ActiveContext
+  ) {}
+
+  async next(context?: Context, options?: Options.DocLoader): Promise<JsonldContext> {
+    return context != null ? processContext(this.ctx, context, options ?? {})
+      .then(ctx => new JsonldContext(ctx)) : this;
+  }
+
+  expandTerm(
+    value: string,
+    options?: Options.Expand & { vocab?: boolean }
+  ): Iri {
+    return expandIri(this.ctx, value, {
+      base: true, vocab: options?.vocab
+    }, options ?? {});
+  }
+
+  compactIri(
+    iri: Iri,
+    options?: Options.CompactIri & { vocab?: boolean }
+  ) {
+    return _compactIri({
+      activeCtx: this.ctx, iri, ...options,
+      ...options?.vocab ? { relativeTo: { vocab: options.vocab } } : null
+    });
+  }
+
+  getTermDetail(key: string, type: keyof ExpandedTermDef): string | null {
+    return getContextValue(this.ctx, key, <keyof ExpandedTermDefinition>type);
+  }
 }
 
 /**
@@ -105,4 +139,79 @@ export function minimiseValue(v: any) {
       return { '@vocab': (v as { '@vocab': string })['@vocab'] };
   }
   return v;
+}
+
+/**
+ * Maps the canonical JSON-LD property value to some target type.
+ *
+ * @param property the property
+ * @param value the JSON-LD value (raw values, value objects, references).
+ * Subjects are minimised to references.
+ * @param fn the map function
+ * @param ctx the JSON-LD context, to establish the type
+ * @param interceptRaw grabs raw string values before they are canonicalised
+ * @todo reconcile with JsProperty & JsType
+ */
+export function mapValue<T>(
+  property: string | null,
+  value: any,
+  fn: (
+    value: string,
+    type: '@id' | '@vocab' | Iri | '@none',
+    language?: string
+  ) => T,
+  { ctx, interceptRaw }: {
+    ctx?: JsonldExpander,
+    interceptRaw?: (value: string) => T | undefined
+  } = {}
+): T {
+  value = minimiseValue(value);
+  if (typeof value == 'string') {
+    const raw = interceptRaw?.(value);
+    if (raw != null)
+      return raw;
+  } else if (isReference(value)) {
+    return interceptRaw?.(value['@id']) ??
+      fn(ctx ? ctx.expandTerm(value['@id']) : value['@id'], '@id');
+  } else if (isVocabReference(value)) {
+    return interceptRaw?.(value['@vocab']) ??
+      fn(ctx ? ctx.expandTerm(value['@vocab'], { vocab: true }) : value['@vocab'], '@vocab');
+  }
+  let type: string | null = null, language: string | null = null;
+  if (isValueObject(value)) {
+    if (value['@type'])
+      type = ctx ? ctx.expandTerm(value['@type']) : value['@type'];
+    language = value['@language'] ?? null;
+    value = value['@value'];
+  }
+  if (type == null && property != null && ctx != null)
+    type = ctx.getTermDetail(property, '@type');
+
+  if (typeof value == 'string') {
+    // Note, we must be in a value object, so do not intercept a raw here.
+    if (property === '@type' || type === '@id' || type === '@vocab') {
+      const vocab = property === '@type' || type === '@vocab';
+      return fn(ctx ? ctx.expandTerm(value, { vocab }) : value, vocab ? '@vocab' : '@id');
+    }
+    if (property != null && ctx != null)
+      language = ctx.getTermDetail(property, '@language');
+    if (language != null)
+      return fn(value, XS.string, language);
+    if (type === XS.double)
+      value = canonicalDouble(parseFloat(value));
+  } else if (isBoolean(value)) {
+    value = value.toString();
+    type ??= XS.boolean;
+  } else if (isNumber(value)) {
+    if (isDouble(value)) {
+      value = canonicalDouble(value);
+      type ??= XS.double;
+    } else {
+      value = value.toFixed(0);
+      type ??= XS.integer;
+    }
+  } else {
+    throw new TypeError(`Value is not a JSON-LD atom: ${value}`);
+  }
+  return fn(value, type ?? '@none', language ?? undefined);
 }

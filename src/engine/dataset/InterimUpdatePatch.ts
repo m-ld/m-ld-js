@@ -1,12 +1,17 @@
 import { DeleteInsert, InterimUpdate, MeldPreUpdate } from '../../api';
-import { Subject, SubjectProperty, Update } from '../../jrql-support';
+import { Subject, SubjectProperty, Update, Value } from '../../jrql-support';
 import { PatchQuads } from '.';
 import { JrqlGraph } from './JrqlGraph';
-import { GraphAliases, SubjectGraph } from '../SubjectGraph';
+import { GraphAliases, jrqlValue, SubjectGraph } from '../SubjectGraph';
 import { Iri } from '@m-ld/jsonld';
 import { Quad } from '../quads';
-import { ActiveContext, compactIri } from '../jsonld';
+import { JsonldContext } from '../jsonld';
 import { array } from '../../util';
+import { Consumable } from 'rx-flowable';
+import { TidsStore } from './TidsStore';
+import { flatMap, ignoreIf } from 'rx-flowable/operators';
+import { consume } from 'rx-flowable/consume';
+import { map } from 'rxjs/operators';
 
 export class InterimUpdatePatch implements InterimUpdate {
   /** If mutable, we allow mutation of the input patch */
@@ -24,6 +29,7 @@ export class InterimUpdatePatch implements InterimUpdate {
 
   /**
    * @param graph
+   * @param tidsStore
    * @param userCtx
    * @param patch the starting app patch (will not be mutated unless 'mutable')
    * @param principalId
@@ -32,7 +38,8 @@ export class InterimUpdatePatch implements InterimUpdate {
    */
   constructor(
     private readonly graph: JrqlGraph,
-    private readonly userCtx: ActiveContext,
+    private readonly tidsStore: TidsStore,
+    private readonly userCtx: JsonldContext,
     private readonly patch: PatchQuads,
     private readonly principalId: Iri | null,
     private agree: any | null,
@@ -112,23 +119,45 @@ export class InterimUpdatePatch implements InterimUpdate {
     });
   }
 
+  // TODO: unit test
+  hidden(subjectId: Iri, property: Iri): Consumable<Value> {
+    const subject = this.userTerm(subjectId);
+    const predicate = this.userTerm(property);
+    // Hidden edges exist in the TID store...
+    return this.tidsStore.findTriples(subject, predicate).pipe(
+      flatMap(object => consume(
+        // ... but not the graph...
+        this.graph.quads.query(subject, predicate, object)
+          .toArray({ limit: 1 })
+          .then(([found]) => found ? null :
+            this.graph.quads.quad(subject, predicate, object)))),
+      // ... and have not been asserted away by this update
+      ignoreIf<Quad>(quad => quad == null || this.assertions.deletes.has(quad)),
+      map(({ value: quad, next }) => ({ value: jrqlValue(property, quad.object), next })));
+  }
+
+  private userTerm(iri: Iri) {
+    return this.graph.quads.namedNode(this.userCtx.expandTerm(iri));
+  }
+
   private aliases: GraphAliases = (subject, property) => {
     return this.subjectAliases.get(subject)?.[property];
   };
 
-  private createUpdate(patch: PatchQuads, ctx?: ActiveContext): MeldPreUpdate {
+  private createUpdate(patch: PatchQuads, ctx?: JsonldContext): MeldPreUpdate {
     return {
       '@delete': this.quadSubjects(patch.deletes, ctx),
       '@insert': this.quadSubjects(patch.inserts, ctx),
       '@principal': this.principalId != null ?
-        { '@id': compactIri(this.principalId, ctx) } : undefined,
+        { '@id': ctx ? ctx.compactIri(this.principalId) : this.principalId } : undefined,
       // Note that agreement specifically checks truthy-ness, not just non-null
       '@agree': this.agree || undefined
     };
   }
 
-  private quadSubjects(quads: Iterable<Quad>, ctx?: ActiveContext) {
-    return SubjectGraph.fromRDF([...quads], { aliases: this.aliases, ctx });
+  private quadSubjects(quads: Iterable<Quad>, ctx?: JsonldContext) {
+    const { aliases } = this;
+    return SubjectGraph.fromRDF([...quads], { aliases, ctx });
   }
 
   private mutate(fn: () => Promise<boolean> | boolean) {

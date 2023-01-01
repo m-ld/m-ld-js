@@ -1,5 +1,6 @@
 import {
-  GraphSubject, LiveStatus, MeldExtensions, MeldReadState, MeldStatus, StateManaged, StateProc
+  GraphSubject, LiveStatus, MeldContext, MeldExtensions, MeldReadState, MeldStatus, StateManaged,
+  StateProc
 } from '../../api';
 import { MeldLocal, MeldRemotes, OperationMessage, Recovery, Revup, Snapshot } from '..';
 import { liveRollup } from '../api-support';
@@ -77,6 +78,8 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
   private readonly networkTimeout: number;
   private readonly genesisClaim: boolean;
   readonly status: LiveStatus;
+  /*readonly*/
+  context: MeldContext;
   /*readonly*/
   match: CloneEngine['match'];
   /*readonly*/
@@ -174,6 +177,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
 
   private async initDataset() {
     await this.dataset.initialise();
+    this.context = this.dataset.userCtx;
     const rdfSrc = this.dataset.readState;
     // Raw RDF methods just pass through to the dataset when its initialised
     this.match = this.wrapStreamFn(rdfSrc.match.bind(rdfSrc));

@@ -173,6 +173,11 @@ export function mapObject(
   return Object.assign({}, ...Object.entries(o).map(([k, v]) => fn(k, v)));
 }
 
+export function *mapIter<T, R>(it: Iterable<T>, fn: (v: T) => R): Iterable<R> {
+  for (let v of it)
+    yield(fn(v));
+}
+
 export function *deepValues(
   o: any,
   filter: (o: any, path: string[]) => boolean = o => typeof o != 'object',

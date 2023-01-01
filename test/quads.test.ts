@@ -16,6 +16,15 @@ describe('quads utilities', () => {
       '"Literal","Fred","http://www.w3.org/2001/XMLSchema#string"');
   });
 
+  test('triple index lbound', () => {
+    expect(tripleIndexKey(rdf.quad(
+      rdf.namedNode('http://ex.org/fred'),
+      rdf.namedNode('http://ex.org/#name'),
+      rdf.variable('any')))).toBe(
+      '"http://ex.org/fred",' +
+      '"http://ex.org/#name"');
+  });
+
   test('quad index key', () => {
     expect(quadIndexKey(makeFredName())).toBe(
       '"","http://ex.org/fred",' +

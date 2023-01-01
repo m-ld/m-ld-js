@@ -4,7 +4,7 @@ import * as MsgPack from './msgPack';
 import { Context, ExpandedTermDef, Reference } from '../jrql-support';
 import { Iri } from '@m-ld/jsonld';
 import { RdfFactory, Triple } from './quads';
-import { ActiveContext, activeCtx, compactIri, expandTerm } from './jsonld';
+import { JsonldContext } from './jsonld';
 import { M_LD, RDF, XS } from '../ns';
 import { SubjectGraph } from './SubjectGraph';
 import { SubjectQuads } from './SubjectQuads';
@@ -50,14 +50,14 @@ export type RefTriple = Triple & Reference;
 export type RefTriplesTids = [RefTriple, UUID[]][];
 
 export class MeldEncoder {
-  private /*readonly*/ ctx: ActiveContext;
+  private /*readonly*/ ctx: JsonldContext;
   private readonly ready: Promise<unknown>;
 
   constructor(
     readonly domain: string,
     readonly rdf: RdfFactory
   ) {
-    this.ready = activeCtx(new DomainContext(domain, OPERATION_CONTEXT))
+    this.ready = JsonldContext.active(new DomainContext(domain, OPERATION_CONTEXT))
       .then(ctx => this.ctx = ctx);
   }
 
@@ -67,8 +67,8 @@ export class MeldEncoder {
 
   private name = lazy(name => this.rdf.namedNode(name));
 
-  compactIri = (iri: Iri) => compactIri(iri, this.ctx);
-  expandTerm = (value: string) => expandTerm(value, this.ctx);
+  compactIri = (iri: Iri) => this.ctx.compactIri(iri);
+  expandTerm = (value: string) => this.ctx.expandTerm(value);
 
   identifyTriple = (triple: Triple): RefTriple =>
     ({ '@id': `_:${this.rdf.blankNode().value}`, ...triple });

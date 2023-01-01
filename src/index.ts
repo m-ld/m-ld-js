@@ -81,6 +81,10 @@ class DatasetClone extends ApiStateMachine implements MeldClone {
     super(dataset);
   }
 
+  get context() {
+    return this.dataset.context;
+  }
+
   get status(): LiveStatus {
     return this.dataset.status;
   }

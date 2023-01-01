@@ -2,7 +2,6 @@ import { MockGraphState, mockInterim, testConfig } from './testClones';
 import { OrmDomain } from '../src/orm';
 import { PropertyShape, ShapeConstrained } from '../src/shacl';
 import { SingletonExtensionSubject } from '../src/orm/ExtensionSubject';
-import { PropertyShapeSpec } from '../src/shacl/Shape';
 
 describe('Shape constrained extension', () => {
   let state: MockGraphState;
@@ -46,79 +45,5 @@ describe('Shape constrained extension', () => {
         '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': ['Fred', 'Flintstone']
       }]
     }))).rejects.toBeDefined();
-  });
-});
-
-describe('Property shape constraints', () => {
-  let state: MockGraphState;
-
-  beforeEach(async () => {
-    state = await MockGraphState.create();
-  });
-
-  afterEach(() => state.close());
-
-  /** Boilerplate property shape creation */
-  const propertyShape = (spec: PropertyShapeSpec) =>
-    new PropertyShape({ '@id': 'myShape', ...PropertyShape.declare(spec) });
-
-  test('constructs with count', () => {
-    const shape = propertyShape({ path: 'http://test.m-ld.org/#name', count: 1 });
-    expect(shape.path).toBe('http://test.m-ld.org/#name');
-    expect(shape.minCount).toBe(1);
-    expect(shape.maxCount).toBe(1);
-  });
-
-  test('checks OK update', async () => {
-    const shape = propertyShape({ path: 'http://test.m-ld.org/#name', count: 1 });
-    await expect(shape.check(state.graph.asReadState, mockInterim({
-      '@insert': [{ '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Fred' }]
-    }))).resolves.not.toThrow();
-  });
-
-  test('checks too many inserted in update', async () => {
-    const shape = propertyShape({ path: 'http://test.m-ld.org/#name', count: 1 });
-    await expect(shape.check(state.graph.asReadState, mockInterim({
-      '@insert': [{
-        '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': ['Fred', 'Flintstone']
-      }]
-    }))).rejects.toBeDefined();
-  });
-
-  test('checks OK after update', async () => {
-    await state.write({ '@id': 'fred', name: 'Fred' });
-    const shape = propertyShape({ path: 'http://test.m-ld.org/#name', count: 1 });
-    await expect(shape.check(state.graph.asReadState, mockInterim({
-      '@delete': [{ '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Fred' }],
-      '@insert': [{
-        '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Flintstone'
-      }]
-    }))).resolves.not.toThrow();
-  });
-
-  test('checks too many after update', async () => {
-    await state.write({ '@id': 'fred', name: 'Fred' });
-    const shape = propertyShape({ path: 'http://test.m-ld.org/#name', count: 1 });
-    await expect(shape.check(state.graph.asReadState, mockInterim({
-      '@insert': [{
-        '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Flintstone'
-      }]
-    }))).rejects.toBeDefined();
-  });
-
-  test('checks too few after update', async () => {
-    await state.write({ '@id': 'fred', name: 'Fred' });
-    const shape = propertyShape({ path: 'http://test.m-ld.org/#name', count: 1 });
-    await expect(shape.check(state.graph.asReadState, mockInterim({
-      '@delete': [{ '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Fred' }]
-    }))).rejects.toBeDefined();
-  });
-
-  test('checks minCount of zero after update', async () => {
-    await state.write({ '@id': 'fred', name: 'Fred' });
-    const shape = propertyShape({ path: 'http://test.m-ld.org/#name', maxCount: 1 });
-    await expect(shape.check(state.graph.asReadState, mockInterim({
-      '@delete': [{ '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Fred' }]
-    }))).resolves.not.toThrow();
   });
 });

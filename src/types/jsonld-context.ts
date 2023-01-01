@@ -15,18 +15,18 @@ declare module '@m-ld/jsonld/lib/context' {
   function isKeyword(v: any): boolean;
 
   function expandIri(
-    activeCtx: Context,
+    activeCtx: ActiveContext,
     value: string,
     relativeTo: { vocab?: boolean, base?: boolean },
     options: Options.Expand): Iri;
   
   function getContextValue(
-    ctx: Context,
+    ctx: ActiveContext,
     key: string,
     type: keyof ExpandedTermDefinition): string | null;
 
   function getContextValue(
-    ctx: Context,
+    ctx: ActiveContext,
     key: null,
     type: '@context'): undefined;
 }

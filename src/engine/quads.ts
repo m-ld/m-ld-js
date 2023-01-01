@@ -1,6 +1,7 @@
 import type { Bindings, DataFactory, NamedNode, Quad, Term } from 'rdf-js';
 import { IndexMap, IndexSet } from './indices';
 import { Binding, QueryableRdfSource } from '../rdfjs-support';
+import { Prefixes } from 'quadstore';
 
 export type Triple = Omit<Quad, 'graph'>;
 export type TriplePos = 'subject' | 'predicate' | 'object';
@@ -9,6 +10,9 @@ export type {
   DefaultGraph, Quad, Term, DataFactory, NamedNode, Source as QuadSource,
   Quad_Subject, Quad_Predicate, Quad_Object, Bindings, Literal
 } from 'rdf-js';
+
+/** Utility interfaces shared with quadstore */
+export { Prefixes };
 
 export abstract class QueryableRdfSourceProxy implements QueryableRdfSource {
   match: QueryableRdfSource['match'] = (...args) => this.src.match(...args);
@@ -35,31 +39,57 @@ export class QuadSet extends IndexSet<Quad> {
   }
 }
 
-export type getTermValue = (term: Term) => string;
-
-export function tripleKey(
-  triple: Triple,
-  value: getTermValue = term => term.value
-): string {
-  const key = [
-    value(triple.subject),
-    value(triple.predicate),
-    triple.object.termType,
-    value(triple.object)
-  ];
-  if (triple.object.termType === 'Literal') {
-    key.push(value(triple.object.datatype));
-    if (triple.object.language)
-      key.push(triple.object.language);
+export function tripleKey(triple: Triple, prefixes?: Prefixes): string {
+  const compact = (term: NamedNode) =>
+    prefixes ? prefixes.compactIri(term.value) : term.value;
+  if (triple.subject.termType !== 'NamedNode' || triple.predicate.termType !== 'NamedNode')
+    throw new TypeError('Triple key requires named node subject & predicate');
+  const key = [compact(triple.subject), compact(triple.predicate)];
+  switch (triple.object.termType) {
+    case 'Variable':
+      break; // Supports range matching
+    case 'NamedNode':
+      key.push(triple.object.termType, compact(triple.object));
+      break;
+    case 'Literal':
+      key.push(triple.object.termType, triple.object.value);
+      key.push(compact(triple.object.datatype));
+      if (triple.object.language)
+        key.push(triple.object.language);
+      break;
+    default:
+      throw new TypeError('Triple key requires named node or literal object');
   }
   // JSON.stringify is ~50% faster than .map(replace(delim)).join(delim)
   return JSON.stringify(key).slice(1, -1);
 }
 
-export function tripleIndexKey(triple: Triple, value?: getTermValue) {
-  if (value != null) {
+export function tripleFromKey(key: string, rdf: DataFactory, prefixes?: Prefixes): Triple {
+  const [subject, predicate, objectTermType, objectValue, datatype, language] =
+    JSON.parse(`[${key}]`);
+  const expand = (term: string) => prefixes ? prefixes.expandTerm(term) : term;
+  let object: Triple['object'];
+  switch (objectTermType) {
+    case 'Literal':
+      object = rdf.literal(objectValue,
+        language ?? rdf.namedNode(expand(datatype)));
+      break;
+    case 'NamedNode':
+      object = rdf.namedNode(expand(objectValue));
+      break;
+    default:
+      throw new TypeError('Triple key requires named node or literal object');
+  }
+  return rdf.quad(
+    rdf.namedNode(expand(subject)),
+    rdf.namedNode(expand(predicate)),
+    object);
+}
+
+export function tripleIndexKey(triple: Triple, prefixes?: Prefixes) {
+  if (prefixes != null) {
     // No caching if value function is specified
-    return tripleKey(triple, value);
+    return tripleKey(triple, prefixes);
   } else {
     const tik = <Triple & { _tik: string }>triple;
     if (tik._tik == null)

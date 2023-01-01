@@ -1,6 +1,6 @@
 import { isPropertyObject, isSet, Reference, Subject, Value } from './jrql-support';
 import { isArray } from './engine/util';
-import { compareValues, getValues, hasProperty, hasValue } from './engine/jsonld';
+import { compareValues, getValues, hasProperty, hasValue, mapValue } from './engine/jsonld';
 
 export { compareValues, getValues };
 
@@ -32,6 +32,14 @@ export class SubjectPropertyValues<S extends Subject = Subject> {
     return getValues(this.subject, this.property);
   }
 
+  minimalSubject(values = this.values) {
+    return { '@id': this.subject['@id'], [this.property]: values };
+  }
+
+  clone() {
+    return new SubjectPropertyValues(<S>this.minimalSubject(), this.property, this.deepUpdater);
+  }
+
   insert(...values: any[]) {
     return this.update([], values);
   }
@@ -50,7 +58,7 @@ export class SubjectPropertyValues<S extends Subject = Subject> {
     if (oldValues !== values) {
       if (this.prior == 'set') {
         // A JSON-LD Set cannot have any other key than @set
-        // @ts-ignore
+        // @ts-ignore Typescript can't tell what the value type should be
         this.subject[this.property] = { '@set': values };
       } else {
         // Per contract of updateSubject, this always L-value assigns (no pushing)
@@ -82,9 +90,17 @@ export class SubjectPropertyValues<S extends Subject = Subject> {
 
   diff(oldValues: any[]) {
     return {
-      deletes: SubjectPropertyValues.minus(oldValues, this.values),
-      inserts: SubjectPropertyValues.minus(this.values, oldValues)
-    }
+      deletes: this.deletes(oldValues),
+      inserts: this.inserts(oldValues)
+    };
+  }
+
+  deletes(oldValues: any[]) {
+    return SubjectPropertyValues.minus(oldValues, this.values);
+  }
+
+  inserts(oldValues: any[]) {
+    return SubjectPropertyValues.minus(this.values, oldValues);
   }
 
   /** @returns `values` if nothing has changed */
@@ -137,4 +153,21 @@ export function includesValue(
   value?: Value | Value[]
 ): boolean {
   return new SubjectPropertyValues(subject, property).exists(value);
+}
+
+/**
+ * A deterministic refinement of the greater-than operator used for SPARQL
+ * ordering. Assumes no unbound values, blank nodes or simple literals (every
+ * literal is typed).
+ *
+ * @see https://www.w3.org/TR/sparql11-query/#modOrderBy
+ */
+export function sortValues(property: string, values: Value[]) {
+  return values.sort((v1, v2) => {
+    const [s1, t1] = mapValue(property, v1, (value, type) => [value, type]);
+    const [s2, t2] = mapValue(property, v2, (value, type) => [value, type]);
+    return t1 === '@id' || t1 === '@vocab' ?
+      t2 === '@id' || t2 === '@vocab' ? s1.localeCompare(s2) : 1 :
+      t2 === '@id' || t2 === '@vocab' ? -1 : s1.localeCompare(s2);
+  });
 }

@@ -1,7 +1,8 @@
 import * as spec from '@m-ld/m-ld-spec';
 import type {
-  Query, Read, Reference, Subject, SubjectProperty, Update, Variable, Write
+  ExpandedTermDef, Query, Read, Reference, Subject, SubjectProperty, Update, Variable, Write
 } from './jrql-support';
+import { Value } from './jrql-support';
 import { Subscription } from 'rxjs';
 import { shortId } from './util';
 import { Iri } from '@m-ld/jsonld';
@@ -413,6 +414,10 @@ export interface MeldStateMachine extends MeldState {
  */
 export interface MeldClone extends MeldStateMachine {
   /**
+   * TODO docs
+   */
+  readonly context: MeldContext;
+  /**
    * The current and future status of a clone. This stream is hot and
    * continuous, terminating when the clone closes (and can therefore be used to
    * detect closure).
@@ -426,6 +431,15 @@ export interface MeldClone extends MeldStateMachine {
    * application failure, for problem diagnosis.
    */
   close(err?: any): Promise<unknown>;
+}
+
+/**
+ * TODO docs
+ */
+export interface MeldContext {
+  expandTerm(value: string, options?: { vocab?: boolean }): Iri;
+  compactIri(iri: Iri, options?: { vocab?: boolean }): string;
+  getTermDetail(key: string, type: keyof ExpandedTermDef): string | null;
 }
 
 /**
@@ -604,6 +618,13 @@ export interface InterimUpdate {
    * local app. Examples of entailments:
    * - The size of a collection
    * - Membership of a duck-type class
+   * - Removal of excess property values
+   *
+   * Note that graph edges that are deleted by entailments retain a hidden
+   * presence in the clone metadata, commonly known as a 'tombstone'. Since this
+   * can give rise to unbounded storage use, constraints should endeavour to
+   * remove these hidden graph edges when the opportunity arises. They can be
+   * obtained using the {@link hidden} method.
    *
    * @param update the update to entail into the domain
    * @see {@link update}
@@ -637,6 +658,16 @@ export interface InterimUpdate {
    * error if the property is `@id` and a `SubjectProperty` alias is provided.
    */
   alias(subjectId: Iri | null, property: '@id' | Iri, alias: Iri | SubjectProperty): void;
+  /**
+   * Recovers hidden graph edges for the given subject and property; that is,
+   * values that have been deleted from the graph by {@link entail entailment}.
+   * Hidden edges can be removed permanently by {@link assert asserting} their
+   * deletion.
+   *
+   * @param subjectId the subject for which to obtain the graph edge
+   * @param property the property for which to obtain the graph edge
+   */
+  hidden(subjectId: Iri, property: Iri): Consumable<Value>;
   /**
    * A promise that resolves to the current update. If any modifications made by
    * the methods above have affected the `@insert` and `@delete` of the update,
@@ -746,7 +777,7 @@ export interface UpdateTrace {
    * which operations were removed, in reverse order (as if each was undone).
    * These operations will have already been removed from the journal.
    */
-  readonly voids: AuditOperation[]
+  readonly voids: AuditOperation[];
 }
 
 /**
