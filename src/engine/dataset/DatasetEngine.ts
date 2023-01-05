@@ -17,7 +17,7 @@ import {
   debounceTime, delayWhen, distinctUntilChanged, expand, filter, finalize, ignoreElements, map,
   share, skipWhile, takeUntil, tap, toArray
 } from 'rxjs/operators';
-import { delayUntil, inflateFrom, poisson } from '../util';
+import { delayUntil, inflateFrom, poisson, settled } from '../util';
 import { LockManager } from '../locks';
 import { levels } from 'loglevel';
 import { AbstractMeld, comesAlive } from '../AbstractMeld';
@@ -62,6 +62,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
 
   private readonly dataset: SuSetDataset;
   private messageService: TreeClockMessageService;
+  private readonly processingBuffer = new Set<MeldOperationMessage>();
   private readonly orderingBuffer: MeldOperationMessage[] = [];
   private readonly remotes: Omit<MeldRemotes, 'operations'>;
   private readonly remoteOps: RemoteOperations;
@@ -221,7 +222,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
       // Only try and accept one operation at a time. If the operation no longer
       // belongs to the remotes' active 'period', discard it.
       concatMap(([op, period]) => period === this.remoteOps.period ?
-        this.acceptRemoteOperation(op) : EMPTY),
+        this.receiveRemoteOperation(op) : EMPTY),
       // Ensure that the merge below does not incur two subscribes
       share());
     const [disordered, maybeBuffering] = partition(acceptOutcomes,
@@ -248,9 +249,11 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
       .pipe(tap(() => this.remoteOps.detach('outdated')));
   }
 
-  private async acceptRemoteOperation(op: MeldOperationMessage): Promise<OperationOutcome> {
+  private async receiveRemoteOperation(op: MeldOperationMessage): Promise<OperationOutcome> {
     const logBody = this.log.getLevel() < levels.DEBUG ? op : `${op.time}`;
     this.log.debug('Receiving', logBody);
+    this.processingBuffer.add(op);
+    settled(op.delivered).then(() => this.processingBuffer.delete(op));
     // Grab the state lock, per CloneEngine contract and to ensure that all
     // clock ticks are immediately followed by their respective transactions.
     return this.lock.exclusive('state', 'remote operation', async () => {
@@ -274,10 +277,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
               throw outOfOrder;
             } else {
               this.log.debug('Accepting', logBody);
-              const cxOp = await this.dataset.apply(msg, this.messageService);
-              if (cxOp != null)
-                this.nextOperation(cxOp, 'constraint');
-              msg.delivered.resolve();
+              await this.acceptRemoteOperation(msg);
             }
           }) ? OperationOutcome.ACCEPTED : OperationOutcome.BUFFERED;
       } catch (err) {
@@ -289,6 +289,18 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
         }
       }
     });
+  }
+
+  private async acceptRemoteOperation(msg: MeldOperationMessage) {
+    try {
+      const cxOp = await this.dataset.apply(msg, this.messageService);
+      if (cxOp != null)
+        this.nextOperation(cxOp, 'constraint');
+      msg.delivered.resolve();
+    } catch (e) {
+      msg.delivered.reject(e);
+      throw e;
+    }
   }
 
   /**
@@ -475,7 +487,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
     return this.lock.exclusive('live', 'snapshot', async () => {
       this.log.info('Compiling snapshot');
       const sentSnapshot = new Future;
-      const updates = this.remoteUpdatesBeforeNow(sentSnapshot);
+      const updates = this.remoteUpdatesToForward(sentSnapshot);
       const snapshot = await this.dataset.takeSnapshot();
       return {
         ...snapshot, updates,
@@ -490,7 +502,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
   revupFrom(time: TreeClock): Promise<Revup | undefined> {
     return this.lock.exclusive('live', 'revup', async () => {
       const operationsSent = new Future;
-      const maybeMissed = this.remoteUpdatesBeforeNow(operationsSent);
+      const maybeMissed = this.remoteUpdatesToForward(operationsSent);
       const gwc = new Future<GlobalClock>();
       const operations = await this.dataset.operationsSince(time, gwc);
       if (operations)
@@ -504,18 +516,14 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
     });
   }
 
-  private remoteUpdatesBeforeNow(until: PromiseLike<void>): Observable<OperationMessage> {
-    if (this.orderingBuffer.length)
-      this.log.info(`Emitting ${this.orderingBuffer.length} from ordering buffer`);
-    const now = this.localTime;
-    return merge(
-      // #1 Anything currently in our ordering buffer
-      from(this.orderingBuffer),
-      // #2 Anything that arrives stamped prior to now
-      this.remoteOps.receiving.pipe(
-        map(([op]) => op),
-        filter(op => op.time.anyLt(now)),
-        takeUntil(from(until)))
+  private remoteUpdatesToForward(until: PromiseLike<void>): Observable<OperationMessage> {
+    if (this.processingBuffer.size)
+      this.log.info(`Emitting ${this.processingBuffer.size} from processing buffer`);
+    return concat(
+      // #1 Anything we have yet to process at the moment we are subscribed
+      from(this.processingBuffer),
+      // #2 Anything that arrives while we are forwarding
+      this.remoteOps.receiving.pipe(map(([op]) => op), takeUntil(until))
     ).pipe(tap((msg: OperationMessage) => {
       this.log.debug('Forwarding update', this.msgString(msg));
     }));

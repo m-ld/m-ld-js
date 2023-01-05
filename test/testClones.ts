@@ -1,5 +1,5 @@
 import {
-  BufferEncoding, EncodedOperation, MeldLocal, MeldRemotes, Revup, Snapshot
+  BufferEncoding, EncodedOperation, MeldLocal, MeldRemotes, OperationMessage, Revup, Snapshot
 } from '../src/engine';
 import { mock, mockFn, MockProxy } from 'jest-mock-extended';
 import { asapScheduler, BehaviorSubject, EMPTY, from, NEVER, Observable, Observer } from 'rxjs';
@@ -18,7 +18,7 @@ import { MemoryLevel } from 'memory-level';
 import * as MsgPack from '../src/engine/msgPack';
 import { DatasetSnapshot } from '../src/engine/dataset/SuSetDataset';
 import { ClockHolder } from '../src/engine/messages';
-import { DomainContext } from '../src/engine/MeldEncoding';
+import { DomainContext, MeldEncoder } from '../src/engine/MeldEncoding';
 import { JrqlGraph } from '../src/engine/dataset/JrqlGraph';
 import { JsonldContext } from '../src/engine/jsonld';
 import { InterimUpdatePatch } from '../src/engine/dataset/InterimUpdatePatch';
@@ -48,7 +48,7 @@ export function mockRemotes(
     setLocal: () => {},
     operations: updates,
     live: Array.isArray(lives) ? hotLive(lives) : lives,
-    newClock: () => Promise.resolve(newClock)
+    newClock: mockFn().mockResolvedValue(newClock)
   };
 }
 
@@ -188,6 +188,12 @@ export function testOp(
     principalId ?? null,
     agreed ?? null
   ];
+}
+
+export function decodeOpUpdate(op: OperationMessage): [{}, {}] {
+  return MeldEncoder.jsonFromBuffer(
+    op.data[EncodedOperation.Key.update],
+    op.data[EncodedOperation.Key.encoding]);
 }
 
 /**

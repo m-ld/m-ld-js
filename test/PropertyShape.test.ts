@@ -4,6 +4,7 @@ import { Shape } from '../src/shacl/Shape';
 import { PropertyShape } from '../src/shacl/index';
 import { MockGraphState, mockInterim } from './testClones';
 import { PropertyShapeSpec } from '../src/shacl/PropertyShape';
+import { consume } from 'rx-flowable/consume';
 
 describe('SHACL Property Shape', () => {
   /** Boilerplate property shape creation */
@@ -170,6 +171,24 @@ describe('SHACL Property Shape', () => {
           '@insert': {
             '@id': 'http://test.m-ld.org/fred',
             'http://test.m-ld.org/#name': ['Fred']
+          }
+        }));
+      });
+
+      test('entailed hidden are reinstated', async () => {
+        await state.write({ '@id': 'fred', name: 'Fred' });
+        const shape = propertyShape({ path: 'http://test.m-ld.org/#name', count: 1 });
+        const interim = mockInterim({
+          '@delete': [{
+            '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Fred'
+          }]
+        });
+        interim.hidden.mockReturnValue(consume(['Flintstone']));
+        await shape.apply(state.graph.asReadState, interim);
+        expect(interim.entail).toBeCalledWith(expect.objectContaining({
+          '@insert': {
+            '@id': 'http://test.m-ld.org/fred',
+            'http://test.m-ld.org/#name': ['Flintstone']
           }
         }));
       });

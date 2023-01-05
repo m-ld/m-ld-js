@@ -1,9 +1,9 @@
 import {
-  BehaviorSubject, concat, defaultIfEmpty, EMPTY, firstValueFrom, from, NEVER, Observable,
+  BehaviorSubject, concat, connect, defaultIfEmpty, EMPTY, firstValueFrom, from, NEVER, Observable,
   ObservableInput, ObservedValueOf, Observer, onErrorResumeNext, OperatorFunction, Subject,
   Subscription
 } from 'rxjs';
-import { mergeMap, publish, switchAll } from 'rxjs/operators';
+import { mergeMap, switchAll } from 'rxjs/operators';
 
 export const isArray = Array.isArray;
 
@@ -53,30 +53,35 @@ export function completed(observable: Observable<unknown>): Promise<void> {
 export function delayUntil<T>(notifier: ObservableInput<unknown>): OperatorFunction<T, T> {
   return source =>
     source.pipe(
-      publish(published => {
+      connect(published => {
         const delayed = new Observable<T>(subscriber => {
           let buffering = true;
           const buffer: T[] = [];
           const subscription = new Subscription();
           subscription.add(
-            from(notifier).subscribe(
-              () => {
+            from(notifier).subscribe({
+              next() {
                 buffer.forEach(value => subscriber.next(value));
                 subscriber.complete();
               },
-              error => subscriber.error(error),
-              () => {
+              error(err) {
+                subscriber.error(err);
+              },
+              complete() {
                 buffering = false;
                 buffer.length = 0;
               }
-            )
-          );
+            }));
           subscription.add(
-            published.subscribe(
-              value => buffering && buffer.push(value),
-              error => subscriber.error(error)
-            )
-          );
+            published.subscribe({
+              next(value) {
+                if (buffering)
+                  buffer.push(value);
+              },
+              error(err) {
+                subscriber.error(err);
+              }
+            }));
           subscription.add(() => {
             buffer.length = 0;
           });
