@@ -70,6 +70,9 @@ export function property(type: JsType<any>, name?: Iri): PropertyDecorator {
   };
 }
 
+/** @internal NOTE do not inline: breaks typedoc */
+type ObjKey<O> = [obj: O, key: string & keyof O];
+
 /**
  * An {@link OrmDomain Object-Resource Mapping (ORM)} Subject is a Javascript
  * class used to reflect graph nodes in a **m-ld** domain.
@@ -165,9 +168,9 @@ export abstract class OrmSubject {
    * @param access custom property access information
    * @throws {RangeError} if the property has already been initialised
    */
-  initSrcProperty<T, S, O>(
+  initSrcProperty<T, S, O = this>(
     src: GraphSubject,
-    local: (string & keyof this) | [obj: O, key: string & keyof O],
+    local: (string & keyof this) | ObjKey<O>,
     property: JsProperty<T, S>,
     access?: PropertyAccess.Any<T, S>
   ) {
@@ -320,6 +323,7 @@ export abstract class OrmSubject {
   onPropertiesUpdated(orm: OrmUpdating) {}
 }
 
+/** @internal */
 function resolveAccess<T, S, O>(
   obj: O,
   key: string & keyof O,
