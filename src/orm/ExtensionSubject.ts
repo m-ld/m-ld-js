@@ -27,6 +27,23 @@ export interface ExtensionSubjectInstance {
 }
 
 /**
+ * Dynamically require the given CommonJS module. In some packagers, like
+ * browserify, a call to `require` only resolves static modules. In that case,
+ * allow for a global `require` on the window object.
+ *
+ * @param cjsModule
+ */
+function dynamicRequire(cjsModule: string) {
+  try {
+    return require(cjsModule);
+  } catch (e) {
+    if (e.code === 'MODULE_NOT_FOUND' && typeof globalThis.require == 'function')
+      return globalThis.require(cjsModule);
+    throw e;
+  }
+}
+
+/**
  * An extension subject defines a way to declare that subjects in the domain
  * should be represented by a certain Javascript class.
  *
@@ -195,7 +212,7 @@ export class ExtensionSubject<T extends ExtensionSubjectInstance> extends OrmSub
           `${this.src['@id']}: CommonJS module declared with no id.`;
       } else {
         try {
-          this._factory.construct = require(this.cjsModule)[this.className];
+          this._factory.construct = dynamicRequire(this.cjsModule)[this.className];
         } catch (e) {
           this._factory.err = e;
         }

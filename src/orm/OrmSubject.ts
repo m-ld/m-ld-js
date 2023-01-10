@@ -80,7 +80,7 @@ type ObjKey<O> = [obj: O, key: string & keyof O];
  * The constructor of an ORM subject should accept a {@link GraphSubject} from
  * which derive its initial state. In the case of a new subject, which does not
  * yet exist in the domain, this will only contain an `@id` (i.e. it's a {@link
-  * Reference}), so the constructor may also accept other values for initialising
+ * Reference}), so the constructor may also accept other values for initialising
  * properties.
  *
  * Local properties properties are then mapped to graph properties (edges) by

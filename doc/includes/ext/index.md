@@ -38,7 +38,7 @@ To write an extension to be declared in the domain data, you must additionally i
   "@list": {
     "≪priority≫": {
       "@id": "≪your-extension-iri≫",
-      "@type": "http://js.m-ld.org/CommonJSExport",
+      "@type": "http://js.m-ld.org/#CommonJSExport",
       "http://js.m-ld.org/#require": "≪your-extension-module≫",
       "http://js.m-ld.org/#class": "≪your-extension-class-name≫"
     }

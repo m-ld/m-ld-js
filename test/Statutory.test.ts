@@ -35,7 +35,7 @@ describe('Statutory', () => {
       await expect(state.graph.asReadState.get('http://ext.m-ld.org/statutes/Statutory'))
         .resolves.toMatchObject({
           '@id': 'http://ext.m-ld.org/statutes/Statutory',
-          '@type': 'http://js.m-ld.org/CommonJSExport',
+          '@type': 'http://js.m-ld.org/#CommonJSExport',
           'http://js.m-ld.org/#require': '@m-ld/m-ld/ext/statutes',
           'http://js.m-ld.org/#class': 'Statutory'
         });
@@ -48,7 +48,7 @@ describe('Statutory', () => {
       }));
       const statutes = await state.graph.asReadState.read({
         '@describe': '?statute',
-        '@where': { '@id': '?statute', '@type': 'http://m-ld.org/Statute' }
+        '@where': { '@id': '?statute', '@type': 'http://m-ld.org/#Statute' }
       });
       expect(statutes).toEqual([expect.objectContaining({
         'http://m-ld.org/#statutory-shape': { '@id': 'http://test.m-ld.org/nameShape' },

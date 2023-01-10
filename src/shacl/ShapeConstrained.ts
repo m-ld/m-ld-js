@@ -12,7 +12,10 @@ export class ShapeConstrained implements ExtensionSubjectInstance, MeldExtension
    * extension. For example (assuming a **m-ld** `clone` object):
    *
    * ```typescript
-   * clone.write(ShapeConstrained.declare(0, { '@id': 'myShape' }));
+   * clone.write(ShapeConstrained.declare(0, PropertyShape.declare({
+   *   path: 'name',
+   *   count: 1
+   * })));
    * ```
    *
    * @param priority the preferred index into the existing list of extensions

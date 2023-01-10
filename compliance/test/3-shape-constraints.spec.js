@@ -3,21 +3,18 @@ const Clone = require('@m-ld/m-ld-spec/compliance/clone');
 describe('SHACL shape constraints', () => {
   let clones;
 
-  const CONFIG = {
-    '@context': {
-      'mld': 'http://m-ld.org/',
-      'js': 'http://js.m-ld.org/',
-      'sh': 'http://www.w3.org/ns/shacl#'
-    }
-  };
-
   const installConstraint = ({ path = 'name', minCount, maxCount }) => ({
-    '@id': 'mld:extensions',
+    '@context': {
+      'mld': 'http://m-ld.org/#',
+      'js': 'http://js.m-ld.org/#',
+      'sh': 'http://www.w3.org/ns/shacl#'
+    },
+    '@id': 'http://m-ld.org/extensions',
     '@list': [{
       '@type': 'js:CommonJSExport',
-      'js:#require': '@m-ld/m-ld/ext/shacl',
-      'js:#class': 'ShapeConstrained',
-      'mld:#controlled-shape': {
+      'js:require': '@m-ld/m-ld/ext/shacl',
+      'js:class': 'ShapeConstrained',
+      'mld:controlled-shape': {
         'sh:path': { '@vocab': path },
         'sh:minCount': minCount,
         'sh:maxCount': maxCount
@@ -26,7 +23,7 @@ describe('SHACL shape constraints', () => {
   });
 
   it('enforces max count 1', async () => {
-    const [clone] = clones = await Clone.start(1, CONFIG);
+    const [clone] = clones = await Clone.start(1);
     await clone.transact(installConstraint({ maxCount: 1 }));
     await clone.transact({ '@id': 'fred', name: 'Fred' });
     await expectAsync(clone.transact({ '@id': 'fred', name: 'Flintstone' }))
@@ -34,7 +31,7 @@ describe('SHACL shape constraints', () => {
   });
 
   it('enforces min count 1', async () => {
-    const [clone] = clones = await Clone.start(1, CONFIG);
+    const [clone] = clones = await Clone.start(1);
     await clone.transact(installConstraint({ minCount: 1 }));
     await clone.transact({ '@id': 'fred', name: 'Fred' });
     await expectAsync(clone.transact({ '@delete': { '@id': 'fred', name: 'Fred' } }))
@@ -42,7 +39,7 @@ describe('SHACL shape constraints', () => {
   });
 
   it('resolves to the max value', async () => {
-    const [clone1, clone2] = clones = await Clone.start(2, CONFIG);
+    const [clone1, clone2] = clones = await Clone.start(2);
     await clone1.transact(installConstraint({ maxCount: 1 }));
     await Promise.all([
       clone1.transact({ '@id': 'fred', name: 'Flintstone', height: 6 }),
@@ -57,7 +54,7 @@ describe('SHACL shape constraints', () => {
   });
 
   it('resolves despite explicit delete', async () => {
-    const [clone1, clone2, clone3] = clones = Clone.create(3, CONFIG);
+    const [clone1, clone2, clone3] = clones = Clone.create(3);
     await clone1.start();
     await clone1.transact(installConstraint({ maxCount: 1 }));
     await clone2.start(true);
