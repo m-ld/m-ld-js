@@ -40,10 +40,12 @@ describe('Default list constraint', () => {
         }])
     });
     await expect(constraint.check(state.graph.asReadState, update)).resolves.toBeUndefined();
-    expect(update.remove).toBeCalledWith('@insert', {
-      '@id': 'http://test.m-ld.org/shopping',
-      '@list': {
-        0: { '@id': 'http://test.m-ld.org/.well-known/genid/slot0' }
+    expect(update.remove).toBeCalledWith({
+      '@insert': {
+        '@id': 'http://test.m-ld.org/shopping',
+        '@list': {
+          0: { '@id': 'http://test.m-ld.org/.well-known/genid/slot0' }
+        }
       }
     });
     let indexKey: string | undefined;

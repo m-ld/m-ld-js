@@ -74,11 +74,16 @@ describe('SHACL Property Shape', () => {
 
       test('too many inserted in update', async () => {
         const shape = propertyShape({ path: 'http://test.m-ld.org/#name', count: 1 });
+        const badFred = {
+          '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': ['Fred', 'Flintstone']
+        };
         await expect(shape.check(state.graph.asReadState, mockInterim({
-          '@insert': [{
-            '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': ['Fred', 'Flintstone']
-          }]
-        }))).rejects.toBeDefined();
+          '@insert': [badFred]
+        }))).resolves.toMatchObject([{
+          focusNode: badFred,
+          resultMessage: expect.stringContaining('Too many values'),
+          sourceConstraintComponent: 'http://www.w3.org/ns/shacl#MaxCountConstraintComponent'
+        }]);
       });
 
       test('OK after update', async () => {
@@ -99,7 +104,13 @@ describe('SHACL Property Shape', () => {
           '@insert': [{
             '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Flintstone'
           }]
-        }))).rejects.toBeDefined();
+        }))).resolves.toMatchObject([{
+          focusNode: {
+            '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': ['Fred', 'Flintstone']
+          },
+          resultMessage: expect.stringContaining('Too many values'),
+          sourceConstraintComponent: 'http://www.w3.org/ns/shacl#MaxCountConstraintComponent'
+        }]);
       });
 
       test('too few after update', async () => {
@@ -107,7 +118,11 @@ describe('SHACL Property Shape', () => {
         const shape = propertyShape({ path: 'http://test.m-ld.org/#name', count: 1 });
         await expect(shape.check(state.graph.asReadState, mockInterim({
           '@delete': [{ '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Fred' }]
-        }))).rejects.toBeDefined();
+        }))).resolves.toMatchObject([{
+          focusNode: { '@id': 'http://test.m-ld.org/fred' },
+          resultMessage: expect.stringContaining('Too few values'),
+          sourceConstraintComponent: 'http://www.w3.org/ns/shacl#MinCountConstraintComponent'
+        }]);
       });
 
       test('minCount of zero after update', async () => {

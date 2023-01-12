@@ -4,14 +4,15 @@ import { Subject, VocabReference } from '../jrql-support';
 import { Iri } from '@m-ld/jsonld';
 import { array } from '../util';
 import {
-  GraphSubject, GraphSubjects, GraphUpdate, InterimUpdate, MeldPreUpdate, MeldReadState
+  Assertions, GraphSubject, GraphSubjects, GraphUpdate, InterimUpdate, MeldPreUpdate, MeldReadState
 } from '../api';
 import { sortValues, SubjectPropertyValues } from '../subjects';
 import { drain } from 'rx-flowable';
 import { SubjectGraph } from '../engine/SubjectGraph';
-import { Shape } from './Shape';
+import { Shape, ValidationResult } from './Shape';
 import { SH } from '../ns';
 import { mapIter } from '../engine/util';
+import { ConstraintComponent } from '../ns/sh';
 
 /** Property cardinality specification */
 export type PropertyCardinality = {
@@ -146,75 +147,89 @@ export class PropertyShape extends Shape {
       return sortValues(this.shape.path, values).reverse(); // Descending order
     }
 
-    failure(
+    nonConformance(
       spv: SubjectPropertyValues<GraphSubject>,
-      constraint: 'minCount' | 'maxCount'
-    ) {
-      const mode = { minCount: 'Too few', maxCount: 'Too many' }[constraint];
-      return `${mode} values for ${spv.subject['@id']} ${this.shape.path}:
-      ${spv.values}`;
+      sourceConstraintComponent: ConstraintComponent,
+      correction?: Assertions
+    ): ValidationResult {
+      const mode = {
+        [ConstraintComponent.MinCount]: 'Too few',
+        [ConstraintComponent.MaxCount]: 'Too many'
+      }[sourceConstraintComponent];
+      return {
+        focusNode: spv.subject,
+        sourceConstraintComponent,
+        resultMessage: `${mode} values for ${spv}`,
+        correction
+      };
     }
   };
 
   private static Check = class Check extends PropertyShape.Constrain {
-    async check() {
+    async check(): Promise<ValidationResult[]> {
       const update = await this.interim.update;
       // Shortcut if there are too many inserts for maxCount
-      for (let spv of this.shape.genSubjectValues(update['@insert']))
-        this.checkMaxCount(spv);
+      const results = array([...mapIter(
+        this.shape.genSubjectValues(update['@insert']), spv => this.checkMaxCount(spv))]);
+      if (results.length > 0)
+        return results;
       // Load existing values and apply the update
       // Note that deletes may not match so minCount cannot be shortcut
       const finalValues = await this.loadFinalValues(update);
-      return Promise.all(finalValues.map(({ final }) => this.checkValues(final)));
+      return array(await Promise.all(
+        finalValues.map(({ final }) => this.checkValues(final))));
     }
 
     private async checkValues(
       spv: SubjectPropertyValues<GraphSubject>
-    ) {
-      this.checkMinCount(spv);
-      this.checkMaxCount(spv);
+    ): Promise<ValidationResult | undefined> {
+      const result = this.checkMinCount(spv) ?? this.checkMaxCount(spv);
       // Delete all hidden values for this subject & property
       const id = spv.subject['@id'];
       const hidden = await drain(this.interim.hidden(id, spv.property));
       this.interim.assert({ '@delete': { '@id': id, [spv.property]: hidden } });
+      return result;
     }
 
     private checkMinCount(spv: SubjectPropertyValues<GraphSubject>) {
-      if (this.shape.minCount != null && spv.values.length < this.shape.minCount) {
-        // TODO: If count is zero, allow a fully-deleted subject
-        throw this.failure(spv, 'minCount');
-      }
+      if (this.shape.minCount != null && spv.values.length < this.shape.minCount)
+        return this.nonConformance(spv, ConstraintComponent.MinCount);
     }
 
     private checkMaxCount(spv: SubjectPropertyValues<GraphSubject>) {
       if (this.shape.maxCount != null && spv.values.length > this.shape.maxCount)
-        throw this.failure(spv, 'maxCount');
+        return this.nonConformance(spv, ConstraintComponent.MaxCount);
     }
   };
 
   private static Apply = class Apply extends PropertyShape.Constrain {
-    async apply() {
+    async apply(): Promise<ValidationResult[]> {
       // Load existing values and apply the update
       const finalValues = await this.loadFinalValues(await this.interim.update);
-      return Promise.all(finalValues.map(async ({ old, final }) => {
+      return array(await Promise.all(finalValues.map(async ({ old, final }) => {
         // Final values is (prior + hidden) - deleted + inserted
         const values = this.sort(final.values), { minCount, maxCount } = this.shape;
         // If not enough, re-assert prior maximal values that were deleted
-        // TODO: unless count is 0 and subject is fully deleted
         if (minCount != null && values.length < minCount) {
           // We need the values that were actually deleted
           const reinstate = this.sort(final.deletes(old.values))
             .slice(0, minCount - values.length);
-          this.interim.assert({ '@insert': final.minimalSubject(reinstate) });
+          const correction = { '@insert': final.minimalSubject(reinstate) };
+          this.interim.assert(correction);
+          return this.nonConformance(final, ConstraintComponent.MinCount, correction);
+        } else {
+          // Anything that was hidden needs to be re-instated by entailment.
+          // Do this by just entailing insert of everything up to max count.
+          const limit = maxCount ?? values.length;
+          const remove = values.slice(limit);
+          this.interim.entail({
+            '@delete': final.minimalSubject(remove),
+            '@insert': final.minimalSubject(values.slice(0, limit))
+          });
+          if (remove.length)
+            return this.nonConformance(final, ConstraintComponent.MaxCount);
         }
-        // Anything that was hidden needs to be re-instated by entailment.
-        // Do this by just entailing insert of everything up to max count.
-        const limit = maxCount ?? values.length;
-        this.interim.entail({
-          '@delete': final.minimalSubject(values.slice(limit)),
-          '@insert': final.minimalSubject(values.slice(0, limit))
-        });
-      }));
+      })));
     }
 
     async loadSubjectValues(id: Iri) {

@@ -33,7 +33,7 @@ export class SubjectPropertyValues<S extends Subject = Subject> {
   }
 
   minimalSubject(values = this.values) {
-    return { '@id': this.subject['@id'], [this.property]: values };
+    return <S>{ '@id': this.subject['@id'], [this.property]: values };
   }
 
   clone() {
@@ -101,6 +101,10 @@ export class SubjectPropertyValues<S extends Subject = Subject> {
 
   inserts(oldValues: any[]) {
     return SubjectPropertyValues.minus(this.values, oldValues);
+  }
+
+  toString() {
+    return `${this.subject['@id']} ${this.property}: ${this.values}`;
   }
 
   /** @returns `values` if nothing has changed */

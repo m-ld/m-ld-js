@@ -27,6 +27,9 @@ export function isDeleteInsert(o: any): o is DeleteInsert<unknown> {
   return '@insert' in o && '@delete' in o;
 }
 
+/** @internal */
+export type Assertions = Partial<DeleteInsert<GraphSubject[] | GraphSubject>>;
+
 /**
  * A utility to generate a variable with a unique Id. Convenient to use when
  * generating query patterns in code.
@@ -602,7 +605,7 @@ export interface InterimUpdate {
    *
    * An assertion is incorporated into the final update sent to other clones and
    * echoed to the local app. Examples of assertions:
-   * - Delete previous value from a single-value register
+   * - Recover a previous value into an empty mandatory property
    * - Rewrite a list index predicate to a CRDT-specific form
    *
    * @param update the update to assert into the domain
@@ -641,11 +644,10 @@ export interface InterimUpdate {
    *    constraint. An attempt to remove an assertion made in the original
    *    update will be ignored, which may lead to unexpected results.
    *
-   * @param key Whether to remove `@delete` or `@insert` components
-   * @param pattern the Subject assertions to remove
+   * @param assertions Subject assertions to remove
    * @see {@link update}
    */
-  remove(key: keyof DeleteInsert<any>, pattern: Subject | Subject[]): void;
+  remove(assertions: Assertions): void;
   /**
    * Substitutes the given alias for the given property subject, property, or
    * subject and property, in updates provided to the application. This allows a

@@ -1,5 +1,5 @@
-import { DeleteInsert, InterimUpdate, MeldPreUpdate } from '../../api';
-import { Subject, SubjectProperty, Update, Value } from '../../jrql-support';
+import { Assertions, InterimUpdate, MeldPreUpdate } from '../../api';
+import { SubjectProperty, Update, Value } from '../../jrql-support';
 import { PatchQuads } from '.';
 import { JrqlGraph } from './JrqlGraph';
 import { GraphAliases, jrqlValue, SubjectGraph } from '../SubjectGraph';
@@ -105,12 +105,18 @@ export class InterimUpdatePatch implements InterimUpdate {
     return false;
   });
 
-  remove = (key: keyof DeleteInsert<any>, pattern: Subject | Subject[]) =>
+  remove = (assertions: Assertions) =>
     this.mutate(() => {
-      const toRemove = this.graph.graphQuads(pattern, this.userCtx);
-      const removed = this.assertions.remove(
-        key == '@delete' ? 'deletes' : 'inserts', toRemove);
-      return removed.length !== 0;
+      let removed = false;
+      if (assertions['@delete'] != null) {
+        removed ||= !!this.assertions.remove('deletes',
+          this.graph.graphQuads(assertions['@delete'], this.userCtx)).length;
+      }
+      if (assertions['@insert'] != null) {
+        removed ||= !!this.assertions.remove('inserts',
+          this.graph.graphQuads(assertions['@insert'], this.userCtx)).length;
+      }
+      return removed;
     });
 
   alias(subjectId: Iri | null, property: '@id' | Iri, alias: Iri | SubjectProperty): void {

@@ -33,9 +33,17 @@ describe('SHACL shape constraints', () => {
   it('enforces min count 1', async () => {
     const [clone] = clones = await Clone.start(1);
     await clone.transact(installConstraint({ minCount: 1 }));
-    await clone.transact({ '@id': 'fred', name: 'Fred' });
+    await clone.transact({ '@id': 'fred', name: 'Fred', height: 1 });
     await expectAsync(clone.transact({ '@delete': { '@id': 'fred', name: 'Fred' } }))
       .toBeRejectedWithError();
+  });
+
+  it('allows full subject deletion', async () => {
+    const [clone] = clones = await Clone.start(1);
+    await clone.transact(installConstraint({ minCount: 1 }));
+    await clone.transact({ '@id': 'fred', name: 'Fred' });
+    await expectAsync(clone.transact({ '@delete': { '@id': 'fred', name: 'Fred' } }))
+      .toBeResolved();
   });
 
   it('resolves to the max value', async () => {
