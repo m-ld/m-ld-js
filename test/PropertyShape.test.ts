@@ -3,14 +3,9 @@ import { mock } from 'jest-mock-extended';
 import { Shape } from '../src/shacl/Shape';
 import { PropertyShape } from '../src/shacl/index';
 import { MockGraphState, mockInterim } from './testClones';
-import { PropertyShapeSpec } from '../src/shacl/PropertyShape';
 import { consume } from 'rx-flowable/consume';
 
 describe('SHACL Property Shape', () => {
-  /** Boilerplate property shape creation */
-  const propertyShape = (spec: PropertyShapeSpec) =>
-    new PropertyShape({ '@id': 'myShape', ...PropertyShape.declare(spec) });
-
   test('create from a subject', () => {
     const shape = Shape.from({
       '@id': 'http://test.m-ld.org/nameShape',
@@ -21,7 +16,8 @@ describe('SHACL Property Shape', () => {
   });
 
   test('create from just a path', () => {
-    const shape = new PropertyShape({ '@id': 'http://test.m-ld.org/nameShape' }, {
+    const shape = new PropertyShape({
+      src: { '@id': 'http://test.m-ld.org/nameShape' },
       path: 'http://test.m-ld.org/#name'
     });
     expect((<PropertyShape>shape).path).toBe('http://test.m-ld.org/#name');
@@ -39,7 +35,7 @@ describe('SHACL Property Shape', () => {
 
   test('declare a property shape', () => {
     const write = PropertyShape.declare({
-      shapeId: 'http://test.m-ld.org/nameShape',
+      src: { '@id': 'http://test.m-ld.org/nameShape' },
       path: 'http://test.m-ld.org/#name'
     });
     expect(write).toMatchObject({
@@ -49,7 +45,7 @@ describe('SHACL Property Shape', () => {
   });
 
   test('constructs with count', () => {
-    const shape = propertyShape({ path: 'http://test.m-ld.org/#name', count: 1 });
+    const shape = new PropertyShape({ path: 'http://test.m-ld.org/#name', count: 1 });
     expect(shape.path).toBe('http://test.m-ld.org/#name');
     expect(shape.minCount).toBe(1);
     expect(shape.maxCount).toBe(1);
@@ -66,14 +62,14 @@ describe('SHACL Property Shape', () => {
 
     describe('checks', () => {
       test('OK update', async () => {
-        const shape = propertyShape({ path: 'http://test.m-ld.org/#name', count: 1 });
+        const shape = new PropertyShape({ path: 'http://test.m-ld.org/#name', count: 1 });
         await expect(shape.check(state.graph.asReadState, mockInterim({
           '@insert': [{ '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Fred' }]
         }))).resolves.not.toThrow();
       });
 
       test('too many inserted in update', async () => {
-        const shape = propertyShape({ path: 'http://test.m-ld.org/#name', count: 1 });
+        const shape = new PropertyShape({ path: 'http://test.m-ld.org/#name', count: 1 });
         const badFred = {
           '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': ['Fred', 'Flintstone']
         };
@@ -88,7 +84,7 @@ describe('SHACL Property Shape', () => {
 
       test('OK after update', async () => {
         await state.write({ '@id': 'fred', name: 'Fred' });
-        const shape = propertyShape({ path: 'http://test.m-ld.org/#name', count: 1 });
+        const shape = new PropertyShape({ path: 'http://test.m-ld.org/#name', count: 1 });
         await expect(shape.check(state.graph.asReadState, mockInterim({
           '@delete': [{ '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Fred' }],
           '@insert': [{
@@ -99,7 +95,7 @@ describe('SHACL Property Shape', () => {
 
       test('too many after update', async () => {
         await state.write({ '@id': 'fred', name: 'Fred' });
-        const shape = propertyShape({ path: 'http://test.m-ld.org/#name', count: 1 });
+        const shape = new PropertyShape({ path: 'http://test.m-ld.org/#name', count: 1 });
         await expect(shape.check(state.graph.asReadState, mockInterim({
           '@insert': [{
             '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Flintstone'
@@ -115,7 +111,7 @@ describe('SHACL Property Shape', () => {
 
       test('too few after update', async () => {
         await state.write({ '@id': 'fred', name: 'Fred' });
-        const shape = propertyShape({ path: 'http://test.m-ld.org/#name', count: 1 });
+        const shape = new PropertyShape({ path: 'http://test.m-ld.org/#name', count: 1 });
         await expect(shape.check(state.graph.asReadState, mockInterim({
           '@delete': [{ '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Fred' }]
         }))).resolves.toMatchObject([{
@@ -127,7 +123,7 @@ describe('SHACL Property Shape', () => {
 
       test('minCount of zero after update', async () => {
         await state.write({ '@id': 'fred', name: 'Fred' });
-        const shape = propertyShape({ path: 'http://test.m-ld.org/#name', maxCount: 1 });
+        const shape = new PropertyShape({ path: 'http://test.m-ld.org/#name', maxCount: 1 });
         await expect(shape.check(state.graph.asReadState, mockInterim({
           '@delete': [{ '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Fred' }]
         }))).resolves.not.toThrow();
@@ -136,14 +132,14 @@ describe('SHACL Property Shape', () => {
 
     describe('apply', () => {
       test('OK update', async () => {
-        const shape = propertyShape({ path: 'http://test.m-ld.org/#name', count: 1 });
+        const shape = new PropertyShape({ path: 'http://test.m-ld.org/#name', count: 1 });
         await expect(shape.apply(state.graph.asReadState, mockInterim({
           '@insert': [{ '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Fred' }]
         }))).resolves.not.toThrow();
       });
 
       test('too many inserted in update', async () => {
-        const shape = propertyShape({ path: 'http://test.m-ld.org/#name', count: 1 });
+        const shape = new PropertyShape({ path: 'http://test.m-ld.org/#name', count: 1 });
         const interim = mockInterim({
           '@insert': [{
             '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': ['Fred', 'Flintstone']
@@ -160,7 +156,7 @@ describe('SHACL Property Shape', () => {
 
       test('too many after update', async () => {
         await state.write({ '@id': 'fred', name: 'Fred' });
-        const shape = propertyShape({ path: 'http://test.m-ld.org/#name', count: 1 });
+        const shape = new PropertyShape({ path: 'http://test.m-ld.org/#name', count: 1 });
         const interim = mockInterim({
           '@insert': [{
             '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Flintstone'
@@ -177,7 +173,7 @@ describe('SHACL Property Shape', () => {
 
       test('too few after update', async () => {
         await state.write({ '@id': 'fred', name: 'Fred' });
-        const shape = propertyShape({ path: 'http://test.m-ld.org/#name', count: 1 });
+        const shape = new PropertyShape({ path: 'http://test.m-ld.org/#name', count: 1 });
         const interim = mockInterim({
           '@delete': [{ '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Fred' }]
         });
@@ -192,7 +188,7 @@ describe('SHACL Property Shape', () => {
 
       test('entailed hidden are reinstated', async () => {
         await state.write({ '@id': 'fred', name: 'Fred' });
-        const shape = propertyShape({ path: 'http://test.m-ld.org/#name', count: 1 });
+        const shape = new PropertyShape({ path: 'http://test.m-ld.org/#name', count: 1 });
         const interim = mockInterim({
           '@delete': [{
             '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Fred'

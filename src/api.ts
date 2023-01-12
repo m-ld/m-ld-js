@@ -417,7 +417,7 @@ export interface MeldStateMachine extends MeldState {
  */
 export interface MeldClone extends MeldStateMachine {
   /**
-   * TODO docs
+   * The context in use for the clone API.
    */
   readonly context: MeldContext;
   /**
@@ -437,11 +437,45 @@ export interface MeldClone extends MeldStateMachine {
 }
 
 /**
- * TODO docs
+ * In **m-ld**, all API interactions are done 'in context'. All identifiers of
+ * significant data entities, including [Subjects](/#subjects), properties and
+ * types are actually [IRIs](https://www.w3.org/TR/json-ld/#iris), but in an API
+ * call they may appear to be simple strings.
+ *
+ * The default context for API calls in **m-ld** (if not overridden in the
+ * {@link MeldConfig config}), uses the provided domain name to scope all
+ * identifiers, as follows:
+ *
+ * - Subject identities are prefixed with `http://≪domain≫/` (the so-called
+ * "base" of the domain)
+ * - property names and types are prefixed with `http://≪domain≫/#` (note the
+ * extra hash; this is the so-called "vocabulary", or "vocab" of the domain)
+ *
+ * A `MeldContext` allows an application to translate between simple strings and
+ * IRIs. This is typically only necessary in advanced use-cases, such as when
+ * creating constraints.
+ *
+ * @see https://www.w3.org/TR/json-ld/#the-context
  */
 export interface MeldContext {
+  /**
+   * Expand an identifier to its full IRI
+   * @param value the identifier to expand
+   * @param options whether to expand according to the vocab (or otherwise the base)
+   */
   expandTerm(value: string, options?: { vocab?: boolean }): Iri;
+  /**
+   * Compact an IRI to its short identifier
+   * @param iri the IRI to compact
+   * @param options whether to compact according to the vocab (or otherwise the base)
+   */
   compactIri(iri: Iri, options?: { vocab?: boolean }): string;
+  /**
+   * Obtain additional information about a given context key
+   * @param key context entry key
+   * @param type expanded term definition key
+   * @see https://www.w3.org/TR/json-ld/#expanded-term-definition
+   */
   getTermDetail(key: string, type: keyof ExpandedTermDef): string | null;
 }
 
@@ -472,9 +506,60 @@ export interface StateManaged<T> {
 }
 
 /**
- * [Extensions](/#extensions) applied to a **m-ld** clone. These may be provided
- * by the app when the clone is initialised, or declared in the data and loaded
- * dynamically.
+ * [Extensions](/#extensions) applied to a **m-ld** clone.
+ *
+ * Extensions can then be installed in two ways:
+ * 1. By providing the implementation in the `app` parameter of the [clone
+ * function](/#clone).
+ * 2. By declaring a module in the domain information.
+ *
+ * The first option is suitable when the data is always going to be used by the
+ * same app – because the app will always know it has to include the extension.
+ *
+ * The second option is more suitable if the data may be shared to other apps,
+ * because the need for the extension is declared in the data itself, and apps
+ * can load it dynamically as required.
+ *
+ * To write an extension to be declared in the domain data, implement
+ * MeldExtensions with one or more of its methods, in a Javascript class. Then,
+ * to declare the extension in the domain, you write:
+ *
+ * ```json
+ * {
+ *   "@id": "http://m-ld.org/extensions",
+ *   "@list": {
+ *     "≪priority≫": {
+ *       "@id": "≪your-extension-iri≫",
+ *       "@type": "http://js.m-ld.org/#CommonJSExport",
+ *       "http://js.m-ld.org/#require": "≪your-extension-module≫",
+ *       "http://js.m-ld.org/#class": "≪your-extension-class-name≫"
+ *     }
+ *   }
+ * }
+ * ```
+ *
+ * Breaking this down:
+ *
+ * - `"http://m-ld.org/extensions"` is the identity of the extensions list. This
+ * is a constant that **m-ld** knows about (it's in the `m-ld.org` domain).
+ * - The extensions list is declared as a [List](https://spec.m-ld.org/#lists),
+ * with the `@list` keyword, because extensions are ordered by priority.
+ * - The value you give for `≪priority≫` (a number) will determine where in the
+ * list your extension appears. The highest priority is `"0"`. The value is
+ * decided by you, based on what you know about your extensions. In most cases
+ * it won't matter, since extensions shouldn't interfere with each other.
+ * - The `"@type"` identifies this extension as a Javascript module loaded in
+ * [CommonJS](https://nodejs.org/docs/latest/api/modules.html) style. (We'll
+ * support ES6 modules in future.)
+ * - The `"http://js.m-ld.org/#require"` and `"http://js.m-ld.org/#class"`
+ * properties tell the module loader how to instantiate your module class. It
+ * will call a global `require` function with the first, dereference the second
+ * and call `new` on it.
+ *
+ * Most extensions will provide a static convenience function to generate this
+ * JSON, which can be called in the genesis clone
+ * ([example](/classes/writepermitted.html#declare)).
+ *
  * @experimental
  * @category Experimental
  */

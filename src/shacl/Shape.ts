@@ -35,7 +35,7 @@ export abstract class Shape extends OrmSubject implements MeldConstraint {
   static from(src: GraphSubject, orm: OrmUpdating): Shape | Promise<Shape> {
     if (SH.path in src) {
       const { PropertyShape } = require('./PropertyShape');
-      return new PropertyShape(src);
+      return new PropertyShape({ src });
     } else {
       return ExtensionSubject.instance(src, orm);
     }

@@ -10,6 +10,36 @@ import { JsProperty, JsType } from '../js-support';
 import { Iri } from '@m-ld/jsonld';
 import { SubjectUpdater } from '../updates';
 
+/**
+ * This extension allows an app to declare that the domain data must conform to
+ * some defined {@link Shape shapes}. A collection of shapes is like a 'schema'
+ * or 'object model'.
+ *
+ * The extension can be declared in the data using {@link declare}, or
+ * instantiated and provided to the [clone function](/#clone) in the `app`
+ * parameter, e.g.
+ *
+ * ```typescript
+ * api = await clone(
+ *   new MemoryLevel, MqttRemotes, config,
+ *   new ShapeConstrained(new PropertyShape({
+ *     path: 'http://ex.org/#name', count: 1
+ *   })));
+ * ```
+ *
+ * > Note that properties and types provided as initialisation parameters to
+ * shapes (e.g. `path` above) must be fully-qualified IRIs according to the
+ * vocabulary of the domain. See {@link MeldContext} for more information.
+ *
+ * If combining shape constraints with other extensions, it may be necessary
+ * (and is safe) to use the {@link constraints} member of this class directly as
+ * a sublist in a list of constraints.
+ *
+ * @see https://www.w3.org/TR/shacl/
+ * @category Experimental
+ * @experimental
+ * @noInheritDoc
+ */
 export class ShapeConstrained implements ExtensionSubjectInstance, MeldExtensions {
   /**
    * Extension declaration. Insert into the domain data to install the
@@ -20,6 +50,10 @@ export class ShapeConstrained implements ExtensionSubjectInstance, MeldExtension
    *   path: 'name', count: 1
    * })));
    * ```
+   *
+   * Note that declaration of shapes will not retrospectively apply constraints
+   * to any existing subjects in the domain. It's the app's responsibility to
+   * correct existing data, if necessary.
    *
    * @param priority the preferred index into the existing list of extensions
    * (lower value is higher priority).
@@ -38,11 +72,21 @@ export class ShapeConstrained implements ExtensionSubjectInstance, MeldExtension
     }
   });
 
-  /** @internal */
+  /**
+   * The shapes to which domain data must conform.
+   */
   shapes: Shape[];
 
   /**
+   * @param shapes The shapes to which domain data must conform
+   */
+  constructor(...shapes: Shape[]) {
+    this.shapes = shapes;
+  }
+
+  /**
    * Note special case constraint handling for subject deletion.
+   * @internal
    */
   constraints: MeldConstraint[] = [{
     check: async (state: MeldReadState, interim: InterimUpdate) => {
@@ -52,7 +96,7 @@ export class ShapeConstrained implements ExtensionSubjectInstance, MeldExtension
       for (let shape of this.shapes) {
         for (let result of await shape.check(state, interim)) {
           if (!(await detector.isFullyDeleted(result.focusNode)))
-              throw result.resultMessage;
+            throw result.resultMessage;
         }
       }
     },

@@ -2,7 +2,7 @@ import { property } from '../orm/OrmSubject';
 import { JsAtomType, JsType, noMerge, Optional } from '../js-support';
 import { Subject, VocabReference } from '../jrql-support';
 import { Iri } from '@m-ld/jsonld';
-import { array } from '../util';
+import { array, uuid } from '../util';
 import {
   Assertions, GraphSubject, GraphSubjects, GraphUpdate, InterimUpdate, MeldPreUpdate, MeldReadState
 } from '../api';
@@ -23,7 +23,7 @@ export type PropertyCardinality = {
 }
 /** Convenience specification for a property shape */
 export type PropertyShapeSpec = {
-  shapeId?: Iri,
+  src?: GraphSubject,
   path: Iri;
   targetClass?: Iri | Iri[];
   name?: string | string[];
@@ -57,41 +57,33 @@ export class PropertyShape extends Shape {
    * ```
    * @param spec shape specification object
    */
-  static declare = (spec: Iri | PropertyShapeSpec): Subject => {
-    if (typeof spec == 'object') {
-      const { minCount, maxCount } = 'count' in spec ? {
-        minCount: spec.count, maxCount: spec.count
-      } : spec;
-      return {
-        '@id': spec.shapeId,
-        [SH.path]: { '@vocab': spec.path },
-        [SH.targetClass]: array(spec.targetClass).map(iri => ({ '@vocab': iri })),
-        [SH.name]: spec.name,
-        [SH.minCount]: minCount,
-        [SH.maxCount]: maxCount
-      };
-    } else {
-      return {
-        [SH.path]: { '@vocab': spec }
-      };
-    }
+  static declare = (spec: PropertyShapeSpec): Subject => {
+    const { minCount, maxCount } = 'count' in spec ? {
+      minCount: spec.count, maxCount: spec.count
+    } : spec;
+    return {
+      [SH.path]: { '@vocab': spec.path },
+      [SH.targetClass]: array(spec.targetClass).map(iri => ({ '@vocab': iri })),
+      [SH.name]: spec.name,
+      [SH.minCount]: minCount,
+      [SH.maxCount]: maxCount,
+      ...spec.src
+    };
   };
 
-  constructor(
-    src: GraphSubject,
-    init?: Partial<PropertyShape>
-  ) {
+  constructor(spec?: PropertyShapeSpec) {
+    const src = spec?.src ?? { '@id': uuid() };
     super(src);
     this.initSrcProperties(src, {
       path: {
         get: () => ({ '@vocab': this.path }),
         set: (v: VocabReference) => this.path = v['@vocab'],
-        init: init?.path ? { '@vocab': init.path } : undefined
+        init: spec?.path ? { '@vocab': spec.path } : undefined
       },
-      name: { init: init?.name },
-      targetClass: { init: init?.targetClass },
-      minCount: { init: init?.minCount },
-      maxCount: { init: init?.maxCount }
+      name: { init: spec?.name },
+      targetClass: { init: spec?.targetClass },
+      minCount: { init: spec != null && 'count' in spec ? spec.count : spec?.minCount },
+      maxCount: { init: spec != null && 'count' in spec ? spec.count : spec?.maxCount }
     });
   }
 
