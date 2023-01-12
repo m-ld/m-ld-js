@@ -14,8 +14,7 @@
     "./ext/wrtc": "./ext/wrtc/index.js",
     "./ext/security": "./ext/security/index.js",
     "./ext/shacl": "./ext/shacl/index.js",
-    "./ext/constraints/WritePermitted": "./ext/constraints/WritePermitted.js",
-    "./ext/constraints/Statutory": "./ext/constraints/Statutory.js"
+    "./ext/statutes": "./ext/statutes/index.js"
   },
   "scripts": {
     "link-locals": "npm link ../m-ld-spec ../json-rql ../typedoc-theme",
@@ -78,6 +77,9 @@
     ],
     "transform": {
       "^.+\\.(ts|tsx)?$": "ts-jest"
+    },
+    "moduleNameMapper": {
+      "^@m-ld/m-ld/ext/(.*)$": "<rootDir>/src/$1"
     }
   },
   "dependencies": {

@@ -10,8 +10,9 @@ import * as cuid from 'cuid';
  * @param value the value to normalise to an array
  * @category Utility
  */
-export function array<T>(value?: T | T[] | null): T[] {
-  return value == null ? [] : ([] as T[]).concat(value).filter(v => v != null);
+export function array<T>(value?: T | T[] | null): NonNullable<T>[] {
+  return value == null ? [] : ([] as T[])
+    .concat(value).filter((v: T): v is NonNullable<T> => v != null);
 }
 
 /**

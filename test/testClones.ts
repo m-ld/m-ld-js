@@ -1,16 +1,16 @@
 import {
-  BufferEncoding, EncodedOperation, MeldLocal, MeldRemotes, Revup, Snapshot
+  BufferEncoding, EncodedOperation, MeldLocal, MeldRemotes, OperationMessage, Revup, Snapshot
 } from '../src/engine';
-import { mock, MockProxy } from 'jest-mock-extended';
-import { asapScheduler, BehaviorSubject, from, NEVER, Observable, Observer } from 'rxjs';
+import { mock, mockFn, MockProxy } from 'jest-mock-extended';
+import { asapScheduler, BehaviorSubject, EMPTY, from, NEVER, Observable, Observer } from 'rxjs';
 import { Dataset, Patch, PatchQuads, QuadStoreDataset } from '../src/engine/dataset';
 import { GlobalClock, TreeClock } from '../src/engine/clocks';
 import { AsyncMqttClient, IPublishPacket } from 'async-mqtt';
 import { EventEmitter } from 'events';
 import { observeOn } from 'rxjs/operators';
 import {
-  Attribution, Context, InterimUpdate, MeldConfig, MeldConstraint, MeldExtensions, MeldPreUpdate,
-  MeldReadState, StateManaged, StateProc, Write
+  Attribution, Context, GraphSubject, GraphSubjects, InterimUpdate, MeldConfig, MeldConstraint,
+  MeldExtensions, MeldPreUpdate, MeldReadState, StateManaged, StateProc, Write
 } from '../src';
 import { AbstractLevel } from 'abstract-level';
 import { LiveValue } from '../src/engine/api-support';
@@ -18,12 +18,14 @@ import { MemoryLevel } from 'memory-level';
 import * as MsgPack from '../src/engine/msgPack';
 import { DatasetSnapshot } from '../src/engine/dataset/SuSetDataset';
 import { ClockHolder } from '../src/engine/messages';
-import { DomainContext } from '../src/engine/MeldEncoding';
+import { DomainContext, MeldEncoder } from '../src/engine/MeldEncoding';
 import { JrqlGraph } from '../src/engine/dataset/JrqlGraph';
-import { ActiveContext, activeCtx } from '../src/engine/jsonld';
+import { JsonldContext } from '../src/engine/jsonld';
 import { InterimUpdatePatch } from '../src/engine/dataset/InterimUpdatePatch';
 import { MeldOperationMessage } from '../src/engine/MeldOperationMessage';
 import { Future } from '../src/engine/Future';
+import { SubjectGraph } from '../src/engine/SubjectGraph';
+import { TidsStore } from '../src/engine/dataset/TidsStore';
 
 export const testDomain = 'test.m-ld.org';
 export const testContext = new DomainContext(testDomain);
@@ -46,7 +48,7 @@ export function mockRemotes(
     setLocal: () => {},
     operations: updates,
     live: Array.isArray(lives) ? hotLive(lives) : lives,
-    newClock: () => Promise.resolve(newClock)
+    newClock: mockFn().mockResolvedValue(newClock)
   };
 }
 
@@ -76,7 +78,7 @@ export async function memStore(opts?: {
   return new QuadStoreDataset(
     opts?.domain ?? testDomain,
     opts?.backend ?? new MemoryLevel()
-    ).initialise();
+  ).initialise();
 }
 
 export class MockState {
@@ -98,7 +100,10 @@ export class MockState {
   }
 }
 
-type GraphStateWriteOpts = { updateType?: 'user' | 'internal', constraint?: MeldConstraint };
+type GraphStateWriteOpts = {
+  updateType?: 'user' | 'internal',
+  constraint?: MeldConstraint
+};
 
 export class MockGraphState {
   static async create({ dataset, context, domain }: {
@@ -107,16 +112,18 @@ export class MockGraphState {
     context ??= testContext;
     return new MockGraphState(
       await MockState.create({ dataset, domain }),
-      await activeCtx(context ?? {}));
+      await JsonldContext.active(context ?? {}));
   }
 
   readonly graph: JrqlGraph;
+  tidsStore: TidsStore;
 
   protected constructor(
     readonly state: MockState,
-    readonly ctx: ActiveContext
+    readonly ctx: JsonldContext
   ) {
     this.graph = new JrqlGraph(state.dataset.graph());
+    this.tidsStore = mock();
   }
 
   async write(
@@ -129,7 +136,13 @@ export class MockGraphState {
     await this.state.write(async () => {
       const patch = await this.graph.write(request, this.ctx);
       const interim = new InterimUpdatePatch(
-        this.graph, this.ctx, patch, null, null, { mutable: true });
+        this.graph,
+        this.tidsStore,
+        this.ctx,
+        patch,
+        null,
+        null,
+        { mutable: true });
       await constraint?.check(this.graph.asReadState, interim);
       const txn = await interim.finalise();
       update.resolve(updateType === 'user' ? txn.userUpdate : txn.internalUpdate);
@@ -175,6 +188,12 @@ export function testOp(
     principalId ?? null,
     agreed ?? null
   ];
+}
+
+export function decodeOpUpdate(op: OperationMessage): [{}, {}] {
+  return MeldEncoder.jsonFromBuffer(
+    op.data[EncodedOperation.Key.update],
+    op.data[EncodedOperation.Key.encoding]);
 }
 
 /**
@@ -289,7 +308,21 @@ export function mockMqtt(): MockMqtt & MockProxy<AsyncMqttClient> {
   return mqtt;
 }
 
-export function mockInterim(update: MeldPreUpdate) {
+export function mockInterim(
+  // Allow undefined or plain array @delete & @insert, for readability
+  update: Partial<{
+    [key in keyof MeldPreUpdate]: MeldPreUpdate[key] extends GraphSubjects ?
+      Array<GraphSubject> : MeldPreUpdate[key]
+  }>
+) {
   // Passing an implementation into the mock adds unwanted properties
-  return Object.assign(mock<InterimUpdate>(), { update: Promise.resolve(update) });
+  return Object.assign(mock<InterimUpdate>(), {
+    update: Promise.resolve({
+      ...update,
+      '@delete': new SubjectGraph(update['@delete'] ?? []),
+      '@insert': new SubjectGraph(update['@insert'] ?? [])
+    }),
+    hidden: mockFn().mockReturnValue(EMPTY)
+  });
 }
+

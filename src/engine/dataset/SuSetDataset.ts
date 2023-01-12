@@ -15,7 +15,7 @@ import { Logger } from 'loglevel';
 import { MeldError } from '../MeldError';
 import { Quad, Triple, tripleIndexKey, TripleMap } from '../quads';
 import { InterimUpdatePatch } from './InterimUpdatePatch';
-import { ActiveContext, activeCtx } from '../jsonld';
+import { JsonldContext } from '../jsonld';
 import { EntryBuilder, Journal, JournalEntry, JournalState } from '../journal';
 import { JournalClerk } from '../journal/JournalClerk';
 import { PatchTids, TidsStore } from './TidsStore';
@@ -58,7 +58,7 @@ export class SuSetDataset extends MeldEncoder {
 
   /** External context used for reads, writes and updates, but not for constraints. */
   /*readonly*/
-  userCtx: ActiveContext;
+  userCtx: JsonldContext;
 
   private /*readonly*/ userGraph: JrqlGraph;
   private readonly tidsStore: TidsStore;
@@ -89,7 +89,7 @@ export class SuSetDataset extends MeldEncoder {
   @SuSetDataset.checkNotClosed.async
   async initialise() {
     await super.initialise();
-    this.userCtx = await activeCtx(this.context);
+    this.userCtx = await JsonldContext.active(this.context);
     this.userGraph = new JrqlGraph(this.dataset.graph());
   }
 
@@ -260,6 +260,7 @@ export class SuSetDataset extends MeldEncoder {
   ) {
     const interim = new InterimUpdatePatch(
       this.userGraph,
+      this.tidsStore,
       this.userCtx,
       patch,
       principalId,
@@ -557,6 +558,7 @@ export class SuSetDataset extends MeldEncoder {
     private async missingCausesResult(rewindPatch: SuSetDataPatch): Promise<PatchResult<null>> {
       const { userUpdate } = await new InterimUpdatePatch(
         this.ssd.userGraph,
+        this.ssd.tidsStore,
         this.ssd.userCtx,
         rewindPatch.quads,
         M_LD.localEngine,
@@ -728,7 +730,7 @@ export class SuSetDataset extends MeldEncoder {
   @SuSetDataset.checkNotClosed.async
   async takeSnapshot(): Promise<DatasetSnapshot> {
     const journal = await this.journal.state();
-    const insData = consume(this.userGraph.graph.query()).pipe(
+    const insData = consume(this.userGraph.quads.query()).pipe(
       batch(10), // TODO batch size config
       mergeMap(async ({ value: quads, next }) => {
         const tidQuads = await this.tidsStore.findTriplesTids(quads, 'includeEmpty');

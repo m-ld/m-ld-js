@@ -1,29 +1,28 @@
 import { MockGraphState, testConfig, testContext } from './testClones';
-import { DefaultList } from '../src/constraints/DefaultList';
+import { DefaultList } from '../src/lseq/DefaultList';
 import { SingleValued } from '../src/constraints/SingleValued';
-import { MeldConstraint, MeldExtensions, MeldTransportSecurity, StateManaged } from '../src/index';
+import { GraphSubject, MeldConstraint, MeldExtensions, MeldTransportSecurity } from '../src/index';
 import { mock } from 'jest-mock-extended';
 import { M_LD } from '../src/ns';
 import { CloneExtensions } from '../src/engine/CloneExtensions';
 import { OrmUpdating } from '../src/orm/index';
+import { ExtensionSubjectInstance } from '../src/orm/ExtensionSubject';
 
 const thisModuleId = require.resolve('./CloneExtensions.test');
 
-export class MockExtensions implements StateManaged<MeldExtensions> {
+export class MockExtensions implements ExtensionSubjectInstance, MeldExtensions {
   static mockTs = mock<MeldTransportSecurity>();
   static mockConstraint = mock<MeldConstraint>();
   static last: OrmUpdating;
 
-  constructor(parent: { orm: OrmUpdating }) {
-    MockExtensions.last = parent.orm;
+  initialise(src: GraphSubject, orm: OrmUpdating) {
+    MockExtensions.last = orm;
+    return this;
   }
 
-  async ready(): Promise<MeldExtensions> {
-    return {
-      constraints: [MockExtensions.mockConstraint],
-      transportSecurity: MockExtensions.mockTs
-    };
-  }
+  constraints = [MockExtensions.mockConstraint];
+
+  transportSecurity = MockExtensions.mockTs;
 }
 
 describe('Top-level extensions loading', () => {
@@ -31,12 +30,13 @@ describe('Top-level extensions loading', () => {
     const cloneExtensions = await CloneExtensions.initial(testConfig(), {}, testContext);
     const ext = await cloneExtensions.ready();
     expect(ext.transportSecurity).toBeUndefined();
-    const constraints = [...ext.constraints];
+    const constraints = [...ext.constraints!];
     expect(constraints.length).toBe(1);
     expect(constraints[0]).toBeInstanceOf(DefaultList);
   });
 
   test('from config', async () => {
+    // noinspection JSDeprecatedSymbols - testing legacy config
     const cloneExtensions = await CloneExtensions.initial(testConfig({
       constraints: [{
         '@type': 'single-valued',
@@ -45,7 +45,7 @@ describe('Top-level extensions loading', () => {
     }), {}, testContext);
     const ext = await cloneExtensions.ready();
     expect(ext.transportSecurity).toBeUndefined();
-    const constraints = [...ext.constraints];
+    const constraints = [...ext.constraints!];
     expect(constraints.length).toBe(2);
     expect(constraints[0]).toBeInstanceOf(SingleValued);
     expect(constraints[0]).toMatchObject({ property: 'http://test.m-ld.org/#prop1' });
@@ -59,7 +59,7 @@ describe('Top-level extensions loading', () => {
     }, testContext);
     const ext = await cloneExtensions.ready();
     expect(ext.transportSecurity).toBe(MockExtensions.mockTs);
-    const constraints = [...ext.constraints];
+    const constraints = [...ext.constraints!];
     expect(constraints.length).toBe(2);
     expect(constraints[0]).toBe(MockExtensions.mockConstraint);
     expect(constraints[1]).toBeInstanceOf(DefaultList);
@@ -97,7 +97,7 @@ describe('Top-level extensions loading', () => {
       await cloneExtensions.initialise(state.graph.asReadState);
       ext = await cloneExtensions.ready();
       expect(ext.transportSecurity).toBe(MockExtensions.mockTs);
-      const constraints = [...ext.constraints];
+      const constraints = [...ext.constraints!];
       expect(constraints.length).toBe(2);
       expect(constraints[0]).toBe(MockExtensions.mockConstraint);
       expect(constraints[1]).toBeInstanceOf(DefaultList);
@@ -119,7 +119,7 @@ describe('Top-level extensions loading', () => {
       await cloneExtensions.onUpdate(update, state.graph.asReadState);
       let ext = await cloneExtensions.ready();
       expect(ext.transportSecurity).toBe(MockExtensions.mockTs);
-      const constraints = [...ext.constraints];
+      const constraints = [...ext.constraints!];
       expect(constraints.length).toBe(2);
       expect(constraints[0]).toBe(MockExtensions.mockConstraint);
       expect(constraints[1]).toBeInstanceOf(DefaultList);

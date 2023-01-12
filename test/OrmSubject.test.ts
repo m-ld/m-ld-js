@@ -1,6 +1,6 @@
 import { MockGraphState, testContext } from './testClones';
 import { GraphSubject, updateSubject } from '../src';
-import { DefaultList } from '../src/constraints/DefaultList';
+import { DefaultList } from '../src/lseq/DefaultList';
 import { OrmSubject, OrmUpdating } from '../src/orm';
 import { mock } from 'jest-mock-extended';
 import { Episode, Flintstone, Series } from './ormFixtures';

@@ -635,6 +635,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
         // and then give up.
         .catch(err => notifyError(err));
     return new Promise<void>((resolve, reject) => {
+      this.log.debug(`Starting production of ${type} on ${notifier.id}`);
       // Convert the input into a consumable to get backpressure, if available
       consume(data).subscribe({
         next: ({ value, next }) =>

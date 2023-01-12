@@ -1,7 +1,7 @@
 import { Graph } from '.';
 import { blank, GraphSubject } from '../../api';
-import { Atom, Result, Subject, Value, VocabReference } from '../../jrql-support';
-import { ActiveContext, compactIri } from '../jsonld';
+import { Atom, Result, Subject, Value } from '../../jrql-support';
+import { JsonldContext } from '../jsonld';
 import { inPosition, Quad, Quad_Object, Term } from '../quads';
 import { JRQL } from '../../ns';
 import { SubjectGraph } from '../SubjectGraph';
@@ -22,7 +22,7 @@ export class JrqlQuads {
   }
 
   solutionSubject(
-    results: Result[] | Result, solution: Binding, ctx: ActiveContext): GraphSubject {
+    results: Result[] | Result, solution: Binding, ctx: JsonldContext): GraphSubject {
     const solutionId = this.graph.blankNode(blank());
     const pseudoPropertyQuads = Object.entries(solution).map(([variable, term]) => this.graph.quad(
       solutionId,
@@ -43,7 +43,7 @@ export class JrqlQuads {
   }
 
   quads(subjects: Subject | Subject[],
-    opts: JrqlQuadsOptions, ctx: ActiveContext): Quad[] {
+    opts: JrqlQuadsOptions, ctx: JsonldContext): Quad[] {
     const processor = new SubjectQuads(opts.mode, ctx, this.graph, opts.vars);
     return [...processor.quads(subjects)];
   }
@@ -55,14 +55,14 @@ export class JrqlQuads {
    * @returns a single subject compacted against the given context
    */
   toApiSubject(
-    propertyQuads: Quad[], listItemQuads: Quad[], ctx: ActiveContext): GraphSubject {
+    propertyQuads: Quad[], listItemQuads: Quad[], ctx: JsonldContext): GraphSubject {
     const subjects = SubjectGraph.fromRDF(propertyQuads, { ctx });
     const subject = { ...subjects[0] };
     if (listItemQuads.length) {
       // Sort the list items lexically by index
       // TODO: Allow for a list implementation-specific ordering
       const indexes = new Set(listItemQuads.map(iq => iq.predicate.value).sort()
-        .map(index => compactIri(index, ctx)));
+        .map(index => ctx.compactIri(index)));
       // Create a subject containing only the list items
       const list = this.toApiSubject(listItemQuads, [], ctx);
       subject['@list'] = [...indexes].map(index => <Value>list[index]);
@@ -82,7 +82,7 @@ export class JrqlQuads {
     }
   }
 
-  toObjectTerm(value: Atom | VocabReference, ctx: ActiveContext): Quad_Object {
+  toObjectTerm(value: Atom, ctx: JsonldContext): Quad_Object {
     return new SubjectQuads('match', ctx, this.graph).objectTerm(value);
   }
 }

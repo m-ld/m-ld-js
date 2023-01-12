@@ -3,11 +3,12 @@ import { SubjectGraph } from '../src/engine/SubjectGraph';
 import { M_LD, SH } from '../src/ns';
 import {
   HasAuthority, ShapeAgreementCondition, Statute, Statutory
-} from '../src/constraints/Statutory';
+} from '../src/statutes/Statutory';
 import { GraphSubject } from '../src';
 import { MeldError } from '../src/engine/MeldError';
-import { DefaultList } from '../src/constraints/DefaultList';
+import { DefaultList } from '../src/lseq/DefaultList';
 import { ExtensionSubject, OrmDomain, OrmSubject } from '../src/orm';
+import { ExtensionSubjectInstance } from '../src/orm/ExtensionSubject';
 
 describe('Statutory', () => {
   let state: MockGraphState;
@@ -29,13 +30,13 @@ describe('Statutory', () => {
       await expect(state.graph.asReadState.get('http://m-ld.org/extensions'))
         .resolves.toMatchObject({
           '@id': 'http://m-ld.org/extensions',
-          '@list': [{ '@id': 'http://ext.m-ld.org/constraints/Statutory' }]
+          '@list': [{ '@id': 'http://ext.m-ld.org/statutes/Statutory' }]
         });
-      await expect(state.graph.asReadState.get('http://ext.m-ld.org/constraints/Statutory'))
+      await expect(state.graph.asReadState.get('http://ext.m-ld.org/statutes/Statutory'))
         .resolves.toMatchObject({
-          '@id': 'http://ext.m-ld.org/constraints/Statutory',
-          '@type': 'http://js.m-ld.org/CommonJSExport',
-          'http://js.m-ld.org/#require': '@m-ld/m-ld/ext/constraints/Statutory',
+          '@id': 'http://ext.m-ld.org/statutes/Statutory',
+          '@type': 'http://js.m-ld.org/#CommonJSExport',
+          'http://js.m-ld.org/#require': '@m-ld/m-ld/ext/statutes',
           'http://js.m-ld.org/#class': 'Statutory'
         });
     });
@@ -47,7 +48,7 @@ describe('Statutory', () => {
       }));
       const statutes = await state.graph.asReadState.read({
         '@describe': '?statute',
-        '@where': { '@id': '?statute', '@type': 'http://m-ld.org/Statute' }
+        '@where': { '@id': '?statute', '@type': 'http://m-ld.org/#Statute' }
       });
       expect(statutes).toEqual([expect.objectContaining({
         'http://m-ld.org/#statutory-shape': { '@id': 'http://test.m-ld.org/nameShape' },
@@ -68,11 +69,18 @@ describe('Statutory', () => {
   });
 
   describe('extension', () => {
+    let appState: OrmDomain;
+
+    beforeEach(async () => {
+      appState = new OrmDomain({ config: testConfig(), app: {} });
+    });
+
     test('passes an update if no statutes', async () => {
-      const statutory = new Statutory(testConfig(), {});
-      await statutory.initialise(state.graph.asReadState);
+      const statutory = new Statutory();
+      await appState.updating(state.graph.asReadState, orm =>
+        statutory.initialise({ '@id': 'statutes/Statutory' }, orm));
       expect.hasAssertions();
-      for (let constraint of (await statutory.ready()).constraints ?? [])
+      for (let constraint of statutory.constraints)
         await expect(constraint.check(state.graph.asReadState, mockInterim({
           '@delete': new SubjectGraph([]),
           '@insert': new SubjectGraph([{
@@ -90,10 +98,11 @@ describe('Statutory', () => {
           [M_LD.sufficientCondition]: { '@id': M_LD.hasAuthority }
         }
       });
-      const statutory = new Statutory(testConfig(), {});
-      await statutory.initialise(state.graph.asReadState);
+      const statutory = new Statutory();
+      await appState.updating(state.graph.asReadState, orm =>
+        statutory.initialise({ '@id': 'statutes/Statutory' }, orm));
       expect.hasAssertions();
-      for (let constraint of (await statutory.ready()).constraints ?? [])
+      for (let constraint of statutory.constraints)
         await expect(constraint.check(state.graph.asReadState, mockInterim({
           '@delete': new SubjectGraph([]),
           '@insert': new SubjectGraph([{
@@ -115,10 +124,11 @@ describe('Statutory', () => {
           [M_LD.hasAuthority]: nameShape
         }]
       });
-      const statutory = new Statutory(testConfig(), {});
-      await statutory.initialise(state.graph.asReadState);
+      const statutory = new Statutory();
+      await appState.updating(state.graph.asReadState, orm =>
+        statutory.initialise({ '@id': 'statutes/Statutory' }, orm));
       expect.hasAssertions();
-      for (let constraint of (await statutory.ready()).constraints ?? [])
+      for (let constraint of statutory.constraints)
         await expect(constraint.check(state.graph.asReadState, mockInterim({
           '@principal': { '@id': 'http://test.m-ld.org/hanna' },
           '@delete': new SubjectGraph([]),
@@ -144,10 +154,11 @@ describe('Statutory', () => {
           }
         }]
       });
-      const statutory = new Statutory(testConfig(), {});
-      await statutory.initialise(state.graph.asReadState);
+      const statutory = new Statutory();
+      await appState.updating(state.graph.asReadState, orm =>
+        statutory.initialise({ '@id': 'statutes/Statutory' }, orm));
       expect.hasAssertions();
-      for (let constraint of (await statutory.ready()).constraints ?? [])
+      for (let constraint of statutory.constraints)
         await expect(constraint.check(state.graph.asReadState, mockInterim({
           '@principal': { '@id': 'http://test.m-ld.org/hanna' },
           '@delete': new SubjectGraph([]),
@@ -170,10 +181,11 @@ describe('Statutory', () => {
           [M_LD.hasAuthority]: nameShape
         }]
       });
-      const statutory = new Statutory(testConfig(), {});
-      await statutory.initialise(state.graph.asReadState);
+      const statutory = new Statutory();
+      await appState.updating(state.graph.asReadState, orm =>
+        statutory.initialise({ '@id': 'statutes/Statutory' }, orm));
       expect.hasAssertions();
-      for (let constraint of (await statutory.ready()).constraints ?? [])
+      for (let constraint of statutory.constraints)
         await expect(constraint.check(state.graph.asReadState, mockInterim({
           '@delete': new SubjectGraph([]),
           '@insert': new SubjectGraph([{
@@ -183,8 +195,9 @@ describe('Statutory', () => {
     });
 
     test('can be initialised on update', async () => {
-      const statutory = new Statutory(testConfig(), {});
-      await statutory.initialise(state.graph.asReadState);
+      const statutory = new Statutory();
+      await appState.updating(state.graph.asReadState, orm =>
+        statutory.initialise({ '@id': 'statutes/Statutory' }, orm));
       const update = await state.write({
         '@insert': [{
           '@id': 'http://test.m-ld.org/nameStatute',
@@ -200,9 +213,9 @@ describe('Statutory', () => {
           }
         }]
       });
-      await statutory.onUpdate(update, state.graph.asReadState);
+      await appState.updating(state.graph.asReadState, orm => orm.updated(update));
       expect.hasAssertions();
-      for (let constraint of (await statutory.ready()).constraints ?? [])
+      for (let constraint of statutory.constraints)
         await expect(constraint.check(state.graph.asReadState, mockInterim({
           '@principal': { '@id': 'http://test.m-ld.org/hanna' },
           '@delete': new SubjectGraph([]),
@@ -228,16 +241,17 @@ describe('Statutory', () => {
           }
         }]
       });
-      const statutory = new Statutory(testConfig(), {});
-      await statutory.initialise(state.graph.asReadState);
+      const statutory = new Statutory();
+      await appState.updating(state.graph.asReadState, orm =>
+        statutory.initialise({ '@id': 'statutes/Statutory' }, orm));
       const update = await state.write({
         '@id': 'http://test.m-ld.org/hanna',
         [M_LD.hasAuthority]: nameShape
       });
       // Now we have authority over name too
-      await statutory.onUpdate(update, state.graph.asReadState);
+      await appState.updating(state.graph.asReadState, orm => orm.updated(update));
       expect.hasAssertions();
-      for (let constraint of (await statutory.ready()).constraints ?? [])
+      for (let constraint of statutory.constraints)
         await expect(constraint.check(state.graph.asReadState, mockInterim({
           '@principal': { '@id': 'http://test.m-ld.org/hanna' },
           '@delete': new SubjectGraph([]),
@@ -248,7 +262,9 @@ describe('Statutory', () => {
     });
 
     test('loads a prover extension', async () => {
-      module.exports.TestExtProver = class implements ShapeAgreementCondition {
+      module.exports.TestExtProver = class
+        implements ShapeAgreementCondition, ExtensionSubjectInstance {
+        initialise = () => this;
         prove = async () => 'test_proof';
         test = async () => <true>true;
       };
@@ -264,11 +280,11 @@ describe('Statutory', () => {
           }
         }]
       });
-      const statutory = new Statutory(testConfig(), {});
-      await statutory.initialise(state.graph.asReadState);
-
+      const statutory = new Statutory();
+      await appState.updating(state.graph.asReadState, orm =>
+        statutory.initialise({ '@id': 'statutes/Statutory' }, orm));
       expect.hasAssertions();
-      for (let constraint of (await statutory.ready()).constraints ?? []) {
+      for (let constraint of statutory.constraints) {
         const update = mockInterim({
           '@principal': { '@id': 'http://test.m-ld.org/hanna' },
           '@delete': new SubjectGraph([]),
@@ -299,7 +315,7 @@ describe('Statutory', () => {
     const testProver = (src: GraphSubject) => Promise.resolve(new TestProver(src));
 
     beforeEach(() => {
-      appState = new OrmDomain(testConfig(), {});
+      appState = new OrmDomain({ config: testConfig(), app: {} });
     });
 
     test('passes an update of non-statutes', async () => {
@@ -312,7 +328,7 @@ describe('Statutory', () => {
             '@id': 'http://test.m-ld.org/alwaysTrue',
             'http://test.m-ld.org/#value': true
           }
-        }, orm, testProver));
+        }, orm, orm.domain.scope, testProver));
       const update = {
         '@delete': new SubjectGraph([]),
         '@insert': new SubjectGraph([{
@@ -334,7 +350,7 @@ describe('Statutory', () => {
             '@id': 'http://test.m-ld.org/alwaysTrue',
             'http://test.m-ld.org/#value': true
           }
-        }, orm, testProver));
+        }, orm, orm.domain.scope, testProver));
       const update = {
         '@delete': new SubjectGraph([]),
         '@insert': new SubjectGraph([{
@@ -358,7 +374,7 @@ describe('Statutory', () => {
             '@id': 'http://test.m-ld.org/alwaysTrue',
             'http://test.m-ld.org/#value': true
           }
-        }, orm, testProver));
+        }, orm, orm.domain.scope, testProver));
       const update = {
         '@delete': new SubjectGraph([{
           '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Fred'
@@ -386,7 +402,7 @@ describe('Statutory', () => {
             '@id': 'http://test.m-ld.org/alwaysTrue',
             'http://test.m-ld.org/#value': true
           }]
-        }, orm, testProver));
+        }, orm, orm.domain.scope, testProver));
       const update = {
         '@ticks': 0,
         '@delete': new SubjectGraph([]),
@@ -415,7 +431,7 @@ describe('Statutory', () => {
             '@id': 'http://test.m-ld.org/alwaysNull',
             'http://test.m-ld.org/#value': 0
           }]
-        }, orm, testProver));
+        }, orm, orm.domain.scope, testProver));
       const update = {
         '@delete': new SubjectGraph([]),
         '@insert': new SubjectGraph([{
@@ -433,11 +449,11 @@ describe('Statutory', () => {
     let appState: OrmDomain;
 
     beforeEach(() => {
-      appState = new OrmDomain(testConfig(), {});
+      appState = new OrmDomain({ config: testConfig(), app: {} });
     });
 
     test('throws if no principal', async () => {
-      const prover = new HasAuthority({ '@id': M_LD.hasAuthority }, appState);
+      const prover = new HasAuthority({ '@id': M_LD.hasAuthority }, appState.scope);
       const update = {
         '@delete': new SubjectGraph([]),
         '@insert': new SubjectGraph([{
@@ -455,7 +471,7 @@ describe('Statutory', () => {
     });
 
     test('returns falsey if principal not found', async () => {
-      const prover = new HasAuthority({ '@id': M_LD.hasAuthority }, appState);
+      const prover = new HasAuthority({ '@id': M_LD.hasAuthority }, appState.scope);
       const update = {
         '@delete': new SubjectGraph([]),
         '@insert': new SubjectGraph([{
@@ -470,7 +486,7 @@ describe('Statutory', () => {
     });
 
     test('returns truthy if principal has authority', async () => {
-      const prover = new HasAuthority({ '@id': M_LD.hasAuthority }, appState);
+      const prover = new HasAuthority({ '@id': M_LD.hasAuthority }, appState.scope);
       await state.write({
         '@id': 'http://test.m-ld.org/hanna',
         [M_LD.hasAuthority]: nameShape

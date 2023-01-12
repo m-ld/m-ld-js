@@ -6,7 +6,7 @@ import type { EventEmitter } from 'events';
 import { Observable } from 'rxjs';
 
 /**
- * **m-ld** clone configuration, used to initialise a {@link clone} for use.
+ * **m-ld** clone configuration, used to initialise a {@link MeldClone} for use.
  *
  * @category Configuration
  */

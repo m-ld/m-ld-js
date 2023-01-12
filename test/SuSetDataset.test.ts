@@ -1,5 +1,5 @@
 import { SuSetDataset } from '../src/engine/dataset/SuSetDataset';
-import { MockProcess, MockState, testExtensions, testOp } from './testClones';
+import { decodeOpUpdate, MockProcess, MockState, testExtensions, testOp } from './testClones';
 import { GlobalClock, TreeClock } from '../src/engine/clocks';
 import { toArray } from 'rxjs/operators';
 import { EmptyError, firstValueFrom, lastValueFrom, Subject } from 'rxjs';
@@ -402,9 +402,7 @@ describe('SU-Set Dataset', () => {
             local.tick().time,
             await ssd.write({ '@delete': fred })
           ]))!;
-          const [del]: [{}] = MeldEncoder.jsonFromBuffer(
-            msg.data[EncodedOperation.Key.update],
-            msg.data[EncodedOperation.Key.encoding]);
+          const [del] = decodeOpUpdate(msg);
           expect(del).toEqual({
             '@id': expect.any(String),
             's': 'fred', 'p': '#name', 'o': 'Fred',
@@ -424,9 +422,7 @@ describe('SU-Set Dataset', () => {
             local.tick().time,
             await ssd.write({ '@delete': fred })
           ]))!;
-          const [del]: [{}] = MeldEncoder.jsonFromBuffer(
-            msg.data[EncodedOperation.Key.update],
-            msg.data[EncodedOperation.Key.encoding]);
+          const [del] = decodeOpUpdate(msg);
           expect(del).toEqual({
             '@id': expect.any(String),
             's': 'fred', 'p': '#name', 'o': 'Fred',
@@ -691,7 +687,7 @@ describe('SU-Set Dataset', () => {
         await ssd.write({ '@insert': wilma })
       ]);
       constraint.check = async state =>
-        firstValueFrom(state.read<Describe>({ '@describe': 'http://test.m-ld.org/wilma' }));
+        firstValueFrom(state.read<Describe>({ '@describe': wilma['@id'] }));
       await expect(ssd.transact(async () => [
         local.tick().time,
         await ssd.write({ '@insert': fred })
@@ -853,7 +849,7 @@ describe('SU-Set Dataset', () => {
       const tid = (await ssd.transact(async () => [
         local.tick().time,
         await ssd.write({ '@insert': wilma })
-      ]))!.data[1];
+      ]))!.time.hash;
 
       const willUpdate = firstValueFrom(ssd.updates);
       await ssd.apply(
@@ -867,6 +863,31 @@ describe('SU-Set Dataset', () => {
       // The deleted data was re-inserted, but Wilma may not have existed before
       await expect(willUpdate).resolves.toMatchObject(
         { '@insert': [wilma], '@delete': [], '@ticks': local.time.ticks });
+    });
+
+    test('entailed deletions retain TIDs', async () => {
+      // Constraint is going to entail deletion of the data we're inserting
+      constraint.check = async (_, update) => update.entail({ '@delete': wilma });
+      const { data: [, , , upd1, enc1], time } = (await ssd.transact(async () => [
+        local.tick().time,
+        await ssd.write({ '@insert': wilma })
+      ]))!;
+      // Wilma asserted in the update
+      expect(MeldEncoder.jsonFromBuffer(upd1, enc1)).toEqual([{}, {
+        '@id': 'wilma', name: 'Wilma'
+      }]);
+      // Wilma does not match in the current dataset (entailed deleted)
+      await expect(drain(ssd.read(<Describe>{ '@describe': wilma['@id'] })))
+        .resolves.toEqual([]);
+      // Now also assert the deletion of wilma
+      const { data: [, , , upd2, enc2] } = (await ssd.transact(async () => [
+        local.tick().time,
+        await ssd.write({ '@delete': wilma })
+      ]))!;
+      // Wilma asserted deleted in the update
+      expect(MeldEncoder.jsonFromBuffer(upd2, enc2)).toMatchObject([
+        { tid: time.hash, s: 'wilma', p: '#name', o: 'Wilma' }, {}
+      ]);
     });
   });
 

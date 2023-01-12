@@ -7,14 +7,14 @@ import {
 import { matchVar } from '../../ns/json-rql';
 import { array } from '../../util';
 import { addPropertyObject, listItems } from '../jrql-util';
-import { ActiveContext, compactIri } from '../jsonld';
+import { JsonldContext } from '../jsonld';
 import { jrqlProperty, jrqlValue } from '../SubjectGraph';
 import { Binding } from '../../rdfjs-support';
 
 export class ConstructTemplate {
   private readonly templates: SubjectTemplate[];
 
-  constructor(construct: Subject | Subject[], ctx: ActiveContext) {
+  constructor(construct: Subject | Subject[], ctx: JsonldContext) {
     this.templates = array(construct).map(c => new SubjectTemplate(c, ctx));
   }
 
@@ -50,7 +50,7 @@ class SubjectTemplate {
   private literalValues: [SubjectProperty, Value][] = [];
   private nestedSubjects: [SubjectProperty, SubjectTemplate][] = [];
 
-  constructor(construct: Subject, readonly ctx: ActiveContext) {
+  constructor(construct: Subject, readonly ctx: JsonldContext) {
     // Discover or create the subject identity variable
     if (construct['@id'] != null)
       withNamedVar(matchVar(construct['@id']),
@@ -124,7 +124,7 @@ class SubjectTemplate {
      * - No template ID: all solutions go in one result with blank ID
      */
     const sid = this.variableId != null && this.variableId in solution ?
-      compactIri(solution[this.variableId].value, this.ctx) : undefined;
+      this.ctx.compactIri(solution[this.variableId].value) : undefined;
     // Do we already have a result for the bound Subject ID?
     const isNewResult = !this.results.has(sid);
     const result = this.results.get(sid) ?? this.createResult(sid);
