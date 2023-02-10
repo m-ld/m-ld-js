@@ -865,6 +865,47 @@ describe('SU-Set Dataset', () => {
         { '@insert': [wilma], '@delete': [], '@ticks': local.time.ticks });
     });
 
+    test('bad operation issues no-op error update', async () => {
+      constraint.apply = () => Promise.reject(new MeldError('Unauthorised'));
+
+      const willUpdate = firstValueFrom(ssd.updates);
+      await ssd.apply(
+        remote.sentOperation({}, { '@id': 'wilma', 'name': 'Wilma' }, {
+          attr: { pid: 'http://box.ex.org/#me', sig: Buffer.of() }
+        }),
+        local.join(remote.time));
+
+      const update = await willUpdate;
+      expect(update).toMatchObject({
+        '@delete': expect.objectContaining({ length: 0 }),
+        '@insert': expect.objectContaining({ length: 0 }),
+        '@ticks': local.time.ticks,
+        '@principal': { '@id': 'http://box.ex.org/#me' }
+      });
+      const trace = update.trace();
+      expect(trace.error?.status).toBe(4030);
+      await expect(drain(ssd.read<Describe>({
+        '@describe': 'http://test.m-ld.org/wilma'
+      }))).resolves.toEqual([]);
+    });
+
+    test('bad operation blocks clone', async () => {
+      constraint.apply = () => Promise.reject(new MeldError('Unauthorised'));
+
+      await ssd.apply(
+        remote.sentOperation({}, { '@id': 'wilma', 'name': 'Wilma' }),
+        local.join(remote.time));
+      const willUpdate = firstValueFrom(ssd.updates);
+      await ssd.apply(
+        remote.sentOperation({}, { '@id': 'wilma', 'name': 'Flintstone' }),
+        local.join(remote.time));
+
+      await expectNoUpdate(willUpdate);
+      await expect(drain(ssd.read<Describe>({
+        '@describe': 'http://test.m-ld.org/wilma'
+      }))).resolves.toEqual([]);
+    });
+
     test('entailed deletions retain TIDs', async () => {
       // Constraint is going to entail deletion of the data we're inserting
       constraint.check = async (_, update) => update.entail({ '@delete': wilma });

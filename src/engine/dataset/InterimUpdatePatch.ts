@@ -1,5 +1,5 @@
 import { Assertions, InterimUpdate, MeldPreUpdate } from '../../api';
-import { SubjectProperty, Update, Value } from '../../jrql-support';
+import { Reference, SubjectProperty, Update, Value } from '../../jrql-support';
 import { PatchQuads } from '.';
 import { JrqlGraph } from './JrqlGraph';
 import { GraphAliases, jrqlValue, SubjectGraph } from '../SubjectGraph';
@@ -26,6 +26,14 @@ export class InterimUpdatePatch implements InterimUpdate {
   private _update: MeldPreUpdate | undefined;
   /** Aliases for use in updates */
   private subjectAliases = new Map<Iri | null, { [property in '@id' | string]: SubjectProperty }>();
+
+  static principalRef(
+    principalId: string | null,
+    ctx?: JsonldContext
+  ): Reference | undefined {
+    return principalId != null ?
+      { '@id': ctx ? ctx.compactIri(principalId) : principalId } : undefined;
+  }
 
   /**
    * @param graph
@@ -154,8 +162,7 @@ export class InterimUpdatePatch implements InterimUpdate {
     return {
       '@delete': this.quadSubjects(patch.deletes, ctx),
       '@insert': this.quadSubjects(patch.inserts, ctx),
-      '@principal': this.principalId != null ?
-        { '@id': ctx ? ctx.compactIri(this.principalId) : this.principalId } : undefined,
+      '@principal': InterimUpdatePatch.principalRef(this.principalId, ctx),
       // Note that agreement specifically checks truthy-ness, not just non-null
       '@agree': this.agree || undefined
     };

@@ -11,6 +11,7 @@ import { Consumable, Flowable } from 'rx-flowable';
 import { MeldMessageType } from './ns/m-ld';
 import { MeldApp } from './config';
 import { EncodedOperation } from './engine/index';
+import { MeldError } from './engine/MeldError';
 
 /**
  * A convenience type for a struct with a `@insert` and `@delete` property, like
@@ -239,6 +240,12 @@ export interface GraphSubjects extends Array<GraphSubject> {
    * by serialised to JSON as it may not be acyclic.
    */
   graph: ReadonlyMap<Iri, GraphSubject>;
+}
+
+/** @internal */
+export namespace GraphSubjects {
+  export const EMPTY: GraphSubjects =
+    Object.assign([], { graph: new Map() });
 }
 
 /**
@@ -840,6 +847,13 @@ export interface AuditOperation {
  * @experimental
  */
 export interface UpdateTrace {
+  /**
+   * Defined if the operation was not processed due to the specified error. Such
+   * errors will always be indicative of a bad request. Catastrophic errors such
+   * as crashes will instead cause the clone itself to shut down in an error
+   * state; see {@link MeldClone#status}.
+   */
+  readonly error?: MeldError;
   /**
    * The operation that directly triggered an app update, either a local write
    * or an arriving remote operation. This operation always exists but is not

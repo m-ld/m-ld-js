@@ -251,18 +251,18 @@ export class MockProcess implements ClockHolder<TreeClock> {
     { agree, attr }: { agree?: true, attr?: Attribution } = {}
   ) {
     // Do not inline: this sets prev
-    const op = this.operated(deletes, inserts, agree);
+    const op = this.operated(deletes, inserts, agree, attr?.pid);
     return MeldOperationMessage.fromOperation(this.prev, op, attr ?? null);
   }
 
-  operated(deletes: object, inserts: object, agree?: any): EncodedOperation {
+  operated(deletes: object, inserts: object, agree?: any, principalId?: string): EncodedOperation {
     this.tick();
     let agreed: [number, any] | undefined;
     if (agree) {
       this.agreed = this.time;
       agreed = [this.time.ticks, agree];
     }
-    return testOp(this.time, deletes, inserts, { agreed });
+    return testOp(this.time, deletes, inserts, { agreed, principalId });
   }
 
   snapshot(data: Snapshot.Datum[]): DatasetSnapshot {

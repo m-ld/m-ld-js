@@ -34,6 +34,12 @@ interface JournalStateJson {
   agreed: TreeClockJson;
 }
 
+/**
+ * Marks a remote identity as blocked in the GWC. Note the use of characters
+ * that do not appear in Base64 alphabet.
+ */
+const BLOCKED = '!blocked!';
+
 export interface EntryBuilder {
   next(
     operation: MeldOperation,
@@ -42,6 +48,7 @@ export interface EntryBuilder {
     attribution: Attribution | null
   ): this;
   void(entry: JournalEntry): this;
+  block(remoteTime: TreeClock): this;
   deleteEntries: JournalEntry[];
   appendEntries: JournalEntry[];
   state: JournalState;
@@ -103,6 +110,8 @@ export class JournalState {
       ) {
         const prevTicks = this.state.gwc.getTicks(operation.time);
         const prevTid = this.state.gwc.tid(operation.time);
+        if (prevTid === BLOCKED)
+          throw new RangeError('Trying to process operation from a blocked remote!');
         this.appendEntries.push(JournalEntry.fromOperation(
           this.state.journal,
           tickKey(localTime.ticks),
@@ -110,13 +119,16 @@ export class JournalState {
           operation,
           deleted,
           attribution));
-        this.state = this.state.withTime(localTime,
-          this.state.gwc.set(operation.time), operation.agreed != null ?
-            operation.time.ticked(operation.agreed.tick) : undefined);
+        this.state = this.state.withTime(
+          localTime,
+          this.state.gwc.set(operation.time),
+          operation.agreed != null ?
+            operation.time.ticked(operation.agreed.tick) : undefined
+        );
         return this;
       }
 
-      void(entry: JournalEntry): this {
+      void(entry: JournalEntry) {
         if (entry.operation.agreed != null)
           throw new RangeError('Cannot void an agreement');
         // The entry's tick is now internal to its process, so the GWC must be
@@ -130,6 +142,12 @@ export class JournalState {
         return this;
       }
 
+      block(remoteTime: TreeClock): this {
+        this.state = this.state.withTime(
+          this.state.time, this.state.gwc.set(remoteTime, BLOCKED));
+        return this;
+      }
+
       /** Commits the changed journal */
       commit: Kvps = async batch => {
         this.state.journal.spliceEntries(
@@ -140,6 +158,10 @@ export class JournalState {
         this.state.commit(batch);
       };
     })(this);
+  }
+
+  isBlocked(remoteTime: TreeClock) {
+    return this.gwc.tid(remoteTime) === BLOCKED;
   }
 
   /**
