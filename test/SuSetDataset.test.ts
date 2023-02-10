@@ -4,13 +4,13 @@ import { GlobalClock, TreeClock } from '../src/engine/clocks';
 import { toArray } from 'rxjs/operators';
 import { EmptyError, firstValueFrom, lastValueFrom, Subject } from 'rxjs';
 import {
-  AgreementCondition, Describe, JournalCheckPoint, MeldConstraint, MeldTransportSecurity, MeldUpdate
+  AgreementCondition, Describe, JournalCheckPoint, MeldConstraint, MeldError, MeldTransportSecurity,
+  MeldUpdate
 } from '../src';
 import { jsonify } from './testUtil';
 import { MeldEncoder } from '../src/engine/MeldEncoding';
 import { BufferEncoding, EncodedOperation } from '../src/engine';
 import { drain } from 'rx-flowable';
-import { MeldError } from '../src/engine/MeldError';
 import { mockFn } from 'jest-mock-extended';
 import { MeldOperationMessage } from '../src/engine/MeldOperationMessage';
 

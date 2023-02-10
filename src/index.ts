@@ -6,7 +6,7 @@ import { DatasetEngine } from './engine/dataset/DatasetEngine';
 import { DomainContext } from './engine/MeldEncoding';
 import type { InitialApp, MeldConfig } from './config';
 import type { MeldRemotes } from './engine';
-import type { LiveStatus, MeldErrorStatus } from '@m-ld/m-ld-spec';
+import type { LiveStatus } from '@m-ld/m-ld-spec';
 import type { AbstractLevel } from 'abstract-level';
 import { Stopwatch } from './engine/Stopwatch';
 
@@ -20,7 +20,6 @@ export * from './updates';
 export * from './subjects';
 export * from './js-support';
 export * from './jrql-support';
-export { MeldErrorStatus };
 
 /**
  * Constructor for a driver for connecting to remote m-ld clones on the domain.

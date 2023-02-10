@@ -1,6 +1,6 @@
 import {
-  Attribution, AuditOperation, GraphSubject, GraphSubjects, MeldConstraint, MeldExtensions,
-  MeldPreUpdate, MeldUpdate, noTransportSecurity, StateManaged, UpdateTrace
+  Attribution, AuditOperation, GraphSubject, GraphSubjects, MeldConstraint, MeldError,
+  MeldExtensions, MeldPreUpdate, MeldUpdate, noTransportSecurity, StateManaged, UpdateTrace
 } from '../../api';
 import { BufferEncoding, EncodedOperation, OperationMessage, Snapshot } from '..';
 import { GlobalClock, TickTree, TreeClock } from '../clocks';
@@ -12,7 +12,6 @@ import { EMPTY, merge, mergeMap, Observable, of, Subject as Source } from 'rxjs'
 import { expand, filter, map, takeWhile } from 'rxjs/operators';
 import { completed, inflate } from '../util';
 import { Logger } from 'loglevel';
-import { MeldError } from '../MeldError';
 import { Quad, Triple, tripleIndexKey, TripleMap } from '../quads';
 import { InterimUpdatePatch } from './InterimUpdatePatch';
 import { JsonldContext } from '../jsonld';

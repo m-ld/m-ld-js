@@ -1,7 +1,6 @@
 import { GlobalClock, TreeClock } from '../clocks';
-import { MeldError, MeldErrorStatus } from '../MeldError';
 import { MeldRequestType, MeldResponseType } from '../../ns/m-ld';
-import { Attribution } from '../../api';
+import { Attribution, MeldError, MeldErrorStatus } from '../../api';
 import * as MsgPack from '../msgPack';
 import { Buffer } from 'buffer';
 

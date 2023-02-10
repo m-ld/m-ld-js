@@ -10,13 +10,14 @@ import { comesAlive } from '../src/engine/AbstractMeld';
 import { count, map, observeOn, take, toArray } from 'rxjs/operators';
 import { TreeClock } from '../src/engine/clocks';
 import { MeldRemotes, Snapshot } from '../src/engine';
-import { Describe, GraphSubject, MeldConfig, MeldReadState, Read, Update, Write } from '../src';
+import {
+  Describe, GraphSubject, MeldConfig, MeldError, MeldReadState, Read, Update, Write
+} from '../src';
 import { AbstractLevel } from 'abstract-level';
 import { jsonify } from './testUtil';
 import { MemoryLevel } from 'memory-level';
 import { Consumable } from 'rx-flowable';
 import { inflateFrom } from '../src/engine/util';
-import { MeldError } from '../src/engine/MeldError';
 import { Dataset } from '../src/engine/dataset/index';
 import { MeldOperationMessage } from '../src/engine/MeldOperationMessage';
 import { mockFn } from 'jest-mock-extended';

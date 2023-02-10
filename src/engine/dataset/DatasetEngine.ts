@@ -1,6 +1,6 @@
 import {
-  GraphSubject, LiveStatus, MeldContext, MeldExtensions, MeldReadState, MeldStatus, StateManaged,
-  StateProc
+  GraphSubject, LiveStatus, MeldContext, MeldError, MeldErrorStatus, MeldExtensions, MeldReadState,
+  MeldStatus, StateManaged, StateProc
 } from '../../api';
 import { MeldLocal, MeldRemotes, OperationMessage, Recovery, Revup, Snapshot } from '..';
 import { liveRollup } from '../api-support';
@@ -23,7 +23,6 @@ import { levels } from 'loglevel';
 import { AbstractMeld, comesAlive } from '../AbstractMeld';
 import { RemoteOperations } from './RemoteOperations';
 import { CloneEngine } from '../StateEngine';
-import { MeldError, MeldErrorStatus } from '../MeldError';
 import async from '../async';
 import { BaseStream } from '../../rdfjs-support';
 import { Consumable } from 'rx-flowable';

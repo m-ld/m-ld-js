@@ -1,4 +1,5 @@
 import * as spec from '@m-ld/m-ld-spec';
+import { MeldErrorStatus } from '@m-ld/m-ld-spec';
 import type {
   ExpandedTermDef, Query, Read, Reference, Subject, SubjectProperty, Update, Variable, Write
 } from './jrql-support';
@@ -11,7 +12,6 @@ import { Consumable, Flowable } from 'rx-flowable';
 import { MeldMessageType } from './ns/m-ld';
 import { MeldApp } from './config';
 import { EncodedOperation } from './engine/index';
-import { MeldError } from './engine/MeldError';
 
 /**
  * A convenience type for a struct with a `@insert` and `@delete` property, like
@@ -939,3 +939,29 @@ export interface MeldTransportSecurity {
 export const noTransportSecurity: MeldTransportSecurity = {
   wire: (data: Buffer) => data
 };
+
+// Errors are used unchanged form m-ld-spec
+export { MeldErrorStatus };
+
+/**
+ * Utility wrapper for exceptions thrown by an engine or its extensions.
+ */
+export class MeldError extends Error {
+  readonly status: MeldErrorStatus;
+
+  constructor(status: keyof typeof MeldErrorStatus | MeldErrorStatus, detail?: any) {
+    super((typeof status == 'string' ? status : MeldErrorStatus[status]) + (detail != null ? `: ${detail}` : ''));
+    this.status = typeof status == 'string' ? MeldErrorStatus[status] : status;
+  }
+
+  static from(err: any): MeldError {
+    if (err == null)
+      return new MeldError('No error');
+    else if (err instanceof MeldError)
+      return err;
+    else if (typeof err.status == 'number' && err.status in MeldErrorStatus)
+      return new MeldError(err.status, err.message);
+    else
+      return new MeldError('Unknown error', err.message);
+  }
+}

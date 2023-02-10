@@ -1,8 +1,7 @@
 import { ExtensionSubject, OrmSubject, OrmUpdating } from '../orm/index';
-import { GraphSubject, InterimUpdate, MeldExtensions, MeldReadState } from '../api';
+import { GraphSubject, InterimUpdate, MeldError, MeldExtensions, MeldReadState } from '../api';
 import { Describe, Reference, Subject } from '../jrql-support';
 import { M_LD } from '../ns';
-import { MeldError } from '../engine/MeldError';
 import { Iri } from '@m-ld/jsonld';
 import { JsType } from '../js-support';
 import { property } from '../orm/OrmSubject';

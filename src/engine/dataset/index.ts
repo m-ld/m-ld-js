@@ -16,12 +16,12 @@ import { DataFactory as RdfDataFactory } from 'rdf-data-factory';
 import { JRQL, M_LD, RDF, XS } from '../../ns';
 import async from '../async';
 import { MutableOperation } from '../ops';
-import { MeldError } from '../MeldError';
 import { BaseStream, Binding, CountableRdf, QueryableRdfSource } from '../../rdfjs-support';
 import { uuid } from '../../util';
 import { Stopwatch } from '../Stopwatch';
 import { check } from '../check';
 import { Consumable } from 'rx-flowable';
+import { MeldError } from '../../api';
 import type EventEmitter = require('events');
 
 /**

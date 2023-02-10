@@ -5,8 +5,7 @@ import { asapScheduler, BehaviorSubject, firstValueFrom, Observable, of } from '
 import { catchError, distinctUntilChanged, filter, observeOn, skip } from 'rxjs/operators';
 import { Logger } from 'loglevel';
 import { PauseableSource } from './util';
-import { MeldError } from './MeldError';
-import { MeldReadState } from '../api';
+import { MeldError, MeldReadState } from '../api';
 import { MeldConfig } from '../config';
 import { MeldOperationMessage } from './MeldOperationMessage';
 import { check } from './check';

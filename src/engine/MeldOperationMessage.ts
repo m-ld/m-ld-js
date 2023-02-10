@@ -1,7 +1,6 @@
 import { TreeClock } from './clocks';
 import * as MsgPack from './msgPack';
-import { Attribution, AuditOperation } from '../api';
-import { MeldError } from './MeldError';
+import { Attribution, AuditOperation, MeldError } from '../api';
 import { levels } from 'loglevel';
 import { MeldEncoder } from './MeldEncoding';
 import { BufferEncoding, EncodedOperation, OperationMessage } from './index';

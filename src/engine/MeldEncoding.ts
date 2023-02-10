@@ -8,10 +8,10 @@ import { JsonldContext } from './jsonld';
 import { M_LD, RDF, XS } from '../ns';
 import { SubjectGraph } from './SubjectGraph';
 import { SubjectQuads } from './SubjectQuads';
-import { MeldError } from './MeldError';
 // TODO: Switch to fflate. Node.js zlib uses Pako in the browser
 import { gunzipSync, gzipSync } from 'zlib';
 import { baseVocab, domainBase } from './dataset/index';
+import { MeldError } from '../api';
 
 const COMPRESS_THRESHOLD_BYTES = 1024;
 
