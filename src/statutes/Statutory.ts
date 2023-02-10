@@ -1,11 +1,10 @@
 import {
   AgreementCondition, DeleteInsert, GraphSubject, GraphUpdate, InterimUpdate, MeldConstraint,
-  MeldExtensions, MeldPreUpdate, MeldReadState
+  MeldError, MeldExtensions, MeldPreUpdate, MeldReadState
 } from '../api';
 import { M_LD } from '../ns';
 import { Describe, isPropertyObject, isReference, Reference, Subject } from '../jrql-support';
 import { ExtensionSubject, OrmSubject, OrmUpdating } from '../orm';
-import { MeldError } from '../engine/MeldError';
 import { Iri } from '@m-ld/jsonld';
 import { SubjectGraph } from '../engine/SubjectGraph';
 import { asSubjectUpdates } from '../updates';

@@ -1,4 +1,4 @@
-import { Journal, JournalEntry } from '../src/engine/journal';
+import { EntryBuilder, Journal, JournalEntry } from '../src/engine/journal';
 import { memStore, MockProcess } from './testClones';
 import { MeldEncoder } from '../src/engine/MeldEncoding';
 import { Dataset } from '../src/engine/dataset';
@@ -21,6 +21,18 @@ describe('Dataset Journal', () => {
     journal = new Journal(store, encoder);
   });
 
+  function transact<T>(txn: (journaling: EntryBuilder) => EntryBuilder, rtn: T) {
+    return store.transact({
+      prepare: () => ({
+        async kvps(batch) {
+          const state = await journal.state();
+          return txn(state.builder()).commit(batch);
+        },
+        return: rtn
+      })
+    });
+  }
+
   /**
    * Operation content doesn't matter to the journal, so in these tests we just commit no-ops.
    * Correct behaviour of e.g. fusions is covered in other tests.
@@ -28,24 +40,21 @@ describe('Dataset Journal', () => {
    * @param content tuple of deletes and inserts , defaults to no-op
    * @param agree whether this operation is an agreement
    */
-  function opAt(process: MockProcess, content: [object, object] = [{}, {}], agree?: true) {
+  function opAt(process: MockProcess, content = [{}, {}], agree?: true) {
     const [deletes, inserts] = content;
     return MeldOperation.fromEncoded(encoder, process.operated(deletes, inserts, agree));
   }
 
   function addEntry(
-    local: MockProcess, remote?: MockProcess, content: [object, object] = [{}, {}]) {
+    local: MockProcess,
+    remote?: MockProcess,
+    content = [{}, {}]
+  ) {
     const op = opAt(remote ?? local, content);
     const localTime = remote ? local.join(op.time).tick().time : local.time;
-    return store.transact({
-      prepare: () => ({
-        async kvps(batch) {
-          const state = await journal.state();
-          return state.builder().next(op, new TripleMap, localTime, null).commit(batch);
-        },
-        return: op
-      })
-    });
+    return transact(journaling => journaling.next(
+      op, new TripleMap, localTime, null
+    ), op);
   }
 
   /** Utility for mixing-in journal clerk testing */
@@ -160,6 +169,18 @@ describe('Dataset Journal', () => {
       expect(state.time.equals(local.time)).toBe(true);
       expect(state.gwc.equals(local.gwc)).toBe(true);
       expect(state.start).toBe(0);
+      expect(state.isBlocked(local.time)).toBe(false);
+    });
+
+    test('blocks a remote', async () => {
+      const remote = local.fork();
+      const op = opAt(remote);
+      await transact(journaling => journaling.block(op.time), null);
+      const state = await journal.state();
+      expect(state.isBlocked(remote.time)).toBe(true);
+      expect(state.isBlocked(local.time)).toBe(false);
+      // Forked remote is also blocked
+      expect(state.isBlocked(remote.fork().time)).toBe(true);
     });
 
     describe('with a local operation', () => {
@@ -189,6 +210,7 @@ describe('Dataset Journal', () => {
         const state = await commitOp.then(() => journal.state());
         expect(state.time.equals(local.time)).toBe(true);
         expect(state.gwc.equals(local.gwc)).toBe(true);
+        expect(state.isBlocked(local.time)).toBe(false);
         expect(state.start).toBe(0);
       });
 

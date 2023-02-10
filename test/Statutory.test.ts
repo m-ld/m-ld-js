@@ -4,8 +4,7 @@ import { M_LD, SH } from '../src/ns';
 import {
   HasAuthority, ShapeAgreementCondition, Statute, Statutory
 } from '../src/statutes/Statutory';
-import { GraphSubject } from '../src';
-import { MeldError } from '../src/engine/MeldError';
+import { GraphSubject, MeldError } from '../src';
 import { DefaultList } from '../src/lseq/DefaultList';
 import { ExtensionSubject, OrmDomain, OrmSubject } from '../src/orm';
 import { ExtensionSubjectInstance } from '../src/orm/ExtensionSubject';

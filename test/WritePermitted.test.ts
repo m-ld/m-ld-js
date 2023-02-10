@@ -2,8 +2,8 @@ import { SH } from '../src/ns';
 import { MockGraphState, mockInterim, testConfig } from './testClones';
 import { WritePermitted } from '../src/security';
 import { SubjectGraph } from '../src/engine/SubjectGraph';
-import { MeldError } from '../src/engine/MeldError';
 import { OrmDomain } from '../src/orm/index';
+import { MeldError } from '../src/index';
 
 describe('Write permissions', () => {
   let state: MockGraphState;

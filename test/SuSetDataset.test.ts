@@ -4,13 +4,13 @@ import { GlobalClock, TreeClock } from '../src/engine/clocks';
 import { toArray } from 'rxjs/operators';
 import { EmptyError, firstValueFrom, lastValueFrom, Subject } from 'rxjs';
 import {
-  AgreementCondition, Describe, JournalCheckPoint, MeldConstraint, MeldTransportSecurity, MeldUpdate
+  AgreementCondition, Describe, JournalCheckPoint, MeldConstraint, MeldError, MeldTransportSecurity,
+  MeldUpdate
 } from '../src';
 import { jsonify } from './testUtil';
 import { MeldEncoder } from '../src/engine/MeldEncoding';
 import { BufferEncoding, EncodedOperation } from '../src/engine';
 import { drain } from 'rx-flowable';
-import { MeldError } from '../src/engine/MeldError';
 import { mockFn } from 'jest-mock-extended';
 import { MeldOperationMessage } from '../src/engine/MeldOperationMessage';
 
@@ -863,6 +863,47 @@ describe('SU-Set Dataset', () => {
       // The deleted data was re-inserted, but Wilma may not have existed before
       await expect(willUpdate).resolves.toMatchObject(
         { '@insert': [wilma], '@delete': [], '@ticks': local.time.ticks });
+    });
+
+    test('bad operation issues no-op error update', async () => {
+      constraint.apply = () => Promise.reject(new MeldError('Unauthorised'));
+
+      const willUpdate = firstValueFrom(ssd.updates);
+      await ssd.apply(
+        remote.sentOperation({}, { '@id': 'wilma', 'name': 'Wilma' }, {
+          attr: { pid: 'http://box.ex.org/#me', sig: Buffer.of() }
+        }),
+        local.join(remote.time));
+
+      const update = await willUpdate;
+      expect(update).toMatchObject({
+        '@delete': expect.objectContaining({ length: 0 }),
+        '@insert': expect.objectContaining({ length: 0 }),
+        '@ticks': local.time.ticks,
+        '@principal': { '@id': 'http://box.ex.org/#me' }
+      });
+      const trace = update.trace();
+      expect(trace.error?.status).toBe(4030);
+      await expect(drain(ssd.read<Describe>({
+        '@describe': 'http://test.m-ld.org/wilma'
+      }))).resolves.toEqual([]);
+    });
+
+    test('bad operation blocks clone', async () => {
+      constraint.apply = () => Promise.reject(new MeldError('Unauthorised'));
+
+      await ssd.apply(
+        remote.sentOperation({}, { '@id': 'wilma', 'name': 'Wilma' }),
+        local.join(remote.time));
+      const willUpdate = firstValueFrom(ssd.updates);
+      await ssd.apply(
+        remote.sentOperation({}, { '@id': 'wilma', 'name': 'Flintstone' }),
+        local.join(remote.time));
+
+      await expectNoUpdate(willUpdate);
+      await expect(drain(ssd.read<Describe>({
+        '@describe': 'http://test.m-ld.org/wilma'
+      }))).resolves.toEqual([]);
     });
 
     test('entailed deletions retain TIDs', async () => {

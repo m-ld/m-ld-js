@@ -11,9 +11,10 @@ import {
 import { toJSON } from '../util';
 import * as MsgPack from '../msgPack';
 import { delay, first, ignoreElements, map, reduce, tap, timeout, toArray } from 'rxjs/operators';
-import { MeldError, MeldErrorStatus } from '../MeldError';
 import { AbstractMeld } from '../AbstractMeld';
-import { MeldExtensions, MeldReadState, noTransportSecurity, shortId, uuid } from '../../index';
+import {
+  MeldError, MeldErrorStatus, MeldExtensions, MeldReadState, noTransportSecurity, shortId, uuid
+} from '../../index';
 import { JsonNotification, NotifyParams, ReplyParams, SendParams } from './PubsubParams';
 import { consume } from 'rx-flowable/consume';
 import { MeldMessageType } from '../../ns/m-ld';

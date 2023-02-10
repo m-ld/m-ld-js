@@ -1,4 +1,5 @@
 import * as spec from '@m-ld/m-ld-spec';
+import { MeldErrorStatus } from '@m-ld/m-ld-spec';
 import type {
   ExpandedTermDef, Query, Read, Reference, Subject, SubjectProperty, Update, Variable, Write
 } from './jrql-support';
@@ -239,6 +240,12 @@ export interface GraphSubjects extends Array<GraphSubject> {
    * by serialised to JSON as it may not be acyclic.
    */
   graph: ReadonlyMap<Iri, GraphSubject>;
+}
+
+/** @internal */
+export namespace GraphSubjects {
+  export const EMPTY: GraphSubjects =
+    Object.assign([], { graph: new Map() });
 }
 
 /**
@@ -841,6 +848,13 @@ export interface AuditOperation {
  */
 export interface UpdateTrace {
   /**
+   * Defined if the operation was not processed due to the specified error. Such
+   * errors will always be indicative of a bad request. Catastrophic errors such
+   * as crashes will instead cause the clone itself to shut down in an error
+   * state; see {@link MeldClone#status}.
+   */
+  readonly error?: MeldError;
+  /**
    * The operation that directly triggered an app update, either a local write
    * or an arriving remote operation. This operation always exists but is not
    * necessarily recorded in the clone journal.
@@ -925,3 +939,29 @@ export interface MeldTransportSecurity {
 export const noTransportSecurity: MeldTransportSecurity = {
   wire: (data: Buffer) => data
 };
+
+// Errors are used unchanged form m-ld-spec
+export { MeldErrorStatus };
+
+/**
+ * Utility wrapper for exceptions thrown by an engine or its extensions.
+ */
+export class MeldError extends Error {
+  readonly status: MeldErrorStatus;
+
+  constructor(status: keyof typeof MeldErrorStatus | MeldErrorStatus, detail?: any) {
+    super((typeof status == 'string' ? status : MeldErrorStatus[status]) + (detail != null ? `: ${detail}` : ''));
+    this.status = typeof status == 'string' ? MeldErrorStatus[status] : status;
+  }
+
+  static from(err: any): MeldError {
+    if (err == null)
+      return new MeldError('No error');
+    else if (err instanceof MeldError)
+      return err;
+    else if (typeof err.status == 'number' && err.status in MeldErrorStatus)
+      return new MeldError(err.status, err.message);
+    else
+      return new MeldError('Unknown error', err.message);
+  }
+}
