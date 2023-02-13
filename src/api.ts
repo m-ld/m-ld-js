@@ -950,7 +950,8 @@ export class MeldError extends Error {
   readonly status: MeldErrorStatus;
 
   constructor(status: keyof typeof MeldErrorStatus | MeldErrorStatus, detail?: any) {
-    super((typeof status == 'string' ? status : MeldErrorStatus[status]) + (detail != null ? `: ${detail}` : ''));
+    super((typeof status == 'string' ? status :
+      MeldErrorStatus[status]) + (detail != null ? `: ${detail}` : ''));
     this.status = typeof status == 'string' ? MeldErrorStatus[status] : status;
   }
 

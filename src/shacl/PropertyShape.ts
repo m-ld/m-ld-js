@@ -9,7 +9,7 @@ import {
 import { sortValues, SubjectPropertyValues } from '../subjects';
 import { drain } from 'rx-flowable';
 import { SubjectGraph } from '../engine/SubjectGraph';
-import { Shape, ValidationResult } from './Shape';
+import { Shape, ShapeSpec, ValidationResult } from './Shape';
 import { SH } from '../ns';
 import { mapIter } from '../engine/util';
 import { ConstraintComponent } from '../ns/sh';
@@ -22,10 +22,8 @@ export type PropertyCardinality = {
   maxCount?: number;
 }
 /** Convenience specification for a property shape */
-export type PropertyShapeSpec = {
-  src?: GraphSubject,
+export type PropertyShapeSpec = ShapeSpec & {
   path: Iri;
-  targetClass?: Iri | Iri[];
   name?: string | string[];
 } & PropertyCardinality;
 
@@ -63,11 +61,10 @@ export class PropertyShape extends Shape {
     } : spec;
     return {
       [SH.path]: { '@vocab': spec.path },
-      [SH.targetClass]: array(spec.targetClass).map(iri => ({ '@vocab': iri })),
       [SH.name]: spec.name,
       [SH.minCount]: minCount,
       [SH.maxCount]: maxCount,
-      ...spec.src
+      ...ShapeSpec.declareShape(spec)
     };
   };
 
@@ -81,7 +78,7 @@ export class PropertyShape extends Shape {
         init: spec?.path ? { '@vocab': spec.path } : undefined
       },
       name: { init: spec?.name },
-      targetClass: { init: spec?.targetClass },
+      targetClass: this.targetClassAccess(spec),
       minCount: { init: spec != null && 'count' in spec ? spec.count : spec?.minCount },
       maxCount: { init: spec != null && 'count' in spec ? spec.count : spec?.maxCount }
     });
@@ -119,14 +116,10 @@ export class PropertyShape extends Shape {
         const old = await this.loadSubjectValues(id);
         return updated[id] = { old, final: old.clone() };
       };
-      await Promise.all(mapIter(this.shape.genSubjectValues(update['@delete']), async del => {
-        const { subject: { '@id': id }, values } = del;
-        (await loadUpdated(id)).final.delete(...values);
-      }));
-      await Promise.all(mapIter(this.shape.genSubjectValues(update['@insert']), async ins => {
-        const { subject: { '@id': id }, values } = ins;
-        (await loadUpdated(id)).final.insert(...values);
-      }));
+      await Promise.all(mapIter(this.shape.genSubjectValues(update['@delete']), async del =>
+        (await loadUpdated(del.subject['@id'])).final.delete(...del.values)));
+      await Promise.all(mapIter(this.shape.genSubjectValues(update['@insert']), async ins =>
+        (await loadUpdated(ins.subject['@id'])).final.insert(...ins.values)));
       return Object.values(updated);
     }
 
