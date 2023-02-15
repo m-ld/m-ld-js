@@ -197,8 +197,10 @@ export class JournalState {
     return this.journal.withLockedHistory(async () => {
       // For each latest op, emit a fusion of all contiguous ops up to it
       const ops = await Promise.all([...this.gwc.tids()].map(async tid => {
-        // Every TID in the GWC except genesis should be represented
-        if (tid !== TreeClock.GENESIS.hash) {
+        // Every TID in the GWC except genesis and blocked should be represented.
+        // Latest operation history for blocked clones is not necessary because
+        // no further operations will be accepted anyway.
+        if (tid !== TreeClock.GENESIS.hash && tid !== BLOCKED) {
           const op = await this.journal.operation(tid, 'require');
           return op.fusedPast();
         }
