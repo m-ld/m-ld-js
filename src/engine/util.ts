@@ -18,7 +18,9 @@ export function flatten<T>(bumpy: T[][]): T[] {
  * @param pump the map function that inflates the input to an observable output
  */
 export function inflate<T extends ObservableInput<any>, O extends ObservableInput<any>>(
-  input: O, pump: (p: ObservedValueOf<O>) => T): Observable<ObservedValueOf<T>> {
+  input: O,
+  pump: (p: ObservedValueOf<O>) => T
+): Observable<ObservedValueOf<T>> {
   return from(input).pipe(mergeMap(pump));
 }
 

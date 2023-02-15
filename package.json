@@ -6,10 +6,12 @@
   "types": "ext/index.d.ts",
   "exports": {
     ".": "./ext/index.js",
+    "./ext/ns": "./ext/ns/index.js",
     "./ext/orm": "./ext/orm/index.js",
     "./ext/mqtt": "./ext/mqtt/index.js",
     "./ext/socket.io": "./ext/socket.io/index.js",
     "./ext/socket.io-server": "./ext/socket.io/server/index.js",
+    "./ext/socket.io/server": "./ext/socket.io/server/index.js",
     "./ext/ably": "./ext/ably/index.js",
     "./ext/wrtc": "./ext/wrtc/index.js",
     "./ext/security": "./ext/security/index.js",

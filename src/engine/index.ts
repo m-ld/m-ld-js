@@ -219,7 +219,9 @@ export namespace Snapshot {
    */
   export type Inserts = { inserts: Buffer, encoding: BufferEncoding[] };
   /**
-   * A latest operation from a remote clone
+   * A latest operation from a remote clone, including any possible fused
+   * history. This is necessary so that when receiving a rev-up fusion, it's
+   * possible to 'cut' already-processed history from that fusion.
    */
   export type Operation = { operation: EncodedOperation };
   /**

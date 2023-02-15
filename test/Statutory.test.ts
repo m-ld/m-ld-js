@@ -387,6 +387,35 @@ describe('Statutory', () => {
         { ...update, '@agree': true })).resolves.not.toThrow();
     });
 
+    test('agrees an insert of a node statute', async () => {
+      const statute = await appState.updating(state.graph.asReadState, orm =>
+        new Statute({
+          '@id': 'http://test.m-ld.org/flintstoneStatute',
+          '@type': M_LD.Statute,
+          [M_LD.statutoryShape]: {
+            '@id': 'http://test.m-ld.org/flintstoneShape',
+            [SH.targetClass]: { '@vocab': 'http://test.m-ld.org/#Flintstone' }
+          },
+          [M_LD.sufficientCondition]: {
+            '@id': 'http://test.m-ld.org/alwaysTrue',
+            'http://test.m-ld.org/#value': true
+          }
+        }, orm, orm.domain.scope, testProver));
+      const update = {
+        '@delete': new SubjectGraph([]),
+        '@insert': new SubjectGraph([{
+          '@id': 'http://test.m-ld.org/fred',
+          '@type': 'http://test.m-ld.org/#Flintstone',
+          'http://test.m-ld.org/#name': 'Fred'
+        }])
+      };
+      const interim = mockInterim(update);
+      await statute.check(state.graph.asReadState, interim);
+      expect(interim.assert).toBeCalledWith({ '@agree': true });
+      await expect(statute.test(state.graph.asReadState,
+        { ...update, '@agree': true })).resolves.not.toThrow();
+    });
+
     test('finds sufficient condition', async () => {
       const statute = await appState.updating(state.graph.asReadState, orm =>
         new Statute({

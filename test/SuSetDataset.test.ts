@@ -906,6 +906,17 @@ describe('SU-Set Dataset', () => {
       }))).resolves.toEqual([]);
     });
 
+    test('blocked clone is included in snapshot', async () => {
+      constraint.apply = () => Promise.reject(new MeldError('Unauthorised'));
+      await ssd.apply(
+        remote.sentOperation({}, { '@id': 'wilma', 'name': 'Wilma' }),
+        local.join(remote.time));
+
+      const snapshot = await ssd.takeSnapshot();
+      // Note that the blocked flag is strictly an internal detail
+      expect(snapshot.gwc.tid(remote.time)).toBe('!blocked!');
+    });
+
     test('entailed deletions retain TIDs', async () => {
       // Constraint is going to entail deletion of the data we're inserting
       constraint.check = async (_, update) => update.entail({ '@delete': wilma });

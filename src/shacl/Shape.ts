@@ -1,12 +1,30 @@
-import { ExtensionSubject, OrmSubject, OrmUpdating } from '../orm/index';
+import { OrmSubject } from '../orm/index';
 import { property } from '../orm/OrmSubject';
 import { JsType } from '../js-support';
-import { VocabReference } from '../jrql-support';
+import { Subject, VocabReference } from '../jrql-support';
 import {
   Assertions, GraphSubject, GraphUpdate, InterimUpdate, MeldConstraint, MeldReadState
 } from '../api';
 import { SH } from '../ns';
 import { ConstraintComponent } from '../ns/sh';
+import { Iri } from '@m-ld/jsonld';
+import { mapIter } from '../engine/util';
+import { array } from '../util';
+
+/** Convenience specification for a shape */
+export interface ShapeSpec {
+  src?: GraphSubject,
+  targetClass?: Iri | Iri[];
+}
+
+export namespace ShapeSpec {
+  export const declareShape = (spec: ShapeSpec): Subject => {
+    return {
+      [SH.targetClass]: array(spec.targetClass).map(id => ({ '@vocab': id })),
+      ...spec.src
+    };
+  };
+}
 
 /**
  * Shapes are used to define patterns of data, which can be used to match or
@@ -18,7 +36,7 @@ import { ConstraintComponent } from '../ns/sh';
  * While this class implements `MeldConstraint`, shape checking is semantically
  * weaker than constraint {@link check checking}, as a violation
  * (non-conformance) does not produce an exception but instead resolves a
- * validation result. However, the constraint {@link apply} will attempt a
+ * validation result. However, the constraint {@link apply} _will_ attempt a
  * correction in response to a non-conformance.
  *
  * @see https://www.w3.org/TR/shacl/#constraints-section
@@ -28,24 +46,44 @@ import { ConstraintComponent } from '../ns/sh';
  */
 export abstract class Shape extends OrmSubject implements MeldConstraint {
   /** @internal */
-  @property(JsType.for(Set, VocabReference), SH.targetClass)
-  targetClass: Set<VocabReference>;
+  @property(JsType.for(Array, VocabReference), SH.targetClass)
+  targetClass: Set<Iri>;
 
   /** @see https://www.w3.org/TR/shacl/#terminology */
-  static from(src: GraphSubject, orm: OrmUpdating): Shape | Promise<Shape> {
+  static from(src: GraphSubject): Shape | Promise<Shape> {
     if (SH.path in src) {
       const { PropertyShape } = require('./PropertyShape');
       return new PropertyShape({ src });
     } else {
-      return ExtensionSubject.instance(src, orm);
+      const { NodeShape } = require('./NodeShape');
+      return new NodeShape({ src });
     }
   }
 
   /**
-   * Capture precisely the data being affected by the given update which matches
-   * this shape, either before or after the update is applied to the state.
+   * Convenience for declaration of target class access in `initSrcProperty`
+   * @internal
+   */
+  protected targetClassAccess(spec?: ShapeSpec) {
+    return {
+      get: () => [...mapIter(this.targetClass, id => ({ '@vocab': id }))],
+      set: (v: VocabReference[]) => this.targetClass = new Set(v.map(ref => ref['@vocab'])),
+      init: array(spec?.targetClass).map(id => ({ '@vocab': id }))
+    };
+  }
+
+  /**
+   * Capture precisely the data being affected by the given update which
+   * correspond to this shape, either before or after the update is applied to
+   * the state.
    *
-   * @returns filtered updates where the affected subject matches this shape
+   * In respect of SHACL concepts, correspondence is based on **targets** and
+   * **paths** (if applicable), but not constraints; so that non-validating
+   * state (either before or after the update) _is_ included.
+   *
+   * @returns filtered updates where the affected subject corresponds to this shape
+   * @see https://www.w3.org/TR/shacl/#targets
+   * @see https://www.w3.org/TR/shacl/#property-paths
    */
   abstract affected(state: MeldReadState, update: GraphUpdate): Promise<GraphUpdate>;
 

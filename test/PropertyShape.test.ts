@@ -1,5 +1,4 @@
 import { SH } from '../src/ns';
-import { mock } from 'jest-mock-extended';
 import { Shape } from '../src/shacl/Shape';
 import { PropertyShape } from '../src/shacl/index';
 import { MockGraphState, mockInterim } from './testClones';
@@ -10,7 +9,7 @@ describe('SHACL Property Shape', () => {
     const shape = Shape.from({
       '@id': 'http://test.m-ld.org/nameShape',
       [SH.path]: { '@vocab': 'http://test.m-ld.org/#name' }
-    }, mock());
+    });
     expect(shape).toBeInstanceOf(PropertyShape);
     expect((<PropertyShape>shape).path).toBe('http://test.m-ld.org/#name');
   });
@@ -27,7 +26,7 @@ describe('SHACL Property Shape', () => {
     const shape = await Shape.from({
       '@id': 'http://test.m-ld.org/nameShape',
       [SH.path]: { '@vocab': 'http://test.m-ld.org/#name' }
-    }, mock());
+    });
     // This tests the ability to respond to m-ld updates
     shape.src[SH.path] = { '@vocab': 'http://test.m-ld.org/#height' };
     expect((<PropertyShape>shape).path).toBe('http://test.m-ld.org/#height');
@@ -60,7 +59,7 @@ describe('SHACL Property Shape', () => {
 
     afterEach(() => state.close());
 
-    describe('checks', () => {
+    describe('check', () => {
       test('OK update', async () => {
         const shape = new PropertyShape({ path: 'http://test.m-ld.org/#name', count: 1 });
         await expect(shape.check(state.graph.asReadState, mockInterim({
@@ -203,7 +202,6 @@ describe('SHACL Property Shape', () => {
           }
         }));
       });
-
     });
   });
 });
