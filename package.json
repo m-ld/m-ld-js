@@ -1,6 +1,6 @@
 {
   "name": "@m-ld/m-ld",
-  "version": "0.9.2-edge.1",
+  "version": "0.9.2-edge.2",
   "description": "m-ld native Javascript",
   "main": "ext/index.js",
   "types": "ext/index.d.ts",
