@@ -366,7 +366,7 @@ export function isSubject(p: Pattern): p is Subject {
 
 /** @internal */
 export function isSubjectObject(o: SubjectPropertyObject): o is Subject {
-  return typeof o == 'object' && !isReference(o) && !isValueObject(o);
+  return typeof o == 'object' && !isReference(o) && !isVocabReference(o) && !isValueObject(o);
 }
 
 /**
