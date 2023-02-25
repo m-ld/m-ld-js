@@ -240,7 +240,7 @@ export class SuSetDataset extends MeldEncoder {
         // Include journaling in final patch
         txc.sw.next('journal');
         const journal = await this.journal.state();
-        const msg = await this.operationMessage(journal, time, op);
+        const msg = await this.operationMessage(journal, op);
         const journaling = journal.builder().next(op, deletedTriplesTids, time, msg.attr);
         const trace: MeldUpdate['trace'] = () => ({
           // No applicable, resolution or voids for local txn
@@ -312,9 +312,9 @@ export class SuSetDataset extends MeldEncoder {
       this.updateSource.next(update);
   }
 
-  private async operationMessage(journal: JournalState, time: TreeClock, op: MeldOperation) {
+  private async operationMessage(journal: JournalState, op: MeldOperation) {
     // Construct the operation message with the previous visible clock tick
-    const prevTick = journal.gwc.getTicks(time);
+    const prevTick = journal.gwc.getTicks(op.time);
     // Apply signature to the unsecured encoded operation
     const attribution = await this.sign(op);
     // Apply transport wire security to the encoded update
@@ -327,7 +327,8 @@ export class SuSetDataset extends MeldEncoder {
       encoded[OpKey.encoding].push(BufferEncoding.SECURE);
     }
     // Re-package the encoded operation with the wire security applied
-    const operationMsg = MeldOperationMessage.fromOperation(prevTick, encoded, attribution, time);
+    const operationMsg = MeldOperationMessage
+      .fromOperation(prevTick, encoded, attribution, op.time);
     if (operationMsg.size > this.maxOperationSize)
       throw new MeldError('Delta too big');
     return operationMsg;
@@ -344,12 +345,13 @@ export class SuSetDataset extends MeldEncoder {
    */
   private async unSecureOperation(msg: OperationMessage): Promise<EncodedOperation> {
     const transportSecurity = await this.transportSecurity;
-    let encoded: EncodedOperation = [...msg.data];
-    if (encoded[OpKey.encoding][encoded[OpKey.encoding].length - 1] === BufferEncoding.SECURE) {
+    const encoded: EncodedOperation = [...msg.data];
+    const encoding = encoded[OpKey.encoding];
+    if (encoding[encoding.length - 1] === BufferEncoding.SECURE) {
       // Un-apply wire security
       encoded[OpKey.update] = await transportSecurity.wire(
         encoded[OpKey.update], MeldMessageType.operation, 'in', this.readState);
-      encoded[OpKey.encoding] = encoded[OpKey.encoding].slice(0, -1);
+      encoded[OpKey.encoding] = encoding.slice(0, -1);
       // Now verify the unsecured encoded update
       await transportSecurity.verify?.(
         EncodedOperation.toBuffer(encoded), msg.attr, this.readState);
@@ -412,21 +414,19 @@ export class SuSetDataset extends MeldEncoder {
         if (journal.isBlocked(msg.time)) {
           this.log.debug(`Ignoring blocked operation: ${msg.time} @ ${clockHolder.peek()}`);
           return { return: null };
+        } else if (msg.time.anyLt(journal.agreed)) {
+          this.log.debug(`Ignoring pre-agreement operation: ${msg.time} @ ${clockHolder.peek()}`);
+          return { return: null };
         } else {
           const receivedOp = MeldOperation.fromEncoded(this, await this.unSecureOperation(msg));
           const applicableOp = await journal.applicableOperation(receivedOp);
-          if (applicableOp == null) {
-            this.log.debug(`Ignoring pre-agreement operation: ${msg.time} @ ${clockHolder.peek()}`);
-            return { return: null };
-          } else {
-            txc.sw.next('apply-txn');
-            this.log.debug(`Applying operation: ${msg.time} @ ${clockHolder.peek()}`);
-            // If the operation is synthesised, we need to attribute it ourselves
-            const attribution = applicableOp === receivedOp ?
-              msg.attr : await this.sign(applicableOp);
-            return new SuSetDataset.OperationApplication(
-              this, applicableOp, attribution, journal.builder(), txc, clockHolder, msg).apply();
-          }
+          txc.sw.next('apply-txn');
+          this.log.debug(`Applying operation: ${msg.time} @ ${clockHolder.peek()}`);
+          // If the operation is synthesised, we need to attribute it ourselves
+          const attribution = applicableOp === receivedOp ?
+            msg.attr : await this.sign(applicableOp);
+          return new SuSetDataset.OperationApplication(
+            this, applicableOp, attribution, journal.builder(), txc, clockHolder, msg).apply();
         }
       }
     });
@@ -497,7 +497,7 @@ export class SuSetDataset extends MeldEncoder {
           patch.tids.append(cxn.tidPatch);
           patch.quads.append(cxnAssertions);
           // FIXME: If this synthetic operation message exceeds max size, what to do?
-          cxnMsg = await this.ssd.operationMessage(this.journaling.state, cxnTime, cxn.operation);
+          cxnMsg = await this.ssd.operationMessage(this.journaling.state, cxn.operation);
           // Also create a journal entry for the constraint "transaction"
           this.journaling.next(cxn.operation, cxn.deletedTriplesTids, cxnTime, cxnMsg.attr);
         }

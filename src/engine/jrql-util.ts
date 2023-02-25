@@ -1,10 +1,10 @@
 import { Url } from '@m-ld/jsonld';
 import {
-  Construct, Describe, Subject, SubjectProperty, SubjectPropertyObject, Value
+  Construct, Describe, isSubjectObject, Subject, SubjectProperty, SubjectPropertyObject, Value
 } from '../jrql-support';
 import { JRQL } from '../ns';
 import { isArray, isNaturalNumber, setAtPath, trimTail } from './util';
-import { includeValues } from '../subjects';
+import { SubjectPropertyValues } from '../subjects';
 import validDataUrl = require('valid-data-url');
 
 /**
@@ -82,10 +82,15 @@ export function addPropertyObject(
   subject: Subject,
   property: SubjectProperty,
   object: Value,
-  createList: () => object = () => ({})
+  createList = () => ({})
 ): Subject {
   if (typeof property == 'string') {
-    includeValues(subject, property, object);
+    const spv = new SubjectPropertyValues(subject, property);
+    // Favour a subject over an existing reference
+    if (isSubjectObject(object))
+      spv.update([object], [object]);
+    else
+      spv.insert(object);
   } else {
     setAtPath(subject,
       // Trim out an empty/undefined tail

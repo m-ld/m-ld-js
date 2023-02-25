@@ -1214,6 +1214,19 @@ describe('SU-Set Dataset', () => {
         local.join(remote.time))).rejects.toThrowError('Invalid signature');
     });
 
+    test('ignores unverifiable operation concurrent with agreement', async () => {
+      transportSecurity.verify = () => { throw new Error('Invalid signature'); };
+      await ssd.transact(async () => [
+        local.tick().time,
+        await ssd.write({ '@insert': fred }),
+        true
+      ]);
+      const attr = { pid: 'bob', sig: Buffer.from('bob') };
+      await expect(ssd.apply(
+        remote.sentOperation({}, { '@id': 'wilma', 'name': 'Wilma' }, { attr }),
+        local.join(remote.time))).resolves.toBe(null)
+    });
+
     test('constraint resolution is locally signed', async () => {
       const aliceAttr = { pid: 'alice', sig: Buffer.from('alice') };
       transportSecurity.sign = () => aliceAttr;

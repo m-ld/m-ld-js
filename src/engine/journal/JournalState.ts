@@ -176,7 +176,7 @@ export class JournalState {
    * @returns `op` if no changes are required, or an operation representing the
    * un-applied suffix, or `null` if `op` should be ignored.
    */
-  applicableOperation(op: MeldOperation): Promise<MeldOperation | null> {
+  applicableOperation(op: MeldOperation): Promise<MeldOperation> {
     return this.journal.withLockedHistory(async () => {
       // Cut away stale parts of an incoming fused operation.
       // Optimisation: no need to cut if incoming is not fused.
@@ -188,8 +188,7 @@ export class JournalState {
         if (seenOp != null)
           op = await seenOp.cutSeen(op);
       }
-      // If anything in the op pre-dates the last agreement, ignore it
-      return { return: op.time.anyLt(this.agreed) ? null : op };
+      return { return: op };
     });
   }
 

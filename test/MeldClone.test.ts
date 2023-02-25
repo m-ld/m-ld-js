@@ -227,6 +227,12 @@ describe('MeldClone', () => {
         .resolves.toBeUndefined();
     });
 
+    test('gets if any available property', async () => {
+      await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
+      await expect(api.get('fred', 'age', 'name'))
+        .resolves.toEqual({ '@id': 'fred', name: 'Fred' });
+    });
+
     test('asks exists', async () => {
       await api.write<Subject>({ '@id': 'fred', name: 'Fred', age: 40 });
       await expect(api.ask({})).resolves.toBe(true);
@@ -316,6 +322,15 @@ describe('MeldClone', () => {
       await api.write<Subject>({ '@id': 'wilma', name: 'Wilma' });
       await expect(api.read<Construct>({
         '@construct': { '@id': 'fred', name: '?' }
+      })).resolves.toMatchObject([{
+        '@id': 'fred', name: 'Fred'
+      }]);
+    });
+
+    test('constructs with missing property', async () => {
+      await api.write<Subject>({ '@id': 'fred', name: 'Fred', age: undefined });
+      await expect(api.read<Construct>({
+        '@construct': { '@id': 'fred', name: '?', age: '?' }
       })).resolves.toMatchObject([{
         '@id': 'fred', name: 'Fred'
       }]);
