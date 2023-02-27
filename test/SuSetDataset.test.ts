@@ -895,11 +895,14 @@ describe('SU-Set Dataset', () => {
       await ssd.apply(
         remote.sentOperation({}, { '@id': 'wilma', 'name': 'Wilma' }),
         local.join(remote.time));
+
+      const preRemoteTicks = remote.time.ticks;
       const willUpdate = firstValueFrom(ssd.updates);
       await ssd.apply(
         remote.sentOperation({}, { '@id': 'wilma', 'name': 'Flintstone' }),
         local.join(remote.time));
 
+      expect(local.time.getTicks(remote.time)).toBe(preRemoteTicks);
       await expectNoUpdate(willUpdate);
       await expect(drain(ssd.read<Describe>({
         '@describe': 'http://test.m-ld.org/wilma'
@@ -1006,10 +1009,12 @@ describe('SU-Set Dataset', () => {
         true
       ]);
       // Not joining with local time here
+      const preRemoteTicks = remote.time.ticks;
       const willUpdate = firstValueFrom(ssd.updates);
       await expect(ssd.apply(
         remote.sentOperation({}, { '@id': 'wilma', 'name': 'Wilma' }),
         local.join(remote.time))).resolves.toBe(null);
+      expect(local.time.getTicks(remote.time)).toBe(preRemoteTicks);
       await expectNoUpdate(willUpdate);
     });
 

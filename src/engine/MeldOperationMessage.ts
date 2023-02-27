@@ -86,13 +86,17 @@ export class MeldOperationMessage implements OperationMessage {
   }
 
   static toString(msg: OperationMessage, logLevel: number = levels.INFO) {
-    const [v, from, time, updateData, encoding] = msg.data;
+    const [v, from, time, updateData, encoding, principalId, agreed] = msg.data;
     const update = logLevel <= levels.DEBUG ?
       encoding.includes(BufferEncoding.SECURE) ? '---ENCRYPTED---' :
         MeldEncoder.jsonFromBuffer(updateData, encoding) :
       { length: updateData.length, encoding };
     return `${JSON.stringify({ v, from, time, update })}
-    @ ${msg.time}, prev ${msg.prev}`;
+    @ ${msg.time}, prev ${msg.prev}, pid ${principalId}, agreed ${agreed}`;
+  }
+
+  toString() {
+    return MeldOperationMessage.toString(this);
   }
 
   // v8(chrome/nodejs) console
