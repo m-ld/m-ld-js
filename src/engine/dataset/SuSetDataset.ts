@@ -412,11 +412,11 @@ export class SuSetDataset extends MeldEncoder {
         txc.sw.next('decode-op');
         const journal = await this.journal.state();
         if (journal.isBlocked(msg.time)) {
-          this.log.debug(`Ignoring blocked operation: ${msg.time} @ ${clockHolder.peek()}`);
-          return { return: null };
+          return this.ignoreMsgResult(
+            'blocked', msg.time, journal.gwc, clockHolder);
         } else if (msg.time.anyLt(journal.agreed)) {
-          this.log.debug(`Ignoring pre-agreement operation: ${msg.time} @ ${clockHolder.peek()}`);
-          return { return: null };
+          return this.ignoreMsgResult(
+            'pre-agreement', msg.time, journal.gwc, clockHolder);
         } else {
           const receivedOp = MeldOperation.fromEncoded(this, await this.unSecureOperation(msg));
           const applicableOp = await journal.applicableOperation(receivedOp);
@@ -430,6 +430,18 @@ export class SuSetDataset extends MeldEncoder {
         }
       }
     });
+  }
+
+  private ignoreMsgResult(
+    reason: string,
+    msgTime: TreeClock,
+    gwc: GlobalClock,
+    clockHolder: ClockHolder<TreeClock>
+  ): PatchResult<null> {
+    const localTime = clockHolder.peek();
+    this.log.debug(`Ignoring ${reason} operation: ${msgTime} @ ${localTime}`);
+    clockHolder.push(localTime.ticked(msgTime.ticked(gwc.getTicks(msgTime))));
+    return { return: null };
   }
 
   private static OperationApplication = class {
@@ -511,10 +523,13 @@ export class SuSetDataset extends MeldEncoder {
         });
       } catch (e) {
         // 4000-5000 are bad request errors, leading to an error update
-        if (e instanceof MeldError && e.status >= 4000 && e.status < 5000)
+        if (e instanceof MeldError && e.status >= 4000 && e.status < 5000) {
+          this.ssd.log.warn('Bad operation', e, this.operation);
           return this.badOperationResult(e);
-        else
+        } else {
+          this.ssd.log.error(e, this.operation);
           throw e;
+        }
       }
     }
 
@@ -526,6 +541,7 @@ export class SuSetDataset extends MeldEncoder {
       // local txn. But first, commit the rewind.
       const localTime = this.journaling.state.time;
       const rewoundJoinTime = localTime.ticked(this.operation.time);
+      this.ssd.log.debug(`Rewinding to ${rewoundJoinTime}`);
       if (rewoundJoinTime.anyLt(this.operation.time)) {
         this.clockHolder.push(localTime); // Not joining
         return this.missingCausesResult(patch);

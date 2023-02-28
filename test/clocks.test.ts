@@ -73,21 +73,21 @@ describe('Tree clock', () => {
 
   test('Tick one cause', () => {
     let { left, right } = TreeClock.GENESIS.ticked().forked();
-    expect(left.ticked(right.ticked()).toJSON()).toEqual([1,[],1]);
+    expect(left.ticked(right.ticked()).toJSON()).toEqual([1, [], 1]);
   });
 
   test('Untick one cause', () => {
     let { left, right } = TreeClock.GENESIS.ticked().forked();
     left = left.update(right.ticked()); // [1,[],1]
     // Untick the right back to zero
-    expect(left.ticked(right).toJSON()).toEqual([1,[],0]);
+    expect(left.ticked(right).toJSON()).toEqual([1, [], 0]);
   });
 
   test('Untick to fork', () => {
     const preFork = TreeClock.GENESIS.ticked();
     let { left } = preFork.forked();
     left = left.ticked(); // [1,[1],0]
-    expect(left.ticked(preFork).toJSON()).toEqual([1,[],0]);
+    expect(left.ticked(preFork).toJSON()).toEqual([1, [], 0]);
   });
 
   test('Untick past fork', () => {
@@ -99,7 +99,7 @@ describe('Tree clock', () => {
 
   test('Tick to forked cause', () => {
     let { left, right } = TreeClock.GENESIS.ticked().forked();
-    expect(left.ticked(right.forked().left.ticked()).toJSON()).toEqual([1,[],[1,0]]);
+    expect(left.ticked(right.forked().left.ticked()).toJSON()).toEqual([1, [], [1, 0]]);
   });
 
   test('Tick fork', () => {
@@ -449,5 +449,24 @@ describe('Global clock', () => {
     const one = TreeClock.GENESIS.ticked();
     const gwc = GlobalClock.GENESIS.set(one).set(one.forked().left.ticked()).set(one);
     expect([...gwc.tids()]).toEqual([one.hash]);
+  });
+
+  test('set with incompatible fork', () => {
+    const one = TreeClock.fromJson([1]);
+    const two = TreeClock.fromJson([1, 0, [1]]);
+    const gwc = GlobalClock.GENESIS.set(one).set(two);
+    // Equivalent to ticking to 2 then forking
+    const three = TreeClock.fromJson([2, 0, [1]]);
+    expect(() => gwc.set(three)).toThrow(Error);
+  });
+
+  // Arose in compliance tests
+  // TODO: Should not happen because it would imply a missed message, [2]
+  test.skip('set with forked in future', () => {
+    const one = TreeClock.fromJson([1]);
+    const gwc = GlobalClock.GENESIS.set(one);
+    // Equivalent to ticking to 2 then forking.
+    const two = TreeClock.fromJson([2, 0, [1]]);
+    expect(gwc.set(two).toJSON()).toEqual([2, [[0, one.hash], [1, two.hash]]]);
   });
 });

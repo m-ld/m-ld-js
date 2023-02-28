@@ -5,6 +5,8 @@ import { EncodedOperation } from '.';
 import { MeldEncoder, RefTriple } from './MeldEncoding';
 import { Iri } from '@m-ld/jsonld';
 
+const inspect = Symbol.for('nodejs.util.inspect.custom');
+
 /**
  * The 'range' of an operation comprises the information required to determine
  * whether operations are logically contiguous.
@@ -175,6 +177,9 @@ export class MeldOperation
   toString() {
     return `${JSON.stringify(this.jsons)}`;
   }
+
+  // v8(chrome/nodejs) console
+  [inspect] = () => this.toString();
 
   protected sizeof(item: Triple): number {
     return tripleIndexKey(item).length;
