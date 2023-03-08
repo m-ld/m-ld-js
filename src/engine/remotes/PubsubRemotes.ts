@@ -308,7 +308,8 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
    * network is unavailable or the publish/subscribe service is not reachable.
    */
   protected onDisconnect() {
-    this.connected.next(false);
+    if (this.connected.value)
+      this.connected.next(false);
     this.setLive(null);
   }
 

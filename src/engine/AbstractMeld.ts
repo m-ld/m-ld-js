@@ -85,7 +85,9 @@ export abstract class AbstractMeld implements Meld {
 }
 
 export function comesAlive(
-  meld: Pick<Meld, 'live'>, expected: boolean | null | 'notNull' = true): Promise<boolean | null> {
+  meld: Pick<Meld, 'live'>,
+  expected: boolean | null | 'notNull' = true
+): Promise<boolean | null> {
   return firstValueFrom(meld.live.pipe(filter(
     expected === 'notNull' ? (live => live != null) : (live => live === expected))));
 }

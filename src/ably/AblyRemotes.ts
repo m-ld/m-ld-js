@@ -39,6 +39,7 @@ export class AblyRemotes extends PubsubRemotes {
   private readonly traffic: AblyTraffic;
   private readonly subscribed: Promise<unknown>;
 
+  /** @type ConstructRemotes */
   constructor(
     config: MeldAblyConfig,
     extensions: () => Promise<MeldExtensions>,

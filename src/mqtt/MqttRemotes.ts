@@ -47,6 +47,7 @@ export class MqttRemotes extends PubsubRemotes {
   private readonly replyTopic: MqttTopic<ReplyParams & TopicParams>;
   private readonly presence: MqttPresence;
 
+  /** @type ConstructRemotes */
   constructor(
     config: MeldMqttConfig,
     extensions: () => Promise<MeldExtensions>,
