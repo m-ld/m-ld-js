@@ -18,7 +18,7 @@ import { JsonldContext } from '../jsonld';
 import { EntryBuilder, Journal, JournalEntry, JournalState } from '../journal';
 import { JournalClerk } from '../journal/JournalClerk';
 import { PatchTids, TidsStore } from './TidsStore';
-import { expandItemTids, flattenItemTids } from '../ops';
+import { CausalOperation, expandItemTids, flattenItemTids } from '../ops';
 import { Consumable, flowable } from 'rx-flowable';
 import { batch } from 'rx-flowable/operators';
 import { consume } from 'rx-flowable/consume';
@@ -94,6 +94,10 @@ export class SuSetDataset extends MeldEncoder {
 
   private get transportSecurity() {
     return this.extensions.ready().then(ext => ext.transportSecurity ?? noTransportSecurity);
+  }
+
+  get lock() {
+    return this.dataset.lock;
   }
 
   get readState() {
@@ -480,7 +484,7 @@ export class SuSetDataset extends MeldEncoder {
           const ext = await this.ssd.extensions.ready();
           for (let agreementCondition of ext.agreementConditions ?? [])
             await agreementCondition.test(this.ssd.readState, txn.internalUpdate);
-          if (this.operation.time.anyLt(this.journaling.state.time)) {
+          if (this.operation.time.anyLt(this.journaling.state.gwc)) {
             // A rewind is required. This trumps the work we have already done.
             this.txc.sw.next('rewind');
             return this.rewindAndReapply();
@@ -555,25 +559,19 @@ export class SuSetDataset extends MeldEncoder {
 
     private async rewind(): Promise<SuSetDataPatch> {
       const tidPatch = new PatchTids(this.ssd.tidsStore);
-      for (
-        let entry = await this.ssd.journal.entryBefore();
-        entry != null && this.operation.time.anyLt(entry.operation.time);
-        entry = await this.ssd.journal.entryBefore(entry.key)
-      ) {
-        const entryOp = entry.operation.asMeldOperation();
-        // Reversing a journal entry involves:
-        tidPatch.append({
-          // 1. Deleting triples that were inserted. The TIDs of the inserted
-          // triples always come from the entry itself, so we know exactly
-          // what TripleTids were added and we can safely remove them.
-          deletes: flattenItemTids(entryOp.inserts),
-          // 2. Inserting triples that were deleted. From the MeldOperation
-          // by itself we don't know which TripleTids were actually removed
-          // (a prior transaction may have removed the same ones). Instead,
-          // the journal keeps track of the actual deletes made.
-          inserts: flattenItemTids(entryOp.byTriple('deletes', entry.deleted))
-        });
-        this.journaling.void(entry);
+      // Work backwards through the journal, voiding entries that are not in the
+      // causes of the applied operation. Stop when the GWC is all-less-than
+      // applied op causes.
+      let entry = await this.ssd.journal.entryBefore();
+      while (this.operation.time.anyLt(this.journaling.state.gwc)) {
+        if (entry == null)
+          throw new MeldError('Updates unavailable');
+        // Only void if the entry itself is concurrent with the agreement
+        if (this.operation.time.anyLt(entry.operation.time)) {
+          tidPatch.append(CausalOperation.flatten(await entry.undo()));
+          this.journaling.void(entry);
+        }
+        entry = await entry.previous();
       }
       // Now compare the affected triple-TIDs to the current state to find
       // actual triples to delete or insert

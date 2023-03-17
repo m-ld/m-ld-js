@@ -9,6 +9,7 @@ import type { MeldRemotes } from './engine';
 import type { LiveStatus } from '@m-ld/m-ld-spec';
 import type { AbstractLevel } from 'abstract-level';
 import { Stopwatch } from './engine/Stopwatch';
+import { SuSetDataset } from './engine/dataset/SuSetDataset';
 
 /**
  * Core API exports. Extension exports can be found in package.json/exports
@@ -62,9 +63,9 @@ export async function clone(
   sw.next('dataset');
   const dataset = await new QuadStoreDataset(
     config['@domain'], backend, backendEvents).initialise(sw.lap);
-  const engine = new DatasetEngine({
-    dataset, remotes, extensions, config, app, context
-  });
+  const suset = new SuSetDataset(
+    dataset, context ?? {}, extensions, app, config);
+  const engine = new DatasetEngine(suset, remotes, config);
 
   sw.next('engine');
   await engine.initialise(sw.lap);

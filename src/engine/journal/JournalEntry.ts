@@ -83,13 +83,41 @@ export class JournalEntry {
     return [this.prev, this.operation.tid, this.deleted, this.attribution];
   }
 
-  async next(): Promise<JournalEntry | undefined> {
+  next() {
     return this.journal.entryAfter(this.key);
+  }
+
+  previous() {
+    return this.journal.entryBefore(this.key);
   }
 
   asMessage() {
     const [prevTick] = this.prev;
     return MeldOperationMessage.fromOperation(
       prevTick, this.operation.encoded, this.attribution, this.operation.time);
+  }
+
+  /**
+   * Undoing an entry creates an operation that removes the entry's effect from
+   * the SU-Set.
+   *
+   * Applying the returned patch is only coherent if nothing in the SU-Set is
+   * caused-by this entry. So, entries must be undone from the tail of the
+   * journal.
+   */
+  async undo() {
+    const op = this.operation.asMeldOperation();
+    // Undoing a journal entry involves:
+    return {
+      // 1. Deleting triples that were inserted. The TIDs of the inserted
+      // triples always come from the entry itself, so we know exactly
+      // what TripleTids were added and we can safely remove them.
+      deletes: op.inserts,
+      // 2. Inserting triples that were deleted. From the MeldOperation
+      // by itself we don't know which TripleTids were actually removed
+      // (a prior transaction may have removed the same ones). Instead,
+      // the journal keeps track of the actual deletes made.
+      inserts: op.byTriple('deletes', this.deleted)
+    };
   }
 }

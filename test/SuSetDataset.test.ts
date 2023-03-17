@@ -1080,7 +1080,8 @@ describe('SU-Set Dataset', () => {
       // Now receive agreement, but not joining with local time
       const willUpdate = firstValueFrom(ssd.updates);
       await expect(ssd.apply(
-        remote.sentOperation({}, { '@id': 'wilma', 'name': 'Wilma' }, { agree: true }),
+        remote.sentOperation({}, { '@id': 'wilma', 'name': 'Wilma' },
+          { agree: true }),
         local.join(remote.time))).resolves.toBe(null);
       // Check fred gets voided out
       await expect(willUpdate).resolves.toMatchObject({
@@ -1089,6 +1090,36 @@ describe('SU-Set Dataset', () => {
       });
       // Local time should no longer have ticks from the third process
       expect(local.time.getTicks(third.time)).toBe(0);
+    });
+
+    test('does not void pre-agreement operation', async () => {
+      // The local has seen another process
+      const third = local.fork();
+      // Which transacts, seen by remote but not local
+      const preOp = third.sentOperation({}, { '@id': 'fred', 'name': 'Fred' });
+      remote.join(third.time);
+      // We transact, unseen by remote (will be voided)
+      await ssd.transact(async () => [
+        local.tick().time,
+        await ssd.write({ '@insert': barney })
+      ]);
+      // See the third-party pre-agreement op (will not be voided)
+      await ssd.apply(preOp, local.join(third.time));
+      // Now receive agreement from remote
+      const willUpdate = firstValueFrom(ssd.updates);
+      await expect(ssd.apply(
+        remote.sentOperation({}, { '@id': 'wilma', 'name': 'Wilma' },
+          { agree: true }),
+        local.join(remote.time))).resolves.toBe(null);
+      // Check fred gets voided out
+      await expect(willUpdate).resolves.toMatchObject({
+        '@delete': [barney],
+        '@insert': [wilma]
+      });
+      // Pre-agreement Fred should have survived
+      await expect(drain(ssd.read<Describe>({
+        '@describe': 'http://test.m-ld.org/fred'
+      }))).resolves.toEqual([fred]);
     });
 
     test('voids an operation in which deleted triples not found', async () => {
@@ -1229,7 +1260,7 @@ describe('SU-Set Dataset', () => {
       const attr = { pid: 'bob', sig: Buffer.from('bob') };
       await expect(ssd.apply(
         remote.sentOperation({}, { '@id': 'wilma', 'name': 'Wilma' }, { attr }),
-        local.join(remote.time))).resolves.toBe(null)
+        local.join(remote.time))).resolves.toBe(null);
     });
 
     test('constraint resolution is locally signed', async () => {
