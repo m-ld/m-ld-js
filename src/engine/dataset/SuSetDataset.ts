@@ -422,7 +422,7 @@ export class SuSetDataset extends MeldEncoder {
         if (journal.isBlocked(msg.time)) {
           return this.ignoreMsgResult(
             'blocked', msg.time, journal.gwc, clockHolder);
-        } else if (msg.time.anyLt(journal.agreed)) {
+        } else if (!msg.data[OpKey.agreed] && msg.time.anyLt(journal.agreed)) {
           return this.ignoreMsgResult(
             'pre-agreement', msg.time, journal.gwc, clockHolder);
         } else {
@@ -565,9 +565,10 @@ export class SuSetDataset extends MeldEncoder {
       const tidPatch = new PatchTids(this.ssd.tidsStore);
       // Work backwards through the journal, voiding entries that are not in the
       // causes of the applied operation. Stop when the GWC is all-less-than
-      // applied op causes.
+      // applied op causes, OR we reach an agreement (because nothing prior
+      // to an agreement in the journal can be concurrent with it).
       let entry = await this.ssd.journal.entryBefore();
-      while (this.operation.time.anyLt(this.journaling.state.gwc)) {
+      while (this.operation.time.anyLt(this.journaling.state.gwc) && !entry?.operation.agreed) {
         if (entry == null)
           throw new MeldError('Updates unavailable');
         // Only void if the entry itself is concurrent with the agreement

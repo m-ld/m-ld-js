@@ -1122,6 +1122,23 @@ describe('SU-Set Dataset', () => {
       }))).resolves.toEqual([fred]);
     });
 
+    test('does not void a concurrent agreement', async () => {
+      await ssd.transact(async () => [
+        local.tick().time,
+        await ssd.write({ '@insert': fred }),
+        true // agree
+      ]);
+      // Not joining with local time here
+      const willUpdate = firstValueFrom(ssd.updates);
+      await expect(ssd.apply(
+        remote.sentOperation({}, { '@id': 'wilma', 'name': 'Wilma' }, { agree: true }),
+        local.join(remote.time))).resolves.toBe(null);
+      // Check fred does not get voided out
+      const update = await willUpdate;
+      expect(update).toMatchObject({ '@insert': [wilma] });
+      expect(update).not.toMatchObject({ '@delete': [fred] });
+    });
+
     test('voids an operation in which deleted triples not found', async () => {
       const firstTid = (await ssd.transact(async () => [
         local.tick().time,
