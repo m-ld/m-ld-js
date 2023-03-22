@@ -191,7 +191,9 @@ describe('New MQTT remotes', () => {
       const revupUpdate = new MockProcess(remoteTime).sentOperation({}, {});
       const gwc = GlobalClock.GENESIS.set(localTime).set(remoteTime);
       remotes.setLocal(mockLocal({
-        revupFrom: () => Promise.resolve({ gwc, updates: of(revupUpdate) })
+        revupFrom: () => Promise.resolve({
+          gwc, updates: of(revupUpdate), cancel() {}
+        })
       }));
 
       // Send a rev-up request from an imaginary client2

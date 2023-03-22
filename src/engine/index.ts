@@ -186,6 +186,12 @@ export interface Recovery {
    * observes during the recovery process.
    */
   readonly updates: Observable<OperationMessage>;
+  /**
+   * Cancel this recovery, potentially before any observables have been
+   * subscribed. This will release any open queries or locks.
+   * @param cause the reason for cancellation, used for logging
+   */
+  cancel(cause?: Error): void;
 }
 
 /**

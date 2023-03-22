@@ -64,7 +64,7 @@ function remotesLive(live: null | boolean) {
     live ? RemotesLive.LIVE : RemotesLive.DEAD;
 }
 
-type ConnectReason = RemotesLive | OperationOutcome | Reconnect;
+type ConnectReason = RemotesLive | OperationOutcome;
 
 export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLocal {
   protected static checkStateLocked =
@@ -174,8 +174,11 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
         // 3. Disordered operations
         this.operationProblems
       ).pipe(
-        // 4. Last attempt to connect can generate more attempts (delay if soft)
-        expand(reason => this.decideLive(reason).pipe(delayWhen(this.reconnectDelayer)))
+        // 4. Last attempt to connect can generate more attempts
+        expand(reason => this.decideLive(reason).pipe(
+          delayWhen(this.reconnectDelayer), // delay if soft reconnect
+          map(() => reason) // recurse with original reason
+        ))
       ).subscribe({
         error: err => this.close(err),
         complete: () => this.close()
@@ -212,10 +215,15 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
         // Hard retry is immediate
         return of(0);
       case Reconnect.SOFT:
-        // Soft retry is a distribution ~(>=0 mean 2) * network timeout
-        return interval((poisson(2) + 1) * Math.random() * this.networkTimeout);
+        // Soft retry is delayed
+        return interval(this.getRetryDelay());
     }
   };
+
+  /** @returns millis from distribution ~(>=0 mean 2) * network timeout */
+  private getRetryDelay(): number {
+    return (poisson(2) + 1) * Math.random() * this.networkTimeout;
+  }
 
   get dataUpdates() {
     return this.suset.updates;
@@ -393,21 +401,25 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
       'connecting to remotes, because',
       reason
     );
+    let recovery: Recovery | null = null;
     try {
       if (!this.newClone && reason !== OperationOutcome.UNBASED) {
         const revup = await this.remotes.revupFrom(this.localTime, this.suset.readState);
         if (revup != null) {
           releaseState();
+          // noinspection JSUnusedAssignment - it is used in catch
+          recovery = revup;
           await this.processRevup(revup, retry);
           return;
         }
         // Otherwise fall through to snapshot recovery
       }
-      const snapshot = await this.remotes.snapshot(this.suset.readState);
+      const snapshot = recovery = await this.remotes.snapshot(this.suset.readState);
       releaseState();
       await this.processSnapshot(snapshot, retry);
     } catch (err) {
       this.log.info('Cannot connect to remotes due to', err);
+      recovery?.cancel(err);
       /*
       An error could indicate that:
       1. The remotes have gone offline during our connection attempt. If they
@@ -447,7 +459,8 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
    * @see decideLive return value
    */
   @DatasetEngine.checkNotClosed.async
-  private async processSnapshot(snapshot: Snapshot, retry: Subscriber<Reconnect>) {
+  private processSnapshot(snapshot: Snapshot, retry: Subscriber<Reconnect>) {
+    this.log.info('processing snapshot from collaborator');
     this.messageService.join(snapshot.gwc);
     // If we have any operations since the snapshot: re-emit them now and
     // re-apply them to our own dataset when the snapshot is applied.
@@ -551,7 +564,8 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
           updates: merge(
             operations.pipe(tapComplete(operationsSent), tap(msg =>
               this.log.debug('Sending rev-up', this.msgString(msg)))),
-            maybeMissed.pipe(delayUntil(operationsSent)))
+            maybeMissed.pipe(delayUntil(operationsSent))),
+          cancel: (cause?: Error) => this.log.debug('Recovery cancelled', cause)
         };
     });
   }

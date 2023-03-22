@@ -8,7 +8,7 @@ import { Context, Query, Read, Write } from '../../jrql-support';
 import { Dataset, PatchQuads, PatchResult, TxnContext } from '.';
 import { JrqlGraph } from './JrqlGraph';
 import { MeldEncoder, UUID } from '../MeldEncoding';
-import { EMPTY, merge, mergeMap, Observable, of, Subject as Source } from 'rxjs';
+import { EMPTY, from, merge, mergeMap, Observable, Subject as Source } from 'rxjs';
 import { expand, filter, map, takeWhile } from 'rxjs/operators';
 import { completed, inflate } from '../util';
 import { Logger } from 'loglevel';
@@ -191,8 +191,10 @@ export class SuSetDataset extends MeldEncoder {
    * `undefined` if the given time is not found in the journal
    */
   @SuSetDataset.checkNotClosed.async
-  async operationsSince(time: TickTree, gwc?: Future<GlobalClock>):
-    Promise<Observable<OperationMessage> | undefined> {
+  async operationsSince(
+    time: TickTree,
+    gwc?: Future<GlobalClock>
+  ): Promise<Observable<OperationMessage> | undefined> {
     return this.dataset.transact<Observable<OperationMessage> | undefined>({
       id: 'suset-ops-since',
       prepare: async () => {
@@ -203,13 +205,15 @@ export class SuSetDataset extends MeldEncoder {
         const tick = time.getTicks(journal.time);
         return {
           // If we don't have that tick any more, return undefined
-          return: tick < journal.start ? undefined :
-            of(await this.journal.entryAfter(tick)).pipe(
-              expand(entry => entry != null ? entry.next() : EMPTY),
-              takeWhile<JournalEntry>(entry => entry != null),
-              // Don't emit an entry if it's all less than the requested time
-              filter(entry => time.anyLt(entry.operation.time)),
-              map(entry => entry.asMessage()))
+          return: tick < journal.start ? undefined : from(
+            this.journal.entryAfter(tick)
+          ).pipe(
+            expand(entry => entry != null ? entry.next() : EMPTY),
+            takeWhile<JournalEntry>(entry => entry != null),
+            // Don't emit an entry if it's all less than the requested time
+            filter(entry => time.anyLt(entry.operation.time)),
+            map(entry => entry.asMessage())
+          )
         };
       }
     });
@@ -744,6 +748,12 @@ export class SuSetDataset extends MeldEncoder {
    */
   @SuSetDataset.checkNotClosed.async
   async applySnapshot(snapshot: DatasetSnapshot, localTime: TreeClock) {
+    // Check that the provided snapshot is not concurrent with the last agreement
+    if (await this.journal.initialised()) {
+      const journal = await this.journal.state();
+      if (snapshot.gwc.anyLt(journal.agreed))
+        throw new Error('Snapshot is concurrent with last agreement');
+    }
     await this.dataset.clear();
     await this.dataset.transact({
       id: 'suset-reset',
@@ -777,7 +787,8 @@ export class SuSetDataset extends MeldEncoder {
   @SuSetDataset.checkNotClosed.async
   async takeSnapshot(): Promise<DatasetSnapshot> {
     const journal = await this.journal.state();
-    const insData = consume(this.userGraph.quads.query()).pipe(
+    const allQuads = this.userGraph.quads.query();
+    const insData = consume(allQuads).pipe(
       batch(10), // TODO batch size config
       mergeMap(async ({ value: quads, next }) => {
         const tidQuads = await this.tidsStore.findTriplesTids(quads, 'includeEmpty');
@@ -791,7 +802,8 @@ export class SuSetDataset extends MeldEncoder {
     return {
       gwc: journal.gwc,
       agreed: journal.agreed,
-      data: flowable<Snapshot.Datum>(merge(insData, opData))
+      data: flowable<Snapshot.Datum>(merge(insData, opData)),
+      cancel: (cause?: Error) => allQuads.destroy(cause)
     };
   }
 }

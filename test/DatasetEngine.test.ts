@@ -163,8 +163,7 @@ describe('Dataset engine', () => {
       clone = await TestDatasetEngine.instance({ remotes });
       await comesAlive(clone); // genesis is alive
       remote = new MockProcess(await clone.newClock()); // no longer genesis
-      remotes.revupFrom = mockFn().mockImplementation(
-        async () => ({ gwc: remote.gwc, updates: EMPTY }));
+      remotes.revupFrom = mockFn().mockImplementation(async () => remote.revup());
       remotesLive.next(true); // remotes come alive
       await clone.status.becomes({ outdated: false });
     });
@@ -257,9 +256,7 @@ describe('Dataset engine', () => {
       remotesLive = hotLive([true]);
       remotes = mockRemotes(remoteUpdates, remotesLive, left);
       snapshot = jest.fn().mockImplementation(async (): Promise<Snapshot> => ({
-        gwc: collaborator.gwc,
-        agreed: TreeClock.GENESIS,
-        data: EMPTY, // Cheating, should really contain Wilma (see op above)
+        ...collaborator.snapshot(),  // Cheating, should really contain Wilma (see op above)
         updates: EMPTY
       }));
       remotes.snapshot = snapshot;
@@ -309,7 +306,7 @@ describe('Dataset engine', () => {
     beforeEach(async () => {
       backend = new MemoryLevel();
       // Start a temporary genesis clone to initialise the store
-      let clone = await TestDatasetEngine.instance({ backend });
+      const clone = await TestDatasetEngine.instance({ backend });
       remote = new MockProcess(await clone.newClock()); // Forks the clock so no longer genesis
       await clone.close();
       // Now the ldb represents a former genesis clone
@@ -318,7 +315,7 @@ describe('Dataset engine', () => {
     test('is outdated while revving-up', async () => {
       // Re-start on the same data, with a rev-up that never completes
       const remotes = mockRemotes(NEVER, [true]);
-      remotes.revupFrom = async () => ({ gwc: remote.gwc, updates: NEVER });
+      remotes.revupFrom = async () => remote.revup(NEVER);
       const clone = await TestDatasetEngine.instance({ backend, remotes, doNotInit });
 
       // Check that we are never not outdated
@@ -333,7 +330,7 @@ describe('Dataset engine', () => {
     test('is not outdated when revved-up', async () => {
       // Re-start on the same data, with a rev-up that completes with no updates
       const remotes = mockRemotes(NEVER, [true]);
-      remotes.revupFrom = async () => ({ gwc: remote.gwc, updates: EMPTY });
+      remotes.revupFrom = async () => remote.revup();
       const clone = await TestDatasetEngine.instance({ backend, remotes, doNotInit });
 
       // Check that we do transition through an outdated state
@@ -396,7 +393,11 @@ describe('Dataset engine', () => {
       const revupCalled = new Promise<void>(resolve => {
         remotes.revupFrom = async () => {
           resolve();
-          return { gwc: remote.gwc.set(remote.time.ticked()), updates: revUps };
+          return {
+            ...remote.revup(),
+            gwc: remote.gwc.set(remote.time.ticked()),
+            updates: revUps
+          };
         };
       });
       // The clone will initialise into a revving-up state, waiting for a revUp
@@ -423,7 +424,7 @@ describe('Dataset engine', () => {
       // Re-start on the same data
       const remoteUpdates = new Source<MeldOperationMessage>();
       const remotes = mockRemotes(remoteUpdates, [true]);
-      remotes.revupFrom = async () => ({ gwc: remote.gwc, updates: EMPTY });
+      remotes.revupFrom = async () => remote.revup();
       const clone = await TestDatasetEngine.instance({ backend, remotes });
       await clone.status.becomes({ outdated: false });
 
@@ -441,7 +442,7 @@ describe('Dataset engine', () => {
       // Re-start on the same data
       const remoteUpdates = new Source<MeldOperationMessage>();
       const remotes = mockRemotes(remoteUpdates, [true]);
-      remotes.revupFrom = async () => ({ gwc: remote.gwc, updates: EMPTY });
+      remotes.revupFrom = async () => remote.revup();
       const clone = await TestDatasetEngine.instance({ backend, remotes });
       await clone.status.becomes({ outdated: false });
 
@@ -460,6 +461,44 @@ describe('Dataset engine', () => {
       const arrived = jsonify(await updates);
       expect(arrived.length).toBe(1);
       expect(arrived[0]).toMatchObject({ '@insert': [{ '@id': 'http://test.m-ld.org/wilma' }] });
+    });
+
+    test('recovers with snapshot if no rev-up available', async () => {
+      // Re-start on the same data, with a rev-up that never completes
+      const remotes = mockRemotes(NEVER, [true]);
+      remotes.revupFrom = async () => undefined;
+      remotes.snapshot = mockFn().mockImplementation(
+        async () => ({ ...remote.snapshot(), updates: EMPTY }));
+      const clone = await TestDatasetEngine.instance({ backend, remotes });
+      await expect(clone.status.becomes({ outdated: false })).resolves.not.toThrow();
+      expect(remotes.snapshot).toHaveBeenCalled();
+    });
+
+    test('refuses snapshot if pre-agreement', async () => {
+      // Start with offline remotes
+      const remotesLive = hotLive([null]);
+      const remotes = mockRemotes(NEVER, remotesLive);
+      const clone = await TestDatasetEngine.instance({ backend, remotes });
+      // Create a local agreement
+      const willAgree = firstValueFrom(clone.operations);
+      await clone.write({ '@insert': fred, '@agree': true });
+      const agreeOp = await willAgree;
+      const tooOldSnapshot = remote.snapshot();
+      remotes.snapshot = mockFn()
+        .mockImplementationOnce(async () => ({ ...tooOldSnapshot, updates: EMPTY }))
+        .mockImplementationOnce(async () => {
+          remote.join(agreeOp.time);
+          return ({ ...remote.snapshot(), updates: EMPTY });
+        });
+      // Go live with forced snapshot
+      remotes.revupFrom = async () => undefined;
+      remotesLive.next(true);
+      // Expect the missing agreement to be emitted again
+      expect((await firstValueFrom(clone.operations)).time.equals(agreeOp.time)).toBe(true);
+      // Expect the clone to eventually resolve to the newer snapshot
+      await expect(clone.status.becomes({ outdated: false })).resolves.not.toThrow();
+      expect(tooOldSnapshot.cancel).toHaveBeenCalled();
+      expect(remotes.snapshot).toHaveBeenCalledTimes(2);
     });
   });
 });
