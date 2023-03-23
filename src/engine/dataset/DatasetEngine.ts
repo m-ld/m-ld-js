@@ -7,7 +7,8 @@ import { liveRollup } from '../api-support';
 import { isUpdate, Pattern, Query, Read, Write } from '../../jrql-support';
 import {
   BehaviorSubject, concat, concatMap, debounce, defaultIfEmpty, EMPTY, firstValueFrom, from,
-  interval, merge, Observable, of, OperatorFunction, partition, race, Subscriber, Subscription
+  interval, merge, Observable, of, OperatorFunction, partition, race, Subscriber, Subscription,
+  throwError
 } from 'rxjs';
 import { GlobalClock, TreeClock } from '../clocks';
 import { SuSetDataset } from './SuSetDataset';
@@ -65,6 +66,8 @@ function remotesLive(live: null | boolean) {
 }
 
 type ConnectReason = RemotesLive | OperationOutcome;
+
+type Operations = Observable<OperationMessage>;
 
 export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLocal {
   protected static checkStateLocked =
@@ -401,25 +404,31 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
       'connecting to remotes, because',
       reason
     );
-    let recovery: Recovery | null = null;
+    let recovery: Recovery | undefined = undefined;
+    const updates = new Future<Operations>();
+    // Start listening for remote updates as early as possible
+    this.acceptRecoveryUpdates(inflateFrom(updates), retry);
+    const processRecovery = async (
+      process: (recovery: Recovery, updates: Future<Operations>) => Promise<void>
+    ) => {
+      if (recovery != null) {
+        releaseState();
+        await process.call(this, recovery, updates);
+      }
+    };
     try {
       if (!this.newClone && reason !== OperationOutcome.UNBASED) {
-        const revup = await this.remotes.revupFrom(this.localTime, this.suset.readState);
-        if (revup != null) {
-          releaseState();
-          // noinspection JSUnusedAssignment - it is used in catch
-          recovery = revup;
-          await this.processRevup(revup, retry);
-          return;
-        }
-        // Otherwise fall through to snapshot recovery
+        recovery = await this.remotes.revupFrom(this.localTime, this.suset.readState);
+        await processRecovery(this.processRevup);
       }
-      const snapshot = recovery = await this.remotes.snapshot(this.suset.readState);
-      releaseState();
-      await this.processSnapshot(snapshot, retry);
+      if (recovery == null) {
+        recovery = await this.remotes.snapshot(this.suset.readState)
+        await processRecovery(this.processSnapshot);
+      }
     } catch (err) {
       this.log.info('Cannot connect to remotes due to', err);
-      recovery?.cancel(err);
+      updates.reject(err); // Ensure we release the remoteOps
+      recovery?.cancel(err); // Tell the collaborator we're giving up
       /*
       An error could indicate that:
       1. The remotes have gone offline during our connection attempt. If they
@@ -437,14 +446,14 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
 
   /**
    * @param revup the revup recovery to process
-   * @param retry to be notified of collaboration completion
+   * @param updates to fill in with updates from the collaborator
    * @see decideLive return value
    */
   @DatasetEngine.checkNotClosed.async
-  private async processRevup(revup: Revup, retry: Subscriber<Reconnect>) {
+  private async processRevup(revup: Revup, updates: Future<Operations>) {
     this.log.info('revving-up from collaborator');
     // We don't wait until rev-ups have been completely delivered
-    this.acceptRecoveryUpdates(revup.updates, retry);
+    updates.resolve(revup.updates);
     // Is there anything in our journal that post-dates the last revup?
     // Wait until those have been delivered, to preserve fifo.
     await this.emitOpsSince(revup);
@@ -455,11 +464,11 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
    * be operations incoming from the collaborator.
    *
    * @param snapshot the snapshot to process
-   * @param retry to be notified of collaboration completion
+   * @param updates to fill in with updates from the collaborator
    * @see decideLive return value
    */
   @DatasetEngine.checkNotClosed.async
-  private processSnapshot(snapshot: Snapshot, retry: Subscriber<Reconnect>) {
+  private processSnapshot(snapshot: Snapshot, updates: Future<Operations>) {
     this.log.info('processing snapshot from collaborator');
     this.messageService.join(snapshot.gwc);
     // If we have any operations since the snapshot: re-emit them now and
@@ -474,10 +483,10 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
       this.suset.applySnapshot(snapshot, this.localTime));
     // Delay all updates until the snapshot has been fully applied
     // This is because a snapshot is applied in multiple transactions
-    const updates = concat(
+    updates.resolve(concat(
       snapshot.updates.pipe(delayUntil(snapshotApplied)),
-      inflateFrom(reEmits));
-    this.acceptRecoveryUpdates(updates, retry);
+      inflateFrom(reEmits)
+    ));
     return snapshotApplied; // We can go live as soon as the snapshot is applied
   }
 
@@ -485,7 +494,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
     recovery: Recovery,
     ret: OperatorFunction<OperationMessage, T[]> = ignoreElements()
   ): Promise<T[]> {
-    const toReturn = (ops: Observable<OperationMessage>) =>
+    const toReturn = (ops: Operations) =>
       firstValueFrom(ops.pipe(ret, defaultIfEmpty([])));
     if (this.newClone) {
       return toReturn(EMPTY);
@@ -501,7 +510,9 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
   }
 
   private acceptRecoveryUpdates(
-    updates: Observable<OperationMessage>, retry: Subscriber<Reconnect>) {
+    updates: Operations,
+    retry: Subscriber<Reconnect>
+  ) {
     this.remoteOps.attach(updates).then(() => {
       // If we were a new clone, we're up-to-date now
       this.log.info('connected');
@@ -570,7 +581,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
     });
   }
 
-  private remoteUpdatesToForward(until: PromiseLike<void>): Observable<OperationMessage> {
+  private remoteUpdatesToForward(until: PromiseLike<void>): Operations {
     if (this.processingBuffer.size)
       this.log.info(`Emitting ${this.processingBuffer.size} from processing buffer`);
     return concat(
@@ -578,9 +589,19 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
       from(this.processingBuffer),
       // #2 Anything that arrives while we are forwarding
       this.remoteOps.receiving.pipe(map(([op]) => op), takeUntil(until))
-    ).pipe(tap((msg: OperationMessage) => {
-      this.log.debug('Forwarding update', this.msgString(msg));
-    }));
+    ).pipe(
+      tap((msg: OperationMessage) => {
+        this.log.debug('Forwarding update', this.msgString(msg));
+      }),
+      takeUntil(this.errorIfClosed())
+    );
+  }
+
+  private errorIfClosed() {
+    return concat(
+      this.live.pipe(ignoreElements()),
+      throwError(() => new MeldError('Clone has closed'))
+    );
   }
 
   @DatasetEngine.checkNotClosed.async

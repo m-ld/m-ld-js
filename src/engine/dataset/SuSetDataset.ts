@@ -8,7 +8,7 @@ import { Context, Query, Read, Write } from '../../jrql-support';
 import { Dataset, PatchQuads, PatchResult, TxnContext } from '.';
 import { JrqlGraph } from './JrqlGraph';
 import { MeldEncoder, UUID } from '../MeldEncoding';
-import { EMPTY, from, merge, mergeMap, Observable, Subject as Source } from 'rxjs';
+import { EMPTY, merge, mergeMap, Observable, of, Subject as Source } from 'rxjs';
 import { expand, filter, map, takeWhile } from 'rxjs/operators';
 import { completed, inflate } from '../util';
 import { Logger } from 'loglevel';
@@ -205,15 +205,15 @@ export class SuSetDataset extends MeldEncoder {
         const tick = time.getTicks(journal.time);
         return {
           // If we don't have that tick any more, return undefined
-          return: tick < journal.start ? undefined : from(
-            this.journal.entryAfter(tick)
-          ).pipe(
-            expand(entry => entry != null ? entry.next() : EMPTY),
-            takeWhile<JournalEntry>(entry => entry != null),
-            // Don't emit an entry if it's all less than the requested time
-            filter(entry => time.anyLt(entry.operation.time)),
-            map(entry => entry.asMessage())
-          )
+          return: tick < journal.start ? undefined :
+            // Note use 'of' instead of 'from' to prevent unhandled
+            of(await this.journal.entryAfter(tick)).pipe(
+              expand(entry => entry != null ? entry.next() : EMPTY),
+              takeWhile<JournalEntry>(entry => entry != null),
+              // Don't emit an entry if it's all less than the requested time
+              filter(entry => time.anyLt(entry.operation.time)),
+              map(entry => entry.asMessage())
+            )
         };
       }
     });
