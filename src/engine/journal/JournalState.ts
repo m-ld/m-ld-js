@@ -99,8 +99,8 @@ export class JournalState {
       appendEntries: JournalEntry[] = [];
 
       constructor(
-        public state: JournalState) {
-      }
+        public state: JournalState
+      ) {}
 
       next(
         operation: MeldOperation,

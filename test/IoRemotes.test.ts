@@ -159,7 +159,8 @@ describe('Socket.io Remotes', () => {
       remoteRemotes.setLocal(mockLocal({
         revupFrom: async () => ({
           gwc: GlobalClock.GENESIS,
-          updates: of(remote.sentOperation({}, {}))
+          updates: of(remote.sentOperation({}, {})),
+          cancel() {}
         })
       }));
       await comesAlive(localRemotes); // Indicates that the remote is present

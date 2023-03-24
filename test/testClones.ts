@@ -30,7 +30,13 @@ import { TidsStore } from '../src/engine/dataset/TidsStore';
 export const testDomain = 'test.m-ld.org';
 export const testContext = new DomainContext(testDomain);
 export function testConfig(config?: Partial<MeldConfig>): MeldConfig {
-  return { '@id': 'test', '@domain': testDomain, genesis: true, ...config };
+  return {
+    '@id': 'test',
+    '@domain': testDomain,
+    genesis: true,
+    networkTimeout: 50,
+    ...config
+  };
 }
 
 export const testExtensions = (ext?: MeldExtensions): StateManaged<MeldExtensions> => ({
@@ -265,8 +271,21 @@ export class MockProcess implements ClockHolder<TreeClock> {
     return testOp(this.time, deletes, inserts, { agreed, principalId });
   }
 
-  snapshot(data: Snapshot.Datum[]): DatasetSnapshot {
-    return { gwc: this.gwc, agreed: this.agreed, data: from(data) };
+  revup(updates: Observable<OperationMessage> = EMPTY): Revup {
+    return {
+      gwc: this.gwc,
+      updates,
+      cancel: mockFn()
+    }
+  }
+
+  snapshot(data: Snapshot.Datum[] = []): DatasetSnapshot {
+    return {
+      gwc: this.gwc,
+      agreed: this.agreed,
+      data: from(data),
+      cancel: mockFn()
+    };
   }
 }
 

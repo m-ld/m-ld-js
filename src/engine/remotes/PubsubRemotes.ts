@@ -264,7 +264,9 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
         // Ack the response to start the streams
         readyToAck.resolve();
         return data;
-      }), updates
+      }),
+      updates,
+      cancel: (cause?: Error) => readyToAck.reject(cause)
     };
   }
 
@@ -283,11 +285,13 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
         from, res.updatesAddress, MeldOperationMessage.fromBuffer, 'failIfSlow');
       sw.stop();
       return {
-        gwc: res.gwc, updates: defer(() => {
+        gwc: res.gwc,
+        updates: defer(() => {
           // Ack the response to start the streams
           readyToAck.resolve();
           return updates;
-        })
+        }),
+        cancel: (cause?: Error) => readyToAck.reject(cause)
       };
     } // else return undefined
     sw.stop();
@@ -385,7 +389,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
             }
           } catch (err) {
             // This will only catch from the work methods, not the returned replies
-            this.reply(sentParams, state, new RejectedResponse(asMeldErrorStatus(err)))
+            this.reply(sentParams, state, rejectedResponse(err))
               .catch(err => this.log.warn('Failed to handle sent message', err));
             throw err;
           }
@@ -428,8 +432,9 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
           // await this.transportSecurity.verify?.(res.enc, res.attr, state);
           received.resolve(res);
           if (readyToAck != null) {
-            await readyToAck;
-            await this.reply(replyParams, state, ACK);
+            await readyToAck.then(
+              () => this.reply(replyParams, state, ACK),
+              err => this.reply(replyParams, state, rejectedResponse(err)));
           }
         }
       } catch (err) {
@@ -551,42 +556,53 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
 
   private async replySnapshot(sentParams: SendParams, state: MeldReadState, snapshot: Snapshot) {
     const { gwc, agreed, data, updates } = snapshot;
-    const dataAddress = uuid(), updatesAddress = uuid();
-    // Send the reply in parallel with establishing notifiers
-    const replyId = uuid();
-    const replied = this.reply(sentParams, state,
-      new SnapshotResponse(gwc, agreed, dataAddress, updatesAddress), replyId);
-    // Allow time for the notifiers to resolve while waiting for a reply
-    const [dataNotifier, updatesNotifier] = await this.getAck(replied, replyId, state, Promise.all([
-      this.notifier({ toId: sentParams.fromId, fromId: this.id, channelId: dataAddress }),
-      this.notifier({ toId: sentParams.fromId, fromId: this.id, channelId: updatesAddress })
-    ]));
-    // Ack has been sent, start streaming the data and updates concurrently
-    return {
-      after: Promise.all([
-        this.produce(data, dataNotifier, MsgPack.encode, 'snapshot'),
-        this.produce(updates, updatesNotifier, MeldOperationMessage.toBuffer, 'updates')
-      ])
-    };
+    try {
+      const dataAddress = uuid(), updatesAddress = uuid();
+      // Send the reply in parallel with establishing notifiers
+      const replyId = uuid();
+      const replied = this.reply(sentParams, state,
+        new SnapshotResponse(gwc, agreed, dataAddress, updatesAddress), replyId);
+      // Allow time for the notifiers to resolve while waiting for a reply
+      const [dataNotifier, updatesNotifier] =
+        await this.getAck(replied, replyId, state, Promise.all([
+          this.notifier({ toId: sentParams.fromId, fromId: this.id, channelId: dataAddress }),
+          this.notifier({ toId: sentParams.fromId, fromId: this.id, channelId: updatesAddress })
+        ]));
+      // Ack has been sent, start streaming the data and updates concurrently
+      return {
+        after: Promise.all([
+          this.produce(data, dataNotifier, MsgPack.encode, 'snapshot'),
+          this.produce(updates, updatesNotifier, MeldOperationMessage.toBuffer, 'updates')
+        ])
+      };
+    } catch (e) {
+      snapshot.cancel(e);
+      throw e;
+    }
   }
 
   private async replyRevup(sentParams: SendParams, state: MeldReadState, revup: Revup | undefined) {
     if (revup) {
-      const updatesAddress = uuid();
-      const replyId = uuid();
-      const replied = this.reply(sentParams, state,
-        new RevupResponse(revup.gwc, updatesAddress), replyId);
-      const notifier = await this.getAck(replied, replyId, state, Promise.resolve(this.notifier({
-        toId: sentParams.fromId, fromId: this.id, channelId: updatesAddress
-      })));
-      // Ack has been sent, start streaming the updates
-      return {
-        after: this.produce(
-          revup.updates,
-          notifier,
-          MeldOperationMessage.toBuffer,
-          'updates')
-      };
+      try {
+        const updatesAddress = uuid();
+        const replyId = uuid();
+        const replied = this.reply(sentParams, state,
+          new RevupResponse(revup.gwc, updatesAddress), replyId);
+        const notifier = await this.getAck(replied, replyId, state, Promise.resolve(this.notifier({
+          toId: sentParams.fromId, fromId: this.id, channelId: updatesAddress
+        })));
+        // Ack has been sent, start streaming the updates
+        return {
+          after: this.produce(
+            revup.updates,
+            notifier,
+            MeldOperationMessage.toBuffer,
+            'updates')
+        };
+      } catch (e) {
+        revup.cancel(e);
+        throw e;
+      }
     } else if (this.clone) {
       await this.reply(sentParams, state, new RevupResponse(null, this.id));
     }
@@ -695,6 +711,8 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
   }
 }
 
-function asMeldErrorStatus(err: any): MeldErrorStatus {
-  return err instanceof MeldError ? err.status : MeldErrorStatus['Request rejected'];
+function rejectedResponse(err: any) {
+  return new RejectedResponse(err instanceof MeldError ?
+    err.status : MeldErrorStatus['Request rejected']);
 }
+
