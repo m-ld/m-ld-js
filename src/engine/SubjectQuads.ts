@@ -1,14 +1,11 @@
 import { any, anyName, blank } from '../api';
 import {
   Atom, isPropertyObject, isReference, isSet, isValueObject, isVocabReference, Reference, Subject,
-  SubjectPropertyObject, VocabReference
+  SubjectPropertyObject
 } from '../jrql-support';
-import {
-  ActiveContext, canonicalDouble, expandTerm, getContextValue, isBoolean, isDouble, isNumber,
-  isString
-} from './jsonld';
+import { JsonldContext, mapValue } from './jsonld';
 import { Quad, Quad_Object, Quad_Subject, RdfFactory } from './quads';
-import { JRQL, RDF, XS } from '../ns';
+import { JRQL, RDF } from '../ns';
 import { JrqlMode, ListIndex, listItems, toIndexDataUrl } from './jrql-util';
 import { isArray, lazy } from './util';
 import { array } from '../util';
@@ -16,9 +13,10 @@ import { array } from '../util';
 export class SubjectQuads {
   constructor(
     readonly mode: JrqlMode,
-    readonly ctx: ActiveContext,
+    readonly ctx: JsonldContext,
     readonly rdf: RdfFactory,
-    readonly vars?: Set<string>) {
+    readonly vars?: Set<string>
+  ) {
   }
 
   *quads(
@@ -30,13 +28,13 @@ export class SubjectQuads {
     for (let value of array(object))
       if (isArray(value))
         // Nested array is flattened
-        yield* this.quads(value, outer, property);
+        yield *this.quads(value, outer, property);
       else if (isSet(value))
         // @set is elided
-        yield* this.quads(value['@set'], outer, property);
+        yield *this.quads(value['@set'], outer, property);
       else if (typeof value === 'object' && !isValueObject(value) && !isVocabReference(value))
         // TODO: @json type, nested @context object
-        yield* this.subjectQuads(value, outer, property);
+        yield *this.subjectQuads(value, outer, property);
       else if (outer != null && property != null)
         // This is an atom, so yield one quad
         yield this.rdf.quad(outer, this.predicate(property),
@@ -66,9 +64,9 @@ export class SubjectQuads {
     for (let [property, value] of Object.entries(subject))
       if (isPropertyObject(property, value))
         if (property === '@list')
-          yield* this.listQuads(sid, value);
+          yield *this.listQuads(sid, value);
         else
-          yield* this.quads(value, sid, property);
+          yield *this.quads(value, sid, property);
   }
 
   private subjectId(subject: Subject) {
@@ -88,7 +86,7 @@ export class SubjectQuads {
   private *listQuads(lid: Quad_Subject, list: SubjectPropertyObject): Iterable<Quad> {
     // Normalise explicit list objects: expand fully to slots
     for (let [index, item] of listItems(list, this.mode))
-      yield* this.slotQuads(lid, index, item);
+      yield *this.slotQuads(lid, index, item);
   }
 
   private *slotQuads(
@@ -119,7 +117,7 @@ export class SubjectQuads {
       // Sub-index should never exist for matching
       slot['@index'] = typeof index == 'string' ? `?${index}` : index[0];
     // This will yield the index key as a property, as well as the slot
-    yield* this.quads(slot, lid, indexKey);
+    yield *this.quads(slot, lid, indexKey);
   }
 
   /** @returns a mutable proto-slot object */
@@ -134,7 +132,7 @@ export class SubjectQuads {
       return { '@item': item };
   }
 
-  private matchVar(term: string) {
+  private matchVar = (term: string) => {
     if (this.mode !== 'graph') {
       const varName = JRQL.matchVar(term);
       if (varName != null) {
@@ -145,19 +143,24 @@ export class SubjectQuads {
         return this.rdf.variable(varName);
       }
     }
-  }
+  };
 
   private predicate = lazy(property => {
     switch (property) {
-      case '@type': return this.rdf.namedNode(RDF.type);
-      case '@index': return this.rdf.namedNode(JRQL.index);
-      case '@item': return this.rdf.namedNode(JRQL.item);
-      default: return this.expandNode(property, true);
+      case '@type':
+        return this.rdf.namedNode(RDF.type);
+      case '@index':
+        return this.rdf.namedNode(JRQL.index);
+      case '@item':
+        return this.rdf.namedNode(JRQL.item);
+      default:
+        return this.expandNode(property, true);
     }
   });
 
   private expandNode(term: string, vocab = false) {
-    return this.matchVar(term) ?? this.rdf.namedNode(expandTerm(term, this.ctx, { vocab }));
+    return this.matchVar(term) ??
+      this.rdf.namedNode(this.ctx.expandTerm(term, { vocab }));
   }
 
   private genVarName() {
@@ -170,51 +173,16 @@ export class SubjectQuads {
     return this.rdf.variable(this.genVarName());
   }
 
-  objectTerm(value: Atom | VocabReference, property?: string): Quad_Object {
-    if (isString(value)) {
-      const variable = this.matchVar(value);
-      if (variable != null)
-        return variable;
-    } else if (isReference(value)) {
-      return this.expandNode(value['@id']);
-    } else if (isVocabReference(value)) {
-      return this.expandNode(value['@vocab'], true);
-    }
-    let type: string | null = null, language: string | null = null;
-    if (isValueObject(value)) {
-      if (value['@type'])
-        type = expandTerm(value['@type'], this.ctx);
-      language = value['@language'] ?? null;
-      value = value['@value'];
-    }
-    if (type == null && property != null)
-      type = getContextValue(this.ctx, property, '@type');
-
-    if (isString(value)) {
-      if (property === '@type' || type === '@id' || type === '@vocab')
-        return this.expandNode(value, property === '@type' || type === '@vocab');
-      if (property != null)
-        language = getContextValue(this.ctx, property, '@language');
-      if (language != null)
+  objectTerm(value: Atom, property?: string): Quad_Object {
+    return mapValue<Quad_Object>(property ?? null, value, (value, type, language) => {
+      if (type === '@id' || type === '@vocab')
+        return this.rdf.namedNode(value);
+      else if (language)
         return this.rdf.literal(value, language);
-      if (type === XS.double)
-        value = canonicalDouble(parseFloat(value));
-    } else if (isBoolean(value)) {
-      value = value.toString();
-      type ??= XS.boolean;
-    } else if (isNumber(value)) {
-      if (isDouble(value)) {
-        value = canonicalDouble(value);
-        type ??= XS.double;
-      } else {
-        value = value.toFixed(0);
-        type ??= XS.integer;
-      }
-    }
-
-    if (type && type !== '@none')
-      return this.rdf.literal(value, this.rdf.namedNode(type));
-    else
-      return this.rdf.literal(value);
+      else if (type !== '@none')
+        return this.rdf.literal(value, this.rdf.namedNode(type));
+      else
+        return this.rdf.literal(value);
+    }, { ctx: this.ctx, interceptRaw: this.matchVar });
   }
 }

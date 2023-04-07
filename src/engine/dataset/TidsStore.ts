@@ -1,9 +1,14 @@
-import { Triple, tripleIndexKey, TripleMap } from '../quads';
+import { Triple, tripleFromKey, tripleIndexKey, TripleMap } from '../quads';
 import { MutableOperation, Operation } from '../ops';
 import { UUID } from '../MeldEncoding';
 import { IndexMatch, IndexSet } from '../indices';
 import { Kvps, TripleKeyStore } from './index';
 import * as MsgPack from '../msgPack';
+import { map, takeWhile } from 'rxjs/operators';
+import { Consumable } from 'rx-flowable';
+
+/** Prefix for TID keys */
+const KEY_PRE = '_qs:ttd:';
 
 /**
  * Persists mappings from triples to transaction IDs (TIDs) in a {@link TripleKeyStore}.
@@ -24,7 +29,9 @@ export class TidsStore {
    *   triples; otherwise, triples with no TIDs will be omitted.
    */
   async findTriplesTids(
-    triples: Iterable<Triple>, includeEmpty?: 'includeEmpty'): Promise<TripleMap<UUID[]>> {
+    triples: Iterable<Triple>,
+    includeEmpty?: 'includeEmpty'
+  ): Promise<TripleMap<UUID[]>> {
     const triplesTids = new TripleMap<UUID[]>();
     await Promise.all([...triples].map(async triple => {
       const tripleTids = await this.findTripleTids(triple);
@@ -41,12 +48,32 @@ export class TidsStore {
    */
   async findTripleTids(triple: Triple): Promise<UUID[]> {
     let tids = this.cache.get(triple);
-    if (tids == null) { // Not found in cache
-      const encoded = await this.store.get(this.tripleTidsKey(triple));
-      tids = encoded != null ? MsgPack.decode(encoded) as UUID[] : [];
-      this.cache.set(triple, tids);
-    }
+    if (tids == null) // Not found in cache
+      tids = this.cacheTids(triple, await this.store.get(this.tripleTidsKey(triple)));
     return tids;
+  }
+
+  /**
+   * Retrieves all triple objects which match the given subject and predicate, for
+   * which TIDs exist in this store.
+   *
+   * @param subject
+   * @param predicate
+   */
+  findTriples(
+    subject: Triple['subject'],
+    predicate: Triple['predicate']
+  ): Consumable<Triple['object']> {
+    const gt = this.tripleTidsKey(this.store.rdf.quad(
+      subject, predicate, this.store.rdf.variable('any')));
+    return this.store.read({ gt }).pipe(
+      takeWhile(({ value: [key] }) => key.startsWith(gt)),
+      map(({ value: [key, encodedTids], next }) => {
+        const triple = tripleFromKey(
+          key.slice(KEY_PRE.length), this.store.rdf, this.store.prefixes);
+        this.cacheTids(triple, encodedTids);
+        return { value: triple.object, next };
+      }));
   }
 
   /**
@@ -68,7 +95,13 @@ export class TidsStore {
   }
 
   tripleTidsKey(triple: Triple) {
-    return `_qs:ttd:${tripleIndexKey(triple, term => this.store.storeValue(term))}`;
+    return `${KEY_PRE}${tripleIndexKey(triple, this.store.prefixes)}`;
+  }
+
+  private cacheTids(triple: Triple, encodedTids: Buffer | undefined) {
+    const tids = encodedTids != null ? MsgPack.decode(encodedTids) as UUID[] : [];
+    this.cache.set(triple, tids);
+    return tids;
   }
 }
 

@@ -8,6 +8,12 @@ import { isArray } from './engine/util';
 
 // Re-exporting unchanged types
 /**
+ * An IRI (Internationalized Resource Identifier) within an RDF graph is a
+ * Unicode string that conforms to the syntax defined in RFC 3987.
+ * @see https://www.w3.org/TR/rdf11-concepts/#dfn-iri
+ */
+export { Iri };
+/**
  * A m-ld transaction is a **json-rql** pattern, which represents a data read or
  * a data write. Supported pattern types are:
  * - {@link Describe}
@@ -116,7 +122,7 @@ export type ValueObject = jrql.ValueObject;
  * @see [json-rql value](https://json-rql.org/#value)
  * @category json-rql
  */
-export type Value = Atom | Subject | Reference;
+export type Value = Atom | Subject;
 /**
  * The allowable types for a Subject property value, named awkwardly to avoid
  * overloading `Object`. Represents the "object" of a property, in the sense of
@@ -360,7 +366,7 @@ export function isSubject(p: Pattern): p is Subject {
 
 /** @internal */
 export function isSubjectObject(o: SubjectPropertyObject): o is Subject {
-  return typeof o == 'object' && !isReference(o) && !isValueObject(o);
+  return typeof o == 'object' && !isReference(o) && !isVocabReference(o) && !isValueObject(o);
 }
 
 /**

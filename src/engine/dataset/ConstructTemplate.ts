@@ -1,25 +1,28 @@
 import { Iri } from '@m-ld/jsonld';
 import { anyName, blank, GraphSubject } from '../../api';
 import {
-  isList, isPropertyObject, isSet, isSubjectObject, Subject, SubjectProperty, SubjectPropertyObject,
-  Value, Variable
+  Group, isList, isPropertyObject, isSet, isSubjectObject, Subject, SubjectProperty,
+  SubjectPropertyObject, Value, Variable
 } from '../../jrql-support';
 import { matchVar } from '../../ns/json-rql';
 import { array } from '../../util';
 import { addPropertyObject, listItems } from '../jrql-util';
-import { ActiveContext, compactIri } from '../jsonld';
+import { JsonldContext } from '../jsonld';
 import { jrqlProperty, jrqlValue } from '../SubjectGraph';
 import { Binding } from '../../rdfjs-support';
 
 export class ConstructTemplate {
   private readonly templates: SubjectTemplate[];
 
-  constructor(construct: Subject | Subject[], ctx: ActiveContext) {
+  constructor(construct: Subject | Subject[], ctx: JsonldContext) {
     this.templates = array(construct).map(c => new SubjectTemplate(c, ctx));
   }
 
-  get asPattern(): Subject[] {
-    return this.templates.map(t => t.pattern);
+  get asPattern(): Group {
+    const group: Group = { '@union': [] };
+    for (let template of this.templates)
+      group['@union']!.push(...template.patterns());
+    return group;
   }
 
   // noinspection JSUnusedGlobalSymbols used in JrqlGraph
@@ -31,7 +34,7 @@ export class ConstructTemplate {
 
   *results(): Iterable<GraphSubject> {
     for (let template of this.templates)
-      yield* template.results.values();
+      yield *template.results.values();
   }
 }
 
@@ -50,7 +53,7 @@ class SubjectTemplate {
   private literalValues: [SubjectProperty, Value][] = [];
   private nestedSubjects: [SubjectProperty, SubjectTemplate][] = [];
 
-  constructor(construct: Subject, readonly ctx: ActiveContext) {
+  constructor(construct: Subject, readonly ctx: JsonldContext) {
     // Discover or create the subject identity variable
     if (construct['@id'] != null)
       withNamedVar(matchVar(construct['@id']),
@@ -61,7 +64,7 @@ class SubjectTemplate {
       for (let [index, item] of listItems(construct['@list'], 'match'))
         withNamedVar(index, // Index may be a var name
           (variable, name) => this.addProperty(['@list', variable], name, item),
-          index => this.addProperty(['@list', ...index], null, item))
+          index => this.addProperty(['@list', ...index], null, item));
     // Discover other property variables
     for (let key in construct) {
       const value = construct[key];
@@ -71,21 +74,21 @@ class SubjectTemplate {
           () => this.addProperty(key, null, value));
     }
   }
-
   /** Only used if the query does not have a `@where` component. */
-  get pattern(): Subject {
-    const pattern = { '@id': this.variableId ?? this.templateId };
+  *patterns(): Generator<Subject> {
+    const id = this.variableId ?? this.templateId;
     for (let [property, value] of this.literalValues)
-      addPropertyObject(pattern, property, value);
+      yield addPropertyObject({ '@id': id }, property, value);
     for (let [property, variable] of this.variableValues)
-      addPropertyObject(pattern, property, variable);
+      yield addPropertyObject({ '@id': id }, property, variable);
     for (let [property, template] of this.nestedSubjects)
-      addPropertyObject(pattern, property, template.pattern);
-    return pattern;
+      for (let pattern of template.patterns())
+        yield addPropertyObject({ '@id': id }, property, pattern);
   }
 
   private addProperty(property: SubjectProperty,
-    propVarName: string | null, object: SubjectPropertyObject) {
+    propVarName: string | null, object: SubjectPropertyObject
+  ) {
     // Register a property variable if present
     if (propVarName != null)
       this.variableProps.push([property, `?${propVarName}`]);
@@ -124,7 +127,7 @@ class SubjectTemplate {
      * - No template ID: all solutions go in one result with blank ID
      */
     const sid = this.variableId != null && this.variableId in solution ?
-      compactIri(solution[this.variableId].value, this.ctx) : undefined;
+      this.ctx.compactIri(solution[this.variableId].value) : undefined;
     // Do we already have a result for the bound Subject ID?
     const isNewResult = !this.results.has(sid);
     const result = this.results.get(sid) ?? this.createResult(sid);
@@ -191,7 +194,8 @@ class SubjectTemplate {
 function withNamedVar<T>(
   identifier: T,
   whenIsVar: (variable: Variable, name: string) => void,
-  otherwise?: (target: Exclude<T, string>) => void) {
+  otherwise?: (target: Exclude<T, string>) => void
+) {
   if (typeof identifier == 'string') {
     const varName = identifier || anyName();
     whenIsVar(`?${varName}`, varName);

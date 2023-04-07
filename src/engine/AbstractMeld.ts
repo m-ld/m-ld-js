@@ -5,8 +5,7 @@ import { asapScheduler, BehaviorSubject, firstValueFrom, Observable, of } from '
 import { catchError, distinctUntilChanged, filter, observeOn, skip } from 'rxjs/operators';
 import { Logger } from 'loglevel';
 import { PauseableSource } from './util';
-import { MeldError } from './MeldError';
-import { MeldReadState } from '../api';
+import { MeldError, MeldReadState } from '../api';
 import { MeldConfig } from '../config';
 import { MeldOperationMessage } from './MeldOperationMessage';
 import { check } from './check';
@@ -86,7 +85,9 @@ export abstract class AbstractMeld implements Meld {
 }
 
 export function comesAlive(
-  meld: Pick<Meld, 'live'>, expected: boolean | null | 'notNull' = true): Promise<boolean | null> {
+  meld: Pick<Meld, 'live'>,
+  expected: boolean | null | 'notNull' = true
+): Promise<boolean | null> {
   return firstValueFrom(meld.live.pipe(filter(
     expected === 'notNull' ? (live => live != null) : (live => live === expected))));
 }

@@ -1,13 +1,15 @@
 import { MockGraphState, testConfig } from './testClones';
 import { M_LD } from '../src/ns';
-import { ExtensionSubject, OrmDomain, OrmSubject } from '../src/orm/index';
+import { ExtensionSubject, OrmDomain } from '../src/orm/index';
+import { ExtensionSubjectInstance, SingletonExtensionSubject } from '../src/orm/ExtensionSubject';
 
-interface MyKindOfExtension extends OrmSubject {
+interface MyKindOfExtension extends ExtensionSubjectInstance {
   doIt(): boolean;
 }
 
-export class MyExtension extends OrmSubject implements MyKindOfExtension {
+export class MyExtension implements MyKindOfExtension {
   doIt = () => true;
+  initialise = () => Promise.resolve(this);
 }
 
 describe('Extension subject', () => {
@@ -16,7 +18,7 @@ describe('Extension subject', () => {
 
   beforeEach(async () => {
     state = await MockGraphState.create();
-    domain = new OrmDomain(testConfig(), {});
+    domain = new OrmDomain({ config: testConfig(), app: {} });
   });
 
   afterEach(() => state.close());
@@ -31,8 +33,8 @@ describe('Extension subject', () => {
     expect.hasAssertions();
     await domain.updating(state.graph.asReadState, async orm => {
       const es = await orm.get(src, src =>
-        new ExtensionSubject<MyKindOfExtension>({ src, orm }));
-      const inst = es.singleton;
+        new SingletonExtensionSubject<MyKindOfExtension>(src, orm));
+      const inst = await es.singleton;
       expect(inst).toBeDefined();
       expect(inst.doIt()).toBe(true);
     });
@@ -47,8 +49,7 @@ describe('Extension subject', () => {
     );
     expect.hasAssertions();
     await domain.updating(state.graph.asReadState, async orm => {
-      const inst = await ExtensionSubject.instance<MyKindOfExtension>(
-        { src, orm });
+      const inst = await ExtensionSubject.instance<MyKindOfExtension>(src, orm);
       expect(inst).toBeDefined();
       expect(inst.doIt()).toBe(true);
     });
@@ -58,8 +59,8 @@ describe('Extension subject', () => {
     const src = { '@id': 'myDoIt', 'done': true };
     expect.hasAssertions();
     await domain.updating(state.graph.asReadState, orm =>
-      expect(ExtensionSubject.instance<MyKindOfExtension>(
-        { src, orm })).rejects.toThrow(TypeError));
+      expect(ExtensionSubject.instance<MyKindOfExtension>(src, orm))
+        .rejects.toThrow(TypeError));
   });
 
   test('Cannot load if type is not a module', async () => {
@@ -73,7 +74,10 @@ describe('Extension subject', () => {
     });
     expect.hasAssertions();
     await domain.updating(state.graph.asReadState, orm =>
-      expect(ExtensionSubject.instance<MyKindOfExtension>(
-        { src, orm })).rejects.toThrow(TypeError));
+      expect(ExtensionSubject.instance<MyKindOfExtension>(src, orm))
+        .rejects.toThrow(TypeError));
   });
+
+  test.todo('Reloads extension on update');
+  test.todo('Passes graph subject to extension initialise on update');
 });

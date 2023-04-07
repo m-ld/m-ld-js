@@ -1,6 +1,6 @@
 import {
-  Attribution, AuditOperation, GraphSubject, MeldConstraint, MeldExtensions, MeldPreUpdate,
-  MeldUpdate, noTransportSecurity, StateManaged, UpdateTrace
+  Attribution, AuditOperation, GraphSubject, GraphSubjects, MeldConstraint, MeldError,
+  MeldExtensions, MeldPreUpdate, MeldUpdate, noTransportSecurity, StateManaged, UpdateTrace
 } from '../../api';
 import { BufferEncoding, EncodedOperation, OperationMessage, Snapshot } from '..';
 import { GlobalClock, TickTree, TreeClock } from '../clocks';
@@ -12,14 +12,13 @@ import { EMPTY, merge, mergeMap, Observable, of, Subject as Source } from 'rxjs'
 import { expand, filter, map, takeWhile } from 'rxjs/operators';
 import { completed, inflate } from '../util';
 import { Logger } from 'loglevel';
-import { MeldError } from '../MeldError';
 import { Quad, Triple, tripleIndexKey, TripleMap } from '../quads';
 import { InterimUpdatePatch } from './InterimUpdatePatch';
-import { ActiveContext, activeCtx } from '../jsonld';
+import { JsonldContext } from '../jsonld';
 import { EntryBuilder, Journal, JournalEntry, JournalState } from '../journal';
 import { JournalClerk } from '../journal/JournalClerk';
 import { PatchTids, TidsStore } from './TidsStore';
-import { expandItemTids, flattenItemTids } from '../ops';
+import { CausalOperation, expandItemTids, flattenItemTids } from '../ops';
 import { Consumable, flowable } from 'rx-flowable';
 import { batch } from 'rx-flowable/operators';
 import { consume } from 'rx-flowable/consume';
@@ -58,7 +57,7 @@ export class SuSetDataset extends MeldEncoder {
 
   /** External context used for reads, writes and updates, but not for constraints. */
   /*readonly*/
-  userCtx: ActiveContext;
+  userCtx: JsonldContext;
 
   private /*readonly*/ userGraph: JrqlGraph;
   private readonly tidsStore: TidsStore;
@@ -89,12 +88,16 @@ export class SuSetDataset extends MeldEncoder {
   @SuSetDataset.checkNotClosed.async
   async initialise() {
     await super.initialise();
-    this.userCtx = await activeCtx(this.context);
+    this.userCtx = await JsonldContext.active(this.context);
     this.userGraph = new JrqlGraph(this.dataset.graph());
   }
 
   private get transportSecurity() {
     return this.extensions.ready().then(ext => ext.transportSecurity ?? noTransportSecurity);
+  }
+
+  get lock() {
+    return this.dataset.lock;
   }
 
   get readState() {
@@ -188,8 +191,10 @@ export class SuSetDataset extends MeldEncoder {
    * `undefined` if the given time is not found in the journal
    */
   @SuSetDataset.checkNotClosed.async
-  async operationsSince(time: TickTree, gwc?: Future<GlobalClock>):
-    Promise<Observable<OperationMessage> | undefined> {
+  async operationsSince(
+    time: TickTree,
+    gwc?: Future<GlobalClock>
+  ): Promise<Observable<OperationMessage> | undefined> {
     return this.dataset.transact<Observable<OperationMessage> | undefined>({
       id: 'suset-ops-since',
       prepare: async () => {
@@ -201,12 +206,14 @@ export class SuSetDataset extends MeldEncoder {
         return {
           // If we don't have that tick any more, return undefined
           return: tick < journal.start ? undefined :
+            // Note use 'of' instead of 'from' to prevent unhandled
             of(await this.journal.entryAfter(tick)).pipe(
               expand(entry => entry != null ? entry.next() : EMPTY),
               takeWhile<JournalEntry>(entry => entry != null),
               // Don't emit an entry if it's all less than the requested time
               filter(entry => time.anyLt(entry.operation.time)),
-              map(entry => entry.asMessage()))
+              map(entry => entry.asMessage())
+            )
         };
       }
     });
@@ -241,7 +248,7 @@ export class SuSetDataset extends MeldEncoder {
         // Include journaling in final patch
         txc.sw.next('journal');
         const journal = await this.journal.state();
-        const msg = await this.operationMessage(journal, time, op);
+        const msg = await this.operationMessage(journal, op);
         const journaling = journal.builder().next(op, deletedTriplesTids, time, msg.attr);
         const trace: MeldUpdate['trace'] = () => ({
           // No applicable, resolution or voids for local txn
@@ -260,6 +267,7 @@ export class SuSetDataset extends MeldEncoder {
   ) {
     const interim = new InterimUpdatePatch(
       this.userGraph,
+      this.tidsStore,
       this.userCtx,
       patch,
       principalId,
@@ -307,14 +315,14 @@ export class SuSetDataset extends MeldEncoder {
     };
   }
 
-  private emitUpdate(update: MeldUpdate) {
-    if (update['@delete'].length || update['@insert'].length)
+  private emitUpdate(update: MeldUpdate, allowEmpty = false) {
+    if (allowEmpty || update['@delete'].length || update['@insert'].length)
       this.updateSource.next(update);
   }
 
-  private async operationMessage(journal: JournalState, time: TreeClock, op: MeldOperation) {
+  private async operationMessage(journal: JournalState, op: MeldOperation) {
     // Construct the operation message with the previous visible clock tick
-    const prevTick = journal.gwc.getTicks(time);
+    const prevTick = journal.gwc.getTicks(op.time);
     // Apply signature to the unsecured encoded operation
     const attribution = await this.sign(op);
     // Apply transport wire security to the encoded update
@@ -327,7 +335,8 @@ export class SuSetDataset extends MeldEncoder {
       encoded[OpKey.encoding].push(BufferEncoding.SECURE);
     }
     // Re-package the encoded operation with the wire security applied
-    const operationMsg = MeldOperationMessage.fromOperation(prevTick, encoded, attribution, time);
+    const operationMsg = MeldOperationMessage
+      .fromOperation(prevTick, encoded, attribution, op.time);
     if (operationMsg.size > this.maxOperationSize)
       throw new MeldError('Delta too big');
     return operationMsg;
@@ -344,12 +353,13 @@ export class SuSetDataset extends MeldEncoder {
    */
   private async unSecureOperation(msg: OperationMessage): Promise<EncodedOperation> {
     const transportSecurity = await this.transportSecurity;
-    let encoded: EncodedOperation = [...msg.data];
-    if (encoded[OpKey.encoding][encoded[OpKey.encoding].length - 1] === BufferEncoding.SECURE) {
+    const encoded: EncodedOperation = [...msg.data];
+    const encoding = encoded[OpKey.encoding];
+    if (encoding[encoding.length - 1] === BufferEncoding.SECURE) {
       // Un-apply wire security
       encoded[OpKey.update] = await transportSecurity.wire(
         encoded[OpKey.update], MeldMessageType.operation, 'in', this.readState);
-      encoded[OpKey.encoding] = encoded[OpKey.encoding].slice(0, -1);
+      encoded[OpKey.encoding] = encoding.slice(0, -1);
       // Now verify the unsecured encoded update
       await transportSecurity.verify?.(
         EncodedOperation.toBuffer(encoded), msg.attr, this.readState);
@@ -409,12 +419,15 @@ export class SuSetDataset extends MeldEncoder {
       prepare: async txc => {
         txc.sw.next('decode-op');
         const journal = await this.journal.state();
-        const receivedOp = MeldOperation.fromEncoded(this, await this.unSecureOperation(msg));
-        const applicableOp = await journal.applicableOperation(receivedOp);
-        if (applicableOp == null) {
-          this.log.debug(`Ignoring pre-agreement operation: ${msg.time} @ ${clockHolder.peek()}`);
-          return { return: null };
+        if (journal.isBlocked(msg.time)) {
+          return this.ignoreMsgResult(
+            'blocked', msg.time, journal.gwc, clockHolder);
+        } else if (!msg.data[OpKey.agreed] && msg.time.anyLt(journal.agreed)) {
+          return this.ignoreMsgResult(
+            'pre-agreement', msg.time, journal.gwc, clockHolder);
         } else {
+          const receivedOp = MeldOperation.fromEncoded(this, await this.unSecureOperation(msg));
+          const applicableOp = await journal.applicableOperation(receivedOp);
           txc.sw.next('apply-txn');
           this.log.debug(`Applying operation: ${msg.time} @ ${clockHolder.peek()}`);
           // If the operation is synthesised, we need to attribute it ourselves
@@ -425,6 +438,18 @@ export class SuSetDataset extends MeldEncoder {
         }
       }
     });
+  }
+
+  private ignoreMsgResult(
+    reason: string,
+    msgTime: TreeClock,
+    gwc: GlobalClock,
+    clockHolder: ClockHolder<TreeClock>
+  ): PatchResult<null> {
+    const localTime = clockHolder.peek();
+    this.log.debug(`Ignoring ${reason} operation: ${msgTime} @ ${localTime}`);
+    clockHolder.push(localTime.ticked(msgTime.ticked(gwc.getTicks(msgTime))));
+    return { return: null };
   }
 
   private static OperationApplication = class {
@@ -447,62 +472,73 @@ export class SuSetDataset extends MeldEncoder {
       patch: SuSetDataPatch = { quads: new PatchQuads(), tids: new PatchTids(this.ssd.tidsStore) },
       processAgreement = true
     ): Promise<PatchResult<OperationMessage | null>> {
-      // Process deletions and inserts
-      const deleteTids = await this.processSuSetOpToPatch(patch);
+      try {
+        // Process deletions and inserts
+        const deleteTids = await this.processSuSetOpToPatch(patch);
 
-      this.txc.sw.next('apply-cx'); // "cx" = constraint
-      const { assertions: cxnAssertions, ...txn } = await this.ssd.assertConstraints(
-        patch.quads, 'apply', this.operation.principalId, this.operation.agreed?.proof);
+        this.txc.sw.next('apply-cx'); // "cx" = constraint
+        const { assertions: cxnAssertions, ...txn } = await this.ssd.assertConstraints(
+          patch.quads, 'apply', this.operation.principalId, this.operation.agreed?.proof);
 
-      if (processAgreement && this.operation.agreed != null) {
-        // Check agreement conditions. This is done against the non-rewound
-        // state, because we may have to recover if the rewind goes back too
-        // far. This is allowed because an agreement condition should only
-        // inspect previously agreed state.
-        const ext = await this.ssd.extensions.ready();
-        for (let agreementCondition of ext.agreementConditions ?? [])
-          await agreementCondition.test(this.ssd.readState, txn.internalUpdate);
-        if (this.operation.time.anyLt(this.journaling.state.time)) {
-          // A rewind is required. This trumps the work we have already done.
-          this.txc.sw.next('rewind');
-          return this.rewindAndReapply();
+        if (processAgreement && this.operation.agreed != null) {
+          // Check agreement conditions. This is done against the non-rewound
+          // state, because we may have to recover if the rewind goes back too
+          // far. This is allowed because an agreement condition should only
+          // inspect previously agreed state.
+          const ext = await this.ssd.extensions.ready();
+          for (let agreementCondition of ext.agreementConditions ?? [])
+            await agreementCondition.test(this.ssd.readState, txn.internalUpdate);
+          if (this.operation.time.anyLt(this.journaling.state.gwc)) {
+            // A rewind is required. This trumps the work we have already done.
+            this.txc.sw.next('rewind');
+            return this.rewindAndReapply();
+          }
+        }
+
+        const opTime = this.clockHolder.event(), cxnTime = this.clockHolder.event();
+        const insertTids = new TripleMap(this.operation.inserts);
+        const cxn = await this.constraintTxn(cxnAssertions, patch.quads, insertTids, cxnTime);
+        // After applying the constraint, some new quads might have been removed
+        patch.tids.append({
+          inserts: flattenItemTids([...patch.quads.inserts]
+            .map(triple => [triple, insertTids.get(triple) ?? []]))
+        });
+
+        // Done determining the applied operation patch. At this point we could
+        // have an empty patch, but we still need to complete the journal entry.
+        this.txc.sw.next('journal');
+        this.journaling.next(this.operation,
+          expandItemTids(deleteTids, new TripleMap), opTime, this.attribution);
+
+        // If the constraint has done anything, we need to merge its work
+        let cxnMsg: MeldOperationMessage | null = null;
+        if (cxn != null) {
+          // update['@ticks'] = cxnTime.ticks;
+          patch.tids.append(cxn.tidPatch);
+          patch.quads.append(cxnAssertions);
+          // FIXME: If this synthetic operation message exceeds max size, what to do?
+          cxnMsg = await this.ssd.operationMessage(this.journaling.state, cxn.operation);
+          // Also create a journal entry for the constraint "transaction"
+          this.journaling.next(cxn.operation, cxn.deletedTriplesTids, cxnTime, cxnMsg.attr);
+        }
+        return this.ssd.txnResult({
+          ...txn,
+          assertions: patch.quads,
+          tidPatch: patch.tids,
+          journaling: this.journaling,
+          msg: cxnMsg,
+          trace: this.tracer({ applied: true, cxnMsg })
+        });
+      } catch (e) {
+        // 4000-5000 are bad request errors, leading to an error update
+        if (e instanceof MeldError && e.status >= 4000 && e.status < 5000) {
+          this.ssd.log.warn('Bad operation', e, this.operation);
+          return this.badOperationResult(e);
+        } else {
+          this.ssd.log.error(e, this.operation);
+          throw e;
         }
       }
-
-      const opTime = this.clockHolder.event(), cxnTime = this.clockHolder.event();
-      const insertTids = new TripleMap(this.operation.inserts);
-      const cxn = await this.constraintTxn(cxnAssertions, patch.quads, insertTids, cxnTime);
-      // After applying the constraint, some new quads might have been removed
-      patch.tids.append({
-        inserts: flattenItemTids([...patch.quads.inserts]
-          .map(triple => [triple, insertTids.get(triple) ?? []]))
-      });
-
-      // Done determining the applied operation patch. At this point we could
-      // have an empty patch, but we still need to complete the journal entry.
-      this.txc.sw.next('journal');
-      this.journaling.next(this.operation,
-        expandItemTids(deleteTids, new TripleMap), opTime, this.attribution);
-
-      // If the constraint has done anything, we need to merge its work
-      let cxnMsg: MeldOperationMessage | null = null;
-      if (cxn != null) {
-        // update['@ticks'] = cxnTime.ticks;
-        patch.tids.append(cxn.tidPatch);
-        patch.quads.append(cxnAssertions);
-        // FIXME: If this synthetic operation message exceeds max size, what to do?
-        cxnMsg = await this.ssd.operationMessage(this.journaling.state, cxnTime, cxn.operation);
-        // Also create a journal entry for the constraint "transaction"
-        this.journaling.next(cxn.operation, cxn.deletedTriplesTids, cxnTime, cxnMsg.attr);
-      }
-      return this.ssd.txnResult({
-        ...txn,
-        assertions: patch.quads,
-        tidPatch: patch.tids,
-        journaling: this.journaling,
-        msg: cxnMsg,
-        trace: this.tracer({ applied: true, cxnMsg })
-      });
     }
 
     private async rewindAndReapply() {
@@ -513,6 +549,7 @@ export class SuSetDataset extends MeldEncoder {
       // local txn. But first, commit the rewind.
       const localTime = this.journaling.state.time;
       const rewoundJoinTime = localTime.ticked(this.operation.time);
+      this.ssd.log.debug(`Rewinding to ${rewoundJoinTime}`);
       if (rewoundJoinTime.anyLt(this.operation.time)) {
         this.clockHolder.push(localTime); // Not joining
         return this.missingCausesResult(patch);
@@ -526,25 +563,20 @@ export class SuSetDataset extends MeldEncoder {
 
     private async rewind(): Promise<SuSetDataPatch> {
       const tidPatch = new PatchTids(this.ssd.tidsStore);
-      for (
-        let entry = await this.ssd.journal.entryBefore();
-        entry != null && this.operation.time.anyLt(entry.operation.time);
-        entry = await this.ssd.journal.entryBefore(entry.key)
-      ) {
-        const entryOp = entry.operation.asMeldOperation();
-        // Reversing a journal entry involves:
-        tidPatch.append({
-          // 1. Deleting triples that were inserted. The TIDs of the inserted
-          // triples always come from the entry itself, so we know exactly
-          // what TripleTids were added and we can safely remove them.
-          deletes: flattenItemTids(entryOp.inserts),
-          // 2. Inserting triples that were deleted. From the MeldOperation
-          // by itself we don't know which TripleTids were actually removed
-          // (a prior transaction may have removed the same ones). Instead,
-          // the journal keeps track of the actual deletes made.
-          inserts: flattenItemTids(entryOp.byTriple('deletes', entry.deleted))
-        });
-        this.journaling.void(entry);
+      // Work backwards through the journal, voiding entries that are not in the
+      // causes of the applied operation. Stop when the GWC is all-less-than
+      // applied op causes, OR we reach an agreement (because nothing prior
+      // to an agreement in the journal can be concurrent with it).
+      let entry = await this.ssd.journal.entryBefore();
+      while (this.operation.time.anyLt(this.journaling.state.gwc) && !entry?.operation.agreed) {
+        if (entry == null)
+          throw new MeldError('Updates unavailable');
+        // Only void if the entry itself is concurrent with the agreement
+        if (this.operation.time.anyLt(entry.operation.time)) {
+          tidPatch.append(CausalOperation.flatten(await entry.undo()));
+          this.journaling.void(entry);
+        }
+        entry = await entry.previous();
       }
       // Now compare the affected triple-TIDs to the current state to find
       // actual triples to delete or insert
@@ -557,6 +589,7 @@ export class SuSetDataset extends MeldEncoder {
     private async missingCausesResult(rewindPatch: SuSetDataPatch): Promise<PatchResult<null>> {
       const { userUpdate } = await new InterimUpdatePatch(
         this.ssd.userGraph,
+        this.ssd.tidsStore,
         this.ssd.userCtx,
         rewindPatch.quads,
         M_LD.localEngine,
@@ -582,9 +615,29 @@ export class SuSetDataset extends MeldEncoder {
       };
     }
 
-    private tracer({ cxnMsg, applied }: {
+    private badOperationResult(error: MeldError): PatchResult<null> {
+      // Put a block on any more operations from this remote
+      this.journaling.block(this.operation.time);
+      return {
+        return: null,
+        kvps: this.journaling.commit, // Commit the block
+        after: () => {
+          this.ssd.emitUpdate({
+            '@delete': GraphSubjects.EMPTY,
+            '@insert': GraphSubjects.EMPTY,
+            '@principal': InterimUpdatePatch.principalRef(
+              this.operation.principalId, this.ssd.userCtx),
+            '@ticks': this.journaling.state.time.ticks,
+            trace: this.tracer({ error, applied: false })
+          }, true);
+        }
+      };
+    }
+
+    private tracer({ cxnMsg, applied, error }: {
       applied: boolean,
-      cxnMsg?: MeldOperationMessage | null
+      cxnMsg?: MeldOperationMessage | null,
+      error?: MeldError
     }): MeldUpdate['trace'] {
       return () => {
         const { received, operation, attribution, journaling } = this;
@@ -595,6 +648,7 @@ export class SuSetDataset extends MeldEncoder {
           return { operation, attribution, data: EncodedOperation.toBuffer(operation) };
         }
         return new class implements UpdateTrace {
+          error = error;
           get trigger() {
             return received.toAuditOperation();
           }
@@ -695,6 +749,12 @@ export class SuSetDataset extends MeldEncoder {
    */
   @SuSetDataset.checkNotClosed.async
   async applySnapshot(snapshot: DatasetSnapshot, localTime: TreeClock) {
+    // Check that the provided snapshot is not concurrent with the last agreement
+    if (await this.journal.initialised()) {
+      const journal = await this.journal.state();
+      if (snapshot.gwc.anyLt(journal.agreed))
+        throw new Error('Snapshot is concurrent with last agreement');
+    }
     await this.dataset.clear();
     await this.dataset.transact({
       id: 'suset-reset',
@@ -728,7 +788,8 @@ export class SuSetDataset extends MeldEncoder {
   @SuSetDataset.checkNotClosed.async
   async takeSnapshot(): Promise<DatasetSnapshot> {
     const journal = await this.journal.state();
-    const insData = consume(this.userGraph.graph.query()).pipe(
+    const allQuads = this.userGraph.quads.query();
+    const insData = consume(allQuads).pipe(
       batch(10), // TODO batch size config
       mergeMap(async ({ value: quads, next }) => {
         const tidQuads = await this.tidsStore.findTriplesTids(quads, 'includeEmpty');
@@ -742,7 +803,8 @@ export class SuSetDataset extends MeldEncoder {
     return {
       gwc: journal.gwc,
       agreed: journal.agreed,
-      data: flowable<Snapshot.Datum>(merge(insData, opData))
+      data: flowable<Snapshot.Datum>(merge(insData, opData)),
+      cancel: (cause?: Error) => allQuads.destroy(cause)
     };
   }
 }

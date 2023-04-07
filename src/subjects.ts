@@ -1,6 +1,6 @@
 import { isPropertyObject, isSet, Reference, Subject, Value } from './jrql-support';
 import { isArray } from './engine/util';
-import { compareValues, getValues, hasProperty, hasValue } from './engine/jsonld';
+import { compareValues, getValues, hasProperty, hasValue, mapValue } from './engine/jsonld';
 
 export { compareValues, getValues };
 
@@ -9,13 +9,13 @@ export { compareValues, getValues };
  * @todo A `@list` property is a property according to `isPropertyObject` but
  * should have very different behaviour
  */
-export class SubjectPropertyValues {
+export class SubjectPropertyValues<S extends Subject = Subject> {
   private readonly prior: 'atom' | 'array' | 'set';
   private readonly configurable: boolean;
 
   constructor(
-    readonly subject: Subject,
-    readonly property: string,
+    readonly subject: S,
+    readonly property: string & keyof S,
     readonly deepUpdater?: (values: Iterable<any>) => void
   ) {
     const object = this.subject[this.property];
@@ -32,12 +32,20 @@ export class SubjectPropertyValues {
     return getValues(this.subject, this.property);
   }
 
+  minimalSubject(values = this.values) {
+    return <S>{ '@id': this.subject['@id'], [this.property]: values };
+  }
+
+  clone() {
+    return new SubjectPropertyValues(<S>this.minimalSubject(), this.property, this.deepUpdater);
+  }
+
   insert(...values: any[]) {
-    this.update([], values);
+    return this.update([], values);
   }
 
   delete(...values: any[]) {
-    this.update(values, []);
+    return this.update(values, []);
   }
 
   update(deletes: any[], inserts: any[]) {
@@ -50,6 +58,7 @@ export class SubjectPropertyValues {
     if (oldValues !== values) {
       if (this.prior == 'set') {
         // A JSON-LD Set cannot have any other key than @set
+        // @ts-ignore Typescript can't tell what the value type should be
         this.subject[this.property] = { '@set': values };
       } else {
         // Per contract of updateSubject, this always L-value assigns (no pushing)
@@ -60,6 +69,7 @@ export class SubjectPropertyValues {
           delete this.subject[this.property];
       }
     }
+    return this;
   }
 
   exists(value?: any): boolean {
@@ -80,9 +90,21 @@ export class SubjectPropertyValues {
 
   diff(oldValues: any[]) {
     return {
-      deletes: SubjectPropertyValues.minus(oldValues, this.values),
-      inserts: SubjectPropertyValues.minus(this.values, oldValues)
-    }
+      deletes: this.deletes(oldValues),
+      inserts: this.inserts(oldValues)
+    };
+  }
+
+  deletes(oldValues: any[]) {
+    return SubjectPropertyValues.minus(oldValues, this.values);
+  }
+
+  inserts(oldValues: any[]) {
+    return SubjectPropertyValues.minus(this.values, oldValues);
+  }
+
+  toString() {
+    return `${this.subject['@id']} ${this.property}: ${this.values}`;
   }
 
   /** @returns `values` if nothing has changed */
@@ -135,4 +157,21 @@ export function includesValue(
   value?: Value | Value[]
 ): boolean {
   return new SubjectPropertyValues(subject, property).exists(value);
+}
+
+/**
+ * A deterministic refinement of the greater-than operator used for SPARQL
+ * ordering. Assumes no unbound values, blank nodes or simple literals (every
+ * literal is typed).
+ *
+ * @see https://www.w3.org/TR/sparql11-query/#modOrderBy
+ */
+export function sortValues(property: string, values: Value[]) {
+  return values.sort((v1, v2) => {
+    const [s1, t1] = mapValue(property, v1, (value, type) => [value, type]);
+    const [s2, t2] = mapValue(property, v2, (value, type) => [value, type]);
+    return t1 === '@id' || t1 === '@vocab' ?
+      t2 === '@id' || t2 === '@vocab' ? s1.localeCompare(s2) : 1 :
+      t2 === '@id' || t2 === '@vocab' ? -1 : s1.localeCompare(s2);
+  });
 }

@@ -10,10 +10,12 @@ export interface CausalClock {
   readonly ticks: number;
   /**
    * A practically conflict-free hash of the time, usable as a stable operation
-   * or message identifier. Because a clock fork does not constitute a
-   * transaction event, the left and right of a fork have identical hashes until
-   * either one is ticked, i.e. `[1]`, `[1,[],0]` and `[1,0,[]]` have the same
-   * hash.
+   * or message identifier. The hash contains only RFC4648 Base64 encoding
+   * characters.
+   *
+   * Because a clock fork does not constitute a transaction event, the left and
+   * right of a fork have identical hashes until either one is ticked, i.e.
+   * `[1]`, `[1,[],0]` and `[1,0,[]]` have the same hash.
    */
   readonly hash: string;
   /**

@@ -1,5 +1,5 @@
 import { mock } from 'jest-mock-extended';
-import { LseqDef, LseqIndexNotify, LseqIndexRewriter } from '../src/engine/lseq';
+import { LseqDef, LseqIndexNotify, LseqIndexRewriter } from '../src/lseq';
 
 describe('LSEQ', () => {
   const lseq = new LseqDef();

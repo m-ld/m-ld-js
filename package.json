@@ -1,21 +1,22 @@
 {
   "name": "@m-ld/m-ld",
-  "version": "0.9.1",
+  "version": "0.9.2-edge.7",
   "description": "m-ld native Javascript",
   "main": "ext/index.js",
   "types": "ext/index.d.ts",
   "exports": {
     ".": "./ext/index.js",
+    "./ext/ns": "./ext/ns/index.js",
     "./ext/orm": "./ext/orm/index.js",
     "./ext/mqtt": "./ext/mqtt/index.js",
     "./ext/socket.io": "./ext/socket.io/index.js",
     "./ext/socket.io-server": "./ext/socket.io/server/index.js",
+    "./ext/socket.io/server": "./ext/socket.io/server/index.js",
     "./ext/ably": "./ext/ably/index.js",
     "./ext/wrtc": "./ext/wrtc/index.js",
     "./ext/security": "./ext/security/index.js",
     "./ext/shacl": "./ext/shacl/index.js",
-    "./ext/constraints/WritePermitted": "./ext/constraints/WritePermitted.js",
-    "./ext/constraints/Statutory": "./ext/constraints/Statutory.js"
+    "./ext/statutes": "./ext/statutes/index.js"
   },
   "scripts": {
     "link-locals": "npm link ../m-ld-spec ../json-rql ../typedoc-theme",
@@ -43,6 +44,7 @@
     "@peculiar/webcrypto": "^1.2.3",
     "@types/jest": "^29.0.1",
     "@types/n3": "^1.4.4",
+    "@types/node": "^16.11.7",
     "@types/readable-stream": "^2.3.9",
     "@types/ws": "^8.5.3",
     "ably": "^1.2.10",
@@ -78,6 +80,9 @@
     ],
     "transform": {
       "^.+\\.(ts|tsx)?$": "ts-jest"
+    },
+    "moduleNameMapper": {
+      "^@m-ld/m-ld/ext/(.*)$": "<rootDir>/src/$1"
     }
   },
   "dependencies": {

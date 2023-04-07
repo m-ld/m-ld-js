@@ -1,13 +1,13 @@
 import { Iri } from '@m-ld/jsonld';
 import { GraphSubject, InterimUpdate, MeldConstraint, MeldReadState } from '../api';
-import { LseqDef, LseqIndexRewriter, PosItem } from '../engine/lseq';
+import { LseqDef, LseqIndexRewriter, PosItem } from '.';
 import * as meld from '../ns/m-ld';
 import { lazy } from '../engine/util';
 import {
   isList, isPropertyObject, isReference, isSlot, isSubjectObject, List, Reference, Select,
   SubjectProperty
 } from '../jrql-support';
-import { SingleValued } from './SingleValued';
+import { SingleValued } from '../constraints/SingleValued';
 import { addPropertyObject, listItems } from '../engine/jrql-util';
 import { includesValue } from '../subjects';
 
@@ -27,9 +27,11 @@ export class DefaultList implements MeldConstraint {
     await this.doListRewrites('check', interim, state);
     // An index deletion can also be asserted in a delete-where, so in
     // all cases, remove any index assertions
-    interim.remove('@delete', update['@delete']
-      .filter(s => isSlot(s) && s['@index'] != null)
-      .map(s => ({ '@id': s['@id'], ['@index']: s['@index'] })));
+    interim.remove({
+      '@delete': update['@delete']
+        .filter(s => isSlot(s) && s['@index'] != null)
+        .map(s => ({ '@id': s['@id'], ['@index']: s['@index'] }))
+    });
   }
 
   async apply(state: MeldReadState, update: InterimUpdate) {
@@ -224,8 +226,9 @@ class ListRewriter extends LseqIndexRewriter<SlotInList> {
           const property = meld.rdflseqPosId(posId);
           if (this.mode == 'check') {
             // Remove the original inserted slot key from the update.
-            interim.remove('@insert',
-              addPropertyObject({ '@id': this.listId }, slot.property, { '@id': slot.id }));
+            const toRemove = addPropertyObject(
+              { '@id': this.listId }, slot.property, { '@id': slot.id });
+            interim.remove({ '@insert': <GraphSubject>toRemove });
             // Add the new slot with updated details at the new position ID.
             interim.assert({ // Asserting the new slot position
               '@insert': { '@id': this.listId, [property]: { '@id': slot.id } }

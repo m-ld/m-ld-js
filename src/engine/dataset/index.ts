@@ -1,31 +1,28 @@
 import {
-  Bindings, DataFactory, DefaultGraph, getTermValue, NamedNode, Quad, Quad_Object, Quad_Predicate,
+  Bindings, DataFactory, DefaultGraph, NamedNode, Prefixes, Quad, Quad_Object, Quad_Predicate,
   Quad_Subject, QuadSet, QuadSource, RdfFactory, toBinding
 } from '../quads';
-import { BatchOpts, Prefixes, Quadstore } from 'quadstore';
+import { BatchOpts, Quadstore } from 'quadstore';
 import {
   AbstractChainedBatch, AbstractIterator, AbstractIteratorOptions, AbstractLevel
 } from 'abstract-level';
 import { Observable } from 'rxjs';
 import { LockManager } from '../locks';
 import { Context, Iri } from '@m-ld/jsonld';
-import { ActiveContext, activeCtx, compactIri, expandTerm } from '../jsonld';
+import { JsonldContext } from '../jsonld';
 import { Algebra } from 'sparqlalgebrajs';
 import { Engine } from 'quadstore-comunica';
 import { DataFactory as RdfDataFactory } from 'rdf-data-factory';
 import { JRQL, M_LD, RDF, XS } from '../../ns';
 import async from '../async';
 import { MutableOperation } from '../ops';
-import { MeldError } from '../MeldError';
 import { BaseStream, Binding, CountableRdf, QueryableRdfSource } from '../../rdfjs-support';
 import { uuid } from '../../util';
 import { Stopwatch } from '../Stopwatch';
 import { check } from '../check';
-import { Term } from 'rdf-js';
+import { Consumable } from 'rx-flowable';
+import { MeldError } from '../../api';
 import type EventEmitter = require('events');
-
-/** Utility interfaces shared with quadstore */
-export { Prefixes };
 
 /**
  * Atomically-applied patch to a quad-store.
@@ -56,7 +53,7 @@ export interface KvpStore {
   /** Exact match kvp retrieval */
   has(key: string): Promise<boolean>;
   /** Kvp retrieval by range options */
-  read(range: AbstractIteratorOptions<string, Buffer>): Observable<[string, Buffer]>;
+  read(range: AbstractIteratorOptions<string, Buffer>): Consumable<[string, Buffer]>;
   /**
    * Ensures that write transactions are executed serially against the store.
    * @param txn prepares a write operation to be performed
@@ -67,8 +64,10 @@ export interface KvpStore {
 }
 
 export interface TripleKeyStore extends KvpStore {
-  /** @returns the compacted storable value of the term, if applicable */
-  storeValue: getTermValue;
+  readonly rdf: Required<DataFactory>;
+
+  /** Term storage compaction, if applicable */
+  readonly prefixes: Prefixes;
 }
 
 /**
@@ -78,7 +77,6 @@ export interface TripleKeyStore extends KvpStore {
  */
 export interface Dataset extends TripleKeyStore {
   readonly location: string;
-  readonly rdf: Required<DataFactory>;
 
   graph(name?: GraphName): Graph;
 
@@ -171,7 +169,7 @@ export class QuadStoreDataset implements Dataset {
   store: Quadstore;
   engine: Engine;
   prefixes: Prefixes;
-  private readonly activeCtx: Promise<ActiveContext>;
+  private readonly activeCtx: Promise<JsonldContext>;
   readonly lock = new LockManager;
   private isClosed: boolean = false;
   readonly base: Iri | undefined;
@@ -184,7 +182,7 @@ export class QuadStoreDataset implements Dataset {
     // Internal of ClassicLevel and BrowserLevel
     this.location = (<any>backend).location ?? uuid();
     this.base = domainBase(domain);
-    this.activeCtx = activeCtx({
+    this.activeCtx = JsonldContext.active({
       '@base': this.base,
       '@vocab': baseVocab(this.base),
       ...STORAGE_CONTEXT
@@ -196,8 +194,8 @@ export class QuadStoreDataset implements Dataset {
     const activeCtx = await this.activeCtx;
     sw?.next('open-store');
     this.prefixes = {
-      expandTerm: term => expandTerm(term, activeCtx),
-      compactIri: iri => compactIri(iri, activeCtx)
+      expandTerm: term => activeCtx.expandTerm(term),
+      compactIri: iri => activeCtx.compactIri(iri)
     };
     this.store = new Quadstore({
       backend: this.backend,
@@ -257,12 +255,6 @@ export class QuadStoreDataset implements Dataset {
       this.events?.emit('error', err);
       throw err;
     });
-  }
-
-  storeValue(term: Term): string {
-    if (term.termType === 'NamedNode')
-      return this.prefixes.compactIri(term.value);
-    return term.value ?? '';
   }
 
   private async applyKvps(kvps: Kvps) {
@@ -335,36 +327,37 @@ export class QuadStoreDataset implements Dataset {
   }
 
   @notClosed.rx
-  read(range: AbstractIteratorOptions<string, Buffer>): Observable<[string, Buffer]> {
+  read(range: AbstractIteratorOptions<string, Buffer>): Consumable<[string, Buffer]> {
     return new Observable(subs => {
       const it = this.store.db.iterator({
         ...range, keyEncoding: 'utf8', valueEncoding: 'buffer'
       });
       const pull = () => {
-        // Calling next on an iterator that is already ended e.g. by closing the
-        // store, may cause a truly evil exception which summarily kills the
-        // process
-        if (this.closed) {
-          const err = new MeldError('Clone has closed');
-          subs.error(err);
-          this.events?.emit('error', err);
-        } else {
-          it.next((err, key: string, value: Buffer) => {
-            if (err) {
-              subs.error(err);
-              this.end(it);
-              this.events?.emit('error', err);
-            } else if (key != null && value != null) {
-              subs.next([key, value]);
-              pull();
-            } else {
-              subs.complete();
-              this.end(it);
-            }
-          });
+        if (!subs.closed) {
+          // Calling next on an iterator that is already ended e.g. by closing the
+          // store, may cause a truly evil exception which summarily kills the
+          // process
+          if (this.closed) {
+            const err = new MeldError('Clone has closed');
+            subs.error(err);
+            this.events?.emit('error', err);
+          } else {
+            it.next((err, key: string, value: Buffer) => {
+              if (err) {
+                subs.error(err);
+                this.events?.emit('error', err);
+              } else if (key != null && value != null) {
+                subs.next({ value: [key, value], next: pull });
+              } else {
+                subs.complete();
+              }
+            });
+          }
         }
+        return true as true;
       };
       pull();
+      return () => this.end(it);
     });
   }
 

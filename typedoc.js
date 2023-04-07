@@ -10,6 +10,7 @@ module.exports = {
     './src/engine/**',
     './src/types/**',
     './src/ns/**',
+    './src/lseq/**',
     './src/ably/**',
     './src/mqtt/**',
     './src/wrtc/**',

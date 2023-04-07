@@ -186,6 +186,12 @@ export interface Recovery {
    * observes during the recovery process.
    */
   readonly updates: Observable<OperationMessage>;
+  /**
+   * Cancel this recovery, potentially before any observables have been
+   * subscribed. This will release any open queries or locks.
+   * @param cause the reason for cancellation, used for logging
+   */
+  cancel(cause?: Error): void;
 }
 
 /**
@@ -219,7 +225,9 @@ export namespace Snapshot {
    */
   export type Inserts = { inserts: Buffer, encoding: BufferEncoding[] };
   /**
-   * A latest operation from a remote clone
+   * A latest operation from a remote clone, including any possible fused
+   * history. This is necessary so that when receiving a rev-up fusion, it's
+   * possible to 'cut' already-processed history from that fusion.
    */
   export type Operation = { operation: EncodedOperation };
   /**

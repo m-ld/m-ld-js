@@ -30,7 +30,7 @@ declare module '@m-ld/jsonld/lib/types' {
    *
    * @return true if the value is a double, false if not.
    */
-  function isDouble(arg: any): boolean;
+  function isDouble(arg: any): arg is number;
 
   /**
    * Returns true if the given value is an empty Object.

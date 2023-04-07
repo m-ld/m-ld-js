@@ -1,16 +1,16 @@
 import { SuSetDataset } from '../src/engine/dataset/SuSetDataset';
-import { MockProcess, MockState, testExtensions, testOp } from './testClones';
+import { decodeOpUpdate, MockProcess, MockState, testExtensions, testOp } from './testClones';
 import { GlobalClock, TreeClock } from '../src/engine/clocks';
 import { toArray } from 'rxjs/operators';
 import { EmptyError, firstValueFrom, lastValueFrom, Subject } from 'rxjs';
 import {
-  AgreementCondition, Describe, JournalCheckPoint, MeldConstraint, MeldTransportSecurity, MeldUpdate
+  AgreementCondition, Describe, JournalCheckPoint, MeldConstraint, MeldError, MeldTransportSecurity,
+  MeldUpdate
 } from '../src';
 import { jsonify } from './testUtil';
 import { MeldEncoder } from '../src/engine/MeldEncoding';
 import { BufferEncoding, EncodedOperation } from '../src/engine';
 import { drain } from 'rx-flowable';
-import { MeldError } from '../src/engine/MeldError';
 import { mockFn } from 'jest-mock-extended';
 import { MeldOperationMessage } from '../src/engine/MeldOperationMessage';
 
@@ -402,9 +402,7 @@ describe('SU-Set Dataset', () => {
             local.tick().time,
             await ssd.write({ '@delete': fred })
           ]))!;
-          const [del]: [{}] = MeldEncoder.jsonFromBuffer(
-            msg.data[EncodedOperation.Key.update],
-            msg.data[EncodedOperation.Key.encoding]);
+          const [del] = decodeOpUpdate(msg);
           expect(del).toEqual({
             '@id': expect.any(String),
             's': 'fred', 'p': '#name', 'o': 'Fred',
@@ -424,9 +422,7 @@ describe('SU-Set Dataset', () => {
             local.tick().time,
             await ssd.write({ '@delete': fred })
           ]))!;
-          const [del]: [{}] = MeldEncoder.jsonFromBuffer(
-            msg.data[EncodedOperation.Key.update],
-            msg.data[EncodedOperation.Key.encoding]);
+          const [del] = decodeOpUpdate(msg);
           expect(del).toEqual({
             '@id': expect.any(String),
             's': 'fred', 'p': '#name', 'o': 'Fred',
@@ -691,7 +687,7 @@ describe('SU-Set Dataset', () => {
         await ssd.write({ '@insert': wilma })
       ]);
       constraint.check = async state =>
-        firstValueFrom(state.read<Describe>({ '@describe': 'http://test.m-ld.org/wilma' }));
+        firstValueFrom(state.read<Describe>({ '@describe': wilma['@id'] }));
       await expect(ssd.transact(async () => [
         local.tick().time,
         await ssd.write({ '@insert': fred })
@@ -853,7 +849,7 @@ describe('SU-Set Dataset', () => {
       const tid = (await ssd.transact(async () => [
         local.tick().time,
         await ssd.write({ '@insert': wilma })
-      ]))!.data[1];
+      ]))!.time.hash;
 
       const willUpdate = firstValueFrom(ssd.updates);
       await ssd.apply(
@@ -867,6 +863,86 @@ describe('SU-Set Dataset', () => {
       // The deleted data was re-inserted, but Wilma may not have existed before
       await expect(willUpdate).resolves.toMatchObject(
         { '@insert': [wilma], '@delete': [], '@ticks': local.time.ticks });
+    });
+
+    test('bad operation issues no-op error update', async () => {
+      constraint.apply = () => Promise.reject(new MeldError('Unauthorised'));
+
+      const willUpdate = firstValueFrom(ssd.updates);
+      await ssd.apply(
+        remote.sentOperation({}, { '@id': 'wilma', 'name': 'Wilma' }, {
+          attr: { pid: 'http://box.ex.org/#me', sig: Buffer.of() }
+        }),
+        local.join(remote.time));
+
+      const update = await willUpdate;
+      expect(update).toMatchObject({
+        '@delete': expect.objectContaining({ length: 0 }),
+        '@insert': expect.objectContaining({ length: 0 }),
+        '@ticks': local.time.ticks,
+        '@principal': { '@id': 'http://box.ex.org/#me' }
+      });
+      const trace = update.trace();
+      expect(trace.error?.status).toBe(4030);
+      await expect(drain(ssd.read<Describe>({
+        '@describe': 'http://test.m-ld.org/wilma'
+      }))).resolves.toEqual([]);
+    });
+
+    test('bad operation blocks clone', async () => {
+      constraint.apply = () => Promise.reject(new MeldError('Unauthorised'));
+
+      await ssd.apply(
+        remote.sentOperation({}, { '@id': 'wilma', 'name': 'Wilma' }),
+        local.join(remote.time));
+
+      const preRemoteTicks = remote.time.ticks;
+      const willUpdate = firstValueFrom(ssd.updates);
+      await ssd.apply(
+        remote.sentOperation({}, { '@id': 'wilma', 'name': 'Flintstone' }),
+        local.join(remote.time));
+
+      expect(local.time.getTicks(remote.time)).toBe(preRemoteTicks);
+      await expectNoUpdate(willUpdate);
+      await expect(drain(ssd.read<Describe>({
+        '@describe': 'http://test.m-ld.org/wilma'
+      }))).resolves.toEqual([]);
+    });
+
+    test('blocked clone is included in snapshot', async () => {
+      constraint.apply = () => Promise.reject(new MeldError('Unauthorised'));
+      await ssd.apply(
+        remote.sentOperation({}, { '@id': 'wilma', 'name': 'Wilma' }),
+        local.join(remote.time));
+
+      const snapshot = await ssd.takeSnapshot();
+      // Note that the blocked flag is strictly an internal detail
+      expect(snapshot.gwc.tid(remote.time)).toBe('!blocked!');
+    });
+
+    test('entailed deletions retain TIDs', async () => {
+      // Constraint is going to entail deletion of the data we're inserting
+      constraint.check = async (_, update) => update.entail({ '@delete': wilma });
+      const { data: [, , , upd1, enc1], time } = (await ssd.transact(async () => [
+        local.tick().time,
+        await ssd.write({ '@insert': wilma })
+      ]))!;
+      // Wilma asserted in the update
+      expect(MeldEncoder.jsonFromBuffer(upd1, enc1)).toEqual([{}, {
+        '@id': 'wilma', name: 'Wilma'
+      }]);
+      // Wilma does not match in the current dataset (entailed deleted)
+      await expect(drain(ssd.read(<Describe>{ '@describe': wilma['@id'] })))
+        .resolves.toEqual([]);
+      // Now also assert the deletion of wilma
+      const { data: [, , , upd2, enc2] } = (await ssd.transact(async () => [
+        local.tick().time,
+        await ssd.write({ '@delete': wilma })
+      ]))!;
+      // Wilma asserted deleted in the update
+      expect(MeldEncoder.jsonFromBuffer(upd2, enc2)).toMatchObject([
+        { tid: time.hash, s: 'wilma', p: '#name', o: 'Wilma' }, {}
+      ]);
     });
   });
 
@@ -933,10 +1009,12 @@ describe('SU-Set Dataset', () => {
         true
       ]);
       // Not joining with local time here
+      const preRemoteTicks = remote.time.ticks;
       const willUpdate = firstValueFrom(ssd.updates);
       await expect(ssd.apply(
         remote.sentOperation({}, { '@id': 'wilma', 'name': 'Wilma' }),
         local.join(remote.time))).resolves.toBe(null);
+      expect(local.time.getTicks(remote.time)).toBe(preRemoteTicks);
       await expectNoUpdate(willUpdate);
     });
 
@@ -1002,7 +1080,8 @@ describe('SU-Set Dataset', () => {
       // Now receive agreement, but not joining with local time
       const willUpdate = firstValueFrom(ssd.updates);
       await expect(ssd.apply(
-        remote.sentOperation({}, { '@id': 'wilma', 'name': 'Wilma' }, { agree: true }),
+        remote.sentOperation({}, { '@id': 'wilma', 'name': 'Wilma' },
+          { agree: true }),
         local.join(remote.time))).resolves.toBe(null);
       // Check fred gets voided out
       await expect(willUpdate).resolves.toMatchObject({
@@ -1011,6 +1090,53 @@ describe('SU-Set Dataset', () => {
       });
       // Local time should no longer have ticks from the third process
       expect(local.time.getTicks(third.time)).toBe(0);
+    });
+
+    test('does not void pre-agreement operation', async () => {
+      // The local has seen another process
+      const third = local.fork();
+      // Which transacts, seen by remote but not local
+      const preOp = third.sentOperation({}, { '@id': 'fred', 'name': 'Fred' });
+      remote.join(third.time);
+      // We transact, unseen by remote (will be voided)
+      await ssd.transact(async () => [
+        local.tick().time,
+        await ssd.write({ '@insert': barney })
+      ]);
+      // See the third-party pre-agreement op (will not be voided)
+      await ssd.apply(preOp, local.join(third.time));
+      // Now receive agreement from remote
+      const willUpdate = firstValueFrom(ssd.updates);
+      await expect(ssd.apply(
+        remote.sentOperation({}, { '@id': 'wilma', 'name': 'Wilma' },
+          { agree: true }),
+        local.join(remote.time))).resolves.toBe(null);
+      // Check fred gets voided out
+      await expect(willUpdate).resolves.toMatchObject({
+        '@delete': [barney],
+        '@insert': [wilma]
+      });
+      // Pre-agreement Fred should have survived
+      await expect(drain(ssd.read<Describe>({
+        '@describe': 'http://test.m-ld.org/fred'
+      }))).resolves.toEqual([fred]);
+    });
+
+    test('does not void a concurrent agreement', async () => {
+      await ssd.transact(async () => [
+        local.tick().time,
+        await ssd.write({ '@insert': fred }),
+        true // agree
+      ]);
+      // Not joining with local time here
+      const willUpdate = firstValueFrom(ssd.updates);
+      await expect(ssd.apply(
+        remote.sentOperation({}, { '@id': 'wilma', 'name': 'Wilma' }, { agree: true }),
+        local.join(remote.time))).resolves.toBe(null);
+      // Check fred does not get voided out
+      const update = await willUpdate;
+      expect(update).toMatchObject({ '@insert': [wilma] });
+      expect(update).not.toMatchObject({ '@delete': [fred] });
     });
 
     test('voids an operation in which deleted triples not found', async () => {
@@ -1139,6 +1265,19 @@ describe('SU-Set Dataset', () => {
       await expect(ssd.apply(
         remote.sentOperation({}, { '@id': 'fred', 'name': 'Fred' }, { attr }),
         local.join(remote.time))).rejects.toThrowError('Invalid signature');
+    });
+
+    test('ignores unverifiable operation concurrent with agreement', async () => {
+      transportSecurity.verify = () => { throw new Error('Invalid signature'); };
+      await ssd.transact(async () => [
+        local.tick().time,
+        await ssd.write({ '@insert': fred }),
+        true
+      ]);
+      const attr = { pid: 'bob', sig: Buffer.from('bob') };
+      await expect(ssd.apply(
+        remote.sentOperation({}, { '@id': 'wilma', 'name': 'Wilma' }, { attr }),
+        local.join(remote.time))).resolves.toBe(null);
     });
 
     test('constraint resolution is locally signed', async () => {

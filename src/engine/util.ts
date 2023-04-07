@@ -1,9 +1,9 @@
 import {
-  BehaviorSubject, concat, defaultIfEmpty, EMPTY, firstValueFrom, from, NEVER, Observable,
+  BehaviorSubject, concat, connect, defaultIfEmpty, EMPTY, firstValueFrom, from, NEVER, Observable,
   ObservableInput, ObservedValueOf, Observer, onErrorResumeNext, OperatorFunction, Subject,
   Subscription
 } from 'rxjs';
-import { mergeMap, publish, switchAll } from 'rxjs/operators';
+import { mergeMap, switchAll } from 'rxjs/operators';
 
 export const isArray = Array.isArray;
 
@@ -18,7 +18,9 @@ export function flatten<T>(bumpy: T[][]): T[] {
  * @param pump the map function that inflates the input to an observable output
  */
 export function inflate<T extends ObservableInput<any>, O extends ObservableInput<any>>(
-  input: O, pump: (p: ObservedValueOf<O>) => T): Observable<ObservedValueOf<T>> {
+  input: O,
+  pump: (p: ObservedValueOf<O>) => T
+): Observable<ObservedValueOf<T>> {
   return from(input).pipe(mergeMap(pump));
 }
 
@@ -53,30 +55,35 @@ export function completed(observable: Observable<unknown>): Promise<void> {
 export function delayUntil<T>(notifier: ObservableInput<unknown>): OperatorFunction<T, T> {
   return source =>
     source.pipe(
-      publish(published => {
+      connect(published => {
         const delayed = new Observable<T>(subscriber => {
           let buffering = true;
           const buffer: T[] = [];
           const subscription = new Subscription();
           subscription.add(
-            from(notifier).subscribe(
-              () => {
+            from(notifier).subscribe({
+              next() {
                 buffer.forEach(value => subscriber.next(value));
                 subscriber.complete();
               },
-              error => subscriber.error(error),
-              () => {
+              error(err) {
+                subscriber.error(err);
+              },
+              complete() {
                 buffering = false;
                 buffer.length = 0;
               }
-            )
-          );
+            }));
           subscription.add(
-            published.subscribe(
-              value => buffering && buffer.push(value),
-              error => subscriber.error(error)
-            )
-          );
+            published.subscribe({
+              next(value) {
+                if (buffering)
+                  buffer.push(value);
+              },
+              error(err) {
+                subscriber.error(err);
+              }
+            }));
           subscription.add(() => {
             buffer.length = 0;
           });
@@ -171,6 +178,11 @@ export function binaryFold<T, R>(
 export function mapObject(
   o: {}, fn: (k: string, v: any) => { [key: string]: any } | undefined): { [key: string]: any } {
   return Object.assign({}, ...Object.entries(o).map(([k, v]) => fn(k, v)));
+}
+
+export function *mapIter<T, R>(it: Iterable<T>, fn: (v: T) => R): Iterable<R> {
+  for (let v of it)
+    yield(fn(v));
 }
 
 export function *deepValues(

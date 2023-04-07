@@ -94,6 +94,15 @@ export interface CausalOperation<T, C extends CausalClock>
   extends CausalTimeRange<C>, Operation<ItemTids<T>> {
 }
 
+export namespace CausalOperation {
+  export function flatten<T>(op: Operation<ItemTids<T>>) {
+    return {
+      deletes: flattenItemTids(op.deletes),
+      inserts: flattenItemTids(op.inserts)
+    };
+  }
+}
+
 export type ItemTids<T> = [item: T, tids: string[]];
 type ItemTid<T> = [item: T, tid: string];
 namespace ItemTid {
@@ -245,10 +254,7 @@ export abstract class FusableCausalOperation<T, C extends CausalClock>
       constructSet(items?: Iterable<ItemTid<T>>) {
         return newFlatIndexSet(items);
       }
-    }({
-      deletes: flattenItemTids(op.deletes),
-      inserts: flattenItemTids(op.inserts)
-    });
+    }(CausalOperation.flatten(op));
   }
 
   private newIndexMap = () => {
@@ -286,7 +292,8 @@ export function expandItemTids<T, M extends IndexMap<T, string[]>>(
 }
 
 export function *flattenItemTids<T>(
-  itemsTids: Iterable<ItemTids<T>>): Iterable<ItemTid<T>> {
+  itemsTids: Iterable<ItemTids<T>>
+): Iterable<ItemTid<T>> {
   for (let itemTids of itemsTids) {
     const [item, tids] = itemTids;
     for (let tid of tids)

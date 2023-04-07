@@ -7,8 +7,9 @@ import { CausalOperator } from '../ops';
 import { JournalOperation } from './JournalOperation';
 import { JournalEntry, TickTid } from './JournalEntry';
 import { EntryBuilder, JournalState } from './JournalState';
-import { defaultIfEmpty, firstValueFrom, Observable, Subject as Source } from 'rxjs';
+import { firstValueFrom, Observable, Subject as Source } from 'rxjs';
 import { MeldOperation, MeldOperationSpec } from '../MeldOperation';
+import { flowable } from 'rx-flowable';
 
 export { JournalState, JournalEntry, EntryBuilder };
 
@@ -147,7 +148,7 @@ export class Journal {
   private entryInTickRange(range: { lt: string; gt: string, reverse?: boolean }) {
     return this.withLockedHistory(async () => {
       const [foundKey, value] = await firstValueFrom(
-        this.store.read({ ...range, limit: 1 }).pipe(defaultIfEmpty([])));
+        flowable(this.store.read({ ...range, limit: 1 })), { defaultValue: [] });
       return foundKey != null && value != null ? {
         return: JournalEntry.fromJson(this, foundKey, MsgPack.decode(value))
       } : {};

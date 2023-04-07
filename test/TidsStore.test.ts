@@ -94,5 +94,43 @@ describe('TIDs Store', () => {
       await expect(tidsStore.findTripleTids(fredName)).resolves.toEqual(['tid1']);
       await expect(tidsStore.findTripleTids(fredHeight)).resolves.toEqual(['tid2']);
     });
+
+    test('Does not find triple for unmatched subject and predicate', done => {
+      const found = tidsStore.findTriples(
+        rdf.namedNode('http://test.m-ld.org/fred'),
+        rdf.namedNode('http://test.m-ld.org/#height'));
+      found.subscribe({
+        next: () => { done('Unexpected triple found'); },
+        complete: () => done()
+      });
+    });
+
+    test('Finds triple for subject and predicate', done => {
+      // Add an extra triple before and after to ensure correct range
+      const fredHeight = rdf.quad(
+        rdf.namedNode('http://test.m-ld.org/fred'),
+        rdf.namedNode('http://test.m-ld.org/#height'), // lexically before
+        rdf.literal('6'));
+      const wilmaName = rdf.quad(
+        rdf.namedNode('http://test.m-ld.org/wilma'), // lexically after
+        rdf.namedNode('http://test.m-ld.org/#name'),
+        rdf.literal('Wilma'));
+      expect.hasAssertions();
+      Promise.all([
+        doCommit({ inserts: [[fredHeight, 'tid2']] }),
+        doCommit({ inserts: [[wilmaName, 'tid3']] })
+      ]).then(() => {
+        const found = tidsStore.findTriples(
+          rdf.namedNode('http://test.m-ld.org/fred'),
+          rdf.namedNode('http://test.m-ld.org/#name'));
+        found.subscribe({
+          next: ({ value, next }) => {
+            expect(value.equals(fredName.object)).toBe(true);
+            next();
+          },
+          complete: () => done()
+        });
+      });
+    });
   });
 });

@@ -21,6 +21,7 @@ export interface MeldIoConfig extends MeldConfig {
 export class IoRemotes extends PubsubRemotes {
   private readonly socket: Socket;
 
+  /** @type ConstructRemotes */
   constructor(
     config: MeldIoConfig,
     extensions: () => Promise<MeldExtensions>,
@@ -38,17 +39,32 @@ export class IoRemotes extends PubsubRemotes {
     this.socket = config.io != null ?
       connect(config.io.uri, optsToUse) : connect(optsToUse);
     this.socket
+      // includes a successful reconnection
       .on('connect', () => this.onConnect())
-      .on('connect_error', err => this.close(err))
-      .on('reconnect_error', err => this.log.warn(err))
-      .on('reconnect_failed', () => this.close('IO reconnect failed'))
-      .on('disconnect', () => this.onDisconnect())
+      // https://socket.io/docs/v4/client-socket-instance/#connect_error
+      .on('connect_error', err => this.onConnectError(
+        err, (<any>err)['type'] !== 'TransportError'))
+      .on('reconnect_error', err => this.onConnectError(err, false)) // Already disconnected
+      // reconnect_failed will only happen if reconnectionAttempts != Infinity (default)
+      .on('reconnect_failed', () => this.onConnectError(
+        'IO reconnect failed', true))
+      // https://socket.io/docs/v4/client-socket-instance/#disconnect
+      .on('disconnect', reason => reason !== 'io client disconnect' &&
+        this.onConnectError(reason, reason === 'io server disconnect'))
       .on('presence', () => this.onPresenceChange())
       .on('operation', (payload: Uint8Array) => this.onOperation(payload))
       .on('send', (params: SendParams, msg: Uint8Array) => this.onSent(msg, params))
       .on('reply', (params: ReplyParams, msg: Uint8Array) => this.onReply(msg, params))
       .on('notify', (params: NotifyParams, msg: Uint8Array) =>
         this.onNotify(params.channelId, msg));
+  }
+
+  onConnectError(error: Error | string, isFatal: boolean) {
+    this.log.warn(typeof error == 'string' ? error : error.message);
+    if (isFatal)
+      this.close(error).catch();
+    else
+      this.onDisconnect();
   }
 
   async close(err?: any): Promise<void> {
