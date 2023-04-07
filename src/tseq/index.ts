@@ -2,7 +2,27 @@ abstract class TSeqNode implements Iterable<TSeqCharNode> {
   /** Arrays per-process, sorted by process ID */
   private readonly rest: TSeqArray[] = [];
 
-  abstract getPath(): TSeqName[];
+  static compare = (n1: TSeqNode, n2: TSeqNode) => {
+    const path1 = n1.path, path2 = n2.path;
+    for (let i = 0; i < path1.length && i < path2.length; i++) {
+      const [pid1, index1] = path1[i];
+      const [pid2, index2] = path2[i];
+      if (pid1 < pid2)
+        return -1;
+      if (pid1 > pid2)
+        return 1;
+      if (index1 < index2)
+        return -1
+      if (index1 > index2)
+        return 1;
+    }
+    return 0;
+  }
+
+  protected constructor(
+    readonly path: TSeqName[]
+  ) {
+  }
 
   // next(afterPid?: string): TSeqCharNode | undefined {
   //   for (
@@ -24,19 +44,11 @@ abstract class TSeqNode implements Iterable<TSeqCharNode> {
   }
 
   /** @returns the actually-affected character nodes (ignoring empty -> empty) */
-  *applyAt([[[pid, index], ...tail], content]: TSeqRun): Iterable<TSeqSplice> {
+  *applyAt([[[pid, index], ...tail], content]: TSeqRun): Iterable<TSeqCharNode> {
     // If a pure delete, don't force creation
     const restIndex = this.getRestIndex(pid, typeof content == 'string');
-    if (restIndex > -1) {
-      let restCharIndex = 0;
-      for (let i = 0; i < restIndex; i++)
-        restCharIndex += this.rest[restIndex].length;
-      const splices = this.rest[restIndex].applyAt(index, [tail, content]);
-      for (let splice of splices) {
-        splice[0] += restCharIndex;
-        yield splice;
-      }
-    }
+    if (restIndex > -1)
+      yield *this.rest[restIndex].applyAt(index, [tail, content]);
   }
 
   *[Symbol.iterator](): IterableIterator<TSeqCharNode> {
@@ -66,13 +78,13 @@ abstract class TSeqNode implements Iterable<TSeqCharNode> {
   }
 
   toJSON(): any {
-    return this.rest;
+    return this.rest.map(array => array.toJSON());
   }
 
   restFromJSON(json: any[]) {
     this.rest.push(...json
-      .map(array => TSeqArray.fromJSON(array, this))
-      .sort((r1, r2) => r1.pid.localeCompare(r2.pid)));
+    .map(array => TSeqArray.fromJSON(array, this))
+    .sort((r1, r2) => r1.pid.localeCompare(r2.pid)));
   }
 }
 
@@ -84,7 +96,7 @@ class TSeqCharNode extends TSeqNode {
     /** Index into sparse container array */
     readonly index: number
   ) {
-    super();
+    super(container.parentNode.path.concat([[container.pid, index]]));
   }
 
   toJSON() {
@@ -117,11 +129,6 @@ class TSeqCharNode extends TSeqNode {
     this._char = char;
   }
 
-  getPath(): TSeqName[] {
-    const name: TSeqName = [this.container.pid, this.index];
-    return this.container.parentNode.getPath().concat([name]);
-  }
-
   /**
    * 'Empty' is equivalent to an empty slot in the enclosing array, so subject
    * to garbage collection.
@@ -134,15 +141,6 @@ class TSeqCharNode extends TSeqNode {
   //   // When run out of arrays, go to container
   //   return super.next(afterPid) ?? this.container.nodeAfter(this.index);
   // }
-
-  *applyAt([[[pid, index], ...tail], content]: TSeqRun): Iterable<TSeqSplice> {
-    const splices = super.applyAt([[[pid, index], ...tail], content]);
-    for (let splice of splices) {
-      if (this.char)
-        splice[0]++;
-      yield splice;
-    }
-  }
 
   *[Symbol.iterator](): IterableIterator<TSeqCharNode> {
     if (this.char)
@@ -174,11 +172,12 @@ class TSeqCharIterator implements Iterable<TSeqCharNode> {
   seekTo(predicate: true | ((node: TSeqCharNode) => boolean)) {
     for (let node of this) {
       if (predicate === true || predicate(node))
-        return this._charNode;
+        return this;
     }
+    return this;
   }
 
-  seekNext() {
+  next() {
     return this.seekTo(true);
   }
 
@@ -206,14 +205,15 @@ class TSeqArray implements Iterable<TSeqCharNode> {
   constructor(
     readonly pid: string,
     readonly parentNode: TSeqNode
-  ) {}
+  ) {
+  }
 
   toJSON() {
     const { pid, start, array } = this;
     if (array.every(node => !node?.hasRest))
       return [pid, start, array.map(node => node?.char || '\x00').join('')];
     else
-      return [pid, start, ...array];
+      return [pid, start, ...array.map(node => node?.toJSON() ?? '')];
   }
 
   static fromJSON(json: any[], parentNode: TSeqNode): TSeqArray {
@@ -301,25 +301,26 @@ class TSeqArray implements Iterable<TSeqCharNode> {
     }
   }
 
-  *applyAt(index: number, [path, content]: TSeqRun): Iterable<TSeqSplice> {
+  *applyAt(index: number, [path, content]: TSeqRun): Iterable<TSeqCharNode> {
     if (path.length) {
       // Don't create a non-existent node if it's just deletes
       const node = typeof content == 'number' ? this.at(index) : this.setAt(index);
-      yield *node?.applyAt([path, content]) ?? [];
+      if (node)
+        yield *node.applyAt([path, content]);
     } else {
       yield *new TSeqArray.RunApplication(this, index).apply(content);
     }
   }
 
-  private static RunApplication = class extends TSeqCharIterator {
-    splice: TSeqSplice | undefined;
-
-    constructor(readonly array: TSeqArray, private index: number) {
-      // Start tracking the character index from zero
-      super(array);
+  // TODO: Does not need to be a class any more
+  private static RunApplication = class {
+    constructor(
+      readonly array: TSeqArray,
+      private index: number
+    ) {
     }
 
-    *apply(content: string | number): Iterable<TSeqSplice> {
+    *apply(content: string | number): Iterable<TSeqCharNode> {
       if (typeof content == 'number') {
         // Applying a run of unsets
         for (let c = 0; c < content; c++, this.index++)
@@ -329,8 +330,6 @@ class TSeqArray implements Iterable<TSeqCharNode> {
         for (let c = 0; c < content.length; c++, this.index++)
           yield *this.setChar(content.charAt(c));
       }
-      if (this.splice != null)
-        yield this.splice;
     }
 
     private *setChar(char: string) {
@@ -338,22 +337,9 @@ class TSeqArray implements Iterable<TSeqCharNode> {
         char = '';
       let node = this.array.at(this.index);
       if (char || (node && node.char)) {
-        const replacing = !!node;
-        // Find the character index of the current container index
-        // TODO: This seek is O(container.length)
-        this.seekTo(charNode =>
-          charNode.container === this.array && charNode.index >= this.index);
         node ??= this.array.setAt(this.index, char);
         node.char = char;
-        if (this.splice != null && this.charIndex > this.splice[0] + 1) {
-          yield this.splice;
-          delete this.splice;
-        }
-        this.splice ??= [this.charIndex == -1 ? 0 : this.charIndex, 0];
-        if (replacing)
-          this.splice[1]++; // deleteCount
-        if (char)
-          this.splice[2] = (this.splice[2] ?? '') + char; // insert
+        yield node;
       }
     }
   };
@@ -376,7 +362,6 @@ class TSeqArray implements Iterable<TSeqCharNode> {
 
 type TSeqName = [pid: string, index: number];
 type TSeqRun = [path: TSeqName[], content: string | number];
-type TSeqSplice = Parameters<TSeq['splice']>;
 
 export class TSeqOperation {
   static fromJSON(json: any) {
@@ -405,30 +390,25 @@ export class TSeqOperation {
 }
 
 export class TSeq extends TSeqNode {
-  private readonly ticks: { [pid: string]: number };
+  private readonly ticks: { [pid: string]: number } = {};
 
   constructor(
-    private readonly pid: string
+    readonly pid: string
   ) {
-    super();
-    this.ticks = { [pid]: 0 };
+    super([]);
   }
 
   toJSON() {
-    const { pid, ticks } = this;
-    return [pid, ticks, ...super.toJSON()];
+    const { ticks } = this;
+    return [ticks, ...super.toJSON()];
   }
 
-  static fromJSON(json: any): TSeqNode {
-    const [pid, ticks, ...rest] = json;
+  static fromJSON(pid: string, json: any): TSeq {
+    const [ticks, ...rest] = json;
     const rtn = new TSeq(pid);
     Object.assign(rtn.ticks, ticks);
     rtn.restFromJSON(rest);
     return rtn;
-  }
-
-  getPath() {
-    return [];
   }
 
   toString() {
@@ -439,7 +419,7 @@ export class TSeq extends TSeqNode {
   }
 
   apply(operations: TSeqOperation[]) {
-    const splices: Parameters<TSeq['splice']>[] = [];
+    let changed = false;
     for (let operation of operations) {
       // Inserts tick the process clock
       const expectedTick =
@@ -448,10 +428,12 @@ export class TSeq extends TSeqNode {
         continue; // Ignore old operation
       if (operation.tick > expectedTick)
         throw new RangeError(`missed operation from ${operation.pid}`);
-      splices.push(...this.applyAt(operation.run));
+      // TODO: Return splices
+      for (let _ of this.applyAt(operation.run))
+        changed = true;
       this.ticks[operation.pid] = operation.tick;
     }
-    return splices;
+    return changed;
   }
 
   splice(index: number, deleteCount: number, content = ''): TSeqOperation[] {
@@ -493,6 +475,7 @@ export class TSeq extends TSeqNode {
     if (!content)
       return [];
     // Any insert ticks our clock
+    this.ticks[this.pid] ??= 0;
     this.ticks[this.pid]++;
     const charIt = this.charItFrom(index);
     const inserts: TSeqCharNode[] = Array(content.length);
@@ -501,12 +484,12 @@ export class TSeq extends TSeqNode {
       while (node && c < content.length) {
         if (!node.container.setIfEmpty(node.index + 1, content.charAt(c)))
           break;
-        inserts[c++] = node = charIt.seekNext()!;
+        inserts[c++] = node = charIt.next().charNode!;
       }
       content = content.slice(c);
     }
     if (content) {
-      const next = charIt.seekNext();
+      const next = charIt.next().charNode;
       const newNodes = !next || next.container === node?.container ?
         // Append to the current
         (node ?? this).push(this.pid, content) :
@@ -535,8 +518,8 @@ export class TSeq extends TSeqNode {
     for (let [node, run] of affected) {
       run.unshift(node);
       yield new TSeqOperation([
-        node.getPath(),
-        run.every(node => node.isEmpty) ?
+        node.path,
+        run.every(node => !node.char) ?
           run.length : // A pure deletion with count
           run.map(node => node.char ? node.char : '\x00').join('')
       ], this.ticks[node.container.pid]);

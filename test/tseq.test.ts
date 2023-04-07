@@ -1,4 +1,4 @@
-import { TSeq, TSeqOperation } from '../src/tseq/index';
+import { TSeq, TSeqOperation } from '../src/tseq';
 import { jsonify } from './testUtil';
 
 describe('TSeq CRDT', () => {
@@ -68,28 +68,37 @@ describe('TSeq CRDT', () => {
     test('ignores replay insert', () => {
       const tSeq = new TSeq('p1');
       const operations = tSeq.splice(0, 0, 'hello world');
-      expect(tSeq.apply(operations)).toEqual([]);
+      expect(tSeq.apply(operations)).toBe(false);
     });
 
     test('ignores replay delete', () => {
       const tSeq = new TSeq('p1');
       tSeq.splice(0, 0, 'hello world');
       const operations = tSeq.splice(5, 6);
-      expect(tSeq.apply(operations)).toEqual([]);
+      expect(tSeq.apply(operations)).toBe(false);
     });
 
     test('applies initial content', () => {
       const tSeq1 = new TSeq('p1'), tSeq2 = new TSeq('p2');
       const operations = tSeq1.splice(0, 0, 'hello world');
-      expect(tSeq2.apply(operations)).toEqual([[0, 0, 'hello world']]);
+      expect(tSeq2.apply(operations)).toBe(true);
       expect(tSeq2.toString()).toBe('hello world');
+    });
+
+    test('returned splices are sequential', () => {
+      const tSeq1 = new TSeq('p1'), tSeq2 = new TSeq('p2');
+      tSeq2.apply(tSeq1.splice(0, 0, 'hell world'));
+      tSeq2.apply(tSeq1.splice(4, 0, 'o'));
+      tSeq2.apply(tSeq1.splice(0, 6));
+      expect(tSeq1.toString()).toBe('world');
+      expect(tSeq2.toString()).toBe('world');
     });
 
     test('ignores duplicate operation', () => {
       const tSeq1 = new TSeq('p1'), tSeq2 = new TSeq('p2');
       const operations = tSeq1.splice(0, 0, 'hello world');
-      expect(tSeq2.apply(operations)).toEqual([[0, 0, 'hello world']]);
-      expect(tSeq2.apply(operations)).toEqual([]);
+      expect(tSeq2.apply(operations)).toBe(true);
+      expect(tSeq2.apply(operations)).toBe(false);
     });
 
     test('throws if missed message', () => {
@@ -125,14 +134,14 @@ describe('TSeq CRDT', () => {
       const tSeq = new TSeq('p1');
       tSeq.splice(0, 0, 'hello world');
       expect(jsonify(tSeq.toJSON())).toEqual([
-        'p1', { 'p1': 1 }, ['p1', 0, 'hello world']
+        { 'p1': 1 }, ['p1', 0, 'hello world']
       ]);
       tSeq.splice(11, 0, '!');
       const json = jsonify(tSeq.toJSON());
       expect(json).toEqual([
-        'p1', { 'p1': 2 }, ['p1', 0, 'hello world!']
+        { 'p1': 2 }, ['p1', 0, 'hello world!']
       ]);
-      const clone = TSeq.fromJSON(json);
+      const clone = TSeq.fromJSON('p2', json);
       expect(clone.toString()).toBe('hello world!');
       expect(jsonify(clone.toJSON())).toEqual(json);
     });
