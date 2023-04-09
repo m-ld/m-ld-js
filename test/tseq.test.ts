@@ -146,6 +146,35 @@ describe('TSeq CRDT', () => {
       expect(jsonify(clone.toJSON())).toEqual(json);
     });
 
+    test('jsonify with garbage collected nodes', () => {
+      const tSeq = new TSeq('p1');
+      tSeq.splice(0, 0, 'hello world');
+      tSeq.splice(0, 6);
+      tSeq.splice(3, 2);
+      expect(jsonify(tSeq.toJSON())).toEqual([
+        { 'p1': 1 }, ['p1', 6, 'wor']
+      ]);
+    });
+
+    test('jsonify mixed string', () => {
+      const tSeq = new TSeq('p1');
+      tSeq.splice(0, 0, 'hell world');
+      tSeq.splice(4, 0, 'o');
+      expect(jsonify(tSeq.toJSON())).toEqual([
+        { 'p1': 2 }, ['p1', 0, "hel", ["l", ["p1", 0, "o"]], " world"]
+      ]);
+    });
+
+    test('jsonify with garbage collected array', () => {
+      const tSeq = new TSeq('p1');
+      tSeq.splice(0, 0, 'hell world');
+      tSeq.splice(4, 0, 'o');
+      tSeq.splice(4, 1);
+      expect(jsonify(tSeq.toJSON())).toEqual([
+        { 'p1': 2 }, ['p1', 0, 'hell world']
+      ]);
+    });
+
     test('jsonify operation', () => {
       const ops = new TSeq('p1').splice(0, 0, 'hello world');
       expect(TSeqOperation.fromJSON(jsonify(ops[0]))).toEqual(ops[0]);

@@ -51,6 +51,13 @@ abstract class TSeqNode implements Iterable<TSeqCharNode> {
       yield *this.rest[restIndex].applyAt(index, [tail, content]);
   }
 
+  gc(array: TSeqArray) {
+    if (array.length === 0) {
+      const index = this.getRestIndex(array.pid);
+      this.rest.splice(index, 1);
+    }
+  }
+
   *[Symbol.iterator](): IterableIterator<TSeqCharNode> {
     for (let array of this.rest)
       yield *array;
@@ -83,8 +90,8 @@ abstract class TSeqNode implements Iterable<TSeqCharNode> {
 
   restFromJSON(json: any[]) {
     this.rest.push(...json
-    .map(array => TSeqArray.fromJSON(array, this))
-    .sort((r1, r2) => r1.pid.localeCompare(r2.pid)));
+      .map(array => TSeqArray.fromJSON(array, this))
+      .sort((r1, r2) => r1.pid.localeCompare(r2.pid)));
   }
 }
 
@@ -99,19 +106,17 @@ class TSeqCharNode extends TSeqNode {
     super(container.parentNode.path.concat([[container.pid, index]]));
   }
 
-  toJSON() {
-    return this.hasRest ? [this._char, ...super.toJSON()] : this._char;
+  toJSON(): any[] {
+    if (!this.hasRest)
+      throw new RangeError('A plain character should be serialised as a string');
+    return [this._char, ...super.toJSON()];
   }
 
   static fromJSON(json: any, container: TSeqArray, index: number): TSeqCharNode {
     const rtn = new TSeqCharNode(container, index);
-    if (Array.isArray(json)) {
-      const [char, ...rest] = json;
-      rtn.char = char;
-      rtn.restFromJSON(rest);
-    } else {
-      rtn.char = json;
-    }
+    const [char, ...rest] = json;
+    rtn.restFromJSON(rest);
+    rtn.char = char;
     return rtn;
   }
 
@@ -121,12 +126,13 @@ class TSeqCharNode extends TSeqNode {
 
   set char(char: string) {
     if (char.length > 1)
-      throw new RangeError('TSeq node value is none or one character');
+      throw new RangeError('TSeq node value is one character');
     if (char === '\x00') // Used in serialisations
       char = '';
-    if (!this._char === !char)
-      this.container.onCharSet(this);
+    const changed = !this._char !== !char;
     this._char = char;
+    if (changed)
+      this.container.onCharSet(this);
   }
 
   /**
@@ -135,6 +141,10 @@ class TSeqCharNode extends TSeqNode {
    */
   get isEmpty() {
     return !this.char && !this.hasRest;
+  }
+
+  static isEmpty(node: TSeqCharNode | undefined) {
+    return !node || node.isEmpty;
   }
 
   // next(afterPid?: string): TSeqCharNode | undefined {
@@ -205,26 +215,40 @@ class TSeqArray implements Iterable<TSeqCharNode> {
   constructor(
     readonly pid: string,
     readonly parentNode: TSeqNode
-  ) {
-  }
+  ) {}
 
   toJSON() {
     const { pid, start, array } = this;
-    if (array.every(node => !node?.hasRest))
-      return [pid, start, array.map(node => node?.char || '\x00').join('')];
-    else
-      return [pid, start, ...array.map(node => node?.toJSON() ?? '')];
+    // Array contents is an array of mixed 'runs' (plain leaf character nodes),
+    // and character node tuples.
+    const arrayJson: (string | any[])[] = [];
+    for (let n = 0, j = -1; n < array.length; n++) {
+      const node = array[n];
+      if (!node?.hasRest) {
+        const char = node?.char || '\x00';
+        if (j > -1 && typeof arrayJson[j] == 'string')
+          arrayJson[j] += char;
+        else
+          j = arrayJson.push(char) - 1;
+      } else {
+        j = arrayJson.push(node.toJSON()) - 1;
+      }
+    }
+    return [pid, start, ...arrayJson];
   }
 
   static fromJSON(json: any[], parentNode: TSeqNode): TSeqArray {
-    let [pid, start, ...array] = json;
+    let [pid, index, ...arrayJson] = json;
     const rtn = new TSeqArray(pid, parentNode);
-    rtn.start = start;
-    if (array.length === 1 && typeof array[0] == 'string')
-      rtn.array.push(...rtn.newNodes(start, array[0]));
-    else
-      rtn.array.push(...array.map((c, i) =>
-        TSeqCharNode.fromJSON(c, rtn, start + i)));
+    rtn.start = index;
+    for (let json of arrayJson) {
+      if (typeof json == 'string') {
+        rtn.array.push(...rtn.newNodes(index, json));
+        index += json.length;
+      } else {
+        rtn.array.push(TSeqCharNode.fromJSON(json, rtn, index++));
+      }
+    }
     return rtn;
   }
 
@@ -237,8 +261,34 @@ class TSeqArray implements Iterable<TSeqCharNode> {
     return this._length;
   }
 
+  private trimEnd() {
+    while (TSeqCharNode.isEmpty(this.array[this.array.length - 1]))
+      this.array.length--;
+  }
+
+  private trimStart() {
+    const trimCount = this.array.findIndex(n => !TSeqCharNode.isEmpty(n));
+    if (trimCount > 0) {
+      this.start += trimCount;
+      this.array.splice(0, trimCount);
+    }
+  }
+
   onCharSet(node: TSeqCharNode) {
     this._length += (node.char ? 1 : -1);
+  }
+
+  gc(node: TSeqCharNode) {
+    if (node.isEmpty) {
+      if (node.index === this.start) {
+        this.trimStart();
+      } else if (node.index === this.end - 1) {
+        this.trimEnd();
+      } else if (node.index > this.start && node.index < this.end - 1) {
+        delete this.array[this.arrayIndex(node.index)];
+      }
+      this.parentNode.gc(this);
+    }
   }
 
   /** Caution: `undefined` is equivalent to an empty node */
@@ -254,13 +304,10 @@ class TSeqArray implements Iterable<TSeqCharNode> {
 
   setIfEmpty(index: number, char: string): TSeqCharNode | undefined {
     let node = this.at(index);
-    if (node) {
-      if (node.isEmpty) {
-        node.char = char;
-        return node;
-      }
-    } else {
-      return this.setAt(index, char);
+    if (TSeqCharNode.isEmpty(node)) {
+      node = this.ensureAt(index);
+      node.char = char;
+      return node;
     }
   }
 
@@ -272,15 +319,12 @@ class TSeqArray implements Iterable<TSeqCharNode> {
     }
   }
 
-  private setAt(index: number, char?: string) {
+  private ensureAt(index: number) {
     if (index < this.start) {
       this.array.unshift(...Array(this.start - index));
       this.start = index;
     }
-    const node = this.array[this.arrayIndex(index)] ??= new TSeqCharNode(this, index);
-    if (char)
-      node.char = char;
-    return node;
+    return this.array[this.arrayIndex(index)] ??= new TSeqCharNode(this, index);
   }
 
   push(content: string): TSeqCharNode[] {
@@ -304,7 +348,7 @@ class TSeqArray implements Iterable<TSeqCharNode> {
   *applyAt(index: number, [path, content]: TSeqRun): Iterable<TSeqCharNode> {
     if (path.length) {
       // Don't create a non-existent node if it's just deletes
-      const node = typeof content == 'number' ? this.at(index) : this.setAt(index);
+      const node = typeof content == 'number' ? this.at(index) : this.ensureAt(index);
       if (node)
         yield *node.applyAt([path, content]);
     } else {
@@ -317,8 +361,7 @@ class TSeqArray implements Iterable<TSeqCharNode> {
     constructor(
       readonly array: TSeqArray,
       private index: number
-    ) {
-    }
+    ) {}
 
     *apply(content: string | number): Iterable<TSeqCharNode> {
       if (typeof content == 'number') {
@@ -336,8 +379,8 @@ class TSeqArray implements Iterable<TSeqCharNode> {
       if (char === '\x00')
         char = '';
       let node = this.array.at(this.index);
-      if (char || (node && node.char)) {
-        node ??= this.array.setAt(this.index, char);
+      if (char || node?.char) {
+        node ??= this.array.ensureAt(this.index);
         node.char = char;
         yield node;
       }
@@ -419,7 +462,7 @@ export class TSeq extends TSeqNode {
   }
 
   apply(operations: TSeqOperation[]) {
-    let changed = false;
+    let affected: TSeqCharNode[] = [];
     for (let operation of operations) {
       // Inserts tick the process clock
       const expectedTick =
@@ -429,11 +472,12 @@ export class TSeq extends TSeqNode {
       if (operation.tick > expectedTick)
         throw new RangeError(`missed operation from ${operation.pid}`);
       // TODO: Return splices
-      for (let _ of this.applyAt(operation.run))
-        changed = true;
+      affected.push(...this.applyAt(operation.run));
       this.ticks[operation.pid] = operation.tick;
     }
-    return changed;
+    for (let node of affected)
+      node.container.gc(node);
+    return affected.length > 0;
   }
 
   splice(index: number, deleteCount: number, content = ''): TSeqOperation[] {
@@ -444,7 +488,10 @@ export class TSeq extends TSeqNode {
     // Seek to just-before the given index
     const deletes = this.delete(index, deleteCount);
     const inserts = this.insert(index, content);
-    return [...this.toRuns(...deletes, ...inserts)];
+    const ops = [...this.toRuns(...deletes, ...inserts)];
+    for (let node of deletes)
+      node.container.gc(node);
+    return ops;
   }
 
   private charItFrom(index: number) {
