@@ -1,7 +1,15 @@
 import * as spec from '@m-ld/m-ld-spec';
 import { MeldErrorStatus } from '@m-ld/m-ld-spec';
 import type {
-  ExpandedTermDef, Query, Read, Reference, Subject, SubjectProperty, Update, Variable, Write
+  ExpandedTermDef,
+  Query,
+  Read,
+  Reference,
+  Subject,
+  SubjectProperty,
+  Update,
+  Variable,
+  Write
 } from './jrql-support';
 import { Value } from './jrql-support';
 import { Subscription } from 'rxjs';
@@ -11,7 +19,7 @@ import { QueryableRdfSource } from './rdfjs-support';
 import { Consumable, Flowable } from 'rx-flowable';
 import { MeldMessageType } from './ns/m-ld';
 import { MeldApp } from './config';
-import { EncodedOperation } from './engine/index';
+import { EncodedOperation } from './engine';
 
 /**
  * A convenience type for a struct with a `@insert` and `@delete` property, like
@@ -484,32 +492,6 @@ export interface MeldContext {
    * @see https://www.w3.org/TR/json-ld/#expanded-term-definition
    */
   getTermDetail(key: string, type: keyof ExpandedTermDef): string | null;
-}
-
-/**
- * Some component of type `T` that is loaded from domain state. The current
- * value may change as the domain evolves; and may also be temporarily
- * unavailable during an update.
- * @internal
- */
-export interface StateManaged<T> {
-  /**
-   * Get the current or next available value, ready for use (or a rejection,
-   * e.g. if the clone is shutting down).
-   */
-  ready(): Promise<T>;
-  /**
-   * Initialises the component against the given clone state. This method could
-   * be used to read significant state into memory for the efficient
-   * implementation of a component's function.
-   */
-  readonly initialise?: StateProc;
-  /**
-   * Called to inform the component of an update to the state, _after_ it has
-   * been applied. If available, this procedure will be called for every state
-   * after that passed to {@link initialise}.
-   */
-  readonly onUpdate?: UpdateProc<MeldPreUpdate>;
 }
 
 /**

@@ -1,6 +1,13 @@
 import { any, anyName, blank } from '../api';
 import {
-  Atom, isPropertyObject, isReference, isSet, isValueObject, isVocabReference, Reference, Subject,
+  Atom,
+  isPropertyObject,
+  isReference,
+  isSet,
+  isValueObject,
+  isVocabReference,
+  Reference,
+  Subject,
   SubjectPropertyObject
 } from '../jrql-support';
 import { JsonldContext, mapValue } from './jsonld';
@@ -16,8 +23,7 @@ export class SubjectQuads {
     readonly ctx: JsonldContext,
     readonly rdf: RdfFactory,
     readonly vars?: Set<string>
-  ) {
-  }
+  ) {}
 
   *quads(
     object: SubjectPropertyObject,

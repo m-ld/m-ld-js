@@ -1,5 +1,12 @@
 import {
-  BufferEncoding, EncodedOperation, MeldLocal, MeldRemotes, OperationMessage, Revup, Snapshot
+  BufferEncoding,
+  EncodedOperation,
+  MeldLocal,
+  MeldRemotes,
+  OperationMessage,
+  Revup,
+  Snapshot,
+  StateManaged
 } from '../src/engine';
 import { mock, mockFn, MockProxy } from 'jest-mock-extended';
 import { asapScheduler, BehaviorSubject, EMPTY, from, NEVER, Observable, Observer } from 'rxjs';
@@ -9,8 +16,18 @@ import { AsyncMqttClient, IPublishPacket } from 'async-mqtt';
 import { EventEmitter } from 'events';
 import { observeOn } from 'rxjs/operators';
 import {
-  Attribution, Context, GraphSubject, GraphSubjects, InterimUpdate, MeldConfig, MeldConstraint,
-  MeldExtensions, MeldPreUpdate, MeldReadState, StateManaged, StateProc, Write
+  Attribution,
+  Context,
+  GraphSubject,
+  GraphSubjects,
+  InterimUpdate,
+  MeldConfig,
+  MeldConstraint,
+  MeldExtensions,
+  MeldPreUpdate,
+  MeldReadState,
+  StateProc,
+  Write
 } from '../src';
 import { AbstractLevel } from 'abstract-level';
 import { LiveValue } from '../src/engine/api-support';

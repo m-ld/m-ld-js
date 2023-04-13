@@ -1,14 +1,37 @@
 import { Iri } from '@m-ld/jsonld';
 import {
-  Constraint, Expression, Group, isConstraint, isConstruct, isDescribe, isGroup, isSelect,
-  isSubject, isUpdate, operators, Query, Read, Result, Subject, SubjectProperty, Update, Variable,
-  VariableExpression, Write
+  Constraint,
+  Expression,
+  Group,
+  isConstraint,
+  isConstruct,
+  isDescribe,
+  isGroup,
+  isSelect,
+  isSubject,
+  isUpdate,
+  operators,
+  Query,
+  Read,
+  Result,
+  Subject,
+  SubjectProperty,
+  Update,
+  Variable,
+  VariableExpression,
+  Write
 } from '../../jrql-support';
 import { Graph, PatchQuads } from '.';
 import { finalize, map, mergeMap, reduce } from 'rxjs/operators';
 import { concat, EMPTY, Observable, throwError } from 'rxjs';
 import {
-  canPosition, Literal, NamedNode, Quad, QueryableRdfSourceProxy, Term, TriplePos
+  canPosition,
+  Literal,
+  NamedNode,
+  Quad,
+  QueryableRdfSourceProxy,
+  Term,
+  TriplePos
 } from '../quads';
 import { JsonldContext } from '../jsonld';
 import { Algebra, Factory as SparqlFactory } from 'sparqlalgebrajs';
@@ -264,8 +287,10 @@ export class JrqlGraph {
     return op == null ? EMPTY : exec(op, vars);
   }
 
-  private operation(where: Group | Subject,
-    vars: Set<string>, ctx: JsonldContext
+  private operation(
+    where: Group | Subject,
+    vars: Set<string>,
+    ctx: JsonldContext
   ): Algebra.Operation {
     if (isSubject(where)) {
       const quads = this.jrql.quads(where, { mode: 'match', vars }, ctx);
@@ -274,7 +299,8 @@ export class JrqlGraph {
       const graph = array(where['@graph']),
         union = array(where['@union']),
         filter = array(where['@filter']),
-        values = array(where['@values']);
+        values = array(where['@values']),
+        binds = array(where['@bind']);
       const quads = graph.length ? this.jrql.quads(
         graph, { mode: 'match', vars }, ctx) : [];
       const bgp = this.sparql.createBgp(quads.map(this.toPattern));
@@ -285,13 +311,40 @@ export class JrqlGraph {
         this.sparql.createJoin([bgp, unionOp]) : unionOp ?? bgp;
       const filtered = filter.length ? this.sparql.createFilter(
         unioned, this.constraintExpr(filter, ctx)) : unioned;
-      return values.length ? this.sparql.createJoin(
+      const valued = values.length ? this.sparql.createJoin(
         [this.valuesExpr(values, ctx), filtered]) : filtered;
+      return this.extendedOperation(valued, binds, vars, ctx);
     }
   }
 
+  private extendedOperation(
+    operation: Algebra.Operation,
+    binds: VariableExpression[],
+    vars: Set<string>,
+    ctx: JsonldContext
+  ): Algebra.Operation {
+    return flatten(binds.map(bind => Object.entries(bind)))
+      .reduce((operation, [variable, expr]) => {
+        const varName = JRQL.matchVar(variable);
+        if (!varName)
+          throw new Error('Variable not specified in a bind expression');
+        vars.add(varName);
+        const varTerm = this.quads.variable(varName);
+        if (isConstraint(expr)) {
+          return Object.entries(expr).reduce((operation, [operator, expr]) =>
+            this.sparql.createExtend(operation, varTerm,
+              this.operatorExpr(operator, expr, ctx)), operation);
+        } else {
+          return this.sparql.createExtend(operation, varTerm,
+            this.sparql.createTermExpression(this.jrql.toObjectTerm(expr, ctx)));
+        }
+      }, operation);
+  }
+
   private valuesExpr(
-    values: VariableExpression[], ctx: JsonldContext): Algebra.Operation {
+    values: VariableExpression[],
+    ctx: JsonldContext
+  ): Algebra.Operation {
     const variableNames = new Set<string>();
     const variablesTerms = values.map(
       variableExpr => Object.entries(variableExpr)
@@ -302,20 +355,23 @@ export class JrqlGraph {
               throw new Error('Variable not specified in a values expression');
             variableNames.add(varName);
             if (isConstraint(expr))
-              throw new Error('Cannot use constraint in a values expression');
+              throw new Error('Cannot use a constraint in a values expression');
             const valueTerm = this.jrql.toObjectTerm(expr, ctx);
             if (valueTerm.termType !== 'NamedNode' && valueTerm.termType !== 'Literal')
               throw new Error('Invalid value in values expression');
             variableTerms[variable] = valueTerm;
             return variableTerms;
-          }, {}));
+          }, {}
+        ));
 
     return this.sparql.createValues(
       [...variableNames].map(this.quads.variable), variablesTerms);
   }
 
   private constraintExpr(
-    constraints: Constraint[], ctx: JsonldContext): Algebra.Expression {
+    constraints: Constraint[],
+    ctx: JsonldContext
+  ): Algebra.Expression {
     const expression = binaryFold(
       // Every constraint and every entry in a constraint is ANDed
       flatten(constraints.map(constraint => Object.entries(constraint))),

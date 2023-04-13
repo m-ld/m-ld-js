@@ -5,7 +5,7 @@ import { GlobalClock, TreeClock, TreeClockJson } from './clocks';
 import { Observable } from 'rxjs';
 import * as MsgPack from './msgPack';
 import { LiveValue } from './api-support';
-import { Attribution, MeldReadState, StateProc } from '../api';
+import { Attribution, MeldPreUpdate, MeldReadState, StateProc, UpdateProc } from '../api';
 import { Message } from './messages';
 
 /**
@@ -271,4 +271,31 @@ export interface ReadLatchable {
    * change until the procedure's returned promise has settled.
    */
   latch<T>(procedure: StateProc<MeldReadState, T>): Promise<T>;
+}
+
+/**
+ * Some component of type `T` that is loaded from domain state. The current
+ * value may change as the domain evolves; and may also be temporarily
+ * unavailable during an update.
+ * @internal
+ */
+export interface StateManaged<T> {
+  /**
+   * Get the current or next available value, ready for use (or a rejection,
+   * e.g. if the clone is shutting down).
+   */
+  ready(): Promise<T>;
+
+  /**
+   * Initialises the component against the given clone state. This method could
+   * be used to read significant state into memory for the efficient
+   * implementation of a component's function.
+   */
+  readonly initialise?: StateProc;
+  /**
+   * Called to inform the component of an update to the state, _after_ it has
+   * been applied. If available, this procedure will be called for every state
+   * after that passed to {@link initialise}.
+   */
+  readonly onUpdate?: UpdateProc<MeldPreUpdate>;
 }

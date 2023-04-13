@@ -1,5 +1,15 @@
 import {
-  any, clone, Construct, Describe, Group, MeldClone, MeldUpdate, Reference, Select, Subject, Update
+  any,
+  clone,
+  Construct,
+  Describe,
+  Group,
+  MeldClone,
+  MeldUpdate,
+  Reference,
+  Select,
+  Subject,
+  Update
 } from '../src';
 import { MockRemotes, testConfig } from './testClones';
 import { blankRegex, genIdRegex } from './testUtil';
@@ -172,6 +182,19 @@ describe('MeldClone', () => {
       await api.delete('wilma');
       await expect(api.get('fred')).resolves.toBeUndefined();
     });
+
+    test('inserts with a bound variable', async () => {
+      await api.write<Subject>({ '@id': 'fred', likes: 1 });
+      await api.write({
+        '@delete': { '@id': 'fred', likes: '?likes' },
+        '@insert': { '@id': 'fred', likes: '?newLikes' },
+        '@where': {
+          '@graph': { '@id': 'fred', likes: '?likes' },
+          '@bind': { '?newLikes': { '@plus': ['?likes', 1] } }
+        }
+      });
+      await expect(api.get('fred')).resolves.toEqual({ '@id': 'fred', likes: 2 });
+    });
   });
 
   describe('rdf/js support', () => {
@@ -197,11 +220,14 @@ describe('MeldClone', () => {
 
     test('selects quad', done => {
       api.write<Subject>({ '@id': 'fred', name: 'Fred' }).then(() =>
-        api.query(sparql.createProject(sparql.createBgp([sparql.createPattern(
+        api.query(sparql.createProject(
+          sparql.createBgp([sparql.createPattern(
             rdf.namedNode('http://test.m-ld.org/fred'),
             rdf.namedNode('http://test.m-ld.org/#name'),
-            rdf.variable('name'))]),
-          [rdf.variable('name')])).on('data', (binding: Binding) => {
+            rdf.variable('name')
+          )]),
+          [rdf.variable('name')]
+        )).on('data', (binding: Binding) => {
           expect(binding['?name'].equals(rdf.literal('Fred'))).toBe(true);
           done();
         }));

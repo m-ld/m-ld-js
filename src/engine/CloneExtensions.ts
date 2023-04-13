@@ -1,15 +1,14 @@
-import {
-  GraphSubject, MeldConstraint, MeldExtensions, MeldPreUpdate, MeldReadState, StateManaged
-} from '../api';
+import { GraphSubject, MeldConstraint, MeldExtensions, MeldPreUpdate, MeldReadState } from '../api';
 import { Context, Subject } from '../jrql-support';
 import { constraintFromConfig } from '../constraints';
 import { DefaultList } from '../lseq/DefaultList';
 import { InitialApp, MeldApp, MeldConfig } from '../config';
 import { M_LD } from '../ns';
 import { Logger } from 'loglevel';
-import { OrmDomain, OrmSubject, OrmUpdating } from '../orm/index';
+import { OrmDomain, OrmSubject, OrmUpdating } from '../orm';
 import { getIdLogger } from './logging';
 import { ExtensionSubjectInstance, SingletonExtensionSubject } from '../orm/ExtensionSubject';
+import { StateManaged } from './index';
 
 /**
  * Top-level aggregation of extensions. Created from the configuration and

@@ -482,6 +482,12 @@ export interface Group extends Pattern {
    * define [inline allowable value combinations]
    */
   '@values'?: VariableExpression | VariableExpression[];
+  /**
+   * Allows a value to be assigned to a variable. The variable introduced by the
+   * `@bind` clause must not be used in the same group graph pattern, but can be
+   * used in subsequent ones.
+   */
+  '@bind'?: VariableExpression | VariableExpression[];
 }
 
 /** @internal */

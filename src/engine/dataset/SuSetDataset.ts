@@ -1,8 +1,17 @@
 import {
-  Attribution, AuditOperation, GraphSubject, GraphSubjects, MeldConstraint, MeldError,
-  MeldExtensions, MeldPreUpdate, MeldUpdate, noTransportSecurity, StateManaged, UpdateTrace
+  Attribution,
+  AuditOperation,
+  GraphSubject,
+  GraphSubjects,
+  MeldConstraint,
+  MeldError,
+  MeldExtensions,
+  MeldPreUpdate,
+  MeldUpdate,
+  noTransportSecurity,
+  UpdateTrace
 } from '../../api';
-import { BufferEncoding, EncodedOperation, OperationMessage, Snapshot } from '..';
+import { BufferEncoding, EncodedOperation, OperationMessage, Snapshot, StateManaged } from '..';
 import { GlobalClock, TickTree, TreeClock } from '../clocks';
 import { Context, Query, Read, Write } from '../../jrql-support';
 import { Dataset, PatchQuads, PatchResult, TxnContext } from '.';
