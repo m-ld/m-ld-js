@@ -1,4 +1,4 @@
-import { TSeq, TSeqOperation } from '../src/tseq';
+import { TSeq } from '../src/tseq';
 import { jsonify } from './testUtil';
 
 describe('TSeq CRDT', () => {
@@ -8,9 +8,11 @@ describe('TSeq CRDT', () => {
       expect(tSeq.toString()).toBe('');
       const operation = tSeq.splice(0, 0, 'hello world');
       expect(tSeq.toString()).toBe('hello world');
-      expect(operation).toEqual([
-        { run: [[['p1', 0]], 'hello world'], tick: 1 }
-      ]);
+      expect(operation).toEqual([[
+        [['p1', 0]],
+        [['h', 1], ['e', 1], ['l', 1], ['l', 1], ['o', 1],
+          [' ', 1], ['w', 1], ['o', 1], ['r', 1], ['l', 1], ['d', 1]]
+      ]]);
     });
 
     test('append content', () => {
@@ -18,9 +20,9 @@ describe('TSeq CRDT', () => {
       tSeq.splice(0, 0, 'hello');
       const operation = tSeq.splice(5, 0, ' world');
       expect(tSeq.toString()).toBe('hello world');
-      expect(operation).toEqual([
-        { run: [[['p1', 5]], ' world'], tick: 2 }
-      ]);
+      expect(operation).toEqual([[
+        [['p1', 5]], [[' ', 2], ['w', 2], ['o', 2], ['r', 2], ['l', 2], ['d', 2]]
+      ]]);
     });
 
     test('prepend content', () => {
@@ -28,9 +30,9 @@ describe('TSeq CRDT', () => {
       tSeq.splice(0, 0, ' world');
       const operation = tSeq.splice(0, 0, 'hello');
       expect(tSeq.toString()).toBe('hello world');
-      expect(operation).toEqual([
-        { run: [[['p1', -5]], 'hello'], tick: 2 }
-      ]);
+      expect(operation).toEqual([[
+        [['p1', -5]], [['h', 2], ['e', 2], ['l', 2], ['l', 2], ['o', 2]]
+      ]]);
     });
 
     test('inject content', () => {
@@ -38,9 +40,9 @@ describe('TSeq CRDT', () => {
       tSeq.splice(0, 0, 'hell world');
       const operation = tSeq.splice(4, 0, 'o');
       expect(tSeq.toString()).toBe('hello world');
-      expect(operation).toEqual([
-        { run: [[['p1', 3], ['p1', 0]], 'o'], tick: 2 }
-      ]);
+      expect(operation).toEqual([[
+        [['p1', 3], ['p1', 0]], [['o', 2]]
+      ]]);
     });
 
     test('remove content', () => {
@@ -48,9 +50,16 @@ describe('TSeq CRDT', () => {
       tSeq.splice(0, 0, 'hello world');
       const operation = tSeq.splice(0, 6);
       expect(tSeq.toString()).toBe('world');
-      expect(operation).toEqual([
-        { run: [[['p1', 0]], 6], tick: 1 }
-      ]);
+      expect(operation).toEqual([[
+        [['p1', 0]], [['', 1], ['', 1], ['', 1], ['', 1], ['', 1], ['', 1]]
+      ]]);
+    });
+
+    test('remove all content', () => {
+      const tSeq = new TSeq('p1');
+      tSeq.splice(0, 0, 'hello world');
+      tSeq.splice(0, 11);
+      expect(tSeq.toString()).toBe('');
     });
 
     test('replace content', () => {
@@ -58,9 +67,9 @@ describe('TSeq CRDT', () => {
       tSeq.splice(0, 0, 'hello world');
       const operation = tSeq.splice(6, 5, 'bob');
       expect(tSeq.toString()).toBe('hello bob');
-      expect(operation).toEqual([
-        { run: [[['p1', 6]], 'bob\x00\x00'], tick: 2 }
-      ]);
+      expect(operation).toEqual([[
+        [['p1', 6]], [['b', 2], ['o', 2], ['b', 2], ['', 1], ['', 1]]
+      ]]);
     });
   });
 
@@ -94,18 +103,11 @@ describe('TSeq CRDT', () => {
       expect(tSeq2.toString()).toBe('world');
     });
 
-    test('ignores duplicate operation', () => {
+    test('ignores duplicate insert', () => {
       const tSeq1 = new TSeq('p1'), tSeq2 = new TSeq('p2');
       const operations = tSeq1.splice(0, 0, 'hello world');
       expect(tSeq2.apply(operations)).toBe(true);
       expect(tSeq2.apply(operations)).toBe(false);
-    });
-
-    test('throws if missed message', () => {
-      const tSeq1 = new TSeq('p1'), tSeq2 = new TSeq('p2');
-      tSeq1.splice(0, 0, 'hello world');
-      const operations = tSeq1.splice(5, 6);
-      expect(() => tSeq2.apply(operations)).toThrow(RangeError);
     });
 
     test('appends independent content', () => {
@@ -127,20 +129,52 @@ describe('TSeq CRDT', () => {
       expect(tSeq1.toString()).toBe('hi world');
       expect(tSeq2.toString()).toBe('hi world');
     });
+
+    test('applies historical delete', () => {
+      const tSeq1 = new TSeq('p1'), tSeq2 = new TSeq('p2');
+      tSeq2.apply(tSeq1.splice(0, 0, 'abc'));
+      const op1 = tSeq1.splice(3, 0, 'd');
+      const op2 = tSeq2.splice(1, 1); // 'b' has tick 1
+      tSeq2.apply(op1);
+      tSeq1.apply(op2);
+      expect(tSeq1.toString()).toBe('acd');
+      expect(tSeq2.toString()).toBe('acd');
+    });
+
+    test('leaves local nodes', () => {
+      const tSeq1 = new TSeq('p1'), tSeq2 = new TSeq('p2');
+      tSeq2.apply(tSeq1.splice(0, 0, 'ab'));
+      tSeq2.splice(2, 0, '1');
+      tSeq2.apply(tSeq1.splice(0, 2));
+      expect(tSeq2.toString()).toBe('1');
+    });
   });
 
   describe('jsonify', () => {
+    test('clone with JSON', () => {
+      const tSeq1 = new TSeq('p1');
+      tSeq1.splice(0, 0, 'abc');
+      const tSeq2 = TSeq.fromJSON('p2', tSeq1.toJSON());
+      expect(tSeq2.toString()).toBe('abc');
+      tSeq2.splice(1, 1);
+      expect(tSeq2.toString()).toBe('ac');
+    });
+
     test('jsonify plain string', () => {
       const tSeq = new TSeq('p1');
       tSeq.splice(0, 0, 'hello world');
-      expect(jsonify(tSeq.toJSON())).toEqual([
-        { 'p1': 1 }, ['p1', 0, 'hello world']
-      ]);
+      expect(jsonify(tSeq.toJSON())).toEqual({
+        tick: 1,
+        rest: [['p1', 0, ['h', 1], ['e', 1], ['l', 1], ['l', 1], ['o', 1],
+          [' ', 1], ['w', 1], ['o', 1], ['r', 1], ['l', 1], ['d', 1]]]
+      });
       tSeq.splice(11, 0, '!');
       const json = jsonify(tSeq.toJSON());
-      expect(json).toEqual([
-        { 'p1': 2 }, ['p1', 0, 'hello world!']
-      ]);
+      expect(json).toEqual({
+        tick: 2,
+        rest: [['p1', 0, ['h', 1], ['e', 1], ['l', 1], ['l', 1], ['o', 1],
+          [' ', 1], ['w', 1], ['o', 1], ['r', 1], ['l', 1], ['d', 1], ['!', 2]]]
+      });
       const clone = TSeq.fromJSON('p2', json);
       expect(clone.toString()).toBe('hello world!');
       expect(jsonify(clone.toJSON())).toEqual(json);
@@ -151,18 +185,22 @@ describe('TSeq CRDT', () => {
       tSeq.splice(0, 0, 'hello world');
       tSeq.splice(0, 6);
       tSeq.splice(3, 2);
-      expect(jsonify(tSeq.toJSON())).toEqual([
-        { 'p1': 1 }, ['p1', 6, 'wor']
-      ]);
+      expect(jsonify(tSeq.toJSON())).toEqual({
+        tick: 1,
+        rest: [['p1', 6, ['w', 1], ['o', 1], ['r', 1]]]
+      });
     });
 
     test('jsonify mixed string', () => {
       const tSeq = new TSeq('p1');
       tSeq.splice(0, 0, 'hell world');
       tSeq.splice(4, 0, 'o');
-      expect(jsonify(tSeq.toJSON())).toEqual([
-        { 'p1': 2 }, ['p1', 0, "hel", ["l", ["p1", 0, "o"]], " world"]
-      ]);
+      expect(jsonify(tSeq.toJSON())).toEqual({
+        'tick': 2,
+        'rest': [['p1', 0, ['h', 1], ['e', 1], ['l', 1],
+          ['l', 1, ['p1', 0, ['o', 2]]], [' ', 1],
+          ['w', 1], ['o', 1], ['r', 1], ['l', 1], ['d', 1]]]
+      });
     });
 
     test('jsonify with garbage collected array', () => {
@@ -170,14 +208,11 @@ describe('TSeq CRDT', () => {
       tSeq.splice(0, 0, 'hell world');
       tSeq.splice(4, 0, 'o');
       tSeq.splice(4, 1);
-      expect(jsonify(tSeq.toJSON())).toEqual([
-        { 'p1': 2 }, ['p1', 0, 'hell world']
-      ]);
-    });
-
-    test('jsonify operation', () => {
-      const ops = new TSeq('p1').splice(0, 0, 'hello world');
-      expect(TSeqOperation.fromJSON(jsonify(ops[0]))).toEqual(ops[0]);
+      expect(jsonify(tSeq.toJSON())).toEqual({
+        'tick': 2,
+        'rest': [['p1', 0, ['h', 1], ['e', 1], ['l', 1], ['l', 1],
+          [' ', 1], ['w', 1], ['o', 1], ['r', 1], ['l', 1], ['d', 1]]]
+      });
     });
   });
 });

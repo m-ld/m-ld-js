@@ -55,7 +55,8 @@ TSeqString
 Boils down to OwnedRegister:
 - owner has a tick
 - owner can set, at new tick
-- anyone can unset, at last-seen tick
+- anyone can unset, at last-seen tick _for that character_
+- once unset, tick can be dropped
 
 | A (owner)    | B   | C          |
 |--------------|-----|------------|

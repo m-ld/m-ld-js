@@ -12,31 +12,19 @@ abstract class TSeqNode implements Iterable<TSeqCharNode> {
       if (pid1 > pid2)
         return 1;
       if (index1 < index2)
-        return -1
+        return -1;
       if (index1 > index2)
         return 1;
     }
     return 0;
-  }
+  };
 
   protected constructor(
     readonly path: TSeqName[]
-  ) {
-  }
+  ) {}
 
-  // next(afterPid?: string): TSeqCharNode | undefined {
-  //   for (
-  //     let i = afterPid ? this.rest.findIndex(a => a.pid > afterPid) : 0;
-  //     i > -1 && i < this.rest.length;
-  //     i++
-  //   ) {
-  //     const [node] = this.rest[i];
-  //     if (node) return node;
-  //   }
-  // }
-
-  push(pid: string, content: string) {
-    return this.rest[this.getRestIndex(pid, true)].push(content);
+  push(pid: string, content: string, tick: number) {
+    return this.rest[this.getRestIndex(pid, true)].push(content, tick);
   }
 
   get hasRest() {
@@ -44,15 +32,15 @@ abstract class TSeqNode implements Iterable<TSeqCharNode> {
   }
 
   /** @returns the actually-affected character nodes (ignoring empty -> empty) */
-  *applyAt([[[pid, index], ...tail], content]: TSeqRun): Iterable<TSeqCharNode> {
+  *applyAt([[[pid, index], ...tail], content]: TSeqOperation): Iterable<TSeqCharNode> {
     // If a pure delete, don't force creation
-    const restIndex = this.getRestIndex(pid, typeof content == 'string');
+    const restIndex = this.getRestIndex(pid, content.some(([char]) => char));
     if (restIndex > -1)
       yield *this.rest[restIndex].applyAt(index, [tail, content]);
   }
 
   gc(array: TSeqArray) {
-    if (array.length === 0) {
+    if (array[Symbol.iterator]().next().done) {
       const index = this.getRestIndex(array.pid);
       this.rest.splice(index, 1);
     }
@@ -84,7 +72,7 @@ abstract class TSeqNode implements Iterable<TSeqCharNode> {
       return -1;
   }
 
-  toJSON(): any {
+  toJSON(): any[] {
     return this.rest.map(array => array.toJSON());
   }
 
@@ -97,6 +85,7 @@ abstract class TSeqNode implements Iterable<TSeqCharNode> {
 
 class TSeqCharNode extends TSeqNode {
   private _char = '';
+  private _tick = 0;
 
   constructor(
     readonly container: TSeqArray,
@@ -106,17 +95,15 @@ class TSeqCharNode extends TSeqNode {
     super(container.parentNode.path.concat([[container.pid, index]]));
   }
 
-  toJSON(): any[] {
-    if (!this.hasRest)
-      throw new RangeError('A plain character should be serialised as a string');
-    return [this._char, ...super.toJSON()];
+  toJSON(): [string, number, ...any[]][] {
+    return [this._char, this._tick, ...super.toJSON()];
   }
 
   static fromJSON(json: any, container: TSeqArray, index: number): TSeqCharNode {
     const rtn = new TSeqCharNode(container, index);
-    const [char, ...rest] = json;
+    const [char, tick, ...rest] = json;
+    rtn.set(char, tick);
     rtn.restFromJSON(rest);
-    rtn.char = char;
     return rtn;
   }
 
@@ -124,15 +111,18 @@ class TSeqCharNode extends TSeqNode {
     return this._char;
   }
 
-  set char(char: string) {
+  get tick() {
+    return this._tick;
+  }
+
+  set(char: ''): void;
+  set(char: string, tick: number): void;
+  set(char: string, tick?: number) {
     if (char.length > 1)
       throw new RangeError('TSeq node value is one character');
-    if (char === '\x00') // Used in serialisations
-      char = '';
-    const changed = !this._char !== !char;
     this._char = char;
-    if (changed)
-      this.container.onCharSet(this);
+    if (tick != null)
+      this._tick = tick;
   }
 
   /**
@@ -146,11 +136,6 @@ class TSeqCharNode extends TSeqNode {
   static isEmpty(node: TSeqCharNode | undefined) {
     return !node || node.isEmpty;
   }
-
-  // next(afterPid?: string): TSeqCharNode | undefined {
-  //   // When run out of arrays, go to container
-  //   return super.next(afterPid) ?? this.container.nodeAfter(this.index);
-  // }
 
   *[Symbol.iterator](): IterableIterator<TSeqCharNode> {
     if (this.char)
@@ -209,8 +194,6 @@ class TSeqArray implements Iterable<TSeqCharNode> {
   private readonly array: (TSeqCharNode | undefined)[] = [];
   /** inclusive minimum index */
   private start = 0;
-  /** character length, counts only filled character nodes */
-  private _length = 0;
 
   constructor(
     readonly pid: string,
@@ -219,35 +202,17 @@ class TSeqArray implements Iterable<TSeqCharNode> {
 
   toJSON() {
     const { pid, start, array } = this;
-    // Array contents is an array of mixed 'runs' (plain leaf character nodes),
-    // and character node tuples.
-    const arrayJson: (string | any[])[] = [];
-    for (let n = 0, j = -1; n < array.length; n++) {
-      const node = array[n];
-      if (!node?.hasRest) {
-        const char = node?.char || '\x00';
-        if (j > -1 && typeof arrayJson[j] == 'string')
-          arrayJson[j] += char;
-        else
-          j = arrayJson.push(char) - 1;
-      } else {
-        j = arrayJson.push(node.toJSON()) - 1;
-      }
-    }
-    return [pid, start, ...arrayJson];
+    return [pid, start, ...array.map(node => node?.toJSON())];
   }
 
   static fromJSON(json: any[], parentNode: TSeqNode): TSeqArray {
     let [pid, index, ...arrayJson] = json;
     const rtn = new TSeqArray(pid, parentNode);
     rtn.start = index;
-    for (let json of arrayJson) {
-      if (typeof json == 'string') {
-        rtn.array.push(...rtn.newNodes(index, json));
-        index += json.length;
-      } else {
-        rtn.array.push(TSeqCharNode.fromJSON(json, rtn, index++));
-      }
+    rtn.array.length = arrayJson.length;
+    for (let i = 0; i < arrayJson.length; i++) {
+      if (arrayJson[i])
+        rtn.array[i] = TSeqCharNode.fromJSON(arrayJson[i], rtn, index++);
     }
     return rtn;
   }
@@ -257,12 +222,8 @@ class TSeqArray implements Iterable<TSeqCharNode> {
     return this.start + this.array.length;
   }
 
-  get length() {
-    return this._length;
-  }
-
   private trimEnd() {
-    while (TSeqCharNode.isEmpty(this.array[this.array.length - 1]))
+    while (this.array.length > 0 && TSeqCharNode.isEmpty(this.array[this.array.length - 1]))
       this.array.length--;
   }
 
@@ -272,10 +233,6 @@ class TSeqArray implements Iterable<TSeqCharNode> {
       this.start += trimCount;
       this.array.splice(0, trimCount);
     }
-  }
-
-  onCharSet(node: TSeqCharNode) {
-    this._length += (node.char ? 1 : -1);
   }
 
   gc(node: TSeqCharNode) {
@@ -302,19 +259,19 @@ class TSeqArray implements Iterable<TSeqCharNode> {
     return index - this.start;
   }
 
-  setIfEmpty(index: number, char: string): TSeqCharNode | undefined {
+  setIfEmpty(index: number, char: string, tick: number): TSeqCharNode | undefined {
     let node = this.at(index);
     if (TSeqCharNode.isEmpty(node)) {
       node = this.ensureAt(index);
-      node.char = char;
+      node.set(char, tick);
       return node;
     }
   }
 
-  private *newNodes(firstIndex: number, content: string) {
+  private *newNodes(firstIndex: number, content: string, tick: number) {
     for (let c = 0; c < content.length; c++) {
       const node = new TSeqCharNode(this, firstIndex + c);
-      node.char = content.charAt(c);
+      node.set(content.charAt(c), tick);
       yield node;
     }
   }
@@ -327,65 +284,51 @@ class TSeqArray implements Iterable<TSeqCharNode> {
     return this.array[this.arrayIndex(index)] ??= new TSeqCharNode(this, index);
   }
 
-  push(content: string): TSeqCharNode[] {
-    this.array.push(...this.newNodes(this.end, content));
+  push(content: string, tick: number): TSeqCharNode[] {
+    this.array.push(...this.newNodes(this.end, content, tick));
     return <TSeqCharNode[]>this.array.slice(-content.length);
   }
 
-  unshift(pid: string, content: string): TSeqCharNode[] {
+  unshift(pid: string, content: string, tick: number): TSeqCharNode[] {
     if (pid === this.pid) {
       this.start -= content.length;
-      this.array.unshift(...this.newNodes(this.start, content));
+      this.array.unshift(...this.newNodes(this.start, content, tick));
       return <TSeqCharNode[]>this.array.slice(0, content.length);
     } else {
       this.start--;
       const node = new TSeqCharNode(this, this.start);
       this.array.unshift(node);
-      return node.push(pid, content);
+      return node.push(pid, content, tick);
     }
   }
 
-  *applyAt(index: number, [path, content]: TSeqRun): Iterable<TSeqCharNode> {
+  *applyAt(index: number, [path, content]: TSeqOperation): Iterable<TSeqCharNode> {
     if (path.length) {
       // Don't create a non-existent node if it's just deletes
-      const node = typeof content == 'number' ? this.at(index) : this.ensureAt(index);
+      const node = content.some(([char]) => char) ? this.ensureAt(index) : this.at(index);
       if (node)
         yield *node.applyAt([path, content]);
     } else {
-      yield *new TSeqArray.RunApplication(this, index).apply(content);
+      for (let c = 0; c < content.length; c++, index++) {
+        const [char, tick] = content[c];
+        let node = this.at(index);
+        if (char) {
+          // Ignore if our tick is ahead
+          if (node != null && tick <= node.tick)
+            continue;
+          node ??= this.ensureAt(index);
+          node.set(char, tick);
+          yield node;
+        } else if (node?.char) {
+          // Ignore if our tick is ahead
+          if (tick < node.tick)
+            return;
+          node.set(char, tick);
+          yield node;
+        }
+      }
     }
   }
-
-  // TODO: Does not need to be a class any more
-  private static RunApplication = class {
-    constructor(
-      readonly array: TSeqArray,
-      private index: number
-    ) {}
-
-    *apply(content: string | number): Iterable<TSeqCharNode> {
-      if (typeof content == 'number') {
-        // Applying a run of unsets
-        for (let c = 0; c < content; c++, this.index++)
-          yield *this.setChar('');
-      } else {
-        // Applying a run of combined unsets and sets
-        for (let c = 0; c < content.length; c++, this.index++)
-          yield *this.setChar(content.charAt(c));
-      }
-    }
-
-    private *setChar(char: string) {
-      if (char === '\x00')
-        char = '';
-      let node = this.array.at(this.index);
-      if (char || node?.char) {
-        node ??= this.array.ensureAt(this.index);
-        node.char = char;
-        yield node;
-      }
-    }
-  };
 
   *[Symbol.iterator](): Iterator<TSeqCharNode> {
     for (let node of this.array)
@@ -404,36 +347,11 @@ class TSeqArray implements Iterable<TSeqCharNode> {
 }
 
 type TSeqName = [pid: string, index: number];
-type TSeqRun = [path: TSeqName[], content: string | number];
-
-export class TSeqOperation {
-  static fromJSON(json: any) {
-    const { run, tick } = json;
-    return new TSeqOperation(run, tick);
-  }
-
-  constructor(
-    readonly run: TSeqRun,
-    readonly tick: number
-  ) {
-    const [path] = run;
-    if (!path.length)
-      throw new RangeError('a run must have a path');
-  }
-
-  get pid() {
-    const [path] = this.run, [pid] = path[path.length - 1];
-    return pid;
-  }
-
-  get hasInserts() {
-    const [, content] = this.run;
-    return typeof content == 'string';
-  }
-}
+type TSeqCharTick = [char: string, tick: number];
+export type TSeqOperation = [path: TSeqName[], content: TSeqCharTick[]];
 
 export class TSeq extends TSeqNode {
-  private readonly ticks: { [pid: string]: number } = {};
+  private tick = 0;
 
   constructor(
     readonly pid: string
@@ -441,15 +359,14 @@ export class TSeq extends TSeqNode {
     super([]);
   }
 
-  toJSON() {
-    const { ticks } = this;
-    return [ticks, ...super.toJSON()];
+  toJSON(): any {
+    return { tick: this.tick, rest: super.toJSON() };
   }
 
   static fromJSON(pid: string, json: any): TSeq {
-    const [ticks, ...rest] = json;
+    const { tick, rest } = json;
     const rtn = new TSeq(pid);
-    Object.assign(rtn.ticks, ticks);
+    rtn.tick = tick;
     rtn.restFromJSON(rest);
     return rtn;
   }
@@ -462,19 +379,10 @@ export class TSeq extends TSeqNode {
   }
 
   apply(operations: TSeqOperation[]) {
-    let affected: TSeqCharNode[] = [];
-    for (let operation of operations) {
-      // Inserts tick the process clock
-      const expectedTick =
-        (this.ticks[operation.pid] ?? 0) + (operation.hasInserts ? 1 : 0);
-      if (operation.tick < expectedTick)
-        continue; // Ignore old operation
-      if (operation.tick > expectedTick)
-        throw new RangeError(`missed operation from ${operation.pid}`);
-      // TODO: Return splices
-      affected.push(...this.applyAt(operation.run));
-      this.ticks[operation.pid] = operation.tick;
-    }
+    const affected: TSeqCharNode[] = [];
+    // TODO: Return splices
+    for (let operation of operations)
+      affected.push(...this.applyAt(operation));
     for (let node of affected)
       node.container.gc(node);
     return affected.length > 0;
@@ -509,7 +417,7 @@ export class TSeq extends TSeqNode {
       let d = 0;
       for (let node of charIt) {
         if (d === deleteCount) break;
-        (deletes[d++] = node).char = '';
+        (deletes[d++] = node).set('');
       }
       deletes.length = d; // In case beyond end
       return deletes;
@@ -522,14 +430,13 @@ export class TSeq extends TSeqNode {
     if (!content)
       return [];
     // Any insert ticks our clock
-    this.ticks[this.pid] ??= 0;
-    this.ticks[this.pid]++;
+    this.tick++;
     const charIt = this.charItFrom(index);
     const inserts: TSeqCharNode[] = Array(content.length);
     let node = charIt.charNode, c = 0;
     if (node?.container.pid === this.pid && !node.hasRest) {
       while (node && c < content.length) {
-        if (!node.container.setIfEmpty(node.index + 1, content.charAt(c)))
+        if (!node.container.setIfEmpty(node.index + 1, content.charAt(c), this.tick))
           break;
         inserts[c++] = node = charIt.next().charNode!;
       }
@@ -539,9 +446,9 @@ export class TSeq extends TSeqNode {
       const next = charIt.next().charNode;
       const newNodes = !next || next.container === node?.container ?
         // Append to the current
-        (node ?? this).push(this.pid, content) :
+        (node ?? this).push(this.pid, content, this.tick) :
         // Prepend to the array containing the next
-        next.container!.unshift(this.pid, content);
+        next.container!.unshift(this.pid, content, this.tick);
       for (let n of newNodes)
         inserts[c++] = n;
     }
@@ -564,12 +471,7 @@ export class TSeq extends TSeqNode {
     }
     for (let [node, run] of affected) {
       run.unshift(node);
-      yield new TSeqOperation([
-        node.path,
-        run.every(node => !node.char) ?
-          run.length : // A pure deletion with count
-          run.map(node => node.char ? node.char : '\x00').join('')
-      ], this.ticks[node.container.pid]);
+      yield [node.path, run.map(({ char, tick }) => [char, tick])];
     }
   }
 }
