@@ -1,6 +1,6 @@
 import { Graph } from '.';
 import { blank, GraphSubject } from '../../api';
-import { Atom, Result, Subject, Value } from '../../jrql-support';
+import { Atom, Result, Value } from '../../jrql-support';
 import { JsonldContext } from '../jsonld';
 import { inPosition, Quad, Quad_Object, Term } from '../quads';
 import { JRQL } from '../../ns';
@@ -10,30 +10,29 @@ import { isArray, mapObject } from '../util';
 import { SubjectQuads } from '../SubjectQuads';
 import { Binding } from '../../rdfjs-support';
 
-export interface JrqlQuadsOptions {
-  mode: JrqlMode;
-  /** The variable names found (sans '?') */
-  vars?: Set<string>;
-}
-
 export class JrqlQuads {
   constructor(
-    readonly graph: Graph) {
-  }
+    readonly graph: Graph
+  ) {}
 
   solutionSubject(
-    results: Result[] | Result, solution: Binding, ctx: JsonldContext): GraphSubject {
+    results: Result[] | Result,
+    solution: Binding,
+    ctx: JsonldContext
+  ): GraphSubject {
     const solutionId = this.graph.blankNode(blank());
     const pseudoPropertyQuads = Object.entries(solution).map(([variable, term]) => this.graph.quad(
       solutionId,
       this.graph.namedNode(JRQL.hiddenVar(variable.slice(1))),
-      inPosition('object', term)));
+      inPosition('object', term)
+    ));
     // Construct quads that represent the solution's variable values
     const subject = this.toApiSubject(pseudoPropertyQuads, [ /* TODO: list-items */], ctx);
     // Unhide the variables and strip out anything that's not selected
     return <GraphSubject>mapObject(subject, (key, value) => {
       switch (key) {
-        case '@id': return { [key]: value };
+        case '@id':
+          return { [key]: value };
         default:
           const varName = JRQL.matchHiddenVar(key), newKey = (varName ? '?' + varName : key);
           if (isSelected(results, newKey))
@@ -42,10 +41,8 @@ export class JrqlQuads {
     });
   }
 
-  quads(subjects: Subject | Subject[],
-    opts: JrqlQuadsOptions, ctx: JsonldContext): Quad[] {
-    const processor = new SubjectQuads(opts.mode, ctx, this.graph, opts.vars);
-    return [...processor.quads(subjects)];
+  in(mode: JrqlMode, ctx: JsonldContext, vars?: Set<string>): SubjectQuads {
+    return new SubjectQuads(this.graph, mode, ctx, vars);
   }
 
   /**
@@ -55,7 +52,10 @@ export class JrqlQuads {
    * @returns a single subject compacted against the given context
    */
   toApiSubject(
-    propertyQuads: Quad[], listItemQuads: Quad[], ctx: JsonldContext): GraphSubject {
+    propertyQuads: Quad[],
+    listItemQuads: Quad[],
+    ctx: JsonldContext
+  ): GraphSubject {
     const subjects = SubjectGraph.fromRDF(propertyQuads, { ctx });
     const subject = { ...subjects[0] };
     if (listItemQuads.length) {
@@ -83,7 +83,7 @@ export class JrqlQuads {
   }
 
   toObjectTerm(value: Atom, ctx: JsonldContext): Quad_Object {
-    return new SubjectQuads('match', ctx, this.graph).objectTerm(value);
+    return new SubjectQuads(this.graph, JrqlMode.match, ctx).objectTerm(value);
   }
 }
 

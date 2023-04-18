@@ -1,12 +1,20 @@
 import { Iri } from '@m-ld/jsonld';
 import { anyName, blank, GraphSubject } from '../../api';
 import {
-  Group, isList, isPropertyObject, isSet, isSubjectObject, Subject, SubjectProperty,
-  SubjectPropertyObject, Value, Variable
+  Group,
+  isList,
+  isPropertyObject,
+  isSet,
+  isSubjectObject,
+  Subject,
+  SubjectProperty,
+  SubjectPropertyObject,
+  Value,
+  Variable
 } from '../../jrql-support';
 import { matchVar } from '../../ns/json-rql';
 import { array } from '../../util';
-import { addPropertyObject, listItems } from '../jrql-util';
+import { addPropertyObject, JrqlMode, listItems } from '../jrql-util';
 import { JsonldContext } from '../jsonld';
 import { jrqlProperty, jrqlValue } from '../SubjectGraph';
 import { Binding } from '../../rdfjs-support';
@@ -61,7 +69,7 @@ class SubjectTemplate {
         () => this.templateId = construct['@id']);
     // Discover List variables
     if (isList(construct))
-      for (let [index, item] of listItems(construct['@list'], 'match'))
+      for (let [index, item] of listItems(construct['@list'], JrqlMode.match))
         withNamedVar(index, // Index may be a var name
           (variable, name) => this.addProperty(['@list', variable], name, item),
           index => this.addProperty(['@list', ...index], null, item));

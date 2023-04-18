@@ -222,9 +222,17 @@ export function isSet(object: SubjectPropertyObject): object is Set {
 }
 
 // Utility functions
-/** @internal */
+/**
+ * A value object can only have the allowed keys (not including @index)
+ * @internal
+ */
 export function isValueObject(value: SubjectPropertyObject): value is ValueObject {
-  return typeof value == 'object' && '@value' in value;
+  if (value == null || typeof value != 'object' || !('@value' in value))
+    return false;
+  for (let key in value)
+    if (!(key === '@value' || key === '@type' || key === '@language'))
+      return false;
+  return true;
 }
 
 /**
@@ -233,13 +241,15 @@ export function isValueObject(value: SubjectPropertyObject): value is ValueObjec
  * @internal
  */
 function isUnaryObject(value: SubjectPropertyObject, theKey: string) {
-  return value != null // typeof null === 'object' too
-    && typeof value == 'object'
-    && theKey in value
-    && Object.entries(value).every(
-      ([key, value]) => key === theKey ||
-        value === null || // or undefined
-        (isArray(value) && value.length === 0));
+  // typeof null === 'object' too
+  if (value == null || typeof value != 'object' || !(theKey in value))
+    return false;
+  for (let key in value) {
+    const v = (<any>value)[key];
+    if (!(key === theKey || v === null || (isArray(v) && v.length === 0)))
+      return false;
+  }
+  return true;
 }
 
 /** @internal */
@@ -369,6 +379,8 @@ export function isSubjectObject(o: SubjectPropertyObject): o is Subject {
   return typeof o == 'object' && !isReference(o) && !isVocabReference(o) && !isValueObject(o);
 }
 
+export type Operator = keyof typeof jrql.operators;
+
 /**
  * An operator-based constraint of the form `{ <operator> : [<expression>...]
  * }`. The key is the operator, and the value is the array of arguments. If the
@@ -376,20 +388,41 @@ export function isSubjectObject(o: SubjectPropertyObject): o is Subject {
  * @see [json-rql constraint](https://json-rql.org/interfaces/constraint.html)
  * @category json-rql
  */
-export interface Constraint {
+export type Constraint = Partial<{
   /**
    * Operators are based on SPARQL expression keywords, lowercase with '@' prefix.
    * @see [json-rql operators](https://json-rql.org/globals.html#operators)
    * @see [SPARQL
    *   conditional](https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#rConditionalOrExpression)
    */
-  [operator: string]: Expression | Expression[];
+  [operator in Operator]: Expression | Expression[];
   // It's not practical to constrain the types further here, see #isConstraint
-}
+}>
 
 /** @internal */
 export function isConstraint(value: Expression): value is Constraint {
-  return typeof value == 'object' && Object.keys(value).every(key => key in jrql.operators);
+  if (value == null || typeof value != 'object')
+    return false;
+  for (let key in value)
+    if (!(key in jrql.operators))
+      return false;
+  return true;
+}
+
+/** @internal */
+export type InlineConstraint = Constraint | (Constraint & { '@value': Variable });
+
+/** @internal */
+export function isInlineConstraint(value: SubjectPropertyObject): value is InlineConstraint {
+  if (value == null || typeof value != 'object')
+    return false;
+  let empty = true;
+  for (let key in value) {
+    if (!(key === '@value' || key in jrql.operators))
+      return false;
+    empty = false;
+  }
+  return !empty;
 }
 
 /**
@@ -483,9 +516,9 @@ export interface Group extends Pattern {
    */
   '@values'?: VariableExpression | VariableExpression[];
   /**
-   * Allows a value to be assigned to a variable. The variable introduced by the
-   * `@bind` clause must not be used in the same group graph pattern, but can be
-   * used in subsequent ones.
+   * Allows a computed value to be assigned to a variable. The variable
+   * introduced by the `@bind` clause cannot be used in the same Group, but can
+   * be returned from a Read or used in an Update.
    */
   '@bind'?: VariableExpression | VariableExpression[];
 }

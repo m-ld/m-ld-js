@@ -1,31 +1,48 @@
 import { Url } from '@m-ld/jsonld';
 import {
-  Construct, Describe, isSubjectObject, Subject, SubjectProperty, SubjectPropertyObject, Value
+  Construct,
+  Describe,
+  isSubjectObject,
+  Subject,
+  SubjectProperty,
+  SubjectPropertyObject,
+  Value
 } from '../jrql-support';
 import { JRQL } from '../ns';
 import { isArray, isNaturalNumber, setAtPath, trimTail } from './util';
 import { SubjectPropertyValues } from '../subjects';
 import validDataUrl = require('valid-data-url');
 
-/**
- * - `match`: querying
- *   - variables to match allowed
- *   - infer variable for missing IRI
- *   - lists can be arrays or hashes
- *   - list items are raw or slots
- * - `load`: loading new information
- *   - variables (to be populated from a match) allowed
- *   - infer skolems for missing Subject IDs
- *   - lists can be arrays or hashes
- *   - list items are raw or slots
- * - `graph`: strict mode, e.g. updates:
- *   - no variables allowed
- *   - do not infer anything
- *   - missing Subject IDs are blank
- *   - lists are hashes
- *   - all list contents are slots
- */
-export type JrqlMode = 'match' | 'load' | 'graph';
+export enum JrqlMode {
+  /**
+   * querying
+   * - variables to match allowed
+   * - inline constraints (filters) allowed
+   * - infer variable for missing IRI
+   * - lists can be arrays or hashes
+   * - list items are raw or slots
+   */
+  match,
+  /**
+   * loading new information
+   * - variables (to be populated from a match) allowed
+   * - inline constraints (binds) allowed
+   * - infer skolems for missing Subject IDs
+   * - lists can be arrays or hashes
+   * - list items are raw or slots
+   */
+  load,
+  /**
+   * strict mode, e.g. updates:
+   * - no variables
+   * - no inline constraints
+   * - do not infer anything
+   * - missing Subject IDs are blank
+   * - lists are hashes
+   * - all list contents are slots
+   */
+  graph
+}
 
 /**
  * Allows variables if mode is not `graph`, and disallows list sub-items (as for
@@ -33,17 +50,18 @@ export type JrqlMode = 'match' | 'load' | 'graph';
  * is the variable name.
  */
 export function *listItems(
-  list: SubjectPropertyObject, mode: JrqlMode = 'graph'
+  list: SubjectPropertyObject,
+  mode = JrqlMode.graph
 ): IterableIterator<[ListIndex | string, SubjectPropertyObject]> {
   if (typeof list === 'object') {
     // This handles arrays as well as hashes
     for (let [indexKey, item] of Object.entries(list)) {
-      if (mode === 'graph') {
+      if (mode === JrqlMode.graph) {
         yield *subItems(list, toIndexNumber(indexKey, 'strict'), item);
       } else {
         // Provided index is either a variable (string) or an index number
         const index = JRQL.matchVar(indexKey) ?? toIndexNumber(indexKey, 'strict');
-        if (typeof index == 'string' || mode === 'match')
+        if (typeof index == 'string' || mode === JrqlMode.match)
           // Definitely a variable if a string
           yield [index, item];
         else

@@ -1,4 +1,4 @@
-import type { Bindings, DataFactory, NamedNode, Quad, Term } from 'rdf-js';
+import type { Bindings, DataFactory, NamedNode, Quad, Term, Variable } from 'rdf-js';
 import { IndexMap, IndexSet } from './indices';
 import { Binding, QueryableRdfSource } from '../rdfjs-support';
 import { Prefixes } from 'quadstore';
@@ -132,9 +132,13 @@ export interface RdfFactory extends Required<DataFactory> {
   skolem?(): NamedNode;
 }
 
+export function asQueryVar(variable: Variable) {
+  return `?${variable.value}`;
+}
+
 export function toBinding(bindings: Bindings): Binding {
   const binding: Binding = {};
   for (let [variable, term] of bindings)
-    binding[`?${variable.value}`] = term;
+    binding[asQueryVar(variable)] = term;
   return binding;
 }

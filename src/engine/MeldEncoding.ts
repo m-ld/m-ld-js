@@ -10,8 +10,9 @@ import { SubjectGraph } from './SubjectGraph';
 import { SubjectQuads } from './SubjectQuads';
 // TODO: Switch to fflate. Node.js zlib uses Pako in the browser
 import { gunzipSync, gzipSync } from 'zlib';
-import { baseVocab, domainBase } from './dataset/index';
+import { baseVocab, domainBase } from './dataset';
 import { MeldError } from '../api';
+import { JrqlMode } from './jrql-util';
 
 const COMPRESS_THRESHOLD_BYTES = 1024;
 
@@ -125,7 +126,7 @@ export class MeldEncoder {
   };
 
   triplesFromJson = (json: object): Triple[] =>
-    [...new SubjectQuads('graph', this.ctx, this.rdf).quads(<any>json)];
+    new SubjectQuads(this.rdf, JrqlMode.graph, this.ctx).quads(<any>json);
 
   triplesFromBuffer = (encoded: Buffer, encoding: BufferEncoding[]): Triple[] =>
     this.triplesFromJson(MeldEncoder.jsonFromBuffer(encoded, encoding));

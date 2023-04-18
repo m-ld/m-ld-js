@@ -1,6 +1,19 @@
 import {
-  BehaviorSubject, concat, connect, defaultIfEmpty, EMPTY, firstValueFrom, from, NEVER, Observable,
-  ObservableInput, ObservedValueOf, Observer, onErrorResumeNext, OperatorFunction, Subject,
+  BehaviorSubject,
+  concat,
+  connect,
+  defaultIfEmpty,
+  EMPTY,
+  firstValueFrom,
+  from,
+  NEVER,
+  Observable,
+  ObservableInput,
+  ObservedValueOf,
+  Observer,
+  onErrorResumeNext,
+  OperatorFunction,
+  Subject,
   Subscription
 } from 'rxjs';
 import { mergeMap, switchAll } from 'rxjs/operators';
@@ -175,8 +188,10 @@ export function binaryFold<T, R>(
   }, null);
 }
 
-export function mapObject(
-  o: {}, fn: (k: string, v: any) => { [key: string]: any } | undefined): { [key: string]: any } {
+export function mapObject<V = any>(
+  o: Record<string, V>,
+  fn: (k: string, v: V) => { [key: string]: V } | undefined
+): { [key: string]: V } {
   return Object.assign({}, ...Object.entries(o).map(([k, v]) => fn(k, v)));
 }
 

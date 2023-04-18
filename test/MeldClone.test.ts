@@ -195,6 +195,49 @@ describe('MeldClone', () => {
       });
       await expect(api.get('fred')).resolves.toEqual({ '@id': 'fred', likes: 2 });
     });
+
+    test('inserts with inline bound variable', async () => {
+      await api.write<Subject>({ '@id': 'fred', likes: 1 });
+      await api.write({
+        '@delete': { '@id': 'fred', likes: '?likes' },
+        '@insert': { '@id': 'fred', likes: { '@value': '?likes', '@plus': 1 } }
+      });
+      await expect(api.get('fred')).resolves.toEqual({ '@id': 'fred', likes: 2 });
+    });
+
+    test('inserts where with inline bound variable', async () => {
+      await api.write<Subject>({ '@id': 'fred', likes: 1 });
+      await api.write({
+        '@insert': { '@id': 'fred', likes: { '@value': '?likes', '@plus': 1 } },
+        '@where': { '@id': 'fred', likes: '?likes' }
+      });
+      await expect(api.get('fred')).resolves.toEqual({
+        '@id': 'fred', likes: expect.arrayContaining([1, 2])
+      });
+    });
+
+    test('deletes with inline filter', async () => {
+      await api.write<Subject>({ '@id': 'fred', age: 41 });
+      await api.write<Subject>({ '@id': 'wilma', age: 39 });
+      await api.write({
+        '@delete': { age: { '@gt': 39 } }
+      });
+      await expect(api.get('fred')).resolves.toBeUndefined();
+      await expect(api.get('wilma')).resolves.toEqual({ '@id': 'wilma', age: 39 });
+    });
+
+    test('deletes where with inline filter', async () => {
+      await api.write<Subject>({ '@id': 'fred', age: 41 });
+      await api.write<Subject>({ '@id': 'wilma', age: 39 });
+      await api.write<Subject>({ '@id': 'barney', age: 40 });
+      await api.write({
+        '@delete': { '@id': '?b', age: { '@value': '?age', '@gt': 39 } },
+        '@where': { '@id': '?b', age: { '@value': '?age', '@lt': 41 } }
+      });
+      await expect(api.get('barney')).resolves.toBeUndefined();
+      await expect(api.get('wilma')).resolves.toBeDefined();
+      await expect(api.get('fred')).resolves.toBeDefined();
+    });
   });
 
   describe('rdf/js support', () => {
@@ -630,6 +673,27 @@ describe('MeldClone', () => {
         { '@id': expect.stringMatching(blankRegex), '?f': { '@id': 'fred' } },
         { '@id': expect.stringMatching(blankRegex), '?f': { '@id': 'wilma' } }
       ]));
+    });
+
+    test('selects where inline filtered', async () => {
+      await api.write<Subject>({ '@id': 'fred', age: 42 });
+      await api.write<Subject>({ '@id': 'wilma', age: 39 });
+      await expect(api.read<Select>({
+        '@select': '?f', '@where': { '@id': '?f', age: { '@gt': 40 } }
+      })).resolves.toMatchObject([{ '?f': { '@id': 'fred' } }]);
+    });
+
+    test('selects where inline and explicit filtered', async () => {
+      await api.write<Subject>({ '@id': 'fred', age: 42, height: 6 });
+      await api.write<Subject>({ '@id': 'barney', age: 41, height: 5 });
+      await api.write<Subject>({ '@id': 'wilma', age: 39, height: 5 });
+      await expect(api.read<Select>({
+        '@select': '?f',
+        '@where': {
+          '@graph': { '@id': '?f', age: { '@gt': 40 }, height: '?h' },
+          '@filter': { '@gt': ['?h', 5] }
+        }
+      })).resolves.toMatchObject([{ '?f': { '@id': 'fred' } }]);
     });
   });
 
