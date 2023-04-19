@@ -126,7 +126,7 @@ export class MeldEncoder {
   };
 
   triplesFromJson = (json: object): Triple[] =>
-    new SubjectQuads(this.rdf, JrqlMode.graph, this.ctx).quads(<any>json);
+    new SubjectQuads(this.rdf, JrqlMode.graph, this.ctx).toQuads(<any>json);
 
   triplesFromBuffer = (encoded: Buffer, encoding: BufferEncoding[]): Triple[] =>
     this.triplesFromJson(MeldEncoder.jsonFromBuffer(encoded, encoding));

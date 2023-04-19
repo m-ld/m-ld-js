@@ -240,6 +240,35 @@ describe('MeldClone', () => {
     });
   });
 
+  describe('basic updates', () => {
+    test('updates a property', async () => {
+      await api.write<Subject>({ '@id': 'fred', likes: 1 });
+      await api.write({
+        '@update': { '@id': 'fred', likes: 2 }
+      });
+      await expect(api.get('fred')).resolves.toEqual({ '@id': 'fred', likes: 2 });
+    });
+
+    test('updates with an operator', async () => {
+      await api.write<Subject>({ '@id': 'fred', likes: 1 });
+      await api.write({
+        '@update': { '@id': 'fred', likes: { '@plus': 1 } }
+      });
+      await expect(api.get('fred')).resolves.toEqual({ '@id': 'fred', likes: 2 });
+    });
+
+    test('updates with filtered variable', async () => {
+      await api.write<Subject>({ '@id': 'fred', likes: [1, 11] });
+      await api.write({
+        '@update': { '@id': 'fred', likes: { '@value': '?old', '@plus': 1 } },
+        '@where': { '@id': 'fred', likes: { '@value': '?old', '@lt': 10 } }
+      });
+      await expect(api.get('fred')).resolves.toEqual({
+        '@id': 'fred', likes: expect.arrayContaining([2, 11])
+      });
+    });
+  });
+
   describe('rdf/js support', () => {
     const rdf = new RdfDataFactory();
     const sparql = new SparqlFactory(rdf);

@@ -1,6 +1,6 @@
 import { Graph } from '.';
 import { blank, GraphSubject } from '../../api';
-import { Atom, Result, Value } from '../../jrql-support';
+import { Atom, Result, Subject, Value } from '../../jrql-support';
 import { JsonldContext } from '../jsonld';
 import { inPosition, Quad, Quad_Object, Term } from '../quads';
 import { JRQL } from '../../ns';
@@ -41,8 +41,16 @@ export class JrqlQuads {
     });
   }
 
-  in(mode: JrqlMode, ctx: JsonldContext, vars?: Set<string>): SubjectQuads {
-    return new SubjectQuads(this.graph, mode, ctx, vars);
+  in(mode: JrqlMode, ctx: JsonldContext) {
+    return new SubjectQuads(this.graph, mode, ctx);
+  }
+
+  toQuads(
+    subjects: Subject | Subject[],
+    mode: JrqlMode,
+    ctx: JsonldContext
+  ): Quad[] {
+    return this.in(mode, ctx).toQuads(subjects);
   }
 
   /**

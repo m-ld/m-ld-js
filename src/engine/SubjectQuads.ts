@@ -20,63 +20,41 @@ import { JRQL, RDF } from '../ns';
 import { JrqlMode, ListIndex, listItems, toIndexDataUrl } from './jrql-util';
 import { isArray, lazy, mapObject } from './util';
 import { array } from '../util';
+import { EventEmitter } from 'events';
 
-const NO_VARS: ReadonlySet<string> = new Set<string>();
-
-export interface InlineConstraints {
-  filters: ReadonlyArray<Constraint>,
-  binds: ReadonlyArray<VariableExpression>
+export interface UpdateQuad extends Quad {
+  before?: Quad_Object
 }
 
-export namespace InlineConstraints {
-  export const NONE: InlineConstraints = { filters: [], binds: [] };
-}
-
-export class SubjectQuads implements InlineConstraints {
-  /** Populated with inline filters found, if mode is 'match' */
-  private readonly _filters?: Constraint[];
-  /** Populated with inline bindings found, if mode is 'load' */
-  private readonly _binds?: VariableExpression[];
-
-  /**
-   * @param rdf
-   * @param mode
-   * @param ctx
-   * @param _vars Populated with variable names found (sans '?')
-   */
+export class SubjectQuads extends EventEmitter {
   constructor(
     readonly rdf: RdfFactory,
     readonly mode: JrqlMode,
-    readonly ctx: JsonldContext,
-    private readonly _vars?: Set<string>
+    readonly ctx: JsonldContext
   ) {
-    if (mode === JrqlMode.match)
-      this._filters = [];
-    if (mode === JrqlMode.load)
-      this._binds = [];
+    super();
   }
 
-  get vars(): ReadonlySet<string> {
-    return this._vars ?? NO_VARS;
+  /** Called with with variable names found (sans '?') */
+  on(event: 'var', listener: (varName: string) => void): this;
+  /** Called with inline filters found, if mode is 'match' */
+  on(event: 'filter', listener: (filter: Constraint) => void): this;
+  /** Called with inline bindings found, if mode is 'load' */
+  on(event: 'bind', listener: (bind: VariableExpression) => void): this;
+  /** Called with metadata found when processing subjects */
+  on(eventName: string, listener: (...args: any[]) => void): this {
+    return super.on(eventName, listener);
   }
 
-  get filters(): ReadonlyArray<Constraint> {
-    return this._filters ?? [];
-  }
-
-  get binds(): ReadonlyArray<VariableExpression> {
-    return this._binds ?? [];
-  }
-
-  quads(subjects: Subject | Subject[]) {
-    return [...this.process(subjects)];
+  toQuads(subjects?: Subject | Subject[]) {
+    return subjects ? [...this.process(subjects)] : [];
   }
 
   private *process(
     object: SubjectPropertyObject,
     outer: Quad_Subject | null = null,
     property: string | null = null
-  ): Iterable<Quad> {
+  ): Iterable<UpdateQuad> {
     // TODO: property is @list in context
     for (let value of array(object))
       if (isArray(value))
@@ -93,14 +71,40 @@ export class SubjectQuads implements InlineConstraints {
         yield *this.subjectQuads(value, outer, property);
       else if (outer != null && property != null)
         // This is an atom, so yield one quad
-        yield this.rdf.quad(
-          outer,
-          this.predicate(property),
-          this.objectTerm(value, property)
-        );
+        yield this.quad(outer, property, value);
       // TODO: What if the property expands to a keyword in the context?
       else
         throw new Error(`Cannot yield quad from top-level value: ${value}`);
+  }
+
+  private quad(
+    subject: Quad_Subject,
+    property: string,
+    value: Atom | InlineConstraint
+  ): UpdateQuad {
+    const predicate = this.predicate(property);
+    if (isInlineConstraint(value)) {
+      let { variable, constraint } = this.inlineConstraintDetails(value);
+      // The variable is the 1st parameter of the resultant constraint expression.
+      constraint = mapObject(constraint, (operator, expression) => ({
+        [operator]: [asQueryVar(variable), ...array(expression)]
+      }));
+      if (this.mode === JrqlMode.match) {
+        // A filter, with the variable as the object e.g. ?o > 1
+        this.emit('filter', constraint);
+      } else if (this.mode === JrqlMode.load) {
+        // A binding, with the return value of the expression e.g. ?o = ?x + 1
+        const returnVar = this.newVar();
+        const quad = Object.assign(this.rdf.quad(subject, predicate, returnVar), {
+          before: variable
+        });
+        this.emit('bind', { [asQueryVar(returnVar)]: constraint });
+        return quad;
+      }
+      // Return variable unless bound to a new one
+      return this.rdf.quad(subject, predicate, variable);
+    }
+    return this.rdf.quad(subject, predicate, this.objectTerm(value, property));
   }
 
   private *subjectQuads(
@@ -117,7 +121,7 @@ export class SubjectQuads implements InlineConstraints {
       yield this.rdf.quad(outer, this.predicate(property), sid);
     else if (this.mode === JrqlMode.match && isReference(subject))
       // References at top level => implicit wildcard p-o
-      yield this.rdf.quad(sid, this.genVar(), this.genVar());
+      yield this.rdf.quad(sid, this.newVar(), this.newVar());
 
     // Process predicates and objects
     for (let [property, value] of Object.entries(subject))
@@ -135,7 +139,7 @@ export class SubjectQuads implements InlineConstraints {
       else
         return this.expandNode(subject['@id']);
     else if (this.mode === JrqlMode.match)
-      return this.genVar();
+      return this.newVar();
     else if (this.mode === JrqlMode.load && this.rdf.skolem != null)
       return this.rdf.skolem();
     else
@@ -197,8 +201,8 @@ export class SubjectQuads implements InlineConstraints {
       if (varName != null) {
         if (!varName)
           // Allow anonymous variables as '?'
-          return this.genVar();
-        this._vars?.add(varName);
+          return this.newVar();
+        this.emit('var', varName);
         return this.rdf.variable(varName);
       }
     }
@@ -224,44 +228,25 @@ export class SubjectQuads implements InlineConstraints {
 
   private genVarName() {
     const varName = anyName();
-    this._vars?.add(varName);
+    this.emit('var', varName);
     return varName;
   }
 
-  private genVar() {
+  newVar() {
     return this.rdf.variable(this.genVarName());
   }
 
   objectTerm(value: Atom | InlineConstraint, property?: string): Quad_Object {
-    if (this.mode !== JrqlMode.graph && isInlineConstraint(value)) {
-      let { variable, constraint } = this.inlineConstraintDetails(value);
-      // The variable is the 1st parameter of the resultant constraint expression.
-      constraint = mapObject(constraint, (operator, expression) => ({
-        [operator]: [asQueryVar(variable), ...array(expression)]
-      }));
-      if (this.mode === JrqlMode.match) {
-        // If we're matching, the variable is the object e.g. ?o > 1
-        this._filters?.push(constraint);
-        return variable;
-      } else /*if (this.mode === JrqlMode.load)*/ {
-        // If we're loading, the object is the return value of the expression e.g.
-        // ?o = ?x + 1, so we expect two variables
-        const returnVar = this.genVar();
-        this._binds?.push({ [asQueryVar(returnVar)]: constraint });
-        return returnVar;
-      }
-    } else {
-      return mapValue<Quad_Object>(property ?? null, value, (value, type, language) => {
-        if (type === '@id' || type === '@vocab')
-          return this.rdf.namedNode(value);
-        else if (language)
-          return this.rdf.literal(value, language);
-        else if (type !== '@none')
-          return this.rdf.literal(value, this.rdf.namedNode(type));
-        else
-          return this.rdf.literal(value);
-      }, { ctx: this.ctx, interceptRaw: this.matchVar });
-    }
+    return mapValue<Quad_Object>(property ?? null, value, (value, type, language) => {
+      if (type === '@id' || type === '@vocab')
+        return this.rdf.namedNode(value);
+      else if (language)
+        return this.rdf.literal(value, language);
+      else if (type !== '@none')
+        return this.rdf.literal(value, this.rdf.namedNode(type));
+      else
+        return this.rdf.literal(value);
+    }, { ctx: this.ctx, interceptRaw: this.matchVar });
   }
 
   private inlineConstraintDetails(inlineConstraint: InlineConstraint) {
@@ -272,7 +257,7 @@ export class SubjectQuads implements InlineConstraints {
       const { '@value': _, ...constraint } = inlineConstraint;
       return { variable, constraint };
     } else {
-      return { variable: this.genVar(), constraint: inlineConstraint };
+      return { variable: this.newVar(), constraint: inlineConstraint };
     }
   }
 }

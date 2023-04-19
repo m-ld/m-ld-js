@@ -537,7 +537,7 @@ export function isWriteGroup(p: Pattern): p is Group {
  * A variable expression an object whose keys are variables, and whose values
  * are expressions whose result will be assigned to the variable, e.g.
  * ```json
- * { "?averageSize" : { '@avg' : "?size" } }
+ * { "?averageSize" : { "@avg" : "?size" } }
  * ```
  * @category json-rql
  */
@@ -967,8 +967,8 @@ export interface Update extends Query {
    * - If there is no `@where`, but a `@delete` clause exists, then values matched in the
    * `@delete` clause will be used.
    * - If a variable value is not matched by the `@where` or `@delete` clause as above, no
-   * insertion
-   * happens (i.e. there must exist a _complete_ solution to all variables in the `@insert`).
+   * insertion happens (i.e. there must exist a _complete_ solution to all variables in the
+   * `@insert`).
    *
    * **Note** that in the case that the `@insert` contains no variables, there is a difference
    * between matching with a `@where` and `@delete`. If a `@where` clause is provided, it _must_
@@ -1001,6 +1001,41 @@ export interface Update extends Query {
    */
   '@insert'?: Subject | Subject[];
   /**
+   * Subjects with properties to be updated in the domain. By default, any
+   * subject property included will have its old value deleted and the provided
+   * value inserted, for example:
+   * ```json
+   * {
+   *   "@update": { "@id": "fred", "height": "6" }
+   * }
+   * ```
+   * is generally equivalent to:
+   * ```json
+   * {
+   *   "@delete": { "@id": "fred", "height": "?" },
+   *   "@insert": { "@id": "fred", "height": "6" }
+   * }
+   * ```
+   * All prior values are deleted, so this query form is best suited for
+   * 'registers' – properties that are expected to have a single value. Note
+   * that the default behaviour can still lead to multiple values if concurrent
+   * updates occur and no constraint exists for the property (a 'conflict').
+   *
+   * Variables may be used to match data to update. If the variable appears in
+   * the property value position the update will have no effect unless an
+   * in-line operation is used, e.g.
+   * ```json
+   * {
+   *   "@update": { "@id": "fred", "likes": { "@value": "?old", "@plus": 1 } }
+   * }
+   * ```
+   *
+   * Constraints operating on the data may change the default behaviour to make
+   * an `@update` logically different to a `@delete` and an `@insert`,
+   * particularly when using an in-line operation.
+   */
+  '@update'?: Subject | Subject[];
+  /**
    * If this key is included and the value is truthy, this update is an
    * _agreement_. Use of an agreement will guarantee that all clones converge on
    * the "agreed" data state (although they may continue to change thereafter).
@@ -1032,7 +1067,7 @@ export interface Update extends Query {
 
 /** @internal */
 export function isUpdate(p: Pattern): p is Update {
-  return '@insert' in p || '@delete' in p;
+  return '@insert' in p || '@delete' in p || '@update' in p;
 }
 
 /**
