@@ -1,7 +1,9 @@
 import { Iri } from '@m-ld/jsonld';
 import { anyName, blank, GraphSubject } from '../../api';
 import {
+  ConstrainedVariable,
   Group,
+  isInlineConstraint,
   isList,
   isPropertyObject,
   isSet,
@@ -57,7 +59,7 @@ class SubjectTemplate {
   private templateId?: Iri;
   private variableId?: Variable;
   private variableProps: [SubjectProperty, Variable][] = [];
-  private variableValues: [SubjectProperty, Variable][] = [];
+  private variableValues: [SubjectProperty, Variable | ConstrainedVariable][] = [];
   private literalValues: [SubjectProperty, Value][] = [];
   private nestedSubjects: [SubjectProperty, SubjectTemplate][] = [];
 
@@ -111,6 +113,9 @@ class SubjectTemplate {
     } else if (isSet(object)) {
       // TODO: this breaks the construct contract by eliding @set
       this.addObject(property, object['@set']);
+    } else if (isInlineConstraint(object)) {
+      withNamedVar('@value' in object ? object['@value'] : '',
+          variable => this.variableValues.push([property, { '@value': variable, ...object }]));
     } else if (isSubjectObject(object)) {
       // Register a nested subject
       const nested = new SubjectTemplate(object, this.ctx);
@@ -146,10 +151,12 @@ class SubjectTemplate {
     for (let [property, literal] of this.literalValues)
       populator(property, isNewResult).populateWith(() => literal);
     // 3. Bound values into (substitute) properties
-    for (let [property, variable] of this.variableValues)
+    for (let [property, def] of this.variableValues) {
+      const variable = typeof def == 'object' ? def['@value'] : def;
       if (variable in solution)
         populator(property).populateWith(
           resultProp => jrqlValue(resultProp, solution[variable], this.ctx));
+    }
     // 4. Nested subjects into (substitute) properties
     for (let [property, template] of this.nestedSubjects) {
       const nested = template.addSolution(solution);

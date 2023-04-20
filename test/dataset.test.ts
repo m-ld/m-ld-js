@@ -93,6 +93,18 @@ describe('Patch quads', () => {
     expect([...patch.inserts][0].equals(c)).toBe(true);
   });
 
+  test('Include removes delete and insert redundancy', () => {
+    const patch = new PatchQuads();
+    patch.include({ deletes: [a], inserts: [b] });
+    patch.include({ deletes: [b], inserts: [c] });
+    expect(patch.isEmpty).toBe(false);
+    expect([...patch.deletes].length).toBe(1);
+    expect([...patch.inserts].length).toBe(2);
+    expect([...patch.deletes][0].equals(a)).toBe(true);
+    expect([...patch.inserts][0].equals(b) || [...patch.inserts][0].equals(c)).toBe(true);
+    expect([...patch.inserts][1].equals(b) || [...patch.inserts][1].equals(c)).toBe(true);
+  });
+
   test('Append removes delete then insert redundancy', () => {
     const patch = new PatchQuads();
     patch.append({ deletes: [a/* squash */], inserts: [b] });

@@ -268,19 +268,19 @@ export class JrqlGraph {
         // @delete (i.e. DELETE WHERE does not apply if @where exists).
         const matchingQuads = (template?: Quad[]) => template == null ? [] :
           this.fillTemplate(template, solution).filter(quad => !anyVarTerm(quad));
-        patch.append(new PatchQuads({
+        patch.include(new PatchQuads({
           deletes: matchingQuads(deletes),
           inserts: matchingQuads(inserts)
         }));
       });
     } else if (deletes.length) {
       // If the @delete has fixed quads, always apply them
-      patch.append({ deletes });
+      patch.include({ deletes });
     }
     if (inserts.length && where == null && !insertsHasVar) {
       // If the @insert has fixed quads (with no @where), always apply them,
       // even if the delete had no solutions, https://github.com/m-ld/m-ld-spec/issues/76
-      patch.append({ inserts });
+      patch.include({ inserts });
     }
     return patch;
   }

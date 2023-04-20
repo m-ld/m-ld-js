@@ -410,7 +410,9 @@ export function isConstraint(value: Expression): value is Constraint {
 }
 
 /** @internal */
-export type InlineConstraint = Constraint | (Constraint & { '@value': Variable });
+export type ConstrainedVariable = Constraint & { '@value': Variable };
+/** @internal */
+export type InlineConstraint = Constraint | ConstrainedVariable;
 
 /** @internal */
 export function isInlineConstraint(value: SubjectPropertyObject): value is InlineConstraint {

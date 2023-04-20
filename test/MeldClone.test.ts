@@ -257,6 +257,16 @@ describe('MeldClone', () => {
       await expect(api.get('fred')).resolves.toEqual({ '@id': 'fred', likes: 2 });
     });
 
+    test('updates multiple with an operator', async () => {
+      await api.write<Subject>({ '@id': 'fred', likes: [1, 2] });
+      await api.write({
+        '@update': { '@id': 'fred', likes: { '@plus': 1 } }
+      });
+      await expect(api.get('fred')).resolves.toEqual({
+        '@id': 'fred', likes: expect.arrayContaining([2, 3])
+      });
+    });
+
     test('updates with filtered variable', async () => {
       await api.write<Subject>({ '@id': 'fred', likes: [1, 11] });
       await api.write({
@@ -712,6 +722,14 @@ describe('MeldClone', () => {
       })).resolves.toMatchObject([{ '?f': { '@id': 'fred' } }]);
     });
 
+    test('constructs where inline filtered', async () => {
+      await api.write<Subject>({ '@id': 'fred', age: 42 });
+      await api.write<Subject>({ '@id': 'wilma', age: 39 });
+      await expect(api.read<Construct>({
+        '@construct': { '@id': '?', age: { '@gt': 40 } }
+      })).resolves.toMatchObject([{ '@id': 'fred', age: 42 }]);
+    });
+
     test('selects where inline and explicit filtered', async () => {
       await api.write<Subject>({ '@id': 'fred', age: 42, height: 6 });
       await api.write<Subject>({ '@id': 'barney', age: 41, height: 5 });
@@ -1129,10 +1147,11 @@ describe('MeldClone', () => {
         '@delete': { '@id': 'shopping', '@list': { '?1': 'Bread' } },
         '@insert': { '@id': 'shopping', '@list': { '?1': 'Spam' } }
       });
-      expect([...(await captureUpdate)['@delete'].graph.values()]).toContainEqual({
+      const update = await captureUpdate;
+      expect([...update['@delete'].graph.values()]).toContainEqual({
         '@id': expect.stringMatching(genIdRegex), '@item': 'Bread'
       });
-      expect([...(await captureUpdate)['@insert'].graph.values()]).toContainEqual({
+      expect([...update['@insert'].graph.values()]).toContainEqual({
         '@id': expect.stringMatching(genIdRegex), '@item': 'Spam'
       });
       await expect(api.read<Describe>({ '@describe': 'shopping' }))

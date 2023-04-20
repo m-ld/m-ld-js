@@ -1,21 +1,52 @@
 import {
-  GraphSubject, LiveStatus, MeldContext, MeldError, MeldErrorStatus, MeldReadState, MeldStatus,
+  GraphSubject,
+  LiveStatus,
+  MeldContext,
+  MeldError,
+  MeldErrorStatus,
+  MeldReadState,
+  MeldStatus,
   StateProc
 } from '../../api';
 import { MeldLocal, MeldRemotes, OperationMessage, Recovery, Revup, Snapshot } from '..';
 import { liveRollup } from '../api-support';
-import { isUpdate, Pattern, Query, Read, Write } from '../../jrql-support';
+import { Pattern, Query, Read, Write } from '../../jrql-support';
 import {
-  BehaviorSubject, concat, concatMap, debounce, defaultIfEmpty, EMPTY, firstValueFrom, from,
-  interval, merge, Observable, of, OperatorFunction, partition, race, Subscriber, Subscription,
+  BehaviorSubject,
+  concat,
+  concatMap,
+  debounce,
+  defaultIfEmpty,
+  EMPTY,
+  firstValueFrom,
+  from,
+  interval,
+  merge,
+  Observable,
+  of,
+  OperatorFunction,
+  partition,
+  race,
+  Subscriber,
+  Subscription,
   throwError
 } from 'rxjs';
 import { GlobalClock, TreeClock } from '../clocks';
 import { SuSetDataset } from './SuSetDataset';
 import { TreeClockMessageService } from '../messages';
 import {
-  delayWhen, distinctUntilChanged, expand, filter, finalize, ignoreElements, map, share, skipWhile,
-  takeUntil, tap, toArray
+  delayWhen,
+  distinctUntilChanged,
+  expand,
+  filter,
+  finalize,
+  ignoreElements,
+  map,
+  share,
+  skipWhile,
+  takeUntil,
+  tap,
+  toArray
 } from 'rxjs/operators';
 import { delayUntil, inflateFrom, poisson, settled } from '../util';
 import { LockManager } from '../locks';
@@ -642,12 +673,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
       this.logRequest('write', request);
       // Take the send timestamp just before enqueuing the transaction. This
       // ensures that transaction stamps increase monotonically.
-      const sendTime = this.messageService.event();
-      const update = await this.suset.transact(async () => [
-        sendTime,
-        await this.suset.write(request),
-        isUpdate(request) ? request['@agree'] : undefined
-      ]);
+      const update = await this.suset.transact(this.messageService.event(), request);
       // Publish the operation
       if (update != null)
         this.nextOperation(update, 'write');

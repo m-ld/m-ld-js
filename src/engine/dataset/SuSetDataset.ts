@@ -13,7 +13,7 @@ import {
 } from '../../api';
 import { BufferEncoding, EncodedOperation, OperationMessage, Snapshot, StateManaged } from '..';
 import { GlobalClock, TickTree, TreeClock } from '../clocks';
-import { Context, Query, Read, Write } from '../../jrql-support';
+import { Context, isUpdate, Query, Read, Write } from '../../jrql-support';
 import { Dataset, PatchQuads, PatchResult, TxnContext } from '.';
 import { JrqlGraph } from './JrqlGraph';
 import { MeldEncoder, UUID } from '../MeldEncoding';
@@ -231,18 +231,17 @@ export class SuSetDataset extends MeldEncoder {
   @SuSetDataset.checkNotClosed.async
   @SuSetDataset.checkStateLocked.async
   @SuSetDataset.checkReadyForTxn.async
-  async transact(
-    prepare: () => Promise<[TreeClock, PatchQuads, any?]>
-  ): Promise<OperationMessage | null> {
+  async transact(time: TreeClock, request: Write): Promise<OperationMessage | null> {
     return this.dataset.transact<OperationMessage | null>({
       prepare: async txc => {
-        const [time, patch, agree] = await prepare();
+        const patch = await this.write(request);
         if (patch.isEmpty)
           return { return: null };
 
         txc.sw.next('check-constraints');
-        const txn = await this.assertConstraints(
-          patch, 'check', this.app.principal?.['@id'] ?? null, agree);
+        const pid = this.app.principal?.['@id'] ?? null;
+        const agree = isUpdate(request) ? request['@agree'] : undefined;
+        const txn = await this.constrain(patch, 'check', pid, agree);
 
         txc.sw.next('find-tids');
         const deletedTriplesTids = await this.tidsStore.findTriplesTids(txn.assertions.deletes);
@@ -268,7 +267,7 @@ export class SuSetDataset extends MeldEncoder {
     });
   }
 
-  private async assertConstraints(
+  private async constrain(
     patch: PatchQuads,
     verb: keyof MeldConstraint,
     principalId: Iri | null,
@@ -486,7 +485,7 @@ export class SuSetDataset extends MeldEncoder {
         const deleteTids = await this.processSuSetOpToPatch(patch);
 
         this.txc.sw.next('apply-cx'); // "cx" = constraint
-        const { assertions: cxnAssertions, ...txn } = await this.ssd.assertConstraints(
+        const { assertions: cxnAssertions, ...txn } = await this.ssd.constrain(
           patch.quads, 'apply', this.operation.principalId, this.operation.agreed?.proof);
 
         if (processAgreement && this.operation.agreed != null) {
