@@ -1,20 +1,23 @@
 import { SuSetDataset } from '../src/engine/dataset/SuSetDataset';
-import { decodeOpUpdate, MockProcess, MockState, testExtensions, testOp } from './testClones';
+import { decodeOpUpdate, MockProcess, MockState, testOp } from './testClones';
 import { GlobalClock, TreeClock } from '../src/engine/clocks';
 import { toArray } from 'rxjs/operators';
 import { EmptyError, firstValueFrom, lastValueFrom, Subject } from 'rxjs';
 import {
   AgreementCondition,
+  Datatype,
   Describe,
   JournalCheckPoint,
   MeldConstraint,
   MeldError,
   MeldTransportSecurity,
-  MeldUpdate
+  MeldUpdate,
+  Select,
+  shortId
 } from '../src';
 import { jsonify } from './testUtil';
 import { MeldEncoder } from '../src/engine/MeldEncoding';
-import { BufferEncoding, EncodedOperation } from '../src/engine';
+import { BufferEncoding, EncodedOperation, Snapshot } from '../src/engine';
 import { drain } from 'rx-flowable';
 import { mockFn } from 'jest-mock-extended';
 import { MeldOperationMessage } from '../src/engine/MeldOperationMessage';
@@ -49,7 +52,7 @@ describe('SU-Set Dataset', () => {
 
   describe('with basic config', () => {
     beforeEach(async () => {
-      ssd = new SuSetDataset(state.dataset, {}, testExtensions(), {}, {
+      ssd = new SuSetDataset(state.dataset, {}, {}, {}, {
         '@id': 'test',
         '@domain': 'test.m-ld.org'
       });
@@ -632,8 +635,7 @@ describe('SU-Set Dataset', () => {
       remote = new MockProcess(right);
       constraint = { check: () => Promise.resolve() };
       ssd = new SuSetDataset(state.dataset,
-        {},
-        testExtensions({ constraints: [constraint] }), {},
+        {}, { constraints: [constraint] }, {},
         { '@id': 'test', '@domain': 'test.m-ld.org' });
       await ssd.initialise();
       await ssd.resetClock(local.tick().time);
@@ -880,6 +882,107 @@ describe('SU-Set Dataset', () => {
     });
   });
 
+  describe('datatypes', () => {
+    let local: MockProcess, remote: MockProcess;
+    let datatypes: Datatype[];
+
+    beforeEach(async () => {
+      datatypes = [];
+      let { left, right } = TreeClock.GENESIS.forked();
+      local = new MockProcess(left);
+      remote = new MockProcess(right);
+      ssd = new SuSetDataset(state.dataset, {}, { datatypes },
+        {}, { '@id': 'test', '@domain': 'test.m-ld.org' });
+      await ssd.initialise();
+      await ssd.resetClock(local.time);
+      await ssd.allowTransact();
+    });
+
+    test('insert binary-like datatype', async () => {
+      const validate = mockFn().mockImplementation(data => new Buffer(data));
+      const toLexical = mockFn().mockImplementation(data => shortId(data.toString()));
+      datatypes.push({ '@id': 'http://ex.org/#Binary', validate, toLexical });
+      const willUpdate = firstValueFrom(ssd.updates);
+      const photo = {
+        '@type': 'http://ex.org/#Binary',
+        '@value': new Buffer('abc')
+      };
+      const fredProfile = {
+        '@id': 'http://test.m-ld.org/fred',
+        'http://test.m-ld.org/#photo': photo
+      };
+      const msg = await ssd.transact(local.tick().time, fredProfile);
+      expect(validate).toBeCalledWith(new Buffer('abc'));
+      expect(toLexical).toBeCalled();
+      // Operation has buffer value
+      const [, , , upd, enc] = msg!.data;
+      expect(MeldEncoder.jsonFromBuffer(upd, enc)).toEqual([{}, { '@id': 'fred', photo }]);
+      // Update has value as given
+      await expect(willUpdate).resolves.toMatchObject({ '@insert': [fredProfile] });
+      // Retrieved state has value as given
+      await expect(drain(ssd.read<Describe>({
+        '@describe': 'http://test.m-ld.org/fred'
+      }))).resolves.toEqual([fredProfile]);
+      // Query equates value
+      await expect(drain(ssd.read<Select>({
+        '@select': '?f', '@where': { ...fredProfile, '@id': '?f' }
+      }))).resolves.toMatchObject([{ '?f': { '@id': 'http://test.m-ld.org/fred' } }]);
+    });
+
+    test('apply operation with binary-like data', async () => {
+      const validate = mockFn().mockImplementation(data => new Buffer(data));
+      const toLexical = mockFn().mockImplementation(data => shortId(data.toString()));
+      datatypes.push({ '@id': 'http://ex.org/#Binary', validate, toLexical });
+      const photo = {
+        '@type': 'http://ex.org/#Binary',
+        '@value': new Buffer('abc')
+      };
+      await expect(ssd.apply(
+        remote.sentOperation({}, { '@id': 'fred', photo }),
+        local.join(remote.time)
+      )).resolves.toBe(null);
+      expect(validate).toBeCalledWith(new Buffer('abc'));
+      expect(toLexical).toBeCalled();
+      await expect(drain(ssd.read<Describe>({
+        '@describe': 'http://test.m-ld.org/fred'
+      }))).resolves.toEqual([{
+        '@id': 'http://test.m-ld.org/fred',
+        'http://test.m-ld.org/#photo': photo
+      }]);
+    });
+
+    test('datatype data included in snapshot', async () => {
+      datatypes.push({
+        '@id': 'http://ex.org/#Binary',
+        validate: data => new Buffer(data),
+        toLexical: data => shortId(data.toString())
+      });
+      const fredProfile = {
+        '@id': 'http://test.m-ld.org/fred',
+        'http://test.m-ld.org/#photo': {
+          '@type': 'http://ex.org/#Binary',
+          '@value': new Buffer('abc')
+        }
+      };
+      await ssd.transact(local.tick().time, fredProfile);
+      const snapshot = await ssd.takeSnapshot();
+      // Snapshot data should have one operation and one triple
+      const data = await firstValueFrom(snapshot.data.pipe(toArray()));
+      expect(data.length).toBe(2);
+      const datum = data.find((v): v is Snapshot.Inserts => 'inserts' in v)!;
+      expect(datum).toBeDefined();
+      expect(MeldEncoder.jsonFromBuffer<any>(datum.inserts, datum.encoding).o).toEqual({
+        '@type': 'http://ex.org/#Binary',
+        '@value': new Buffer('abc')
+      });
+      // Re-applying the snapshot recovers binary data
+      await ssd.applySnapshot(local.snapshot(data), local.tick().time);
+      await expect(drain(ssd.read<Describe>({
+        '@describe': 'http://test.m-ld.org/fred'
+      }))).resolves.toEqual([fredProfile]);
+    });
+  });
+
   describe('agreements', () => {
     let local: MockProcess, remote: MockProcess;
     let checkpoints: Subject<JournalCheckPoint>;
@@ -891,7 +994,7 @@ describe('SU-Set Dataset', () => {
       remote = new MockProcess(right);
       checkpoints = new Subject<JournalCheckPoint>();
       agreementConditions = [];
-      ssd = new SuSetDataset(state.dataset, {}, testExtensions({ agreementConditions }),
+      ssd = new SuSetDataset(state.dataset, {}, { agreementConditions },
         { journalAdmin: { checkpoints } },
         { '@id': 'test', '@domain': 'test.m-ld.org', journal: { adminDebounce: 0 } });
       await ssd.initialise();
@@ -1106,8 +1209,7 @@ describe('SU-Set Dataset', () => {
       transportSecurity = { wire: data => data };
       constraint = { check: () => Promise.resolve() };
       ssd = new SuSetDataset(state.dataset,
-        {},
-        testExtensions({ transportSecurity, constraints: [constraint] }), {},
+        {}, { transportSecurity, constraints: [constraint] }, {},
         { '@id': 'test', '@domain': 'test.m-ld.org' });
       await ssd.initialise();
       await ssd.resetClock(local.tick().time);
@@ -1186,7 +1288,7 @@ describe('SU-Set Dataset', () => {
   });
 
   test('enforces operation size limit', async () => {
-    ssd = new SuSetDataset(state.dataset, {}, testExtensions(), {}, {
+    ssd = new SuSetDataset(state.dataset, {}, {}, {}, {
       '@id': 'test',
       '@domain': 'test.m-ld.org',
       maxOperationSize: 1

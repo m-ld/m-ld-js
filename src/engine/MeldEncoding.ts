@@ -4,14 +4,13 @@ import * as MsgPack from './msgPack';
 import { Context, ExpandedTermDef, Reference } from '../jrql-support';
 import { Iri } from '@m-ld/jsonld';
 import { RdfFactory, Triple } from './quads';
-import { JsonldContext } from './jsonld';
 import { M_LD, RDF, XS } from '../ns';
 import { SubjectGraph } from './SubjectGraph';
-import { SubjectQuads } from './SubjectQuads';
+import { JrqlContext, SubjectQuads } from './SubjectQuads';
 // TODO: Switch to fflate. Node.js zlib uses Pako in the browser
 import { gunzipSync, gzipSync } from 'zlib';
 import { baseVocab, domainBase } from './dataset';
-import { MeldError } from '../api';
+import { Datatype, MeldError } from '../api';
 import { JrqlMode } from './jrql-util';
 
 const COMPRESS_THRESHOLD_BYTES = 1024;
@@ -51,15 +50,16 @@ export type RefTriple = Triple & Reference;
 export type RefTriplesTids = [RefTriple, UUID[]][];
 
 export class MeldEncoder {
-  private /*readonly*/ ctx: JsonldContext;
+  private /*readonly*/ ctx: JrqlContext;
   private readonly ready: Promise<unknown>;
 
   constructor(
     readonly domain: string,
-    readonly rdf: RdfFactory
+    readonly rdf: RdfFactory,
+    datatypes?: Iterable<Datatype>
   ) {
-    this.ready = JsonldContext.active(new DomainContext(domain, OPERATION_CONTEXT))
-      .then(ctx => this.ctx = ctx);
+    this.ready = JrqlContext.active(new DomainContext(domain, OPERATION_CONTEXT))
+      .then(ctx => this.ctx = ctx.withDatatypes(datatypes));
   }
 
   async initialise() {

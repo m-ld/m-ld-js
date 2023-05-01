@@ -1,10 +1,17 @@
 import { Iri } from '@m-ld/jsonld';
-import { isReference, Reference, Subject, SubjectProperty, Value } from '../jrql-support';
+import {
+  isReference,
+  Reference,
+  Subject,
+  SubjectProperty,
+  Value,
+  ValueObject
+} from '../jrql-support';
 import { Quad_Predicate, Quad_Subject, Term, Triple } from './quads';
 import { JRQL, RDF, XS } from '../ns';
 import { GraphSubject, GraphSubjects } from '../api';
 import { deepValues, isArray, setAtPath } from './util';
-import { addPropertyObject, toIndexNumber } from './jrql-util';
+import { addPropertyObject, getContextType, toIndexNumber } from './jrql-util';
 import { JsonldContext } from './jsonld';
 
 export type GraphAliases =
@@ -119,10 +126,8 @@ function identifyProperty(
   throw new SyntaxError('Subject property must be an IRI');
 }
 
-function getContextType(
-  property: SubjectProperty, ctx = JsonldContext.NONE): string | null {
-  return typeof property == 'string' && ctx != null ?
-    ctx.getTermDetail(property, '@type') : null;
+function toValueObject(value: any, type: string, ctx = JsonldContext.NONE): ValueObject {
+  return { '@value': value, '@type': ctx.compactIri(type, { vocab: true }) };
 }
 
 export function jrqlValue(
@@ -144,18 +149,20 @@ export function jrqlValue(
     if (object.language)
       return { '@value': object.value, '@language': object.language };
     else {
+      // If the literal has attached data, use that instead of the value
+      const value = object.typed != null ? object.typed.data : object.value;
       const type = object.datatype == null ?
         getContextType(property, ctx) : object.datatype.value;
       if (type == null || type === XS.string)
-        return object.value;
+        return value;
       else if (type === XS.boolean)
-        return object.value === 'true';
+        return value === 'true';
       else if (type === XS.integer)
-        return parseInt(object.value, 10);
+        return parseInt(value, 10);
       else if (type === XS.double)
-        return parseFloat(object.value);
+        return parseFloat(value);
       else
-        return { '@value': object.value, '@type': ctx.compactIri(type, { vocab: true }) };
+        return toValueObject(value, type, ctx);
     }
   } else {
     throw new Error(`Cannot include ${object.termType} in a Subject`);

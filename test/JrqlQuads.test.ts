@@ -4,8 +4,8 @@ import * as N3 from 'n3';
 import { Graph } from '../src/engine/dataset';
 import { mock } from 'jest-mock-extended';
 import { Constraint, uuid } from '../src';
-import { JsonldContext } from '../src/engine/jsonld';
 import { JrqlMode } from '../src/engine/jrql-util';
+import { JrqlContext } from '../src/engine/SubjectQuads';
 
 describe('json-rql Quads translation', () => {
   const rdf = new RdfDataFactory();
@@ -13,10 +13,10 @@ describe('json-rql Quads translation', () => {
   Object.assign(rdf, { skolem: () => rdf.namedNode(`http://test.m-ld.org/${uuid()}`) });
 
   let jrql: JrqlQuads;
-  let ctx: JsonldContext;
+  let ctx: JrqlContext;
 
   beforeEach(async () => {
-    ctx = await JsonldContext.active({
+    ctx = await JrqlContext.active({
       '@base': 'http://test.m-ld.org/',
       '@vocab': '#',
       'ex': 'http://example.org/'

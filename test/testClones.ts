@@ -5,8 +5,7 @@ import {
   MeldRemotes,
   OperationMessage,
   Revup,
-  Snapshot,
-  StateManaged
+  Snapshot
 } from '../src/engine';
 import { mock, mockFn, MockProxy } from 'jest-mock-extended';
 import { asapScheduler, BehaviorSubject, EMPTY, from, NEVER, Observable, Observer } from 'rxjs';
@@ -23,7 +22,6 @@ import {
   InterimUpdate,
   MeldConfig,
   MeldConstraint,
-  MeldExtensions,
   MeldPreUpdate,
   MeldReadState,
   StateProc,
@@ -37,12 +35,12 @@ import { DatasetSnapshot } from '../src/engine/dataset/SuSetDataset';
 import { ClockHolder } from '../src/engine/messages';
 import { DomainContext, MeldEncoder } from '../src/engine/MeldEncoding';
 import { JrqlGraph } from '../src/engine/dataset/JrqlGraph';
-import { JsonldContext } from '../src/engine/jsonld';
 import { InterimUpdatePatch } from '../src/engine/dataset/InterimUpdatePatch';
 import { MeldOperationMessage } from '../src/engine/MeldOperationMessage';
 import { Future } from '../src/engine/Future';
 import { SubjectGraph } from '../src/engine/SubjectGraph';
 import { TidsStore } from '../src/engine/dataset/TidsStore';
+import { JrqlContext } from '../src/engine/SubjectQuads';
 
 export const testDomain = 'test.m-ld.org';
 export const testContext = new DomainContext(testDomain);
@@ -55,10 +53,6 @@ export function testConfig(config?: Partial<MeldConfig>): MeldConfig {
     ...config
   };
 }
-
-export const testExtensions = (ext?: MeldExtensions): StateManaged<MeldExtensions> => ({
-  ready: () => Promise.resolve(ext ?? {})
-});
 
 export function mockRemotes(
   updates: Observable<MeldOperationMessage> = NEVER,
@@ -135,7 +129,7 @@ export class MockGraphState {
     context ??= testContext;
     return new MockGraphState(
       await MockState.create({ dataset, domain }),
-      await JsonldContext.active(context ?? {}));
+      await JrqlContext.active(context ?? {}));
   }
 
   readonly graph: JrqlGraph;
@@ -143,7 +137,7 @@ export class MockGraphState {
 
   protected constructor(
     readonly state: MockState,
-    readonly ctx: JsonldContext
+    readonly ctx: JrqlContext
   ) {
     this.graph = new JrqlGraph(state.dataset.graph());
     this.tidsStore = mock();

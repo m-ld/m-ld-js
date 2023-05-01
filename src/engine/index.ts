@@ -274,18 +274,10 @@ export interface ReadLatchable {
 }
 
 /**
- * Some component of type `T` that is loaded from domain state. The current
- * value may change as the domain evolves; and may also be temporarily
- * unavailable during an update.
+ * A component that needs to be kept abreast of state changes
  * @internal
  */
-export interface StateManaged<T> {
-  /**
-   * Get the current or next available value, ready for use (or a rejection,
-   * e.g. if the clone is shutting down).
-   */
-  ready(): Promise<T>;
-
+export interface StateManaged {
   /**
    * Initialises the component against the given clone state. This method could
    * be used to read significant state into memory for the efficient

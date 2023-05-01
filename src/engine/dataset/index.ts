@@ -1,10 +1,24 @@
 import {
-  Bindings, DataFactory, DefaultGraph, NamedNode, Prefixes, Quad, Quad_Object, Quad_Predicate,
-  Quad_Subject, QuadSet, QuadSource, RdfFactory, toBinding
+  Bindings,
+  DataFactory,
+  DefaultGraph,
+  NamedNode,
+  Prefixes,
+  Quad,
+  Quad_Object,
+  Quad_Predicate,
+  Quad_Subject,
+  QuadSet,
+  QuadSource,
+  RdfFactory,
+  toBinding
 } from '../quads';
 import { BatchOpts, Quadstore } from 'quadstore';
 import {
-  AbstractChainedBatch, AbstractIterator, AbstractIteratorOptions, AbstractLevel
+  AbstractChainedBatch,
+  AbstractIterator,
+  AbstractIteratorOptions,
+  AbstractLevel
 } from 'abstract-level';
 import { Observable } from 'rxjs';
 import { LockManager } from '../locks';
@@ -47,13 +61,18 @@ export class PatchQuads extends MutableOperation<Quad> implements Patch {
 
 export type GraphName = DefaultGraph | NamedNode;
 
-export interface KvpStore {
+export interface KvpSet {
   /** Exact match kvp retrieval */
   get(key: string): Promise<Buffer | undefined>;
   /** Exact match kvp retrieval */
   has(key: string): Promise<boolean>;
   /** Kvp retrieval by range options */
   read(range: AbstractIteratorOptions<string, Buffer>): Consumable<[string, Buffer]>;
+  /** Term storage compaction, if applicable */
+  readonly prefixes: Prefixes;
+}
+
+export interface KvpStore extends KvpSet {
   /**
    * Ensures that write transactions are executed serially against the store.
    * @param txn prepares a write operation to be performed
@@ -65,9 +84,6 @@ export interface KvpStore {
 
 export interface TripleKeyStore extends KvpStore {
   readonly rdf: Required<DataFactory>;
-
-  /** Term storage compaction, if applicable */
-  readonly prefixes: Prefixes;
 }
 
 /**
@@ -119,7 +135,7 @@ const notClosed = check((d: Dataset) => !d.closed,
 /**
  * Read-only utility interface for reading Quads from a Dataset.
  */
-export interface Graph extends RdfFactory, QueryableRdfSource {
+export interface Graph extends RdfFactory, QueryableRdfSource, KvpSet {
   readonly name: GraphName;
   readonly lock: LockManager<'state'>;
 
@@ -238,12 +254,13 @@ export class QuadStoreDataset implements Dataset {
       sw.next('prepare');
       const result = await txn.prepare({ id, sw: sw.lap });
       sw.next('apply');
-      if (result.patch != null)
+      if (result.patch != null) {
         await this.applyQuads(result.patch, {
           preWrite: batch => result.kvps?.(this.kvpBatch(batch))
         });
-      else if (result.kvps != null)
+      } else if (result.kvps != null) {
         await this.applyKvps(result.kvps);
+      }
       sw.next('after');
       await result.after?.();
       sw.stop();
@@ -397,11 +414,26 @@ class QuadStoreGraph implements Graph {
   constructor(
     readonly dataset: QuadStoreDataset,
     readonly name: GraphName
-  ) {
-  }
+  ) {}
 
   get lock() {
     return this.dataset.lock;
+  }
+
+  get prefixes() {
+    return this.dataset.prefixes;
+  }
+
+  get(key: string): Promise<Buffer | undefined> {
+    return this.dataset.get(key);
+  }
+
+  has(key: string): Promise<boolean> {
+    return this.dataset.has(key);
+  }
+
+  read(range: AbstractIteratorOptions<string, Buffer>): Consumable<[string, Buffer]> {
+    return this.dataset.read(range);
   }
 
   match: Graph['match'] = (subject, predicate, object, graph) => {

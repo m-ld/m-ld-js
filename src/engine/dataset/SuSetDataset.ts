@@ -14,16 +14,15 @@ import {
 import { BufferEncoding, EncodedOperation, OperationMessage, Snapshot, StateManaged } from '..';
 import { GlobalClock, TickTree, TreeClock } from '../clocks';
 import { Context, isUpdate, Query, Read, Write } from '../../jrql-support';
-import { Dataset, PatchQuads, PatchResult, TxnContext } from '.';
+import { Dataset, Kvps, PatchQuads, PatchResult, TxnContext } from '.';
 import { JrqlGraph } from './JrqlGraph';
 import { MeldEncoder, UUID } from '../MeldEncoding';
 import { EMPTY, merge, mergeMap, Observable, of, Subject as Source } from 'rxjs';
 import { expand, filter, map, takeWhile } from 'rxjs/operators';
-import { completed, inflate } from '../util';
+import { completed, inflate, mapIter } from '../util';
 import { Logger } from 'loglevel';
 import { Quad, Triple, tripleIndexKey, TripleMap } from '../quads';
 import { InterimUpdatePatch } from './InterimUpdatePatch';
-import { JsonldContext } from '../jsonld';
 import { EntryBuilder, Journal, JournalEntry, JournalState } from '../journal';
 import { JournalClerk } from '../journal/JournalClerk';
 import { PatchTids, TidsStore } from './TidsStore';
@@ -41,6 +40,7 @@ import { MeldOperationMessage } from '../MeldOperationMessage';
 import { check } from '../check';
 import { getIdLogger } from '../logging';
 import { Future } from '../Future';
+import { JrqlContext } from '../SubjectQuads';
 
 export type DatasetSnapshot = Omit<Snapshot, 'updates'>;
 
@@ -65,8 +65,7 @@ export class SuSetDataset extends MeldEncoder {
     d.readyForTxn, () => new MeldError('Unknown error', 'Dataset not ready'));
 
   /** External context used for reads, writes and updates, but not for constraints. */
-  /*readonly*/
-  userCtx: JsonldContext;
+  /*readonly*/ userCtx: JrqlContext;
 
   private /*readonly*/ userGraph: JrqlGraph;
   private readonly tidsStore: TidsStore;
@@ -80,11 +79,11 @@ export class SuSetDataset extends MeldEncoder {
   constructor(
     private readonly dataset: Dataset,
     private readonly context: Context,
-    private readonly extensions: StateManaged<MeldExtensions>,
+    private readonly extensions: StateManaged & MeldExtensions,
     private readonly app: MeldApp,
     config: DatasetConfig
   ) {
-    super(config['@domain'], dataset.rdf);
+    super(config['@domain'], dataset.rdf, extensions.datatypes);
     if (app.principal?.['@id'] === M_LD.localEngine)
       throw new MeldError('Unauthorised', 'Application principal cannot be local engine');
     this.log = getIdLogger(this.constructor, config['@id'], config.logLevel);
@@ -97,12 +96,13 @@ export class SuSetDataset extends MeldEncoder {
   @SuSetDataset.checkNotClosed.async
   async initialise() {
     await super.initialise();
-    this.userCtx = await JsonldContext.active(this.context);
+    this.userCtx = (await JrqlContext.active(this.context))
+      .withDatatypes(this.extensions.datatypes);
     this.userGraph = new JrqlGraph(this.dataset.graph());
   }
 
   private get transportSecurity() {
-    return this.extensions.ready().then(ext => ext.transportSecurity ?? noTransportSecurity);
+    return this.extensions.transportSecurity ?? noTransportSecurity;
   }
 
   get lock() {
@@ -281,8 +281,7 @@ export class SuSetDataset extends MeldEncoder {
       principalId,
       agree,
       { mutable: verb === 'check' });
-    const ext = await this.extensions.ready();
-    for (let constraint of ext.constraints ?? [])
+    for (let constraint of this.extensions.constraints ?? [])
       await constraint[verb]?.(this.readState, interim);
     return interim.finalise();
   }
@@ -290,7 +289,7 @@ export class SuSetDataset extends MeldEncoder {
   /**
    * Rolls up the given transaction details into a single patch to the store.
    */
-  private async txnResult(txn: {
+  private async txnResult({ tidPatch, journaling, ...txn }: {
     assertions: PatchQuads,
     entailments: PatchQuads,
     tidPatch: PatchTids,
@@ -300,26 +299,36 @@ export class SuSetDataset extends MeldEncoder {
     userUpdate: MeldPreUpdate,
     trace: MeldUpdate['trace']
   }): Promise<PatchResult<OperationMessage | null>> {
-    const commitTids = await this.tidsStore.commit(txn.tidPatch);
-    this.log.debug(`patch ${txn.journaling.appendEntries.map(e => e.operation.time)}:
+    this.log.debug(`patch ${journaling.appendEntries.map(e => e.operation.time)}:
     deletes: ${[...txn.assertions.deletes].map(triple => tripleIndexKey(triple))}
     inserts: ${[...txn.assertions.inserts].map(triple => tripleIndexKey(triple))}`);
+    const patch = new PatchQuads(txn.assertions).append(txn.entailments);
     return {
-      patch: new PatchQuads(txn.assertions).append(txn.entailments),
-      kvps: batch => {
-        commitTids(batch);
-        txn.journaling.commit(batch);
-      },
+      patch,
+      kvps: await this.txnKvps({ tidPatch, journaling, patch }),
       return: txn.msg,
       after: async () => {
-        if (this.readyForTxn && this.extensions.onUpdate != null)
-          await this.extensions.onUpdate(txn.internalUpdate, this.readState);
+        if (this.readyForTxn)
+          await this.extensions.onUpdate?.(txn.internalUpdate, this.readState);
         this.emitUpdate({
           ...txn.userUpdate,
-          '@ticks': txn.journaling.state.time.ticks,
+          '@ticks': journaling.state.time.ticks,
           trace: txn.trace
         });
       }
+    };
+  }
+
+  private async txnKvps(txn: {
+    tidPatch?: PatchTids,
+    journaling?: EntryBuilder,
+    patch?: PatchQuads
+  }): Promise<Kvps> {
+    const commitTids = txn.tidPatch ? await this.tidsStore.commit(txn.tidPatch) : null;
+    return batch => {
+      commitTids?.(batch);
+      txn.journaling?.commit(batch);
+      txn.patch && this.userGraph.jrql.saveData(txn.patch, batch);
     };
   }
 
@@ -335,8 +344,7 @@ export class SuSetDataset extends MeldEncoder {
     const attribution = await this.sign(op);
     // Apply transport wire security to the encoded update
     let encoded: EncodedOperation = [...op.encoded];
-    const transportSecurity = await this.transportSecurity;
-    const wireUpdate = await transportSecurity.wire(
+    const wireUpdate = await this.transportSecurity.wire(
       encoded[OpKey.update], MeldMessageType.operation, 'out', this.readState);
     if (wireUpdate !== encoded[OpKey.update]) {
       encoded[OpKey.update] = wireUpdate;
@@ -351,29 +359,28 @@ export class SuSetDataset extends MeldEncoder {
   }
 
   private sign = async (op: MeldOperation) => {
-    const transportSecurity = await this.transportSecurity;
-    return transportSecurity.sign != null ?
-      transportSecurity.sign(EncodedOperation.toBuffer(op.encoded), this.readState) : null;
+    return this.transportSecurity.sign?.(
+      EncodedOperation.toBuffer(op.encoded), this.readState) ?? null;
   };
 
   /**
    * Un-applies transport security from the encoded operation in the message
    */
   private async unSecureOperation(msg: OperationMessage): Promise<EncodedOperation> {
-    const transportSecurity = await this.transportSecurity;
     const encoded: EncodedOperation = [...msg.data];
     const encoding = encoded[OpKey.encoding];
     if (encoding[encoding.length - 1] === BufferEncoding.SECURE) {
       // Un-apply wire security
-      encoded[OpKey.update] = await transportSecurity.wire(
+      encoded[OpKey.update] = await this.transportSecurity.wire(
         encoded[OpKey.update], MeldMessageType.operation, 'in', this.readState);
       encoded[OpKey.encoding] = encoding.slice(0, -1);
       // Now verify the unsecured encoded update
-      await transportSecurity.verify?.(
+      await this.transportSecurity.verify?.(
         EncodedOperation.toBuffer(encoded), msg.attr, this.readState);
     } else {
       // Signature applies to the already-encoded message data
-      await transportSecurity.verify?.(MeldOperationMessage.enc(msg), msg.attr, this.readState);
+      await this.transportSecurity.verify?.(
+        MeldOperationMessage.enc(msg), msg.attr, this.readState);
     }
     return encoded;
   }
@@ -493,8 +500,7 @@ export class SuSetDataset extends MeldEncoder {
           // state, because we may have to recover if the rewind goes back too
           // far. This is allowed because an agreement condition should only
           // inspect previously agreed state.
-          const ext = await this.ssd.extensions.ready();
-          for (let agreementCondition of ext.agreementConditions ?? [])
+          for (let agreementCondition of this.ssd.extensions.agreementConditions ?? [])
             await agreementCondition.test(this.ssd.readState, txn.internalUpdate);
           if (this.operation.time.anyLt(this.journaling.state.gwc)) {
             // A rewind is required. This trumps the work we have already done.
@@ -603,13 +609,10 @@ export class SuSetDataset extends MeldEncoder {
         M_LD.localEngine,
         null,
         { mutable: false }).finalise();
-      const commitTids = await this.ssd.tidsStore.commit(rewindPatch.tids);
       return {
         patch: rewindPatch.quads,
-        kvps: batch => {
-          commitTids(batch);
-          this.journaling.commit(batch);
-        },
+        kvps: await this.ssd.txnKvps(
+          { tidPatch: rewindPatch.tids, journaling: this.journaling }),
         return: null,
         after: () => {
           this.ssd.emitUpdate({
@@ -729,14 +732,16 @@ export class SuSetDataset extends MeldEncoder {
         // Triples that were inserted in the applied transaction may have been
         // deleted by the constraint - these need to be removed from the applied
         // transaction patch but still published in the constraint operation
-        const deletedExistingTids = await this.ssd.tidsStore.findTriplesTids(cxnAssertions.deletes);
+        const deletedExistingTids =
+          await this.ssd.tidsStore.findTriplesTids(cxnAssertions.deletes);
         const deletedTriplesTids = new TripleMap(deletedExistingTids);
         patch.remove('inserts', cxnAssertions.deletes)
           .forEach(delTriple => deletedTriplesTids.with(delTriple, () => [])
             .push(...(insertTids.get(delTriple) ?? [])));
         // Anything deleted by the constraint that did not exist before the
         // applied transaction can now be removed from the constraint patch
-        cxnAssertions.remove('deletes', triple => deletedExistingTids.get(triple) == null);
+        cxnAssertions.remove(
+          'deletes', triple => deletedExistingTids.get(triple) == null);
         const cxnId = cxnTime.hash;
         return {
           operation: this.ssd.txnOperation(
@@ -776,12 +781,13 @@ export class SuSetDataset extends MeldEncoder {
           const reified = this.triplesFromBuffer(batch.inserts, batch.encoding);
           const triplesTids = MeldEncoder.unreifyTriplesTids(reified);
           // For each triple in the batch, insert the TIDs into the tids graph
-          const tidPatch = new PatchTids(this.tidsStore, { inserts: flattenItemTids(triplesTids) });
+          const tidPatch = new PatchTids(
+            this.tidsStore, { inserts: flattenItemTids(triplesTids) });
           // And include the triples themselves
           const patch = new PatchQuads({
             inserts: triplesTids.map(([triple]) => this.toUserQuad(triple))
           });
-          return { kvps: await this.tidsStore.commit(tidPatch), patch };
+          return { kvps: await this.txnKvps({ tidPatch, patch }), patch };
         } else {
           return { kvps: this.journal.insertPastOperation(batch.operation) };
         }
@@ -800,7 +806,10 @@ export class SuSetDataset extends MeldEncoder {
     const insData = consume(allQuads).pipe(
       batch(10), // TODO batch size config
       mergeMap(async ({ value: quads, next }) => {
-        const tidQuads = await this.tidsStore.findTriplesTids(quads, 'includeEmpty');
+        const tidQuads = await this.tidsStore
+          .findTriplesTids(quads, 'includeEmpty');
+        await Promise.all(mapIter(tidQuads, ([triple]) =>
+          this.userGraph.jrql.loadData(triple, this.userCtx)));
         const reified = this.reifyTriplesTids(this.identifyTriplesTids(tidQuads));
         const [inserts, encoding] = this.bufferFromTriples(reified);
         return { value: { inserts, encoding }, next };

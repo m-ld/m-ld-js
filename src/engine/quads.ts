@@ -86,16 +86,11 @@ export function tripleFromKey(key: string, rdf: DataFactory, prefixes?: Prefixes
     object);
 }
 
-export function tripleIndexKey(triple: Triple, prefixes?: Prefixes) {
-  if (prefixes != null) {
-    // No caching if value function is specified
-    return tripleKey(triple, prefixes);
-  } else {
-    const tik = <Triple & { _tik: string }>triple;
-    if (tik._tik == null)
-      tik._tik = tripleKey(triple);
-    return tik._tik;
-  }
+export function tripleIndexKey(triple: Triple) {
+  const tik = <Triple & { _tik: string }>triple;
+  if (tik._tik == null)
+    tik._tik = tripleKey(triple);
+  return tik._tik;
 }
 
 export function quadIndexKey(quad: Quad) {

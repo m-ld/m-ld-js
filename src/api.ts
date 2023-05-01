@@ -11,7 +11,7 @@ import type {
   Variable,
   Write
 } from './jrql-support';
-import { Value } from './jrql-support';
+import { Expression, Value } from './jrql-support';
 import { Subscription } from 'rxjs';
 import { shortId } from './util';
 import { Iri } from '@m-ld/jsonld';
@@ -338,8 +338,8 @@ export type StateProc<S extends MeldReadState = MeldReadState, T = unknown> =
  * rejects.
  * @category API
  */
-export type UpdateProc<U extends MeldPreUpdate = MeldUpdate, T = unknown> =
-  (update: U, state: MeldReadState) => PromiseLike<T> | void;
+export type UpdateProc<U extends MeldPreUpdate = MeldUpdate, T = void> =
+  (update: U, state: MeldReadState) => PromiseLike<T> | T;
 
 /**
  * A m-ld state machine extends the {@link MeldState} API for convenience, but
@@ -560,6 +560,10 @@ export interface MeldExtensions {
    */
   readonly constraints?: Iterable<MeldConstraint>;
   /**
+   * @todo
+   */
+  readonly datatypes?: Iterable<Datatype>;
+  /**
    * Agreement preconditions applicable to the domain.
    *
    * @experimental
@@ -723,17 +727,25 @@ export interface InterimUpdate {
    */
   remove(assertions: Assertions): void;
   /**
-   * Substitutes the given alias for the given property subject, property, or
-   * subject and property, in updates provided to the application. This allows a
-   * constraint to hide a data implementation detail.
+   * Substitutes the given alias for the given property or subject and property,
+   * in updates provided to the application. This allows a constraint to hide a
+   * data implementation detail.
    *
    * @param subjectId the subject to which the alias applies
-   * @param property if `@id`, the subject IRI is aliased. Otherwise, the
-   * property is aliased.
-   * @param alias the alias for the given subject and/or property. It is an
-   * error if the property is `@id` and a `SubjectProperty` alias is provided.
+   * @param property the property to be aliased
+   * @param alias the alias for the given property
    */
-  alias(subjectId: Iri | null, property: '@id' | Iri, alias: Iri | SubjectProperty): void;
+  alias(subjectId: Iri | null, property: Iri, alias: SubjectProperty): void;
+  /**
+   * Substitutes the given alias for the given subject, in updates provided to
+   * the application. This allows a constraint to hide a data implementation
+   * detail.
+   *
+   * @param subjectId the subject to which the alias applies
+   * @param property `@id` to indicate that the subject IRI is aliased
+   * @param alias the alias for the given subject
+   */
+  alias(subjectId: Iri, property: '@id', alias: Iri): void;
   /**
    * Recovers hidden graph edges for the given subject and property; that is,
    * values that have been deleted from the graph by {@link entail entailment}.
@@ -750,6 +762,75 @@ export interface InterimUpdate {
    * they will have been applied.
    */
   readonly update: Promise<MeldPreUpdate>;
+}
+
+/**
+ * @todo doc
+ * @see https://ci.mines-stetienne.fr/lindt/spec.html#interface-customdatatype
+ */
+export interface Datatype<T = any> {
+  /**
+   * The identity of the datatype. Matched against value object literals.
+   * @see ValueObject
+   */
+  readonly '@id': string;
+  /**
+   * Checks whether the provided data is valid for this datatype. This may give
+   * the application some leeway in type strictness; but note that the data
+   * provided back to the application will be of type `T` unless an
+   * {@link AbstractDatatype} is used.
+   *
+   * This method should ideally allow for values that might have been naively
+   * parsed from JSON in the app, for example in a data import, such that
+   * `value` is the JSON encoding of `T`.
+   *
+   * @returns the valid data, or undefined if the data is not valid
+   * @throws {TypeError} if a validation message is indicated
+   */
+  validate(value: any): T | undefined;
+  /**
+   * Obtains the lexical value to be contained in the graph. The lexical value
+   * is visible to query filters, but the data is substituted in retrieval and
+   * updates.
+   */
+  toLexical(data: T): string;
+  /**
+   * Convert data to a representation that can be stringified to JSON. If this
+   * method is not provided, the data itself must be JSON serialisable. The
+   * implementation should include a version if the format is likely to change.
+   * @see fromSerial
+   */
+  toJSON?(data: T): any;
+  /**
+   * Deserialises data. If this method is not provided, the data must be
+   * directly deserialisable from JSON.
+   * @see toJSON
+   */
+  fromJSON?(serial: any): T;
+}
+
+export interface AbstractDatatype<T, I> extends Datatype<T> {
+  /**
+   * Provides a value to appear as the literal `@value` when retrieved
+   */
+  toValue(data: T): I;
+}
+
+export interface SharedDatatype<T, O> extends Datatype<T> {
+  /**
+   * Intercepts update of a value object `@value`.
+   * @param data the existing state of the shared value
+   * @param update the json-rql expression used to perform the update
+   * @returns the new state, and an operation which can be {@link apply applied}
+   */
+  update(data: T, update: Expression): [data: T, operation: O];
+  /**
+   * Applies an operation to some state.
+   * @param data the existing state of the shared value
+   * @param operation the operation being applied, created using {@link update}
+   * on another clone
+   */
+  apply(data: T, operation: O): [data: T, update?: Expression];
 }
 
 /**
@@ -922,7 +1003,7 @@ export const noTransportSecurity: MeldTransportSecurity = {
   wire: (data: Buffer) => data
 };
 
-// Errors are used unchanged form m-ld-spec
+// Errors are used unchanged from m-ld-spec
 export { MeldErrorStatus };
 
 /**

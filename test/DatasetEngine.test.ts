@@ -1,9 +1,21 @@
 import { DatasetEngine } from '../src/engine/dataset/DatasetEngine';
 import {
-  decodeOpUpdate, hotLive, memStore, MockProcess, mockRemotes, testConfig, testExtensions
+  decodeOpUpdate,
+  hotLive,
+  memStore,
+  MockProcess,
+  mockRemotes,
+  testConfig
 } from './testClones';
 import {
-  asapScheduler, BehaviorSubject, EMPTY, EmptyError, firstValueFrom, NEVER, of, Subject as Source,
+  asapScheduler,
+  BehaviorSubject,
+  EMPTY,
+  EmptyError,
+  firstValueFrom,
+  NEVER,
+  of,
+  Subject as Source,
   throwError
 } from 'rxjs';
 import { comesAlive } from '../src/engine/AbstractMeld';
@@ -42,7 +54,7 @@ class TestDatasetEngine extends DatasetEngine {
     const fullConfig = testConfig({ genesis: params?.genesis ?? true });
     const suset = new SuSetDataset(
       await memStore({ backend: params?.backend }),
-      {}, testExtensions(), {}, fullConfig
+      {}, {}, {}, fullConfig
     );
     const clone = new TestDatasetEngine(
       suset, params?.remotes ?? mockRemotes(), fullConfig

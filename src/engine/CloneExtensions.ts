@@ -9,21 +9,23 @@ import { OrmDomain, OrmSubject, OrmUpdating } from '../orm';
 import { getIdLogger } from './logging';
 import { ExtensionSubjectInstance, SingletonExtensionSubject } from '../orm/ExtensionSubject';
 import { StateManaged } from './index';
+import { iterable } from './util';
 
 /**
  * Top-level aggregation of extensions. Created from the configuration and
  * runtime app initially; thereafter tracks extensions declared in the domain
  * data and installs them as required.
  */
-export class CloneExtensions extends OrmDomain implements StateManaged<MeldExtensions> {
+export class CloneExtensions extends OrmDomain implements StateManaged, MeldExtensions {
   static async initial(
     config: MeldConfig,
     app: InitialApp,
     context: Context
   ) {
+    const { datatypes, agreementConditions, transportSecurity } = app;
+    const constraints = await this.constraintsFromConfig(config, app.constraints, context);
     return new CloneExtensions({
-      constraints: await this.constraintsFromConfig(config, app.constraints, context),
-      transportSecurity: app.transportSecurity
+      constraints, datatypes, agreementConditions, transportSecurity
     }, config, app);
   }
 
@@ -40,6 +42,7 @@ export class CloneExtensions extends OrmDomain implements StateManaged<MeldExten
   private readonly log: Logger;
   /** Represents the `@list` of the global `M_LD.extensions` list subject  */
   private readonly extensionSubjects: ManagedExtensionSubject[];
+  private _extensions: MeldExtensions[];
 
   private constructor(
     private readonly initial: MeldExtensions,
@@ -60,27 +63,21 @@ export class CloneExtensions extends OrmDomain implements StateManaged<MeldExten
         // OrmSubject cannot cope with list update syntax, so load from state
         await this.loadAllExtensions(orm);
     });
+    this._extensions = [this.initial];
   }
 
-  ready = () => this.upToDate().then(() => {
-    const id = this.config['@id'];
-    return Promise.all(this.iterateExtensions()).then(extensions => ({
-      get constraints() {
-        return constraints(extensions, id);
-      },
-      get agreementConditions() {
-        return agreementConditions(extensions);
-      },
-      get transportSecurity() {
-        return transportSecurity(extensions);
-      }
-    }));
-  });
+  /**
+   * Get the current or next available value, ready for use (or a rejection,
+   * e.g. if the clone is shutting down). This might be called while one of the
+   * update methods is in-progress.
+   */
+  ready = () => this.upToDate().then(() => this);
 
   initialise(state: MeldReadState) {
     return this.updating(state, async orm => {
       // Load the top-level extensions subject into our cache
       await this.loadAllExtensions(orm);
+      await this.updateExtensions();
     });
   }
 
@@ -88,7 +85,28 @@ export class CloneExtensions extends OrmDomain implements StateManaged<MeldExten
     return this.updating(state, async orm => {
       // This will update the extension list and all the extension subjects
       await orm.updated(update);
+      await this.updateExtensions();
     });
+  }
+
+  get constraints() {
+    return iterable(() => constraints(this._extensions, this.config['@id']));
+  }
+
+  get datatypes() {
+    return iterable(() => datatypes(this._extensions));
+  }
+
+  get agreementConditions() {
+    return iterable(() => agreementConditions(this._extensions));
+  }
+
+  get transportSecurity() {
+    return transportSecurity(this._extensions);
+  }
+
+  private async updateExtensions() {
+    return this._extensions = await Promise.all(this.iterateExtensions());
   }
 
   private async loadAllExtensions(orm: OrmUpdating) {
@@ -138,6 +156,11 @@ function *constraints(
   // Ensure the default list constraint exists
   if (!foundDefaultList)
     yield new DefaultList(id);
+}
+
+function *datatypes(extensions: Iterable<MeldExtensions>) {
+  for (let ext of extensions)
+    yield *ext.datatypes ?? [];
 }
 
 function *agreementConditions(extensions: Iterable<MeldExtensions>) {

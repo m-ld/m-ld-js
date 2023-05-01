@@ -200,6 +200,14 @@ export function *mapIter<T, R>(it: Iterable<T>, fn: (v: T) => R): Iterable<R> {
     yield(fn(v));
 }
 
+export function iterable<T>(genIt: () => Iterator<T> | undefined): Iterable<T> {
+  return {
+    [Symbol.iterator]() {
+      return genIt() ?? [][Symbol.iterator]();
+    }
+  };
+}
+
 export function *deepValues(
   o: any,
   filter: (o: any, path: string[]) => boolean = o => typeof o != 'object',

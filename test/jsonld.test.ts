@@ -1,4 +1,4 @@
-import { compareValues, getValues, JsonldContext, mapValue } from '../src/engine/jsonld';
+import { compareValues, expandValue, getValues, JsonldContext } from '../src/engine/jsonld';
 
 describe('JSON-LD', () => {
   const context = {
@@ -77,31 +77,31 @@ describe('JSON-LD', () => {
     expect(compareValues({ '@id': 'http://a' }, { '@vocab': 'http://a' })).toBe(true);
   });
 
-  describe('mapping values', () => {
+  describe('expanding values', () => {
     test('references & subjects', () => {
-      expect(mapValue(
-        'spouse', { '@id': 'fred' }, (value, type) => [value, type]))
-        .toEqual(['fred', '@id']);
-      expect(mapValue(
-        'spouse', { '@vocab': 'fred' }, (value, type) => [value, type]))
-        .toEqual(['fred', '@vocab']);
-      expect(mapValue(
-        'spouse', { '@id': 'fred', name: 'Fred' }, (value, type) => [value, type]))
-        .toEqual(['fred', '@id']);
-      expect(() => mapValue(
-        'spouse', { name: 'Fred' }, (value, type) => [value, type]))
-        .toThrow(TypeError);
+      expect(expandValue(
+        'spouse', { '@id': 'fred' }))
+        .toEqual({ raw: 'fred', canonical: 'fred', type: '@id' });
+      expect(expandValue(
+        'spouse', { '@vocab': 'fred' }))
+        .toEqual({ raw: 'fred', canonical: 'fred', type: '@vocab' });
+      expect(expandValue(
+        'spouse', { '@id': 'fred', name: 'Fred' }))
+        .toEqual({ raw: 'fred', canonical: 'fred', type: '@id' });
+      expect(expandValue(
+        'spouse', { name: 'Fred' }))
+        .toEqual({ raw: { name: 'Fred' }, canonical: '[object Object]', type: '@none' });
     });
     test('plain JSON values', () => {
-      expect(mapValue(
-        'name', 'Fred', (value, type) => [value, type]))
-        .toEqual(['Fred', '@none']);
-      expect(mapValue(
-        'height', 1, (value, type) => [value, type]))
-        .toEqual(['1', 'http://www.w3.org/2001/XMLSchema#integer']);
-      expect(mapValue(
-        'height', 1.1, (value, type) => [value, type]))
-        .toEqual(['1.1E0', 'http://www.w3.org/2001/XMLSchema#double']);
+      expect(expandValue(
+        'name', 'Fred'))
+        .toEqual({ raw: 'Fred', canonical: 'Fred', type: '@none' });
+      expect(expandValue(
+        'height', 1))
+        .toEqual({ raw: 1, canonical: '1', type: 'http://www.w3.org/2001/XMLSchema#integer' });
+      expect(expandValue(
+        'height', 1.1))
+        .toEqual({ raw: 1.1, canonical: '1.1E0', type: 'http://www.w3.org/2001/XMLSchema#double' });
     });
     test('type from context', async () => {
       const ctx = await JsonldContext.active({
@@ -110,51 +110,42 @@ describe('JSON-LD', () => {
           '@type': 'http://www.w3.org/2001/XMLSchema#string'
         }
       });
-      expect(mapValue(
-        'name', 'Fred', (value, type) => [value, type], { ctx }))
-        .toEqual(['Fred', 'http://www.w3.org/2001/XMLSchema#string']);
+      expect(expandValue(
+        'name', 'Fred', ctx))
+        .toEqual({
+          raw: 'Fred',
+          canonical: 'Fred',
+          type: 'http://www.w3.org/2001/XMLSchema#string'
+        });
     });
     test('language from context', async () => {
       const ctx = await JsonldContext.active({
         'name': { '@id': 'http://test.m-ld.org/#name', '@language': 'en-gb' }
       });
-      expect(mapValue(
-        'name', 'Fred', (value, type, language) => [value, type, language], { ctx }))
-        .toEqual(['Fred', 'http://www.w3.org/2001/XMLSchema#string', 'en-gb']);
+      expect(expandValue(
+        'name', 'Fred', ctx))
+        .toEqual({
+          raw: 'Fred',
+          canonical: 'Fred',
+          type: 'http://www.w3.org/2001/XMLSchema#string',
+          language: 'en-gb'
+        });
     });
     test('value objects', () => {
-      expect(mapValue(
-        'name', { '@value': 'Fred' }, (value, type) => [value, type]))
-        .toEqual(['Fred', '@none']);
-      expect(mapValue(
+      expect(expandValue(
+        'name', { '@value': 'Fred' }))
+        .toEqual({ raw: 'Fred', canonical: 'Fred', type: '@none', isValue: true });
+      expect(expandValue(
         'name', {
           '@value': 'Fred',
           '@type': 'http://www.w3.org/2001/XMLSchema#string'
-        }, (value, type) => [value, type]))
-        .toEqual(['Fred', 'http://www.w3.org/2001/XMLSchema#string']);
-    });
-    test('intercept raw', () => {
-      expect(mapValue(
-        'name', 'Fred', (value, type) => [value, type], {
-          interceptRaw(value) {
-            expect(value).toBe('Fred');
-            return ['Barney', 'trouble'];
-          }
         }))
-        .toEqual(['Barney', 'trouble']);
-      expect(mapValue(
-        'name', { '@value': 'Fred' }, (value, type) => [value, type], {
-          interceptRaw() { fail('value object should not intercept'); }
-        }))
-        .toEqual(['Fred', '@none']);
-      expect(mapValue(
-        'spouse', { '@id': 'fred' }, (value, type) => [value, type], {
-          interceptRaw(value) {
-            expect(value).toBe('fred');
-            return ['barney', 'trouble'];
-          }
-        }))
-        .toEqual(['barney', 'trouble']);
+        .toEqual({
+          raw: 'Fred',
+          canonical: 'Fred',
+          type: 'http://www.w3.org/2001/XMLSchema#string',
+          isValue: true
+        });
     });
   });
 });

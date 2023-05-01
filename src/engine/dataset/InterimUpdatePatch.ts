@@ -12,6 +12,7 @@ import { TidsStore } from './TidsStore';
 import { flatMap, ignoreIf } from 'rx-flowable/operators';
 import { consume } from 'rx-flowable/consume';
 import { map } from 'rxjs/operators';
+import { JrqlContext } from '../SubjectQuads';
 
 export class InterimUpdatePatch implements InterimUpdate {
   /** If mutable, we allow mutation of the input patch */
@@ -47,7 +48,7 @@ export class InterimUpdatePatch implements InterimUpdate {
   constructor(
     private readonly graph: JrqlGraph,
     private readonly tidsStore: TidsStore,
-    private readonly userCtx: JsonldContext,
+    private readonly userCtx: JrqlContext,
     private readonly patch: PatchQuads,
     private readonly principalId: Iri | null,
     private agree: any | null,

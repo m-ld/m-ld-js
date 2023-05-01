@@ -112,12 +112,36 @@ export type Variable = jrql.Variable;
  * @see [json-rql atom](https://json-rql.org/#atom)
  * @category json-rql
  */
-export type Atom = jrql.Atom;
+export type Atom = number | string | boolean | Variable | ValueObject | Reference | VocabReference;
 /**
- * @see [json-rql value object](https://json-rql.org/interfaces/valueobject.html)
  * @category json-rql
+ * @see [json-rql value object](https://json-rql.org/interfaces/valueobject.html)
  */
-export type ValueObject = jrql.ValueObject;
+export interface ValueObject {
+  /**
+   * Used to specify the data that is associated with a particular property in
+   * the graph. Note that:
+   * - in **json-rql** a `@value` will never be a Variable.
+   * - **m-ld** allows a `@value` to be any JSON-serialisable type, to allow for
+   * custom datatypes. If a value that is not a string, number or boolean is
+   * used and there is no corresponding custom datatype, a TypeError may be
+   * thrown.
+   * @see [JSON-LD typed-values](https://w3c.github.io/json-ld-syntax/#typed-values)
+   */
+  '@value': any;
+  /**
+   * Used to set the data type of the typed value.
+   * @see [JSON-LD typed-values](https://w3c.github.io/json-ld-syntax/#typed-values)
+   * @see [JSON-LD type-coercion](https://w3c.github.io/json-ld-syntax/#type-coercion)
+   */
+  '@type'?: Iri;
+  /**
+   * Used to specify the language for a particular string value or the default
+   * language of a JSON-LD document.
+   */
+  '@language'?: string;
+}
+
 /**
  * @see [json-rql value](https://json-rql.org/#value)
  * @category json-rql
@@ -230,7 +254,7 @@ export function isValueObject(value: SubjectPropertyObject): value is ValueObjec
   if (value == null || typeof value != 'object' || !('@value' in value))
     return false;
   for (let key in value)
-    if (!(key === '@value' || key === '@type' || key === '@language'))
+    if (key !== '@value' && key !== '@type' && key !== '@language')
       return false;
   return true;
 }
@@ -392,8 +416,8 @@ export type Constraint = Partial<{
   /**
    * Operators are based on SPARQL expression keywords, lowercase with '@' prefix.
    * @see [json-rql operators](https://json-rql.org/globals.html#operators)
-   * @see [SPARQL
-   *   conditional](https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#rConditionalOrExpression)
+   * @see [SPARQL conditional]
+   * (https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#rConditionalOrExpression)
    */
   [operator in Operator]: Expression | Expression[];
   // It's not practical to constrain the types further here, see #isConstraint

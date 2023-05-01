@@ -11,6 +11,7 @@ import {
 import { JRQL } from '../ns';
 import { isArray, isNaturalNumber, setAtPath, trimTail } from './util';
 import { SubjectPropertyValues } from '../subjects';
+import { JsonldCompacter } from './jsonld';
 import validDataUrl = require('valid-data-url');
 
 export enum JrqlMode {
@@ -174,4 +175,12 @@ export function constructProperties(id: string, properties: SubjectProperty[]): 
 
 export function describeId(id: string): Describe {
   return { '@describe': id };
+}
+
+export function getContextType(
+  property: SubjectProperty,
+  ctx: JsonldCompacter
+): string | null {
+  return typeof property == 'string' && ctx != null ?
+    ctx.getTermDetail(property, '@type') : null;
 }

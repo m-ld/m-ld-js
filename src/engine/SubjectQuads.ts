@@ -1,4 +1,4 @@
-import { any, anyName, blank } from '../api';
+import { any, anyName, blank, Datatype } from '../api';
 import {
   Atom,
   Constraint,
@@ -14,23 +14,57 @@ import {
   SubjectPropertyObject,
   VariableExpression
 } from '../jrql-support';
-import { JsonldContext, mapValue } from './jsonld';
+import { expandValue, JsonldContext } from './jsonld';
 import { asQueryVar, Quad, Quad_Object, Quad_Subject, RdfFactory } from './quads';
 import { JRQL, RDF } from '../ns';
 import { JrqlMode, ListIndex, listItems, toIndexDataUrl } from './jrql-util';
 import { isArray, lazy, mapObject } from './util';
 import { array } from '../util';
 import { EventEmitter } from 'events';
+import { Context, Iri, Options } from '@m-ld/jsonld';
+import { ActiveContext } from '@m-ld/jsonld/lib/context';
 
-export interface UpdateQuad extends Quad {
-  before?: Quad_Object
+export class JrqlContext extends JsonldContext {
+  static active(context: Context, options?: Options.DocLoader) {
+    return new JrqlContext().next(context, options);
+  }
+
+  constructor(
+    private readonly datatypes: Iterable<Datatype> = [],
+    ctx?: ActiveContext
+  ) {
+    super(ctx);
+  }
+
+  withDatatypes(datatypes: Iterable<Datatype> | undefined) {
+    return new JrqlContext(datatypes, this.ctx);
+  }
+
+  protected withCtx(ctx: ActiveContext) {
+    return new JrqlContext(this.datatypes, ctx) as this;
+  }
+
+  getDatatype(id: Iri) {
+    for (let dt of this.datatypes)
+      if (dt['@id'] === id)
+        return dt;
+  }
+}
+
+declare module './quads' {
+  export interface Quad {
+    before?: Quad_Object;
+  }
+  export interface Literal {
+    typed?: { type: Datatype, data: any };
+  }
 }
 
 export class SubjectQuads extends EventEmitter {
   constructor(
     readonly rdf: RdfFactory,
     readonly mode: JrqlMode,
-    readonly ctx: JsonldContext
+    readonly ctx: JrqlContext
   ) {
     super();
   }
@@ -54,7 +88,7 @@ export class SubjectQuads extends EventEmitter {
     object: SubjectPropertyObject,
     outer: Quad_Subject | null = null,
     property: string | null = null
-  ): Iterable<UpdateQuad> {
+  ): Iterable<Quad> {
     // TODO: property is @list in context
     for (let value of array(object))
       if (isArray(value))
@@ -81,7 +115,7 @@ export class SubjectQuads extends EventEmitter {
     subject: Quad_Subject,
     property: string,
     value: Atom | InlineConstraint
-  ): UpdateQuad {
+  ): Quad {
     const predicate = this.predicate(property);
     if (isInlineConstraint(value)) {
       let { variable, constraint } = this.inlineConstraintDetails(value);
@@ -95,11 +129,9 @@ export class SubjectQuads extends EventEmitter {
       } else if (this.mode === JrqlMode.load) {
         // A binding, with the return value of the expression e.g. ?o = ?x + 1
         const returnVar = this.newVar();
-        const quad = Object.assign(this.rdf.quad(subject, predicate, returnVar), {
-          before: variable
-        });
         this.emit('bind', { [asQueryVar(returnVar)]: constraint });
-        return quad;
+        return Object.assign(
+          this.rdf.quad(subject, predicate, returnVar), { before: variable });
       }
       // Return variable unless bound to a new one
       return this.rdf.quad(subject, predicate, variable);
@@ -195,8 +227,8 @@ export class SubjectQuads extends EventEmitter {
       return { '@item': item };
   }
 
-  private matchVar = (term: string) => {
-    if (this.mode !== JrqlMode.graph) {
+  private matchVar = (term: any) => {
+    if (this.mode !== JrqlMode.graph && typeof term == 'string') {
       const varName = JRQL.matchVar(term);
       if (varName != null) {
         if (!varName)
@@ -237,16 +269,28 @@ export class SubjectQuads extends EventEmitter {
   }
 
   objectTerm(value: Atom | InlineConstraint, property?: string): Quad_Object {
-    return mapValue<Quad_Object>(property ?? null, value, (value, type, language) => {
-      if (type === '@id' || type === '@vocab')
-        return this.rdf.namedNode(value);
-      else if (language)
-        return this.rdf.literal(value, language);
-      else if (type !== '@none')
-        return this.rdf.literal(value, this.rdf.namedNode(type));
-      else
-        return this.rdf.literal(value);
-    }, { ctx: this.ctx, interceptRaw: this.matchVar });
+    const { raw, canonical, type, language, isValue } =
+      expandValue(property ?? null, value, this.ctx);
+    const variable = !isValue && this.matchVar(raw);
+    if (variable) {
+      return variable;
+    } else if (type === '@id' || type === '@vocab') {
+      return this.rdf.namedNode(canonical);
+    } else if (language) {
+      return this.rdf.literal(canonical, language);
+    } else if (type !== '@none') {
+      const datatype = this.ctx.getDatatype(type);
+      if (datatype) {
+        const data = datatype.validate(raw);
+        return Object.assign(
+          this.rdf.literal(datatype.toLexical(data), this.rdf.namedNode(type)),
+          { typed: { type: datatype, data } });
+      } else {
+        return this.rdf.literal(canonical, this.rdf.namedNode(type));
+      }
+    } else {
+      return this.rdf.literal(canonical);
+    }
   }
 
   private inlineConstraintDetails(inlineConstraint: InlineConstraint) {

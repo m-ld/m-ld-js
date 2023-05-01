@@ -1,6 +1,6 @@
 import { MockRemotes, testConfig } from './testClones';
-import { OrmDomain } from '../src/orm/index';
-import { clone, Construct, MeldClone, MeldStateMachine } from '../src/index';
+import { OrmDomain } from '../src/orm';
+import { clone, Construct, MeldClone, MeldStateMachine } from '../src';
 import { MemoryLevel } from 'memory-level';
 import { Episode, Flintstone, Series } from './ormFixtures';
 
