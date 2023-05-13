@@ -12,8 +12,8 @@ import type { EventEmitter } from 'events';
  * Keys include the variable prefix `?`.
  * @category RDFJS
  */
-export interface Binding {
-  [key: string]: Term;
+export interface Binding<T = Term> {
+  [key: string]: T;
 }
 
 /**

@@ -1,7 +1,11 @@
-import type { Bindings, DataFactory, NamedNode, Quad, Term, Variable } from 'rdf-js';
+import type { Bindings, DataFactory, NamedNode, Quad, Quad_Object, Term, Variable } from 'rdf-js';
+import { DataFactory as RdfDataFactory } from 'rdf-data-factory';
 import { IndexMap, IndexSet } from './indices';
 import { Binding, QueryableRdfSource } from '../rdfjs-support';
 import { Prefixes } from 'quadstore';
+import { Datatype } from '../api';
+import { Iri } from '@m-ld/jsonld';
+import { uuid } from '../util';
 
 export type Triple = Omit<Quad, 'graph'>;
 export type TriplePos = 'subject' | 'predicate' | 'object';
@@ -13,6 +17,36 @@ export type {
 
 /** Utility interfaces shared with quadstore */
 export { Prefixes };
+
+declare module './quads' {
+  export interface Quad {
+    before?: Quad_Object;
+  }
+  export interface Literal {
+    typed?: { type: Datatype, data: any };
+  }
+}
+
+export interface LiteralTriple extends Triple {
+  object: Literal;
+}
+
+export function isLiteralTriple(triple: Triple): triple is LiteralTriple {
+  return triple.object.termType === 'Literal';
+}
+
+/** Note `datatype.value === typed.type['@id']` */
+export interface TypedLiteral extends Literal {
+  typed: { type: Datatype, data: any };
+}
+
+export interface TypedTriple extends LiteralTriple {
+  object: TypedLiteral;
+}
+
+export function isTypedTriple(triple: Triple): triple is TypedTriple {
+  return triple.object.termType === 'Literal' && triple.object.typed != null;
+}
 
 export abstract class QueryableRdfSourceProxy implements QueryableRdfSource {
   match: QueryableRdfSource['match'] = (...args) => this.src.match(...args);
@@ -118,13 +152,42 @@ export function inPosition<P extends TriplePos>(pos: P, value?: Term): Quad[P] {
     throw new Error(`${value} cannot be used in ${pos} position`);
 }
 
-export interface RdfFactory extends Required<DataFactory> {
+export class RdfFactory extends RdfDataFactory {
+  constructor(
+    readonly base: Iri | undefined
+  ) {
+    super();
+  }
+
   /**
    * Generates a new skolemization IRI. The dataset base is allowed to be
    * `undefined` but the function will throw a `TypeError` if it is.
    * @see https://www.w3.org/TR/rdf11-concepts/#h3_section-skolemization
    */
-  skolem?(): NamedNode;
+  skolem = () => this.namedNode(
+    new URL(`/.well-known/genid/${uuid()}`, this.base).href);
+
+  /** @inheritDoc */
+  literal(value: string, languageOrDatatype?: string | NamedNode): Literal;
+  /**
+   * Creates a literal with a specific custom datatype
+   */
+  literal(value: any, datatype?: Datatype): TypedLiteral;
+  /** @internal */
+  literal(value: any, languageOrDatatype?: string | NamedNode | Datatype): Literal {
+    if (languageOrDatatype == null ||
+      typeof languageOrDatatype == 'string' ||
+      'termType' in languageOrDatatype) {
+      return super.literal(value, languageOrDatatype);
+    } else {
+      return Object.assign(super.literal(
+        languageOrDatatype.toLexical(value),
+        this.namedNode(languageOrDatatype['@id'])
+      ), {
+        typed: { type: languageOrDatatype, data: value }
+      });
+    }
+  }
 }
 
 export function asQueryVar(variable: Variable) {

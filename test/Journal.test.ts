@@ -42,7 +42,7 @@ describe('Dataset Journal', () => {
    */
   function opAt(process: MockProcess, content = [{}, {}], agree?: true) {
     const [deletes, inserts] = content;
-    return MeldOperation.fromEncoded(encoder, process.operated(deletes, inserts, agree));
+    return MeldOperation.fromEncoded(encoder, process.operated(deletes, inserts, { agree }));
   }
 
   function addEntry(

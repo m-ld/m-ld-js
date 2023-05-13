@@ -2,6 +2,7 @@ import { any, anyName, blank, Datatype } from '../api';
 import {
   Atom,
   Constraint,
+  Expression,
   InlineConstraint,
   isInlineConstraint,
   isPropertyObject,
@@ -12,9 +13,9 @@ import {
   Reference,
   Subject,
   SubjectPropertyObject,
-  VariableExpression
+  Variable
 } from '../jrql-support';
-import { expandValue, JsonldContext } from './jsonld';
+import { ActiveContext, expandValue, JsonldContext } from './jsonld';
 import { asQueryVar, Quad, Quad_Object, Quad_Subject, RdfFactory } from './quads';
 import { JRQL, RDF } from '../ns';
 import { JrqlMode, ListIndex, listItems, toIndexDataUrl } from './jrql-util';
@@ -22,7 +23,6 @@ import { isArray, lazy, mapObject } from './util';
 import { array } from '../util';
 import { EventEmitter } from 'events';
 import { Context, Iri, Options } from '@m-ld/jsonld';
-import { ActiveContext } from '@m-ld/jsonld/lib/context';
 
 export class JrqlContext extends JsonldContext {
   static active(context: Context, options?: Options.DocLoader) {
@@ -30,13 +30,13 @@ export class JrqlContext extends JsonldContext {
   }
 
   constructor(
-    private readonly datatypes: Iterable<Datatype> = [],
+    private readonly datatypes: (id: Iri) => Datatype | undefined = () => undefined,
     ctx?: ActiveContext
   ) {
     super(ctx);
   }
 
-  withDatatypes(datatypes: Iterable<Datatype> | undefined) {
+  withDatatypes(datatypes?: (id: Iri) => Datatype | undefined) {
     return new JrqlContext(datatypes, this.ctx);
   }
 
@@ -45,18 +45,7 @@ export class JrqlContext extends JsonldContext {
   }
 
   getDatatype(id: Iri) {
-    for (let dt of this.datatypes)
-      if (dt['@id'] === id)
-        return dt;
-  }
-}
-
-declare module './quads' {
-  export interface Quad {
-    before?: Quad_Object;
-  }
-  export interface Literal {
-    typed?: { type: Datatype, data: any };
+    return this.datatypes?.(id);
   }
 }
 
@@ -74,7 +63,12 @@ export class SubjectQuads extends EventEmitter {
   /** Called with inline filters found, if mode is 'match' */
   on(event: 'filter', listener: (filter: Constraint) => void): this;
   /** Called with inline bindings found, if mode is 'load' */
-  on(event: 'bind', listener: (bind: VariableExpression) => void): this;
+  on(event: 'bind', listener: (
+    returnVar: Variable,
+    binding: Expression,
+    queryVar: Variable,
+    constraint: Constraint
+  ) => void): this;
   /** Called with metadata found when processing subjects */
   on(eventName: string, listener: (...args: any[]) => void): this {
     return super.on(eventName, listener);
@@ -118,20 +112,23 @@ export class SubjectQuads extends EventEmitter {
   ): Quad {
     const predicate = this.predicate(property);
     if (isInlineConstraint(value)) {
-      let { variable, constraint } = this.inlineConstraintDetails(value);
+      const { variable, constraint } = this.inlineConstraintDetails(value);
       // The variable is the 1st parameter of the resultant constraint expression.
-      constraint = mapObject(constraint, (operator, expression) => ({
-        [operator]: [asQueryVar(variable), ...array(expression)]
+      const queryVar = asQueryVar(variable);
+      const uncurried = mapObject(constraint, (operator, expression) => ({
+        [operator]: [queryVar, ...array(expression)]
       }));
       if (this.mode === JrqlMode.match) {
         // A filter, with the variable as the object e.g. ?o > 1
-        this.emit('filter', constraint);
+        this.emit('filter', uncurried);
       } else if (this.mode === JrqlMode.load) {
         // A binding, with the return value of the expression e.g. ?o = ?x + 1
         const returnVar = this.newVar();
-        this.emit('bind', { [asQueryVar(returnVar)]: constraint });
-        return Object.assign(
-          this.rdf.quad(subject, predicate, returnVar), { before: variable });
+        this.emit('bind',
+          asQueryVar(returnVar), uncurried, queryVar, constraint);
+        const quad = this.rdf.quad(subject, predicate, returnVar);
+        quad.before = variable;
+        return quad;
       }
       // Return variable unless bound to a new one
       return this.rdf.quad(subject, predicate, variable);
@@ -280,14 +277,10 @@ export class SubjectQuads extends EventEmitter {
       return this.rdf.literal(canonical, language);
     } else if (type !== '@none') {
       const datatype = this.ctx.getDatatype(type);
-      if (datatype) {
-        const data = datatype.validate(raw);
-        return Object.assign(
-          this.rdf.literal(datatype.toLexical(data), this.rdf.namedNode(type)),
-          { typed: { type: datatype, data } });
-      } else {
+      if (datatype)
+        return this.rdf.literal(datatype.validate(raw), datatype);
+      else
         return this.rdf.literal(canonical, this.rdf.namedNode(type));
-      }
     } else {
       return this.rdf.literal(canonical);
     }

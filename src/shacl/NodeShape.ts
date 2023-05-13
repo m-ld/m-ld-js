@@ -46,7 +46,8 @@ export class NodeShape extends Shape {
       ).pipe(filter((s): s is GraphSubject => s != null), toArray())));
     return {
       '@delete': await filterUpdate(update['@delete']),
-      '@insert': await filterUpdate(update['@insert'])
+      '@insert': await filterUpdate(update['@insert']),
+      '@update': await filterUpdate(update['@update'])
     };
   }
 

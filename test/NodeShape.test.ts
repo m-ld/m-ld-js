@@ -1,7 +1,6 @@
-import { NodeShape, Shape } from '../src/shacl/index';
+import { NodeShape, Shape } from '../src/shacl';
 import { SH } from '../src/ns';
-import { MockGraphState } from './testClones';
-import { SubjectGraph } from '../src/engine/SubjectGraph';
+import { MockGraphState, mockUpdate } from './testClones';
 
 describe('SHACL Node Shape', () => {
   test('create from a subject', () => {
@@ -40,68 +39,67 @@ describe('SHACL Node Shape', () => {
 
     test('insert with no matching type', async () => {
       const shape = new NodeShape({ targetClass: 'http://test.m-ld.org/#Flintstone' });
-      await expect(shape.affected(state.graph.asReadState, {
-        '@delete': new SubjectGraph([]),
-        '@insert': new SubjectGraph([{
+      await expect(shape.affected(state.graph.asReadState, mockUpdate({
+        '@insert': [{
           '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Fred'
-        }])
-      })).resolves.toEqual({
-        '@delete': [], '@insert': []
+        }]
+      }))).resolves.toEqual({
+        '@delete': [], '@insert': [], '@update': []
       });
     });
 
     test('insert with matching type in update', async () => {
       const shape = new NodeShape({ targetClass: 'http://test.m-ld.org/#Flintstone' });
-      await expect(shape.affected(state.graph.asReadState, {
-        '@delete': new SubjectGraph([]),
-        '@insert': new SubjectGraph([{
-          '@id': 'http://test.m-ld.org/fred',
-          '@type': 'http://test.m-ld.org/#Flintstone',
-          'http://test.m-ld.org/#name': 'Fred'
-        }])
-      })).resolves.toEqual({
-        '@delete': [],
+      await expect(shape.affected(state.graph.asReadState, mockUpdate({
         '@insert': [{
           '@id': 'http://test.m-ld.org/fred',
           '@type': 'http://test.m-ld.org/#Flintstone',
           'http://test.m-ld.org/#name': 'Fred'
         }]
+      }))).resolves.toEqual({
+        '@delete': [],
+        '@insert': [{
+          '@id': 'http://test.m-ld.org/fred',
+          '@type': 'http://test.m-ld.org/#Flintstone',
+          'http://test.m-ld.org/#name': 'Fred'
+        }],
+        '@update': []
       });
     });
 
     test('insert with matching type in state', async () => {
       await state.write({ '@id': 'fred', '@type': 'http://test.m-ld.org/#Flintstone' });
       const shape = new NodeShape({ targetClass: 'http://test.m-ld.org/#Flintstone' });
-      await expect(shape.affected(state.graph.asReadState, {
-        '@delete': new SubjectGraph([]),
-        '@insert': new SubjectGraph([{
-          '@id': 'http://test.m-ld.org/fred',
-          'http://test.m-ld.org/#name': 'Fred'
-        }])
-      })).resolves.toEqual({
-        '@delete': [],
+      await expect(shape.affected(state.graph.asReadState, mockUpdate({
         '@insert': [{
           '@id': 'http://test.m-ld.org/fred',
           'http://test.m-ld.org/#name': 'Fred'
         }]
+      }))).resolves.toEqual({
+        '@delete': [],
+        '@insert': [{
+          '@id': 'http://test.m-ld.org/fred',
+          'http://test.m-ld.org/#name': 'Fred'
+        }],
+        '@update': []
       });
     });
 
     test('delete with matching type in state', async () => {
       await state.write({ '@id': 'fred', '@type': 'http://test.m-ld.org/#Flintstone' });
       const shape = new NodeShape({ targetClass: 'http://test.m-ld.org/#Flintstone' });
-      await expect(shape.affected(state.graph.asReadState, {
-        '@delete': new SubjectGraph([{
+      await expect(shape.affected(state.graph.asReadState, mockUpdate({
+        '@delete': [{
           '@id': 'http://test.m-ld.org/fred',
           'http://test.m-ld.org/#name': 'Fred'
-        }]),
-        '@insert': new SubjectGraph([])
-      })).resolves.toEqual({
+        }]
+      }))).resolves.toEqual({
         '@delete': [{
           '@id': 'http://test.m-ld.org/fred',
           'http://test.m-ld.org/#name': 'Fred'
         }],
-        '@insert': []
+        '@insert': [],
+        '@update': []
       });
     });
 

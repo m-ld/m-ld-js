@@ -22,22 +22,14 @@ import { MeldApp } from './config';
 import { EncodedOperation } from './engine';
 
 /**
- * A convenience type for a struct with a `@insert` and `@delete` property, like
- * a {@link MeldUpdate}.
+ * An update form that mirrors the structure of a {@link GraphUpdate}, having
+ * optional keys
  * @category API
  */
-export interface DeleteInsert<T> {
-  readonly '@delete': T;
-  readonly '@insert': T;
-}
+export type UpdateForm<T> = Partial<{ [verb in keyof GraphUpdate]: T }>
 
 /** @internal */
-export function isDeleteInsert(o: any): o is DeleteInsert<unknown> {
-  return '@insert' in o && '@delete' in o;
-}
-
-/** @internal */
-export type Assertions = Partial<DeleteInsert<GraphSubject[] | GraphSubject>>;
+export type Assertions = UpdateForm<GraphSubject[] | GraphSubject>;
 
 /**
  * A utility to generate a variable with a unique Id. Convenient to use when
@@ -260,7 +252,7 @@ export namespace GraphSubjects {
  * An update arising from a write operation to **m-ld** graph data.
  * @category API
  */
-export interface GraphUpdate extends DeleteInsert<GraphSubjects> {
+export interface GraphUpdate {
   /**
    * Partial subjects, containing properties that have been deleted from the
    * domain. Note that deletion of a property (even of all properties) does not
@@ -273,6 +265,12 @@ export interface GraphUpdate extends DeleteInsert<GraphSubjects> {
    * domain.
    */
   readonly '@insert': GraphSubjects;
+  /**
+   * Partial subjects, containing only properties with a {@link SharedDatatype}
+   * in the domain, which have been operated on.
+   * @todo more explanation
+   */
+  readonly '@update': GraphSubjects;
 }
 
 /**
@@ -562,7 +560,7 @@ export interface MeldExtensions {
   /**
    * @todo
    */
-  readonly datatypes?: Iterable<Datatype>;
+  readonly datatypes?: (id: Iri) => Datatype | undefined;
   /**
    * Agreement preconditions applicable to the domain.
    *
@@ -806,7 +804,7 @@ export interface Datatype<T = any> {
    * directly deserialisable from JSON.
    * @see toJSON
    */
-  fromJSON?(serial: any): T;
+  fromJSON?(json: any): T;
 }
 
 export interface AbstractDatatype<T, I> extends Datatype<T> {
@@ -816,21 +814,47 @@ export interface AbstractDatatype<T, I> extends Datatype<T> {
   toValue(data: T): I;
 }
 
+/**
+ * @typeParam O operation type; must be JSON-serialisable
+ */
 export interface SharedDatatype<T, O> extends Datatype<T> {
   /**
-   * Intercepts update of a value object `@value`.
-   * @param data the existing state of the shared value
-   * @param update the json-rql expression used to perform the update
-   * @returns the new state, and an operation which can be {@link apply applied}
+   * A shared data type MUST always generate a new identity as its lexical
+   * value, for which mutable state will exist.
    */
-  update(data: T, update: Expression): [data: T, operation: O];
+  toLexical(): UUID;
   /**
-   * Applies an operation to some state.
-   * @param data the existing state of the shared value
+   * Intercepts update of data. The implementation may mutate the passed `data`;
+   * the backend may later undo the returned operation in case of rollback.
+   *
+   * @param state the existing state of the shared value
+   * @param update the json-rql expression used to perform the update
+   * @returns an operation which can be {@link apply applied}
+   */
+  update(state: T, update: Expression): [T, O];
+  /**
+   * Applies an operation to some state. The implementation is welcome to mutate
+   * the passed `state` and return it as the new state.
+   *
+   * @param state the existing state of the shared value
    * @param operation the operation being applied, created using {@link update}
    * on another clone
+   * @returns the new state (can be the input) and an update to notify the app
    */
-  apply(data: T, operation: O): [data: T, update?: Expression];
+  apply(state: T, operation: O): [T, Expression];
+  /**
+   * Merges multiple state values. This is called if multiple clones
+   * concurrently insert shared data of the same type at the same subject
+   * property.
+   */
+  merge(s1: T, s2: T, ...sn: T[]): T;
+}
+
+/**
+ * @todo
+ */
+export function isSharedDatatype<T>(dt: Datatype<T>): dt is SharedDatatype<T, unknown> {
+  return 'update' in dt;
 }
 
 /**
@@ -1029,3 +1053,5 @@ export class MeldError extends Error {
       return new MeldError('Unknown error', err.message);
   }
 }
+
+export type UUID = string;

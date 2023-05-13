@@ -24,11 +24,12 @@ import {
   isVocabReference
 } from '../jrql-support';
 import { array } from '../util';
-import { XS } from '../ns';
+import { RDF, XS } from '../ns';
 
-export { hasProperty, hasValue } from '@m-ld/jsonld/lib/util';
+export { clone, hasProperty, hasValue } from '@m-ld/jsonld/lib/util';
 export { isAbsolute } from '@m-ld/jsonld/lib/url';
 export { isBoolean, isDouble, isNumber, isString } from '@m-ld/jsonld/lib/types';
+export { ActiveContext };
 
 export function compareValues(v1: any, v2: any): boolean {
   const jsonldEqual = _compareValues(v1, v2);
@@ -224,6 +225,8 @@ export function expandValue(
       canonical = value.toFixed(0);
       type ??= XS.integer;
     }
+  } else if (type === '@json') {
+    type = RDF.JSON;
   }
   return {
     raw: value,

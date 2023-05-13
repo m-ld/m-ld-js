@@ -3,13 +3,15 @@ import { Context, Subject } from '../jrql-support';
 import { constraintFromConfig } from '../constraints';
 import { DefaultList } from '../lseq/DefaultList';
 import { InitialApp, MeldApp, MeldConfig } from '../config';
-import { M_LD } from '../ns';
+import { M_LD, RDF } from '../ns';
 import { Logger } from 'loglevel';
 import { OrmDomain, OrmSubject, OrmUpdating } from '../orm';
 import { getIdLogger } from './logging';
 import { ExtensionSubjectInstance, SingletonExtensionSubject } from '../orm/ExtensionSubject';
 import { StateManaged } from './index';
 import { iterable } from './util';
+import { jsonDatatype } from '../datatype';
+import { Iri } from '@m-ld/jsonld';
 
 /**
  * Top-level aggregation of extensions. Created from the configuration and
@@ -93,8 +95,14 @@ export class CloneExtensions extends OrmDomain implements StateManaged, MeldExte
     return iterable(() => constraints(this._extensions, this.config['@id']));
   }
 
-  get datatypes() {
-    return iterable(() => datatypes(this._extensions));
+  datatypes = (id: Iri) => {
+    for (let ext of this._extensions) {
+      const dt = ext.datatypes?.(id);
+      if (dt)
+        return dt;
+    }
+    if (id === RDF.JSON)
+      return jsonDatatype;
   }
 
   get agreementConditions() {
@@ -142,25 +150,28 @@ class ManagedExtensionSubject
   extends SingletonExtensionSubject<MeldExtensions & ExtensionSubjectInstance> {
 }
 
-function *constraints(
+function *withDefaults<T>(
   extensions: Iterable<MeldExtensions>,
-  id: string
+  getOfType: (ext: MeldExtensions) => Iterable<T> | undefined,
+  ...defaults: { is: (ext: T) => boolean, get: () => T }[]
 ) {
-  let foundDefaultList = false;
+  const foundDefault = Array<boolean>(defaults.length);
   for (let ext of extensions) {
-    for (let constraint of ext.constraints ?? []) {
-      yield constraint;
-      foundDefaultList ||= constraint instanceof DefaultList;
+    for (let extOfType of getOfType(ext) ?? []) {
+      yield extOfType;
+      defaults.forEach((d, i) => foundDefault[i] ||= defaults[i].is(extOfType));
     }
   }
-  // Ensure the default list constraint exists
-  if (!foundDefaultList)
-    yield new DefaultList(id);
+  // Ensure the defaults exist
+  for (let i = 0; i < defaults.length; i++)
+    if (!foundDefault[i])
+      yield defaults[i].get();
 }
 
-function *datatypes(extensions: Iterable<MeldExtensions>) {
-  for (let ext of extensions)
-    yield *ext.datatypes ?? [];
+function *constraints(extensions: Iterable<MeldExtensions>, id: string) {
+  yield *withDefaults(extensions, ext => ext.constraints, {
+    is: constraint => constraint instanceof DefaultList, get: () => new DefaultList(id)
+  });
 }
 
 function *agreementConditions(extensions: Iterable<MeldExtensions>) {

@@ -4,6 +4,9 @@ export const $vocab = `${$base}#`;
 /** Property for serialisation of transaction IDs in operation messages */
 export const tid = `${$vocab}tid`;
 
+/** Property for serialisation of datatype operations in operation messages */
+export const op = `${$vocab}op`;
+
 /** Property for secret known only to domain users */
 export const secret = `${$vocab}secret`;
 

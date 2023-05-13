@@ -4,7 +4,14 @@ import { LseqDef, LseqIndexRewriter, PosItem } from '.';
 import * as meld from '../ns/m-ld';
 import { lazy } from '../engine/util';
 import {
-  isList, isPropertyObject, isReference, isSlot, isSubjectObject, List, Reference, Select,
+  isList,
+  isPropertyObject,
+  isReference,
+  isSlot,
+  isSubjectObject,
+  List,
+  Reference,
+  Select,
   SubjectProperty
 } from '../jrql-support';
 import { SingleValued } from '../constraints/SingleValued';
@@ -98,7 +105,7 @@ function findListInserts(
 /** @internal */
 function addItems(subject: List & Reference, rewriter: (listId: string) => ListRewriter) {
   for (let [listIndex, item] of listItems(subject['@list'])) {
-    if (isSlot(item) && typeof listIndex != 'string') {
+    if ((isSlot(item) || isReference(item)) && typeof listIndex != 'string') {
       const slotInList: SlotInList = {
         property: ['@list', ...listIndex], id: item['@id']
       };

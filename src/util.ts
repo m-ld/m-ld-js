@@ -44,5 +44,5 @@ export function shortId(spec?: string) {
  * @category Utility
  */
 export function uuid() {
-  return cuid()
+  return cuid();
 }

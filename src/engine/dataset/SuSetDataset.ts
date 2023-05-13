@@ -9,26 +9,27 @@ import {
   MeldPreUpdate,
   MeldUpdate,
   noTransportSecurity,
-  UpdateTrace
+  UpdateTrace,
+  UUID
 } from '../../api';
 import { BufferEncoding, EncodedOperation, OperationMessage, Snapshot, StateManaged } from '..';
 import { GlobalClock, TickTree, TreeClock } from '../clocks';
 import { Context, isUpdate, Query, Read, Write } from '../../jrql-support';
 import { Dataset, Kvps, PatchQuads, PatchResult, TxnContext } from '.';
 import { JrqlGraph } from './JrqlGraph';
-import { MeldEncoder, UUID } from '../MeldEncoding';
+import { MeldEncoder } from '../MeldEncoding';
 import { EMPTY, merge, mergeMap, Observable, of, Subject as Source } from 'rxjs';
 import { expand, filter, map, takeWhile } from 'rxjs/operators';
 import { completed, inflate, mapIter } from '../util';
 import { Logger } from 'loglevel';
-import { Quad, Triple, tripleIndexKey, TripleMap } from '../quads';
+import { Quad, Triple, tripleIndexKey, TripleMap, TypedTriple } from '../quads';
 import { InterimUpdatePatch } from './InterimUpdatePatch';
 import { EntryBuilder, Journal, JournalEntry, JournalState } from '../journal';
 import { JournalClerk } from '../journal/JournalClerk';
 import { PatchTids, TidsStore } from './TidsStore';
 import { CausalOperation, expandItemTids, flattenItemTids } from '../ops';
-import { Consumable, flowable } from 'rx-flowable';
-import { batch } from 'rx-flowable/operators';
+import { Consumable, drain, flowable } from 'rx-flowable';
+import { batch, flatMap, ignoreIf } from 'rx-flowable/operators';
 import { consume } from 'rx-flowable/consume';
 import { MeldMessageType } from '../../ns/m-ld';
 import { MeldApp, MeldConfig } from '../../config';
@@ -41,13 +42,14 @@ import { check } from '../check';
 import { getIdLogger } from '../logging';
 import { Future } from '../Future';
 import { JrqlContext } from '../SubjectQuads';
+import { JrqlPatchQuads, SharedDataOpMeta } from './JrqlQuads';
 
 export type DatasetSnapshot = Omit<Snapshot, 'updates'>;
 
 type DatasetConfig = Pick<MeldConfig,
   '@id' | '@domain' | 'maxOperationSize' | 'logLevel' | 'journal'>;
 
-type SuSetDataPatch = { quads: PatchQuads, tids: PatchTids };
+type SuSetDataPatch = { quads: JrqlPatchQuads, tids: PatchTids };
 
 const OpKey = EncodedOperation.Key;
 
@@ -129,7 +131,7 @@ export class SuSetDataset extends MeldEncoder {
   }
 
   @SuSetDataset.checkStateLocked.async
-  write(request: Write): Promise<PatchQuads> {
+  write(request: Write) {
     return this.userGraph.write(request, this.userCtx);
   }
 
@@ -247,8 +249,13 @@ export class SuSetDataset extends MeldEncoder {
         const deletedTriplesTids = await this.tidsStore.findTriplesTids(txn.assertions.deletes);
         const tid = time.hash;
         const op = this.txnOperation(
-          tid, time, txn.assertions.inserts, deletedTriplesTids, txn.agree);
-
+          tid,
+          time,
+          txn.assertions.inserts,
+          deletedTriplesTids,
+          txn.assertions.sharedDataOps(),
+          txn.agree
+        );
         // Include tid changes in final patch
         txc.sw.next('new-tids');
         const tidPatch = this.txnTidPatch(tid, txn.assertions.inserts, deletedTriplesTids);
@@ -268,7 +275,7 @@ export class SuSetDataset extends MeldEncoder {
   }
 
   private async constrain(
-    patch: PatchQuads,
+    patch: JrqlPatchQuads,
     verb: keyof MeldConstraint,
     principalId: Iri | null,
     agree: any | null
@@ -302,7 +309,7 @@ export class SuSetDataset extends MeldEncoder {
     this.log.debug(`patch ${journaling.appendEntries.map(e => e.operation.time)}:
     deletes: ${[...txn.assertions.deletes].map(triple => tripleIndexKey(triple))}
     inserts: ${[...txn.assertions.inserts].map(triple => tripleIndexKey(triple))}`);
-    const patch = new PatchQuads(txn.assertions).append(txn.entailments);
+    const patch = new JrqlPatchQuads(txn.assertions).append(txn.entailments);
     return {
       patch,
       kvps: await this.txnKvps({ tidPatch, journaling, patch }),
@@ -319,21 +326,25 @@ export class SuSetDataset extends MeldEncoder {
     };
   }
 
-  private async txnKvps(txn: {
+  private async txnKvps({ tidPatch, journaling, patch }: {
     tidPatch?: PatchTids,
     journaling?: EntryBuilder,
-    patch?: PatchQuads
+    patch?: JrqlPatchQuads
   }): Promise<Kvps> {
-    const commitTids = txn.tidPatch ? await this.tidsStore.commit(txn.tidPatch) : null;
+    const commitTids = tidPatch && await this.tidsStore.commit(tidPatch);
     return batch => {
       commitTids?.(batch);
-      txn.journaling?.commit(batch);
-      txn.patch && this.userGraph.jrql.saveData(txn.patch, batch);
+      journaling?.commit(batch);
+      patch && this.userGraph.jrql.saveData(
+        patch, batch, journaling?.state.time.ticks);
     };
   }
 
   private emitUpdate(update: MeldUpdate, allowEmpty = false) {
-    if (allowEmpty || update['@delete'].length || update['@insert'].length)
+    if (allowEmpty ||
+      update['@delete'].length ||
+      update['@insert'].length ||
+      update['@update'].length)
       this.updateSource.next(update);
   }
 
@@ -401,6 +412,7 @@ export class SuSetDataset extends MeldEncoder {
     time: TreeClock,
     inserts: Iterable<Quad>,
     deletes: TripleMap<UUID[]>,
+    operations: Iterable<Triple>,
     agreed?: any
   ) {
     return MeldOperation.fromOperation(this, {
@@ -408,6 +420,7 @@ export class SuSetDataset extends MeldEncoder {
       time,
       deletes,
       inserts: [...inserts].map(triple => [triple, [tid]]),
+      sharedDataOps: [...operations],
       principalId: this.app.principal?.['@id'] ?? null,
       // Note that agreement specifically checks truthy-ness, not just non-null
       agreed: agreed ? { tick: time.ticks, proof: agreed } : null
@@ -484,7 +497,10 @@ export class SuSetDataset extends MeldEncoder {
      * @param processAgreement whether to process an agreement in the operation
      */
     async apply(
-      patch: SuSetDataPatch = { quads: new PatchQuads(), tids: new PatchTids(this.ssd.tidsStore) },
+      patch: SuSetDataPatch = {
+        quads: new JrqlPatchQuads(),
+        tids: new PatchTids(this.ssd.tidsStore)
+      },
       processAgreement = true
     ): Promise<PatchResult<OperationMessage | null>> {
       try {
@@ -594,7 +610,7 @@ export class SuSetDataset extends MeldEncoder {
       }
       // Now compare the affected triple-TIDs to the current state to find
       // actual triples to delete or insert
-      const quadPatch = new PatchQuads();
+      const quadPatch = new JrqlPatchQuads();
       for (let [triple, tids] of await tidPatch.affected)
         quadPatch.append({ [tids.size ? 'inserts' : 'deletes']: [this.ssd.toUserQuad(triple)] });
       return { tids: tidPatch, quads: quadPatch };
@@ -636,6 +652,7 @@ export class SuSetDataset extends MeldEncoder {
           this.ssd.emitUpdate({
             '@delete': GraphSubjects.EMPTY,
             '@insert': GraphSubjects.EMPTY,
+            '@update': GraphSubjects.EMPTY,
             '@principal': InterimUpdatePatch.principalRef(
               this.operation.principalId, this.ssd.userCtx),
             '@ticks': this.journaling.state.time.ticks,
@@ -710,11 +727,13 @@ export class SuSetDataset extends MeldEncoder {
           deletions.tids.push([triple, tid]);
         return deletions;
       }, Promise.resolve({ tids: [] as [Triple, UUID][], triples: [] as Triple[] }));
-      // Now modify the patch with deletions and insertions
+      // Now modify the patch with deletions, insertions and custom operations
       patch.tids.append({ deletes: deletions.tids });
       patch.quads.append({
         deletes: deletions.triples.map(this.ssd.toUserQuad),
-        inserts: this.operation.inserts.map(([triple]) => this.ssd.toUserQuad(triple))
+        inserts: this.operation.inserts.map(([triple]) => this.ssd.toUserQuad(triple)),
+        sharedDataOpMeta: await drain(inflate(
+          this.operation.sharedDataOps, this.ssd.toSharedDataOpMeta))
       });
       return deletions.tids;
     }
@@ -723,8 +742,8 @@ export class SuSetDataset extends MeldEncoder {
      * Caution: mutates patch
      */
     private async constraintTxn(
-      cxnAssertions: PatchQuads,
-      patch: PatchQuads,
+      cxnAssertions: JrqlPatchQuads,
+      patch: JrqlPatchQuads,
       insertTids: TripleMap<UUID[]>,
       cxnTime: TreeClock
     ) {
@@ -745,13 +764,30 @@ export class SuSetDataset extends MeldEncoder {
         const cxnId = cxnTime.hash;
         return {
           operation: this.ssd.txnOperation(
-            cxnId, cxnTime, cxnAssertions.inserts, deletedTriplesTids),
+            cxnId,
+            cxnTime,
+            cxnAssertions.inserts,
+            deletedTriplesTids,
+            cxnAssertions.sharedDataOps()
+          ),
           tidPatch: await this.ssd.txnTidPatch(
-            cxnId, cxnAssertions.inserts, deletedExistingTids),
+            cxnId,
+            cxnAssertions.inserts,
+            deletedExistingTids
+          ),
           deletedTriplesTids // This is as-if the constraint was applied in isolation
         };
       }
     }
+  };
+
+  private toSharedDataOpMeta = (opTriple: TypedTriple): Consumable<SharedDataOpMeta> => {
+    return this.tidsStore.findTriples(opTriple.subject, opTriple.predicate).pipe(
+      flatMap(literal =>
+        consume(this.userGraph.jrql.applyTripleOperation(this.userGraph.quads.quad(
+          opTriple.subject, opTriple.predicate, literal), opTriple, this.userCtx))),
+      ignoreIf(null)
+    );
   };
 
   /**
@@ -784,7 +820,7 @@ export class SuSetDataset extends MeldEncoder {
           const tidPatch = new PatchTids(
             this.tidsStore, { inserts: flattenItemTids(triplesTids) });
           // And include the triples themselves
-          const patch = new PatchQuads({
+          const patch = new JrqlPatchQuads({
             inserts: triplesTids.map(([triple]) => this.toUserQuad(triple))
           });
           return { kvps: await this.txnKvps({ tidPatch, patch }), patch };
@@ -810,7 +846,7 @@ export class SuSetDataset extends MeldEncoder {
           .findTriplesTids(quads, 'includeEmpty');
         await Promise.all(mapIter(tidQuads, ([triple]) =>
           this.userGraph.jrql.loadData(triple, this.userCtx)));
-        const reified = this.reifyTriplesTids(this.identifyTriplesTids(tidQuads));
+        const reified = this.reifyTriplesTids(this.identifyTriplesData(tidQuads));
         const [inserts, encoding] = this.bufferFromTriples(reified);
         return { value: { inserts, encoding }, next };
       }));

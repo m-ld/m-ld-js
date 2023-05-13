@@ -5,8 +5,7 @@ import { EncodedOperation } from '../index';
 import { Journal, tickKey } from '.';
 import { MeldOperation } from '../MeldOperation';
 import { TripleMap } from '../quads';
-import { UUID } from '../MeldEncoding';
-import { Attribution } from '../../api';
+import { Attribution, UUID } from '../../api';
 
 interface JournalStateJson {
   /**

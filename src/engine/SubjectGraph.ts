@@ -16,9 +16,11 @@ import { JsonldContext } from './jsonld';
 
 export type GraphAliases =
   (subject: Iri | null, property: '@id' | string) => Iri | SubjectProperty | undefined;
+export type ValueAliases = (i: number, triple: Triple) => Value | undefined;
 
-interface RdfOptions {
+export interface RdfOptions {
   aliases?: GraphAliases,
+  values?: ValueAliases,
   ctx?: JsonldContext
 }
 
@@ -37,12 +39,12 @@ export class SubjectGraph extends Array<GraphSubject> implements GraphSubjects {
    */
   static fromRDF(triples: Triple[], opts: RdfOptions = {}): SubjectGraph {
     return new SubjectGraph(Object.values(
-      triples.reduce<{ [id: string]: GraphSubject }>((byId, triple) => {
+      triples.reduce<{ [id: string]: GraphSubject }>((byId, triple, i) => {
         const subjectId = identifySubject(triple.subject, opts);
         const property = identifyProperty(
           triple.subject.value, triple.predicate, opts);
-        addPropertyObject(byId[subjectId] ??= { '@id': subjectId },
-          property, jrqlValue(property, triple.object, opts.ctx));
+        const value = opts.values?.(i, triple) ?? jrqlValue(property, triple.object, opts.ctx);
+        addPropertyObject(byId[subjectId] ??= { '@id': subjectId }, property, value);
         return byId;
       }, {})));
   }
@@ -59,14 +61,17 @@ export class SubjectGraph extends Array<GraphSubject> implements GraphSubjects {
     if (this._graph == null) {
       const byId = new Map<Iri, Subject & Reference>();
       // Make a copy of each subject to reify its references
-      for (let subject of this)
-        byId.set(subject['@id'], { ...subject });
+      for (let subject of this) {
+        const id = subject['@id'];
+        byId.set(id, { ...byId.get(id), ...subject });
+      }
       // Replace json-rql References with Javascript references
-      for (let subject of byId.values())
-        for (let [path, value] of deepValues(subject, isReference))
+      for (let subject of byId.values()) {
+        for (let [path, value] of deepValues(subject, isReference)) {
           if (byId.has(value['@id']))
             setAtPath(subject, path, byId.get(value['@id']));
-
+        }
+      }
       this._graph = byId;
     }
     return this._graph;
@@ -161,6 +166,8 @@ export function jrqlValue(
         return parseInt(value, 10);
       else if (type === XS.double)
         return parseFloat(value);
+      else if (type === RDF.JSON)
+        return toValueObject(value, '@json', ctx);
       else
         return toValueObject(value, type, ctx);
     }

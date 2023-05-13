@@ -1,16 +1,14 @@
-import { DataFactory as RdfDataFactory } from 'rdf-data-factory';
 import { JrqlQuads } from '../src/engine/dataset/JrqlQuads';
 import * as N3 from 'n3';
 import { Graph } from '../src/engine/dataset';
 import { mock } from 'jest-mock-extended';
-import { Constraint, uuid } from '../src';
+import { Constraint } from '../src';
 import { JrqlMode } from '../src/engine/jrql-util';
 import { JrqlContext } from '../src/engine/SubjectQuads';
+import { RdfFactory } from '../src/engine/quads';
 
 describe('json-rql Quads translation', () => {
-  const rdf = new RdfDataFactory();
-  // noinspection JSUnusedGlobalSymbols
-  Object.assign(rdf, { skolem: () => rdf.namedNode(`http://test.m-ld.org/${uuid()}`) });
+  const rdf = new RdfFactory('http://test.m-ld.org');
 
   let jrql: JrqlQuads;
   let ctx: JrqlContext;
@@ -21,7 +19,7 @@ describe('json-rql Quads translation', () => {
       '@vocab': '#',
       'ex': 'http://example.org/'
     });
-    jrql = new JrqlQuads(mock<Graph>(rdf));
+    jrql = new JrqlQuads(mock<Graph>({ rdf }));
   });
 
   test('quadifies @id-only top-level subject with variable p-o', () => {

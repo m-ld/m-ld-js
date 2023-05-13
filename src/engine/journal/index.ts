@@ -10,6 +10,7 @@ import { EntryBuilder, JournalState } from './JournalState';
 import { firstValueFrom, Observable, Subject as Source } from 'rxjs';
 import { MeldOperation, MeldOperationSpec } from '../MeldOperation';
 import { flowable } from 'rx-flowable';
+import { IndexKeyGenerator } from '../util';
 
 export { JournalState, JournalEntry, EntryBuilder };
 
@@ -22,13 +23,11 @@ const JOURNAL_KEY = '_qs:journal';
  * 36^8, about 3 trillion, about 90 years in milliseconds.
  */
 export type TickKey = string;
-const TICK_KEY_LEN = 8;
-const TICK_KEY_RADIX = 36;
-const TICK_KEY_PAD = '0'.repeat(TICK_KEY_LEN);
+const TICK_KEY_GEN = new IndexKeyGenerator;
 const TICK_KEY_MIN = '_qs:tick:!'; // < '0'
 const TICK_KEY_MAX = '_qs:tick:~'; // > 'z'
 export function tickKey(tick: number): TickKey {
-  return `_qs:tick:${TICK_KEY_PAD.concat(tick.toString(TICK_KEY_RADIX)).slice(-TICK_KEY_LEN)}`;
+  return `_qs:tick:${TICK_KEY_GEN.key(tick)}`;
 }
 
 /** Operations indexed by time hash (TID) */

@@ -2,11 +2,11 @@ import { firstValueFrom, Subject as Source } from 'rxjs';
 import { MeldUpdate } from '../src';
 import { LockManager } from '../src/engine/locks';
 import { CloneEngine, StateEngine } from '../src/engine/StateEngine';
-import { SubjectGraph } from '../src/engine/SubjectGraph';
 import async from '../src/engine/async';
 import { DataFactory as RdfDataFactory, Quad } from 'rdf-data-factory';
 import { drain } from 'rx-flowable';
 import { consume } from 'rx-flowable/consume';
+import { mockUpdate } from './testClones';
 
 describe('State Engine', () => {
   class MockCloneEngine implements CloneEngine {
@@ -25,8 +25,7 @@ describe('State Engine', () => {
     read = () => consume([{ '@id': 'state', tick: this.tick }]);
     write = async () => {
       this.dataUpdates.next({
-        '@delete': new SubjectGraph([]),
-        '@insert': new SubjectGraph([]),
+        ...mockUpdate(),
         '@ticks': ++this.tick,
         trace: jest.fn()
       });

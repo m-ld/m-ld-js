@@ -1,8 +1,11 @@
-import { MockGraphState, mockInterim, testConfig } from './testClones';
+import { MockGraphState, mockInterim, mockUpdate, testConfig } from './testClones';
 import { SubjectGraph } from '../src/engine/SubjectGraph';
 import { M_LD, SH } from '../src/ns';
 import {
-  HasAuthority, ShapeAgreementCondition, Statute, Statutory
+  HasAuthority,
+  ShapeAgreementCondition,
+  Statute,
+  Statutory
 } from '../src/statutes/Statutory';
 import { GraphSubject, MeldError } from '../src';
 import { DefaultList } from '../src/lseq/DefaultList';
@@ -328,12 +331,11 @@ describe('Statutory', () => {
             'http://test.m-ld.org/#value': true
           }
         }, orm, orm.domain.scope, testProver));
-      const update = {
-        '@delete': new SubjectGraph([]),
+      const update = mockUpdate({
         '@insert': new SubjectGraph([{
           '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#height': 5
         }])
-      };
+      });
       await expect(statute.test(state.graph.asReadState, update)).resolves.not.toThrow();
       await expect(statute.check(state.graph.asReadState,
         mockInterim(update))).resolves.not.toThrow();
@@ -350,12 +352,11 @@ describe('Statutory', () => {
             'http://test.m-ld.org/#value': true
           }
         }, orm, orm.domain.scope, testProver));
-      const update = {
-        '@delete': new SubjectGraph([]),
+      const update = mockUpdate({
         '@insert': new SubjectGraph([{
           '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Fred'
         }])
-      };
+      });
       const interim = mockInterim(update);
       await statute.check(state.graph.asReadState, interim);
       expect(interim.assert).toBeCalledWith({ '@agree': true });
@@ -374,12 +375,11 @@ describe('Statutory', () => {
             'http://test.m-ld.org/#value': true
           }
         }, orm, orm.domain.scope, testProver));
-      const update = {
+      const update = mockUpdate({
         '@delete': new SubjectGraph([{
           '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Fred'
-        }]),
-        '@insert': new SubjectGraph([])
-      };
+        }])
+      });
       const interim = mockInterim(update);
       await statute.check(state.graph.asReadState, interim);
       expect(interim.assert).toBeCalledWith({ '@agree': true });
@@ -401,14 +401,13 @@ describe('Statutory', () => {
             'http://test.m-ld.org/#value': true
           }
         }, orm, orm.domain.scope, testProver));
-      const update = {
-        '@delete': new SubjectGraph([]),
+      const update = mockUpdate({
         '@insert': new SubjectGraph([{
           '@id': 'http://test.m-ld.org/fred',
           '@type': 'http://test.m-ld.org/#Flintstone',
           'http://test.m-ld.org/#name': 'Fred'
         }])
-      };
+      });
       const interim = mockInterim(update);
       await statute.check(state.graph.asReadState, interim);
       expect(interim.assert).toBeCalledWith({ '@agree': true });
@@ -433,10 +432,11 @@ describe('Statutory', () => {
         }, orm, orm.domain.scope, testProver));
       const update = {
         '@ticks': 0,
-        '@delete': new SubjectGraph([]),
-        '@insert': new SubjectGraph([{
-          '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Fred'
-        }])
+        ...mockUpdate({
+          '@insert': [{
+            '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Fred'
+          }]
+        })
       };
       const interim = mockInterim(update);
       await statute.check(state.graph.asReadState, interim);
@@ -460,12 +460,11 @@ describe('Statutory', () => {
             'http://test.m-ld.org/#value': 0
           }]
         }, orm, orm.domain.scope, testProver));
-      const update = {
-        '@delete': new SubjectGraph([]),
-        '@insert': new SubjectGraph([{
+      const update = mockUpdate({
+        '@insert': [{
           '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Fred'
-        }])
-      };
+        }]
+      });
       const interim = mockInterim(update);
       await expect(statute.check(state.graph.asReadState, interim)).rejects.toBeDefined();
       await expect(statute.test(state.graph.asReadState,
@@ -482,12 +481,11 @@ describe('Statutory', () => {
 
     test('throws if no principal', async () => {
       const prover = new HasAuthority({ '@id': M_LD.hasAuthority }, appState.scope);
-      const update = {
-        '@delete': new SubjectGraph([]),
-        '@insert': new SubjectGraph([{
+      const update = mockUpdate({
+        '@insert': [{
           '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Fred'
-        }])
-      };
+        }]
+      });
       await expect(prover.prove(state.graph.asReadState, update, undefined))
         .rejects.toThrow(MeldError);
       await expect(prover.test(
@@ -500,12 +498,11 @@ describe('Statutory', () => {
 
     test('returns falsey if principal not found', async () => {
       const prover = new HasAuthority({ '@id': M_LD.hasAuthority }, appState.scope);
-      const update = {
-        '@delete': new SubjectGraph([]),
-        '@insert': new SubjectGraph([{
+      const update = mockUpdate({
+        '@insert': [{
           '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Fred'
-        }])
-      };
+        }]
+      });
       const principalRef = { '@id': 'http://test.m-ld.org/hanna' };
       await expect(prover.prove(state.graph.asReadState, update, principalRef))
         .resolves.toBe(false);
@@ -519,12 +516,11 @@ describe('Statutory', () => {
         '@id': 'http://test.m-ld.org/hanna',
         [M_LD.hasAuthority]: nameShape
       });
-      const update = {
-        '@delete': new SubjectGraph([]),
-        '@insert': new SubjectGraph([{
+      const update = mockUpdate({
+        '@insert': [{
           '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Fred'
-        }])
-      };
+        }]
+      });
       const principalRef = { '@id': 'http://test.m-ld.org/hanna' };
       await expect(prover.prove(state.graph.asReadState, update, principalRef))
         .resolves.toBe(true);

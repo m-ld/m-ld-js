@@ -1,11 +1,11 @@
 import { Triple, tripleFromKey, tripleIndexKey, tripleKey, TripleMap } from '../quads';
 import { MutableOperation, Operation } from '../ops';
-import { UUID } from '../MeldEncoding';
 import { IndexMatch, IndexSet } from '../indices';
 import { Kvps, TripleKeyStore } from './index';
 import * as MsgPack from '../msgPack';
 import { map, takeWhile } from 'rxjs/operators';
 import { Consumable } from 'rx-flowable';
+import { UUID } from '../../api';
 
 /** Prefix for TID keys */
 const KEY_PRE = '_qs:ttd:';

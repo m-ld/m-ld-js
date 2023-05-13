@@ -13,6 +13,7 @@ import {
   MeldTransportSecurity,
   MeldUpdate,
   Select,
+  SharedDatatype,
   shortId
 } from '../src';
 import { jsonify } from './testUtil';
@@ -21,6 +22,8 @@ import { BufferEncoding, EncodedOperation, Snapshot } from '../src/engine';
 import { drain } from 'rx-flowable';
 import { mockFn } from 'jest-mock-extended';
 import { MeldOperationMessage } from '../src/engine/MeldOperationMessage';
+import { jsonDatatype } from '../src/datatype';
+import { Iri } from '@m-ld/jsonld';
 
 const fred = {
   '@id': 'http://test.m-ld.org/fred',
@@ -328,7 +331,7 @@ describe('SU-Set Dataset', () => {
           const update = await willUpdate;
           // Check update JSON in full (no trace in JSON)
           expect(jsonify(update)).toEqual({
-            '@delete': [fred], '@insert': [], '@ticks': 2
+            '@delete': [fred], '@insert': [], '@update': [], '@ticks': 2
           });
           // Check audit trace
           const trace = update.trace();
@@ -885,14 +888,22 @@ describe('SU-Set Dataset', () => {
   describe('datatypes', () => {
     let local: MockProcess, remote: MockProcess;
     let datatypes: Datatype[];
+    let counterSeq: number;
 
     beforeEach(async () => {
       datatypes = [];
+      datatypes.push(jsonDatatype);
+      counterSeq = 1;
       let { left, right } = TreeClock.GENESIS.forked();
       local = new MockProcess(left);
       remote = new MockProcess(right);
-      ssd = new SuSetDataset(state.dataset, {}, { datatypes },
-        {}, { '@id': 'test', '@domain': 'test.m-ld.org' });
+      ssd = new SuSetDataset(state.dataset, {}, {
+        datatypes(id: Iri) {
+          for (let dt of datatypes)
+            if (dt['@id'] === id)
+              return dt;
+        }
+      }, {}, { '@id': 'test', '@domain': 'test.m-ld.org' });
       await ssd.initialise();
       await ssd.resetClock(local.time);
       await ssd.allowTransact();
@@ -981,6 +992,91 @@ describe('SU-Set Dataset', () => {
         '@describe': 'http://test.m-ld.org/fred'
       }))).resolves.toEqual([fredProfile]);
     });
+
+    const counterType: SharedDatatype<number, string> = {
+      '@id': 'http://ex.org/#Counter',
+      validate: Number,
+      toLexical: () => `counter${counterSeq++}`,
+      update: (data, update) => {
+        const inc = (<any>update)['@plus'];
+        return [data + inc, `+${inc}`];
+        },
+      apply: (data, operation) => {
+        const inc = Number(/\+(\d+)/.exec(operation)![1]);
+        return [data + inc, { '@plus': inc }];
+      },
+      merge: (...data) => data.reduce((v, n) => v + n)
+    };
+
+    test('operates on counter-like datatype', async () => {
+      datatypes.push(counterType);
+      await ssd.transact(local.tick().time, {
+        '@id': 'http://test.m-ld.org/fred',
+        'http://test.m-ld.org/#likes': {
+          '@type': 'http://ex.org/#Counter',
+          '@value': 0
+        }
+      });
+      const willUpdate = firstValueFrom(ssd.updates);
+      const msg = await ssd.transact(local.tick().time, {
+        '@update': {
+          '@id': 'http://test.m-ld.org/fred',
+          'http://test.m-ld.org/#likes': { '@plus': 1 }
+        }
+      });
+      // Operation has custom operation
+      const [, , , upd, enc] = msg!.data;
+      expect(MeldEncoder.jsonFromBuffer(upd, enc)).toEqual([{}, {}, {
+        '@id': 'fred', likes: { '@value': ['counter1', '+1'], '@type': '@json' }
+      }]);
+      // Update has custom operation
+      await expect(willUpdate).resolves.toMatchObject({
+        '@update': [{
+          '@id': 'http://test.m-ld.org/fred',
+          'http://test.m-ld.org/#likes': { '@plus': 1 }
+        }]
+      });
+      // Final state has increment
+      await expect(drain(ssd.read<Describe>({
+        '@describe': 'http://test.m-ld.org/fred'
+      }))).resolves.toMatchObject([{
+        '@id': 'http://test.m-ld.org/fred',
+        'http://test.m-ld.org/#likes': { '@type': 'http://ex.org/#Counter', '@value': 1 }
+      }]);
+    });
+
+    test('applies counter-like datatype operation', async () => {
+      datatypes.push(counterType);
+      await expect(ssd.apply(
+        remote.sentOperation({}, {
+          '@id': 'fred', likes: { '@type': 'http://ex.org/#Counter', '@value': 0 }
+        }),
+        local.join(remote.time)
+      )).resolves.toBe(null);
+      const willUpdate = firstValueFrom(ssd.updates);
+      await expect(ssd.apply(
+        remote.sentOperation({}, {}, {
+          operations: { '@id': 'fred', likes: { '@value': ['counter1', '+1'], '@type': '@json' } }
+        }),
+        local.join(remote.time)
+      )).resolves.toBe(null);
+      await expect(willUpdate).resolves.toMatchObject({
+        '@update': [{
+          '@id': 'http://test.m-ld.org/fred',
+          'http://test.m-ld.org/#likes': { '@plus': 1 }
+        }]
+      });
+      await expect(drain(ssd.read<Describe>({
+        '@describe': 'http://test.m-ld.org/fred'
+      }))).resolves.toMatchObject([{
+        '@id': 'http://test.m-ld.org/fred',
+        'http://test.m-ld.org/#likes': { '@type': 'http://ex.org/#Counter', '@value': 1 }
+      }]);
+    });
+
+    test.todo('merges concurrent counter-like inserts');
+
+    test.todo('voids counter-like operations');
   });
 
   describe('agreements', () => {

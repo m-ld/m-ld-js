@@ -1,8 +1,7 @@
 import { Assertions, InterimUpdate, MeldPreUpdate } from '../../api';
 import { Reference, SubjectProperty, Update, Value } from '../../jrql-support';
-import { PatchQuads } from '.';
 import { JrqlGraph } from './JrqlGraph';
-import { GraphAliases, jrqlValue, SubjectGraph } from '../SubjectGraph';
+import { jrqlValue, RdfOptions, SubjectGraph } from '../SubjectGraph';
 import { Iri } from '@m-ld/jsonld';
 import { Quad } from '../quads';
 import { JsonldContext } from '../jsonld';
@@ -13,14 +12,15 @@ import { flatMap, ignoreIf } from 'rx-flowable/operators';
 import { consume } from 'rx-flowable/consume';
 import { map } from 'rxjs/operators';
 import { JrqlContext } from '../SubjectQuads';
+import { JrqlPatchQuads } from './JrqlQuads';
 
 export class InterimUpdatePatch implements InterimUpdate {
   /** If mutable, we allow mutation of the input patch */
   private readonly mutable: boolean;
   /** Assertions made by the constraint (not including the app patch if not mutable) */
-  private readonly assertions: PatchQuads;
+  private readonly assertions: JrqlPatchQuads;
   /** Entailments made by the constraint */
-  private entailments = new PatchQuads();
+  private entailments = new JrqlPatchQuads();
   /** Whether to recreate the insert & delete fields from the assertions */
   private needsUpdate: PromiseLike<boolean>;
   /** Cached interim update, lazily recreated after changes */
@@ -49,14 +49,14 @@ export class InterimUpdatePatch implements InterimUpdate {
     private readonly graph: JrqlGraph,
     private readonly tidsStore: TidsStore,
     private readonly userCtx: JrqlContext,
-    private readonly patch: PatchQuads,
+    private readonly patch: JrqlPatchQuads,
     private readonly principalId: Iri | null,
     private agree: any | null,
     { mutable }: { mutable: boolean }
   ) {
     this.mutable = mutable;
     // If mutable, we treat the app patch as assertions
-    this.assertions = mutable ? patch : new PatchQuads();
+    this.assertions = mutable ? patch : new JrqlPatchQuads();
     this.needsUpdate = Promise.resolve(true);
   }
 
@@ -69,7 +69,7 @@ export class InterimUpdatePatch implements InterimUpdate {
       }
     };
     // The final update to the app includes all assertions and entailments
-    const finalPatch = new PatchQuads(this.allAssertions).append(this.entailments);
+    const finalPatch = new JrqlPatchQuads(this.allAssertions).append(this.entailments);
     return {
       userUpdate: this.createUpdate(finalPatch, this.userCtx),
       // TODO: Make the internal update conditional on anyone wanting it
@@ -152,28 +152,24 @@ export class InterimUpdatePatch implements InterimUpdate {
   }
 
   private userTerm(iri: Iri) {
-    return this.graph.quads.namedNode(this.userCtx.expandTerm(iri));
+    return this.graph.rdf.namedNode(this.userCtx.expandTerm(iri));
   }
 
-  private aliases: GraphAliases = (subject, property) => {
-    return this.subjectAliases.get(subject)?.[property];
-  };
-
-  private createUpdate(patch: PatchQuads, ctx?: JsonldContext): MeldPreUpdate {
+  private createUpdate(patch: JrqlPatchQuads, ctx?: JsonldContext): MeldPreUpdate {
+    const opts: RdfOptions = {
+      ctx, aliases: (subject, property) => this.subjectAliases.get(subject)?.[property]
+    };
     return {
-      '@delete': this.quadSubjects(patch.deletes, ctx),
-      '@insert': this.quadSubjects(patch.inserts, ctx),
+      '@delete': SubjectGraph.fromRDF([...patch.deletes], opts),
+      '@insert': SubjectGraph.fromRDF([...patch.inserts], opts),
+      '@update': SubjectGraph.fromRDF([...patch.sharedDataOps()], {
+        ...opts, values: i => patch.getDataOpUpdate(i)
+      }),
       '@principal': InterimUpdatePatch.principalRef(this.principalId, ctx),
       // Note that agreement specifically checks truthy-ness, not just non-null
       '@agree': this.agree || undefined
     };
   }
-
-  private quadSubjects(quads: Iterable<Quad>, ctx?: JsonldContext) {
-    const { aliases } = this;
-    return SubjectGraph.fromRDF([...quads], { aliases, ctx });
-  }
-
   private mutate(fn: () => Promise<boolean> | boolean) {
     this.needsUpdate = this.needsUpdate.then(
       async needsUpdate => (await fn()) || needsUpdate);
@@ -181,6 +177,6 @@ export class InterimUpdatePatch implements InterimUpdate {
 
   private get allAssertions() {
     return this.mutable ? this.assertions :
-      new PatchQuads(this.patch).append(this.assertions);
+      new JrqlPatchQuads(this.patch).append(this.assertions);
   }
 }

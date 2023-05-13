@@ -10,8 +10,7 @@ import { JournalAdmin, JournalCheckPoint, MeldConfig } from '../../config';
 import { MeldOperation, MeldOperationSpec } from '../MeldOperation';
 import { TickTid } from './JournalEntry';
 import { TripleMap } from '../quads';
-import { UUID } from '../MeldEncoding';
-import { Attribution } from '../../api';
+import { Attribution, UUID } from '../../api';
 import { getIdLogger } from '../logging';
 
 export type JournalClerkConfig = Pick<MeldConfig, '@id' | 'logLevel' | 'journal'>;

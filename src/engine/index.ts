@@ -103,6 +103,7 @@ export enum BufferEncoding {
 export type EncodedOperation = [
   /**
    * @since 1
+   * @todo bump
    */
   version: 4,
   /**
@@ -118,7 +119,7 @@ export type EncodedOperation = [
    */
   time: TreeClockJson,
   /**
-   * A tuple `[delete: object, insert: object]` encoded as per `encoding`
+   * A tuple `[delete: object, insert: object, operations?: object]` encoded as per `encoding`
    * @since 3
    */
   update: Buffer,

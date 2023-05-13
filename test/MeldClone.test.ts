@@ -13,7 +13,6 @@ import {
 } from '../src';
 import { MockRemotes, testConfig } from './testClones';
 import { blankRegex, genIdRegex } from './testUtil';
-import { SubjectGraph } from '../src/engine/SubjectGraph';
 import { DataFactory as RdfDataFactory, Quad } from 'rdf-data-factory';
 import { Factory as SparqlFactory } from 'sparqlalgebrajs';
 import { Subscription } from 'rxjs';
@@ -35,8 +34,9 @@ describe('MeldClone', () => {
     await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
     await expect(captureUpdate).resolves.toEqual({
       '@ticks': 1,
-      '@insert': new SubjectGraph([{ '@id': 'fred', name: 'Fred' }]),
-      '@delete': new SubjectGraph([]),
+      '@delete': [],
+      '@insert': [{ '@id': 'fred', name: 'Fred' }],
+      '@update': [],
       trace: expect.any(Function)
     });
     await expect(api.get('fred'))
@@ -59,6 +59,7 @@ describe('MeldClone', () => {
         '@ticks': 2,
         '@delete': [{ '@id': 'fred', name: 'Fred' }],
         '@insert': [],
+        '@update': [],
         trace: expect.any(Function)
       });
     });
@@ -73,6 +74,7 @@ describe('MeldClone', () => {
         '@ticks': 2,
         '@delete': [{ '@id': 'fred', height: 5 }],
         '@insert': [],
+        '@update': [],
         trace: expect.any(Function)
       });
     });
@@ -97,6 +99,7 @@ describe('MeldClone', () => {
         '@ticks': 2,
         '@delete': [{ '@id': 'fred', height: 5 }],
         '@insert': [{ '@id': 'fred', height: 6 }],
+        '@update': [],
         trace: expect.any(Function)
       });
     });
@@ -154,6 +157,7 @@ describe('MeldClone', () => {
         '@ticks': 1,
         '@delete': [],
         '@insert': [{ '@id': 'fred', name: 'Fred' }],
+        '@update': [],
         trace: expect.any(Function)
       });
     });
@@ -167,6 +171,7 @@ describe('MeldClone', () => {
         '@ticks': 2,
         '@delete': [{ '@id': 'fred', name: 'Fred' }],
         '@insert': [],
+        '@update': [],
         trace: expect.any(Function)
       });
     });
@@ -1078,17 +1083,18 @@ describe('MeldClone', () => {
           '@id': 'shopping', '@list': { 0: { '@id': '?slot', '@item': '?item' } }
         }
       });
-      expect([...(await captureUpdate)['@delete'].graph.values()]).toContainEqual({
+      const update = await captureUpdate;
+      expect([...update['@delete'].graph.values()]).toContainEqual({
         '@id': 'shopping',
         '@list': {
           // @item is not included in delete for a move
           1: { '@id': expect.stringMatching(genIdRegex), '@index': 1 }
         }
       });
-      expect([...(await captureUpdate)['@insert'].graph.values()]).toContainEqual({
+      expect([...update['@insert'].graph.values()]).toContainEqual({
         '@id': 'shopping',
         '@list': {
-          0: [{ '@id': expect.stringMatching(genIdRegex), '@item': 'Bread', '@index': 0 }]
+          0: [{ '@id': expect.stringMatching(genIdRegex), '@index': 0 }]
         }
       });
       await expect(api.read<Describe>({ '@describe': 'shopping' }))
@@ -1120,7 +1126,7 @@ describe('MeldClone', () => {
       expect([...(await captureUpdate)['@insert'].graph.values()]).toContainEqual({
         '@id': 'shopping',
         '@list': {
-          0: [{ '@id': expect.stringMatching(genIdRegex), '@item': 'Spam', '@index': 0 }]
+          0: [{ '@id': expect.stringMatching(genIdRegex), '@index': 0 }]
         }
       });
       await expect(api.read<Describe>({ '@describe': 'shopping' }))

@@ -243,3 +243,22 @@ export function trimTail<T>(arr: T[]): T[] {
 
 export const isNaturalNumber = (n: any) =>
   typeof n == 'number' && Number.isSafeInteger(n) && n >= 0;
+
+export class IndexKeyGenerator {
+  pad: string;
+
+  constructor(
+    public radix = 36,
+    public length = 8
+  ) {
+    this.pad = '0'.repeat(length);
+  }
+
+  key(index: number) {
+    return this.pad.concat(index.toString(this.radix)).slice(-this.length);
+  }
+
+  index(key: string) {
+    return Number.parseInt(key, this.radix);
+  }
+}

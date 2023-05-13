@@ -2,10 +2,9 @@ import { JournalOperation } from './JournalOperation';
 import type { Journal, TickKey } from '.';
 import { EntryIndex } from '.';
 import { MeldOperation } from '../MeldOperation';
-import { UUID } from '../MeldEncoding';
 import { TripleMap } from '../quads';
 import { Iri } from '@m-ld/jsonld';
-import { Attribution } from '../../api';
+import { Attribution, UUID } from '../../api';
 import { MeldOperationMessage } from '../MeldOperationMessage';
 
 /**

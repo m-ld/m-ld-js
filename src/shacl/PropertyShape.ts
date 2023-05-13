@@ -4,7 +4,13 @@ import { Subject, VocabReference } from '../jrql-support';
 import { Iri } from '@m-ld/jsonld';
 import { array, uuid } from '../util';
 import {
-  Assertions, GraphSubject, GraphSubjects, GraphUpdate, InterimUpdate, MeldPreUpdate, MeldReadState
+  Assertions,
+  GraphSubject,
+  GraphSubjects,
+  GraphUpdate,
+  InterimUpdate,
+  MeldPreUpdate,
+  MeldReadState
 } from '../api';
 import { sortValues, SubjectPropertyValues } from '../subjects';
 import { drain } from 'rx-flowable';
@@ -95,7 +101,8 @@ export class PropertyShape extends Shape {
   async affected(state: MeldReadState, update: GraphUpdate): Promise<GraphUpdate> {
     return {
       '@delete': this.filterGraph(update['@delete']),
-      '@insert': this.filterGraph(update['@insert'])
+      '@insert': this.filterGraph(update['@insert']),
+      '@update': this.filterGraph(update['@update'])
     };
   }
 

@@ -25,6 +25,7 @@ import {
   MeldPreUpdate,
   MeldReadState,
   StateProc,
+  SubjectsUpdate,
   Write
 } from '../src';
 import { AbstractLevel } from 'abstract-level';
@@ -192,18 +193,21 @@ export function testOp(
   time: TreeClock,
   deletes: object = {},
   inserts: object = {},
-  { from, principalId, agreed }: {
-    from?: number, principalId?: string, agreed?: [number, any]
+  opts: {
+    from?: number,
+    principalId?: string,
+    agreed?: [number, any],
+    operations?: object
   } = {}
 ): EncodedOperation {
   return [
     4,
-    from ?? time.ticks,
+    opts.from ?? time.ticks,
     time.toJSON(),
-    MsgPack.encode([deletes, inserts]),
+    MsgPack.encode([deletes, inserts].concat(opts.operations ?? [])),
     [BufferEncoding.MSGPACK],
-    principalId ?? null,
-    agreed ?? null
+    opts.principalId ?? null,
+    opts.agreed ?? null
   ];
 }
 
@@ -265,21 +269,27 @@ export class MockProcess implements ClockHolder<TreeClock> {
   sentOperation(
     deletes: object,
     inserts: object,
-    { agree, attr }: { agree?: true, attr?: Attribution } = {}
+    { agree, attr, operations }: { agree?: true, attr?: Attribution, operations?: object } = {}
   ) {
     // Do not inline: this sets prev
-    const op = this.operated(deletes, inserts, agree, attr?.pid);
+    const op = this.operated(deletes, inserts, { agree, pid: attr?.pid, operations });
     return MeldOperationMessage.fromOperation(this.prev, op, attr ?? null);
   }
 
-  operated(deletes: object, inserts: object, agree?: any, principalId?: string): EncodedOperation {
+  operated(
+    deletes: object,
+    inserts: object,
+    opts: { agree?: any, pid?: string, operations?: object } = {}
+  ): EncodedOperation {
     this.tick();
     let agreed: [number, any] | undefined;
-    if (agree) {
+    if (opts.agree) {
       this.agreed = this.time;
-      agreed = [this.time.ticks, agree];
+      agreed = [this.time.ticks, opts.agree];
     }
-    return testOp(this.time, deletes, inserts, { agreed, principalId });
+    return testOp(this.time, deletes, inserts, {
+      agreed, principalId: opts.pid, operations: opts.operations
+    });
   }
 
   revup(updates: Observable<OperationMessage> = EMPTY): Revup {
@@ -338,6 +348,14 @@ export function mockMqtt(): MockMqtt & MockProxy<AsyncMqttClient> {
   return mqtt;
 }
 
+export function mockUpdate(update?: SubjectsUpdate) {
+  return {
+    '@delete': new SubjectGraph(update?.['@delete'] ?? []),
+    '@insert': new SubjectGraph(update?.['@insert'] ?? []),
+    '@update': new SubjectGraph(update?.['@update'] ?? [])
+  };
+}
+
 export function mockInterim(
   // Allow undefined or plain array @delete & @insert, for readability
   update: Partial<{
@@ -347,11 +365,7 @@ export function mockInterim(
 ) {
   // Passing an implementation into the mock adds unwanted properties
   return Object.assign(mock<InterimUpdate>(), {
-    update: Promise.resolve({
-      ...update,
-      '@delete': new SubjectGraph(update['@delete'] ?? []),
-      '@insert': new SubjectGraph(update['@insert'] ?? [])
-    }),
+    update: Promise.resolve({ ...update, ...mockUpdate(update) }),
     hidden: mockFn().mockReturnValue(EMPTY)
   });
 }

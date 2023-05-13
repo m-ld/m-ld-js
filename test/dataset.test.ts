@@ -165,7 +165,7 @@ describe('Patch quads', () => {
 describe('Quadstore Dataset', () => {
   test('generate skolem from base', async () => {
     const ds = await new QuadStoreDataset('ex.org', new MemoryLevel()).initialise();
-    expect(ds.graph().skolem!().value).toMatch(
+    expect(ds.graph().rdf.skolem!().value).toMatch(
       /http:\/\/ex\.org\/\.well-known\/genid\/\w+/);
   });
 });

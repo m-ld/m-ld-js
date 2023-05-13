@@ -16,9 +16,11 @@ export abstract class MutableOperation<T> implements Operation<T> {
     this.minimise();
   }
 
-  private minimise() {
+  minimise(knownPrior = false) {
     // del(a), ins(a) == ins(a)
-    this.deletes.deleteAll(this.inserts);
+    const intersect = this.deletes.deleteAll(this.inserts);
+    if (knownPrior)
+      this.inserts.deleteAll(intersect);
     return this;
   }
 

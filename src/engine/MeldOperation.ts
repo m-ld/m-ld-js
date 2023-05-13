@@ -16,10 +16,18 @@ export interface MeldOperationRange extends CausalTimeRange<TreeClock> {
   readonly principalId: Iri | null;
 }
 
-/** A causal operation that may contain an agreement */
+/**
+ * A causal operation that may contain an agreement, and operations on shared
+ * data types
+ */
 export interface MeldOperationSpec<T extends Triple = RefTriple>
   extends MeldOperationRange, CausalOperation<T, TreeClock> {
   readonly agreed: OperationAgreedSpec | null;
+  /**
+   * Triples having shared datatype operation literal as rdf:JSON
+   * @todo improve typing
+   */
+  readonly sharedDataOps?: Triple[];
 }
 
 export type OperationAgreedSpec = { tick: number, proof: any };
@@ -51,29 +59,35 @@ export class MeldOperation
    */
   static fromOperation(
     encoder: MeldEncoder,
-    spec: MeldOperationSpec<Triple>
+    { from, time, deletes, inserts, sharedDataOps, principalId, agreed }: MeldOperationSpec<Triple>
   ): MeldOperation {
-    const { from, time, deletes, inserts, principalId, agreed } = spec;
-    const [refDeletes, refInserts] =
-      [deletes, inserts].map(encoder.identifyTriplesTids);
+    const refDeletes = encoder.identifyTriplesData(deletes);
+    const refInserts = encoder.identifyTriplesData(inserts);
     const delTriples = encoder.reifyTriplesTids(refDeletes);
     // Encoded inserts are only reified if fused
-    const insTriples = spec.from === spec.time.ticks ?
+    const insTriples = from === time.ticks ?
       [...inserts].map(([triple]) => triple) :
       encoder.reifyTriplesTids(refInserts);
     const jsons = [delTriples, insTriples].map(encoder.jsonFromTriples);
+    if (sharedDataOps && sharedDataOps.length > 0)
+      jsons.push(encoder.jsonFromTriples(sharedDataOps));
     const [update, encoding] = MeldEncoder.bufferFromJson(jsons);
-    const encoded: EncodedOperation = [4,
-      spec.from,
-      spec.time.toJSON(),
+    return new MeldOperation({
+      from,
+      time,
+      deletes: refDeletes,
+      inserts: refInserts,
+      sharedDataOps,
+      principalId,
+      agreed
+    }, [4,
+      from,
+      time.toJSON(),
       update,
       encoding,
       principalId != null ? encoder.compactIri(principalId) : null,
       agreed != null ? [agreed.tick, agreed.proof] : null
-    ];
-    return new MeldOperation({
-      from, time, deletes: refDeletes, inserts: refInserts, principalId, agreed
-    }, encoded, jsons);
+    ], jsons);
   };
 
   /**
@@ -88,8 +102,8 @@ export class MeldOperation
     if (ver < 3)
       throw new Error(`Encoded operation version ${ver} not supported`);
     let [, from, timeJson, update, encoding, principalId, encAgree] = encoded;
-    const jsons: [object, object] = MeldEncoder.jsonFromBuffer(update, encoding);
-    const [delTriples, insTriples] = jsons.map(encoder.triplesFromJson);
+    const jsons: [object, object, object?] = MeldEncoder.jsonFromBuffer(update, encoding);
+    const [delTriples, insTriples, sharedDataOps] = jsons.map(encoder.triplesFromJson);
     const time = TreeClock.fromJson(timeJson);
     const deletes = MeldEncoder.unreifyTriplesTids(delTriples);
     let inserts: MeldOperation['inserts'];
@@ -102,7 +116,7 @@ export class MeldOperation
     }
     principalId = principalId != null ? encoder.expandTerm(principalId) : null;
     const agreed = this.agreed(encAgree);
-    const spec = { from, time, deletes, inserts, principalId, agreed };
+    const spec = { from, time, deletes, inserts, sharedDataOps, principalId, agreed };
     return new MeldOperation(spec, encoded, jsons);
   }
 
@@ -116,6 +130,7 @@ export class MeldOperation
 
   readonly agreed: OperationAgreedSpec | null;
   readonly principalId: Iri | null;
+  readonly sharedDataOps: Triple[];
 
   /**
    * Serialisation of triples is not required to be normalised. For any m-ld
@@ -135,26 +150,31 @@ export class MeldOperation
     super(spec, tripleIndexKey);
     this.agreed = spec.agreed;
     this.principalId = spec.principalId;
+    this.sharedDataOps = spec.sharedDataOps ?? [];
   }
 
   fusion(): CausalOperator<MeldOperationSpec> {
     return new class extends MeldOperationOperator {
       update(next: MeldOperationSpec) {
+        // TODO: Custom operation fusion
+        this.addTailSharedDataOps(next.sharedDataOps);
         // Most recent agreement is significant
         if (next.agreed != null)
           this.agreed = next.agreed;
       }
-    }(super.fusion(), this.principalId, this.agreed);
+    }(super.fusion(), this.sharedDataOps, this.principalId, this.agreed);
   }
 
   cutting(): CausalOperator<MeldOperationSpec> {
     return new class extends MeldOperationOperator {
       update(prev: MeldOperationSpec) {
+        // TODO: Custom operation cutting
+        this.removeHeadSharedDataOps(prev.sharedDataOps?.length);
         // Check if the last agreement is being cut away
         if (this.agreed != null && prev.time.ticks >= this.agreed.tick)
           this.agreed = null;
       }
-    }(super.cutting(), this.principalId, this.agreed);
+    }(super.cutting(), this.sharedDataOps, this.principalId, this.agreed);
   }
 
   byRef<T>(key: 'deletes' | 'inserts', byTriple: TripleMap<T>): { [id: Iri]: T } {
@@ -189,11 +209,20 @@ export class MeldOperation
 abstract class MeldOperationOperator implements CausalOperator<MeldOperationSpec> {
   constructor(
     protected operator: CausalOperator<CausalOperation<RefTriple, TreeClock>>,
+    private sharedDataOps: Triple[], // Note, immutable
     protected principalId: Iri | null,
     protected agreed: OperationAgreedSpec | null
   ) {}
 
   abstract update(op: MeldOperationSpec): void;
+  
+  protected addTailSharedDataOps(ops: Triple[] = []) {
+    ops.length > 0 && (this.sharedDataOps = this.sharedDataOps.concat(ops));
+  }
+  
+  protected removeHeadSharedDataOps(count = 0) {
+    count > 0 && (this.sharedDataOps = this.sharedDataOps.slice(count));
+  }
 
   next(op: MeldOperationSpec): this {
     this.operator.next(op);
@@ -202,11 +231,8 @@ abstract class MeldOperationOperator implements CausalOperator<MeldOperationSpec
   }
 
   commit() {
-    return {
-      ...this.operator.commit(),
-      principalId: this.principalId,
-      agreed: this.agreed
-    };
+    const { principalId, agreed, sharedDataOps } = this;
+    return { ...this.operator.commit(), sharedDataOps: sharedDataOps, principalId, agreed };
   }
 
   get footprint() {

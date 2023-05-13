@@ -1,21 +1,28 @@
 import { isList, List, Reference, Slot, Subject } from './jrql-support';
-import { DeleteInsert, GraphSubject, GraphUpdate, isDeleteInsert } from './api';
-import { getValues } from './engine/jsonld';
-import { deepValues, isNaturalNumber, setAtPath } from './engine/util';
+import { GraphSubject, GraphUpdate, UpdateForm } from './api';
+import { clone, getValues } from './engine/jsonld';
+import { isNaturalNumber } from './engine/util';
 import { array } from './util';
 import { isReference } from 'json-rql';
 import { SubjectPropertyValues } from './subjects';
 
 /**
+ * Simplified form of {@link GraphUpdate}, with plain Subject arrays
+ * @category Utility
+ */
+export type SubjectsUpdate = UpdateForm<GraphSubject[]>;
+/**
  * An update to a single graph Subject.
  * @category Utility
  */
-export type SubjectUpdate = DeleteInsert<GraphSubject | undefined>;
+export type SubjectUpdate = UpdateForm<GraphSubject>;
 /**
  * A **m-ld** update notification, indexed by graph Subject ID.
  * @category Utility
  */
 export type SubjectUpdates = { [id: string]: SubjectUpdate };
+/** @internal */
+const graphUpdateKeys = ['@delete', '@insert', '@update'];
 /**
  * Provides an alternate view of the update deletes and inserts, by Subject.
  *
@@ -49,32 +56,21 @@ export type SubjectUpdates = { [id: string]: SubjectUpdate };
  * Javascript references to other Subjects in a Subject's properties will always
  * be collapsed to json-rql Reference objects (e.g. `{ '@id': '<iri>' }`).
  *
+ * @param update the update to convert
+ * @param copy if flagged, each subject in the update is cloned
  * @category Utility
  */
-export function asSubjectUpdates(update: DeleteInsert<GraphSubject[]>): SubjectUpdates {
-  return bySubject(update, '@insert', bySubject(update, '@delete'));
-}
-
-/** @internal */
-function bySubject(
-  update: DeleteInsert<GraphSubject[]>,
-  key: keyof DeleteInsert<GraphSubject[]>,
-  bySubject: SubjectUpdates = {}
-): SubjectUpdates {
-  for (let subject of update[key])
-    Object.assign(
-      // @id should never be empty
-      bySubject[subject['@id']] ??= { '@delete': undefined, '@insert': undefined },
-      { [key]: unReifyRefs({ ...subject }) });
-  return bySubject;
-}
-
-/** @internal */
-function unReifyRefs(subject: Subject) {
-  for (let [path, value] of deepValues(subject,
-    (value, path) => path.length > 0 && typeof value == 'object' && '@id' in value))
-    setAtPath(subject, path, { '@id': value['@id'] });
-  return subject;
+export function asSubjectUpdates(update: SubjectsUpdate, copy?: true): SubjectUpdates {
+  const su: SubjectUpdates = {};
+  for (let key of graphUpdateKeys as (keyof GraphUpdate)[]) {
+    for (let subject of update[key] ?? []) {
+      Object.assign(
+        su[subject['@id']] ??= {},
+        { [key]: copy ? clone(subject) : subject }
+      );
+    }
+  }
+  return su;
 }
 
 /**
@@ -111,8 +107,15 @@ function unReifyRefs(subject: Subject) {
  * @category Utility
  */
 export function updateSubject<T extends Subject & Reference>(
-  subject: T, update: SubjectUpdates | GraphUpdate): T {
+  subject: T,
+  update: SubjectUpdates | GraphUpdate
+): T {
   return new SubjectUpdater(update).update(subject);
+}
+
+/** @internal */
+function isGraphUpdate(update: SubjectUpdates | GraphUpdate): update is GraphUpdate {
+  return Object.keys(update).some(key => graphUpdateKeys.includes(key));
 }
 
 /**
@@ -123,17 +126,18 @@ export function updateSubject<T extends Subject & Reference>(
  * @category Utility
  */
 export class SubjectUpdater {
-  private readonly delOrInsForSubject:
-    (subject: GraphSubject, key: keyof DeleteInsert<any>) => GraphSubject | undefined;
+  private readonly verbForSubject:
+    (subject: GraphSubject, key: keyof GraphUpdate) => GraphSubject | undefined;
   private readonly done = new Set<object>();
 
   constructor(update: SubjectUpdates | GraphUpdate) {
-    if (isDeleteInsert(update))
-      this.delOrInsForSubject = (subject, key) =>
+    if (isGraphUpdate(update)) {
+      this.verbForSubject = (subject, key) =>
         update[key].graph.get(subject['@id']);
-    else
-      this.delOrInsForSubject = (subject, key) =>
+    } else {
+      this.verbForSubject = (subject, key) =>
         subject['@id'] in update ? update[subject['@id']][key] : undefined;
+    }
   }
 
   /**
@@ -145,8 +149,10 @@ export class SubjectUpdater {
   update<T extends Subject & Reference>(subject: T): T {
     if (!this.done.has(subject)) {
       this.done.add(subject);
-      const deletes = this.delOrInsForSubject(subject, '@delete');
-      const inserts = this.delOrInsForSubject(subject, '@insert');
+      if (this.verbForSubject(subject, '@update') != null)
+        throw new RangeError('Subject updater cannot apply shared data type updates');
+      const deletes = this.verbForSubject(subject, '@delete');
+      const inserts = this.verbForSubject(subject, '@insert');
       for (let property of new Set(Object.keys(subject).concat(Object.keys(inserts ?? {})))) {
         switch (property) {
           case '@id':
