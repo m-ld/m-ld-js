@@ -341,8 +341,7 @@ export class JrqlGraph {
         // even if the delete had no solutions, https://github.com/m-ld/m-ld-spec/issues/76
         patch.include({ inserts });
       }
-      // Ensure the patch knows if triples have data attached
-      return this.graph.jrql.loadHasData(patch, this.ctx);
+      return patch;
     }
 
     async fillTemplate(

@@ -63,12 +63,12 @@ export class TripleMap<T> extends IndexMap<Triple, T> {
   }
 }
 
-export class QuadSet extends IndexSet<Quad> {
-  protected construct(quads?: Iterable<Quad>): QuadSet {
-    return new QuadSet(quads);
+export class QuadSet<Q extends Quad = Quad> extends IndexSet<Q> {
+  protected construct(quads?: Iterable<Q>): QuadSet<Q> {
+    return new QuadSet<Q>(quads);
   }
 
-  protected getIndex(quad: Quad): string {
+  protected getIndex(quad: Q): string {
     return quadIndexKey(quad);
   }
 }
@@ -117,7 +117,8 @@ export function tripleFromKey(key: string, rdf: DataFactory, prefixes?: Prefixes
   return rdf.quad(
     rdf.namedNode(expand(subject)),
     rdf.namedNode(expand(predicate)),
-    object);
+    object
+  );
 }
 
 export function tripleIndexKey(triple: Triple) {
@@ -170,22 +171,24 @@ export class RdfFactory extends RdfDataFactory {
   /** @inheritDoc */
   literal(value: string, languageOrDatatype?: string | NamedNode): Literal;
   /**
-   * Creates a literal with a specific custom datatype
+   * Creates a typed literal with a specific custom datatype
    */
-  literal(value: any, datatype?: Datatype): TypedLiteral;
+  literal(value: string, datatype: Datatype, data: any): TypedLiteral;
   /** @internal */
-  literal(value: any, languageOrDatatype?: string | NamedNode | Datatype): Literal {
+  literal(
+    value: string,
+    languageOrDatatype?: string | NamedNode | Datatype,
+    data?: any
+  ): Literal {
     if (languageOrDatatype == null ||
       typeof languageOrDatatype == 'string' ||
       'termType' in languageOrDatatype) {
       return super.literal(value, languageOrDatatype);
     } else {
-      return Object.assign(super.literal(
-        languageOrDatatype.toLexical(value),
-        this.namedNode(languageOrDatatype['@id'])
-      ), {
-        typed: { type: languageOrDatatype, data: value }
-      });
+      return Object.assign(
+        super.literal(value, this.namedNode(languageOrDatatype['@id'])),
+        { typed: { type: languageOrDatatype, data } }
+      );
     }
   }
 }

@@ -154,13 +154,14 @@ export class MockGraphState {
     await this.state.write(async () => {
       const patch = await this.graph.write(request, this.ctx);
       const interim = new InterimUpdatePatch(
+        patch,
         this.graph,
         this.tidsStore,
         this.ctx,
-        patch,
         null,
         null,
-        { mutable: true });
+        { mutable: true }
+      );
       await constraint?.check(this.graph.asReadState, interim);
       const txn = await interim.finalise();
       update.resolve(updateType === 'user' ? txn.userUpdate : txn.internalUpdate);

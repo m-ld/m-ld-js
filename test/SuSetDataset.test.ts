@@ -1004,8 +1004,7 @@ describe('SU-Set Dataset', () => {
       apply: (data, operation) => {
         const inc = Number(/\+(\d+)/.exec(operation)![1]);
         return [data + inc, { '@plus': inc }];
-      },
-      merge: (...data) => data.reduce((v, n) => v + n)
+      }
     };
 
     test('operates on counter-like datatype', async () => {
@@ -1049,14 +1048,15 @@ describe('SU-Set Dataset', () => {
       datatypes.push(counterType);
       await expect(ssd.apply(
         remote.sentOperation({}, {
-          '@id': 'fred', likes: { '@type': 'http://ex.org/#Counter', '@value': 0 }
+          '@id': 'fred',
+          likes: { '@id': 'counterX', '@type': 'http://ex.org/#Counter', '@value': 0 }
         }),
         local.join(remote.time)
       )).resolves.toBe(null);
       const willUpdate = firstValueFrom(ssd.updates);
       await expect(ssd.apply(
         remote.sentOperation({}, {}, {
-          operations: { '@id': 'fred', likes: { '@value': ['counter1', '+1'], '@type': '@json' } }
+          operations: { '@id': 'fred', likes: { '@value': ['counterX', '+1'], '@type': '@json' } }
         }),
         local.join(remote.time)
       )).resolves.toBe(null);
@@ -1074,7 +1074,63 @@ describe('SU-Set Dataset', () => {
       }]);
     });
 
-    test.todo('merges concurrent counter-like inserts');
+    test('prevents conflicting counter-like inserts in write', async () => {
+      datatypes.push(counterType);
+      await expect(ssd.transact(local.tick().time, {
+        '@id': 'http://test.m-ld.org/fred',
+        'http://test.m-ld.org/#likes': [{
+          '@type': 'http://ex.org/#Counter',
+          '@value': 0
+        }, {
+          '@type': 'http://ex.org/#Counter',
+          '@value': 10
+        }]
+      })).rejects.toMatch(/Multiple shared data values/);
+    });
+
+    test('prevents conflicting counter-like inserts in state', async () => {
+      datatypes.push(counterType);
+      await ssd.transact(local.tick().time, {
+        '@id': 'http://test.m-ld.org/fred',
+        'http://test.m-ld.org/#likes': {
+          '@type': 'http://ex.org/#Counter',
+          '@value': 0
+        }
+      });
+      await expect(ssd.transact(local.tick().time, {
+        '@id': 'http://test.m-ld.org/fred',
+        'http://test.m-ld.org/#likes': {
+          '@type': 'http://ex.org/#Counter',
+          '@value': 10
+        }
+      })).rejects.toMatch(/Multiple shared data values/);
+    });
+
+    test('picks one from concurrent counter-like inserts', async () => {
+      datatypes.push(counterType);
+      await ssd.transact(local.tick().time, {
+        '@id': 'http://test.m-ld.org/fred',
+        'http://test.m-ld.org/#likes': {
+          '@type': 'http://ex.org/#Counter',
+          '@value': 0
+        }
+      });
+      await expect(ssd.apply(
+        remote.sentOperation({}, {
+          '@id': 'http://test.m-ld.org/fred',
+          'http://test.m-ld.org/#likes': {
+            '@id': 'counterX', '@type': 'http://ex.org/#Counter', '@value': 10
+          }
+        }, { agree: true }),
+        local.join(remote.time)
+      )).resolves.toBe(null);
+      await expect(drain(ssd.read<Describe>({
+        '@describe': 'http://test.m-ld.org/fred'
+      }))).resolves.toMatchObject([{
+        '@id': 'http://test.m-ld.org/fred',
+        'http://test.m-ld.org/#likes': { '@type': 'http://ex.org/#Counter', '@value': 10 }
+      }]);
+    });
 
     test.todo('voids counter-like operations');
   });

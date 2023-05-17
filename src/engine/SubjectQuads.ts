@@ -266,9 +266,9 @@ export class SubjectQuads extends EventEmitter {
   }
 
   objectTerm(value: Atom | InlineConstraint, property?: string): Quad_Object {
-    const { raw, canonical, type, language, isValue } =
+    const { raw, canonical, type, language, id } =
       expandValue(property ?? null, value, this.ctx);
-    const variable = !isValue && this.matchVar(raw);
+    const variable = id == null && this.matchVar(raw);
     if (variable) {
       return variable;
     } else if (type === '@id' || type === '@vocab') {
@@ -277,10 +277,12 @@ export class SubjectQuads extends EventEmitter {
       return this.rdf.literal(canonical, language);
     } else if (type !== '@none') {
       const datatype = this.ctx.getDatatype(type);
-      if (datatype)
-        return this.rdf.literal(datatype.validate(raw), datatype);
-      else
+      if (datatype) {
+        const value = id || datatype.toLexical(raw);
+        return this.rdf.literal(value, datatype, datatype.validate(raw));
+      } else {
         return this.rdf.literal(canonical, this.rdf.namedNode(type));
+      }
     } else {
       return this.rdf.literal(canonical);
     }

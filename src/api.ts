@@ -842,12 +842,6 @@ export interface SharedDatatype<T, O> extends Datatype<T> {
    * @returns the new state (can be the input) and an update to notify the app
    */
   apply(state: T, operation: O): [T, Expression];
-  /**
-   * Merges multiple state values. This is called if multiple clones
-   * concurrently insert shared data of the same type at the same subject
-   * property.
-   */
-  merge(s1: T, s2: T, ...sn: T[]): T;
 }
 
 /**

@@ -140,6 +140,12 @@ export interface ValueObject {
    * language of a JSON-LD document.
    */
   '@language'?: string;
+  /**
+   * The unique identity of the value in the domain. This is only used if the
+   * value is _mutable_; in practice this applies only to shared data types.
+   * @experimental
+   */
+  '@id'?: Iri;
 }
 
 /**
@@ -254,7 +260,7 @@ export function isValueObject(value: SubjectPropertyObject): value is ValueObjec
   if (value == null || typeof value != 'object' || !('@value' in value))
     return false;
   for (let key in value)
-    if (key !== '@value' && key !== '@type' && key !== '@language')
+    if (key !== '@value' && key !== '@type' && key !== '@language' && key !== '@id')
       return false;
   return true;
 }

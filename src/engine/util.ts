@@ -200,6 +200,11 @@ export function *mapIter<T, R>(it: Iterable<T>, fn: (v: T) => R): Iterable<R> {
     yield(fn(v));
 }
 
+export function *concatIter<T>(...its: Iterable<T>[]) {
+  for (let it of its)
+    yield *it;
+}
+
 export function iterable<T>(genIt: () => Iterator<T> | undefined): Iterable<T> {
   return {
     [Symbol.iterator]() {

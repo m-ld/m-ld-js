@@ -1,5 +1,5 @@
 import { Graph, KvpBatch, PatchQuads } from '.';
-import { blank, Datatype, GraphSubject, isSharedDatatype } from '../../api';
+import { blank, Datatype, GraphSubject, isSharedDatatype, UUID } from '../../api';
 import { Atom, Expression, Result, Subject, Value } from '../../jrql-support';
 import {
   inPosition,
@@ -11,19 +11,19 @@ import {
   Term,
   Triple,
   tripleKey,
-  TripleMap,
   TypedTriple
 } from '../quads';
 import { JRQL, RDF } from '../../ns';
 import { SubjectGraph } from '../SubjectGraph';
 import { JrqlMode, toIndexDataUrl } from '../jrql-util';
-import { IndexKeyGenerator, isArray, mapObject } from '../util';
+import { concatIter, IndexKeyGenerator, isArray, mapIter, mapObject } from '../util';
 import { JrqlContext, SubjectQuads } from '../SubjectQuads';
 import { Binding } from '../../rdfjs-support';
 import * as MsgPack from '../msgPack';
 import { Operation } from '../ops';
 import { takeWhile } from 'rxjs/operators';
 import { drain } from 'rx-flowable';
+import { jsonDatatype } from '../../datatype';
 
 export class JrqlQuads {
   constructor(
@@ -56,7 +56,7 @@ export class JrqlQuads {
       }
     });
   }
-  
+
   get rdf() {
     return this.graph.rdf;
   }
@@ -127,7 +127,7 @@ export class JrqlQuads {
         if (isTypedTriple(triple)) {
           const [data, operation] = datatype.update(triple.object.typed.data, update);
           triple.object.typed.data = data; // In case immutable
-          const opTriple = this.operationTriple(triple, operation, ctx);
+          const opTriple = this.encodeOpTriple(triple, operation);
           return { triple, opTriple, update };
         }
       }
@@ -140,10 +140,11 @@ export class JrqlQuads {
     ctx: JrqlContext
   ): Promise<SharedDataOpMeta | undefined> {
     if (isLiteralTriple(triple)) {
-      const [dataId, operation] = opTriple.object.typed.data;
+      const { dataId, operation } = this.decodeOpTriple(opTriple);
       if (triple.object.value === dataId) {
         await this.loadData(triple, ctx);
         if (isTypedTriple(triple) && isSharedDatatype(triple.object.typed.type)) {
+          // Shared datatypes have UUID values, so the type should be correct
           const [data, update] = triple.object.typed.type.apply(
             triple.object.typed.data, operation);
           triple.object.typed.data = data; // In case immutable
@@ -153,18 +154,22 @@ export class JrqlQuads {
     }
   }
 
-  loadHasData(patch: JrqlPatchQuads, ctx: JrqlContext) {
-    return Promise.all([...patch.deletes, ...patch.inserts].map(async triple => {
-      if (patch.tripleHasData.get(triple) == null) {
-        if (isLiteralTriple(triple) && ctx.getDatatype(triple.object.datatype.value) != null) {
+  loadHasData(triples: Iterable<JrqlQuad>, ctx: JrqlContext) {
+    return Promise.all(mapIter(triples, async triple => {
+      if (isLiteralTriple(triple) && triple.hasData == null) {
+        const datatype = ctx.getDatatype(triple.object.datatype.value);
+        if (datatype != null) {
           const keys = await this.loadDataAndOps(triple, { values: false });
           if (keys.length > 0) {
-            patch.tripleHasData.set(triple,
-              keys.slice(1).map(([key]) => DATA_KEY_GEN.tickFrom(key)));
+            return triple.hasData = {
+              shared: isSharedDatatype(datatype),
+              ticks: keys.slice(1).map(([key]) => DATA_KEY_GEN.tickFrom(key))
+            };
           }
         }
       }
-    })).then(() => patch);
+      triple.hasData = false;
+    }));
   }
 
   private loadDataAndOps(triple: LiteralTriple, opts: { values?: false } = {}) {
@@ -197,11 +202,13 @@ export class JrqlQuads {
     }
   }
 
-  saveData(patch: JrqlPatchQuads, batch: KvpBatch, tick?: number) {
-    for (let [triple, ticks] of patch.tripleHasData) {
+  saveData(patch: JrqlQuadOperation, batch: KvpBatch, tick?: number) {
+    for (let triple of concatIter(patch.deletes, patch.inserts)) {
       batch.del(DATA_KEY_GEN.keyFor(triple, this.graph));
-      for (let tick of ticks)
-        batch.del(DATA_KEY_GEN.keyFor(triple, this.graph, tick));
+      if (triple.hasData && triple.hasData.shared) {
+        for (let tick of triple.hasData.ticks)
+          batch.del(DATA_KEY_GEN.keyFor(triple, this.graph, tick));
+      }
     }
     for (let quad of patch.inserts) {
       if (isTypedTriple(quad)) {
@@ -221,10 +228,18 @@ export class JrqlQuads {
     }
   }
 
-  private operationTriple(triple: LiteralTriple, operation: any, ctx: JrqlContext): TypedTriple {
-    const dataId = triple.object.value; // @see SharedDatatype#toLexical
-    const opLiteral = this.rdf.literal([dataId, operation], ctx.getDatatype(RDF.JSON));
+  private encodeOpTriple(triple: LiteralTriple, operation: any): TypedTriple {
+    const data = [triple.object.value, operation]; // @see SharedDatatype#toLexical
+    // Insist on the default JSON datatype, because this is protocol-level
+    const opLiteral = this.rdf.literal(jsonDatatype.toLexical(data), jsonDatatype, data);
     return <TypedTriple>this.rdf.quad(triple.subject, triple.predicate, opLiteral);
+  }
+
+  private decodeOpTriple(opTriple: TypedTriple): { dataId: UUID; operation: any } {
+    if (opTriple.object.datatype.value !== RDF.JSON)
+      throw new RangeError('Operation triple incorrectly encoded');
+    const [dataId, operation] = opTriple.object.typed.data;
+    return { dataId, operation };
   }
 }
 
@@ -241,39 +256,35 @@ const DATA_KEY_GEN = new class extends IndexKeyGenerator {
   }
 }();
 
+export interface JrqlQuad extends Quad {
+  /**
+   * Does this triple have attached data? If so, and the data is shared, lists
+   * the operation ticks found.
+   */
+  hasData?: false | { shared: false } | { shared: true, ticks: number[] };
+}
+
 export interface SharedDataOpMeta {
   /** The triple having shared data that was operated on */
   triple: LiteralTriple,
   /** The operation, encoded as a literal triple having rdf:JSON type */
   opTriple: TypedTriple,
-  /** The expression used to perform the update */
+  /** The json-rql expression used to perform the update */
   update: Expression
 }
 
-interface JrqlQuadOperation extends Operation<Quad> {
+/** Operation over quads, with attached metadata (interface is read-only) */
+export interface JrqlQuadOperation extends Operation<JrqlQuad> {
+  /** Metadata of shared datatype operations */
   sharedDataOpMeta: Iterable<SharedDataOpMeta>;
-  tripleHasData: Iterable<[Triple, number[]]>;
 }
 
 export class JrqlPatchQuads extends PatchQuads implements JrqlQuadOperation {
-  /** Shared datatype operation metadata */
   readonly sharedDataOpMeta: SharedDataOpMeta[] = [];
-  /**
-   * For every triple mentioned in this patch, does the triple have attached
-   * data? If so, and the data is shared, lists the operation ticks found.
-   */
-  readonly tripleHasData = new TripleMap<number[]>();
 
   constructor(patch: Partial<JrqlQuadOperation> = {}) {
     super(patch);
     this.inheritMeta(patch);
-  }
-
-  private inheritMeta(patch: Partial<JrqlQuadOperation>) {
-    if (patch.sharedDataOpMeta != null)
-      this.sharedDataOpMeta.push(...patch.sharedDataOpMeta);
-    if (patch.tripleHasData != null)
-      this.tripleHasData.setAll(patch.tripleHasData);
   }
 
   *sharedDataOps() {
@@ -281,9 +292,8 @@ export class JrqlPatchQuads extends PatchQuads implements JrqlQuadOperation {
       yield opTriple;
   }
 
-  getDataOpUpdate(index: number): Expression {
-    return this.sharedDataOpMeta[index].update;
-  }
+  getDataOpUpdate = (index: number) =>
+    this.sharedDataOpMeta[index].update;
 
   include(patch: Partial<JrqlQuadOperation>) {
     this.inheritMeta(patch);
@@ -297,6 +307,11 @@ export class JrqlPatchQuads extends PatchQuads implements JrqlQuadOperation {
 
   get isEmpty(): boolean {
     return super.isEmpty && this.sharedDataOpMeta.length === 0;
+  }
+
+  private inheritMeta(patch: Partial<JrqlQuadOperation>) {
+    if (patch.sharedDataOpMeta != null)
+      this.sharedDataOpMeta.push(...patch.sharedDataOpMeta);
   }
 }
 

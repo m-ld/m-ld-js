@@ -15,11 +15,12 @@ import {
   getInitialContext
 } from '@m-ld/jsonld/lib/context';
 import { isAbsolute } from '@m-ld/jsonld/lib/url';
-import { isBoolean, isDouble, isNumber, isObject, isString } from '@m-ld/jsonld/lib/types';
+import { isBoolean, isDouble, isNumber, isString } from '@m-ld/jsonld/lib/types';
 import {
   ExpandedTermDef,
   isReference,
   isSet,
+  isSubjectObject,
   isValueObject,
   isVocabReference
 } from '../jrql-support';
@@ -140,10 +141,10 @@ export function canonicalDouble(value: number) {
 }
 
 export function minimiseValue(v: any) {
-  if (isObject(v)) {
-    if (('@id' in v) && Object.keys(v).length > 1)
+  if (isSubjectObject(v)) {
+    if ('@id' in v)
       return { '@id': (v as { '@id': string })['@id'] };
-    else if (('@vocab' in v) && Object.keys(v).length > 1)
+    else if ('@vocab' in v)
       return { '@vocab': (v as { '@vocab': string })['@vocab'] };
   }
   return v;
@@ -167,9 +168,8 @@ export function expandValue(
   canonical: string,
   type: '@id' | '@vocab' | Iri | '@none',
   language?: string,
-  isValue?: true
+  id?: string // Indicates a value object if not-null, may be blank
 } {
-  let canonical: string | undefined;
   value = minimiseValue(value);
   if (isReference(value)) {
     value = value['@id'];
@@ -186,13 +186,16 @@ export function expandValue(
       type: '@vocab'
     };
   }
-  let type: string | undefined, language: string | undefined, isValue: true | undefined;
+  let canonical: string | undefined,
+    type: string | undefined,
+    language: string | undefined,
+    id: string | undefined;
   if (isValueObject(value)) {
+    id = value['@id'] ?? '';
     if (value['@type'])
       type = ctx?.expandTerm(value['@type']) ?? value['@type'];
     language = value['@language'];
     value = value['@value'];
-    isValue = true;
   }
   if (type == null && property != null && ctx != null)
     type = ctx.getTermDetail(property, '@type') ?? undefined;
@@ -214,6 +217,7 @@ export function expandValue(
       };
     if (type === XS.double)
       canonical = canonicalDouble(parseFloat(value));
+    canonical ??= value;
   } else if (isBoolean(value)) {
     canonical = value.toString();
     type ??= XS.boolean;
@@ -230,9 +234,9 @@ export function expandValue(
   }
   return {
     raw: value,
-    canonical: canonical ?? `${value}`,
+    canonical: canonical ?? '',
     type: type ?? '@none',
     language,
-    isValue
+    id
   };
 }

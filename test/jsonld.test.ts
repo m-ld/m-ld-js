@@ -1,4 +1,10 @@
-import { compareValues, expandValue, getValues, JsonldContext } from '../src/engine/jsonld';
+import {
+  compareValues,
+  expandValue,
+  getValues,
+  JsonldContext,
+  minimiseValue
+} from '../src/engine/jsonld';
 
 describe('JSON-LD', () => {
   const context = {
@@ -77,6 +83,15 @@ describe('JSON-LD', () => {
     expect(compareValues({ '@id': 'http://a' }, { '@vocab': 'http://a' })).toBe(true);
   });
 
+  test('minimises values', () => {
+    expect(minimiseValue(1)).toBe(1);
+    expect(minimiseValue({ '@id': 'fred' })).toEqual({ '@id': 'fred' });
+    expect(minimiseValue({ '@id': 'fred', name: 'Fred' })).toEqual({ '@id': 'fred' });
+    expect(minimiseValue({ '@vocab': 'name', name: 'Name' })).toEqual({ '@vocab': 'name' });
+    expect(minimiseValue({ '@id': 'v1', '@value': 'Fred' }))
+      .toEqual({ '@id': 'v1', '@value': 'Fred' });
+  });
+
   describe('expanding values', () => {
     test('references & subjects', () => {
       expect(expandValue(
@@ -90,7 +105,7 @@ describe('JSON-LD', () => {
         .toEqual({ raw: 'fred', canonical: 'fred', type: '@id' });
       expect(expandValue(
         'spouse', { name: 'Fred' }))
-        .toEqual({ raw: { name: 'Fred' }, canonical: '[object Object]', type: '@none' });
+        .toEqual({ raw: { name: 'Fred' }, canonical: '', type: '@none' });
     });
     test('plain JSON values', () => {
       expect(expandValue(
@@ -134,7 +149,7 @@ describe('JSON-LD', () => {
     test('value objects', () => {
       expect(expandValue(
         'name', { '@value': 'Fred' }))
-        .toEqual({ raw: 'Fred', canonical: 'Fred', type: '@none', isValue: true });
+        .toEqual({ raw: 'Fred', canonical: 'Fred', type: '@none', id: '' });
       expect(expandValue(
         'name', {
           '@value': 'Fred',
@@ -144,7 +159,7 @@ describe('JSON-LD', () => {
           raw: 'Fred',
           canonical: 'Fred',
           type: 'http://www.w3.org/2001/XMLSchema#string',
-          isValue: true
+          id: ''
         });
     });
   });

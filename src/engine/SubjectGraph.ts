@@ -9,7 +9,7 @@ import {
 } from '../jrql-support';
 import { Quad_Predicate, Quad_Subject, Term, Triple } from './quads';
 import { JRQL, RDF, XS } from '../ns';
-import { GraphSubject, GraphSubjects } from '../api';
+import { GraphSubject, GraphSubjects, isSharedDatatype } from '../api';
 import { deepValues, isArray, setAtPath } from './util';
 import { addPropertyObject, getContextType, toIndexNumber } from './jrql-util';
 import { JsonldContext } from './jsonld';
@@ -131,10 +131,6 @@ function identifyProperty(
   throw new SyntaxError('Subject property must be an IRI');
 }
 
-function toValueObject(value: any, type: string, ctx = JsonldContext.NONE): ValueObject {
-  return { '@value': value, '@type': ctx.compactIri(type, { vocab: true }) };
-}
-
 export function jrqlValue(
   property: SubjectProperty,
   object: Term,
@@ -153,24 +149,29 @@ export function jrqlValue(
   } else if (object.termType === 'Literal') {
     if (object.language)
       return { '@value': object.value, '@language': object.language };
-    else {
-      // If the literal has attached data, use that instead of the value
-      const value = object.typed != null ? object.typed.data : object.value;
-      const type = object.datatype == null ?
-        getContextType(property, ctx) : object.datatype.value;
-      if (type == null || type === XS.string)
-        return value;
+    const type = object.datatype == null ?
+      getContextType(property, ctx) : object.datatype.value;
+    if (type == null) {
+      return object.value;
+    } else if (object.typed == null) {
+      if (type === XS.string)
+        return object.value;
       else if (type === XS.boolean)
-        return value === 'true';
+        return object.value === 'true';
       else if (type === XS.integer)
-        return parseInt(value, 10);
+        return parseInt(object.value, 10);
       else if (type === XS.double)
-        return parseFloat(value);
-      else if (type === RDF.JSON)
-        return toValueObject(value, '@json', ctx);
-      else
-        return toValueObject(value, type, ctx);
+        return parseFloat(object.value);
     }
+    // If the literal has attached data, use that instead of the value
+    const valueObject: ValueObject = {
+      '@value': object.typed != null ? object.typed.data : object.value,
+      '@type': type === RDF.JSON ? '@json' :
+        ctx.compactIri(type, { vocab: true })
+    };
+    if (object.typed != null && isSharedDatatype(object.typed.type))
+      valueObject['@id'] = object.value;
+    return valueObject;
   } else {
     throw new Error(`Cannot include ${object.termType} in a Subject`);
   }

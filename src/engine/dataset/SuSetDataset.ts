@@ -281,13 +281,14 @@ export class SuSetDataset extends MeldEncoder {
     agree: any | null
   ) {
     const interim = new InterimUpdatePatch(
+      patch,
       this.userGraph,
       this.tidsStore,
       this.userCtx,
-      patch,
       principalId,
       agree,
-      { mutable: verb === 'check' });
+      { mutable: verb === 'check' }
+    );
     for (let constraint of this.extensions.constraints ?? [])
       await constraint[verb]?.(this.readState, interim);
     return interim.finalise();
@@ -618,13 +619,14 @@ export class SuSetDataset extends MeldEncoder {
 
     private async missingCausesResult(rewindPatch: SuSetDataPatch): Promise<PatchResult<null>> {
       const { userUpdate } = await new InterimUpdatePatch(
+        rewindPatch.quads,
         this.ssd.userGraph,
         this.ssd.tidsStore,
         this.ssd.userCtx,
-        rewindPatch.quads,
         M_LD.localEngine,
         null,
-        { mutable: false }).finalise();
+        { mutable: false }
+      ).finalise();
       return {
         patch: rewindPatch.quads,
         kvps: await this.ssd.txnKvps(
