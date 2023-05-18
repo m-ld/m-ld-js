@@ -24,6 +24,7 @@ import { mockFn } from 'jest-mock-extended';
 import { MeldOperationMessage } from '../src/engine/MeldOperationMessage';
 import { jsonDatatype } from '../src/datatype';
 import { Iri } from '@m-ld/jsonld';
+import { CounterType } from './datatypeFixtures';
 
 const fred = {
   '@id': 'http://test.m-ld.org/fred',
@@ -888,12 +889,12 @@ describe('SU-Set Dataset', () => {
   describe('datatypes', () => {
     let local: MockProcess, remote: MockProcess;
     let datatypes: Datatype[];
-    let counterSeq: number;
+    let counterType: SharedDatatype<number, string>;
 
     beforeEach(async () => {
       datatypes = [];
       datatypes.push(jsonDatatype);
-      counterSeq = 1;
+      counterType = new CounterType();
       let { left, right } = TreeClock.GENESIS.forked();
       local = new MockProcess(left);
       remote = new MockProcess(right);
@@ -992,20 +993,6 @@ describe('SU-Set Dataset', () => {
         '@describe': 'http://test.m-ld.org/fred'
       }))).resolves.toEqual([fredProfile]);
     });
-
-    const counterType: SharedDatatype<number, string> = {
-      '@id': 'http://ex.org/#Counter',
-      validate: Number,
-      toLexical: () => `counter${counterSeq++}`,
-      update: (data, update) => {
-        const inc = (<any>update)['@plus'];
-        return [data + inc, `+${inc}`];
-        },
-      apply: (data, operation) => {
-        const inc = Number(/\+(\d+)/.exec(operation)![1]);
-        return [data + inc, { '@plus': inc }];
-      }
-    };
 
     test('operates on counter-like datatype', async () => {
       datatypes.push(counterType);

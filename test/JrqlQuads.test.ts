@@ -2,10 +2,11 @@ import { JrqlQuads } from '../src/engine/dataset/JrqlQuads';
 import * as N3 from 'n3';
 import { Graph } from '../src/engine/dataset';
 import { mock } from 'jest-mock-extended';
-import { Constraint, Datatype } from '../src';
+import { Constraint } from '../src';
 import { JrqlMode } from '../src/engine/jrql-util';
 import { JrqlContext } from '../src/engine/SubjectQuads';
 import { Literal, RdfFactory } from '../src/engine/quads';
+import { dateDatatype } from './datatypeFixtures';
 
 describe('json-rql Quads translation', () => {
   const rdf = new RdfFactory('http://test.m-ld.org');
@@ -120,19 +121,11 @@ describe('json-rql Quads translation', () => {
     expect(filters).toEqual([{ '@gt': [`?${quads[0].object.value}`, 40] }]);
   });
 
-  const dateDatatype: Datatype = {
-    '@id': 'http://ex.org/date',
-    validate: value => new Date(value),
-    toLexical: date => date.toDateString(),
-    toJSON: date => ({
-      year: date.getYear(), month: date.getMonth() + 1, date: date.getDate()
-    }),
-    fromJSON: json => new Date(`${json.year}-${json.month}-${json.date}`)
-  };
+
 
   test('serialises json-able datatype', () => {
     const quads = jrql.in(JrqlMode.serial, ctx.withDatatypes(id => {
-      if (id === 'http://ex.org/date')
+      if (id === dateDatatype['@id'])
         return dateDatatype;
     })).toQuads({
       '@id': 'fred',
@@ -152,7 +145,7 @@ describe('json-rql Quads translation', () => {
 
   test('validates json-able datatype', () => {
     const quads = jrql.in(JrqlMode.graph, ctx.withDatatypes(id => {
-      if (id === 'http://ex.org/date')
+      if (id === dateDatatype['@id'])
         return dateDatatype;
     })).toQuads({
       '@id': 'fred',

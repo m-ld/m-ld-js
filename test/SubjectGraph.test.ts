@@ -1,5 +1,8 @@
 import { toIndexNumber } from '../src/engine/jrql-util';
-import { SubjectGraph } from '../src/engine/SubjectGraph';
+import { jrqlValue, SubjectGraph } from '../src/engine/SubjectGraph';
+import { RdfFactory } from '../src/engine/quads';
+import { dateDatatype } from './datatypeFixtures';
+import { JsonldContext } from '../src/engine/jsonld';
 
 test('converts key to index number', () => {
   expect(toIndexNumber(undefined)).toBeUndefined();
@@ -51,6 +54,35 @@ describe('Subject Graph', () => {
     const fred2 = { '@id': 'fred', name: 'Flintstone' };
     expect(new SubjectGraph([fred, fred2]).graph.get('fred')).toEqual({
       '@id': 'fred', name: expect.arrayContaining(['Fred', 'Flintstone'])
+    });
+  });
+});
+
+// Note plain value generation is tested via dependent code
+describe('json-rql typed values', () => {
+  test('creates value object from typed literal', () => {
+    const rdf = new RdfFactory(undefined);
+    const date = new Date('01-01-2000');
+    expect(jrqlValue(
+      'date',
+      rdf.literal(dateDatatype.toLexical(date), dateDatatype, date)
+    )).toEqual({
+      '@type': dateDatatype['@id'],
+      '@value': date
+    });
+  });
+
+  test('creates serialised value object from typed literal', () => {
+    const rdf = new RdfFactory(undefined);
+    const date = new Date('01-01-2000');
+    expect(jrqlValue(
+      'date',
+      rdf.literal(dateDatatype.toLexical(date), dateDatatype, date),
+      JsonldContext.NONE,
+      true
+    )).toEqual({
+      '@type': dateDatatype['@id'],
+      '@value': { year: 2000, month: 1, date: 1 }
     });
   });
 });

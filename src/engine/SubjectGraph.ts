@@ -175,7 +175,10 @@ export function jrqlValue(
           '@type': jrqlType
         };
       } else {
-        return { '@value': data, '@type': jrqlType };
+        return {
+          '@value': serial && datatype.toJSON ? datatype.toJSON(data) : data,
+          '@type': jrqlType
+        };
       }
     }
   } else {
