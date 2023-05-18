@@ -214,18 +214,28 @@ export class SubjectQuads extends EventEmitter {
 
   /** @returns a mutable proto-slot object */
   private asSlot(item: SubjectPropertyObject): Subject {
-    if (isArray(item))
+    if (isArray(item)) {
       // A nested list is a nested list (not flattened or a set)
       return { '@item': { '@list': item } };
-    if (typeof item == 'object' && ('@item' in item || this.mode === JrqlMode.graph))
+    }
+    if (typeof item == 'object' && (
+      '@item' in item ||
+      this.mode === JrqlMode.graph ||
+      this.mode === JrqlMode.serial
+    )) {
       // The item is already a slot (with an @item key)
       return { ...item };
-    else
+    } else {
       return { '@item': item };
+    }
   }
 
   private matchVar = (term: any) => {
-    if (this.mode !== JrqlMode.graph && typeof term == 'string') {
+    if (
+      this.mode !== JrqlMode.graph &&
+      this.mode !== JrqlMode.serial &&
+      typeof term == 'string'
+    ) {
       const varName = JRQL.matchVar(term);
       if (varName != null) {
         if (!varName)
@@ -278,8 +288,10 @@ export class SubjectQuads extends EventEmitter {
     } else if (type !== '@none') {
       const datatype = this.ctx.getDatatype(type);
       if (datatype) {
-        const value = id || datatype.toLexical(raw);
-        return this.rdf.literal(value, datatype, datatype.validate(raw));
+        const data = this.mode === JrqlMode.serial ?
+          datatype.fromJSON?.(raw) ?? raw : // coming from protocol
+          datatype.validate(raw); // coming from the app
+        return this.rdf.literal(id || datatype.toLexical(data), datatype, data);
       } else {
         return this.rdf.literal(canonical, this.rdf.namedNode(type));
       }

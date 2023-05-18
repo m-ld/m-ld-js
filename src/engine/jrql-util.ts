@@ -42,7 +42,12 @@ export enum JrqlMode {
    * - lists are hashes
    * - all list contents are slots
    */
-  graph
+  graph,
+  /**
+   * same as `graph` but
+   * - data in typed literals are serialised to/from JSON
+   */
+  serial
 }
 
 /**
@@ -57,7 +62,7 @@ export function *listItems(
   if (typeof list === 'object') {
     // This handles arrays as well as hashes
     for (let [indexKey, item] of Object.entries(list)) {
-      if (mode === JrqlMode.graph) {
+      if (mode === JrqlMode.graph || mode === JrqlMode.serial) {
         yield *subItems(list, toIndexNumber(indexKey, 'strict'), item);
       } else {
         // Provided index is either a variable (string) or an index number

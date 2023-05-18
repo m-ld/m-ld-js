@@ -142,13 +142,13 @@ export class MeldEncoder {
   }
 
   jsonFromTriples = (triples: Triple[]): object => {
-    const json = SubjectGraph.fromRDF(triples, { ctx: this.ctx });
+    const json = SubjectGraph.fromRDF(triples, { ctx: this.ctx, serial: true });
     // Recreates JSON-LD compaction behaviour
     return json.length == 0 ? {} : json.length == 1 ? json[0] : json;
   };
 
   triplesFromJson = (json: object): Triple[] =>
-    new SubjectQuads(this.rdf, JrqlMode.graph, this.ctx).toQuads(<any>json);
+    new SubjectQuads(this.rdf, JrqlMode.serial, this.ctx).toQuads(<any>json);
 
   triplesFromBuffer = (encoded: Buffer, encoding: BufferEncoding[]): Triple[] =>
     this.triplesFromJson(MeldEncoder.jsonFromBuffer(encoded, encoding));

@@ -1,12 +1,5 @@
 import { Iri } from '@m-ld/jsonld';
-import {
-  isReference,
-  Reference,
-  Subject,
-  SubjectProperty,
-  Value,
-  ValueObject
-} from '../jrql-support';
+import { isReference, Reference, Subject, SubjectProperty, Value } from '../jrql-support';
 import { Quad_Predicate, Quad_Subject, Term, Triple } from './quads';
 import { JRQL, RDF, XS } from '../ns';
 import { GraphSubject, GraphSubjects, isSharedDatatype } from '../api';
@@ -21,7 +14,8 @@ export type ValueAliases = (i: number, triple: Triple) => Value | undefined;
 export interface RdfOptions {
   aliases?: GraphAliases,
   values?: ValueAliases,
-  ctx?: JsonldContext
+  ctx?: JsonldContext,
+  serial?: true
 }
 
 export class SubjectGraph extends Array<GraphSubject> implements GraphSubjects {
@@ -43,7 +37,8 @@ export class SubjectGraph extends Array<GraphSubject> implements GraphSubjects {
         const subjectId = identifySubject(triple.subject, opts);
         const property = identifyProperty(
           triple.subject.value, triple.predicate, opts);
-        const value = opts.values?.(i, triple) ?? jrqlValue(property, triple.object, opts.ctx);
+        const value = opts.values?.(i, triple) ??
+          jrqlValue(property, triple.object, opts.ctx, opts.serial);
         addPropertyObject(byId[subjectId] ??= { '@id': subjectId }, property, value);
         return byId;
       }, {})));
@@ -134,7 +129,8 @@ function identifyProperty(
 export function jrqlValue(
   property: SubjectProperty,
   object: Term,
-  ctx = JsonldContext.NONE
+  ctx = JsonldContext.NONE,
+  serial?: true
 ): Value {
   if (object.termType.endsWith('Node')) {
     if (property === '@type') {
@@ -164,14 +160,24 @@ export function jrqlValue(
         return parseFloat(object.value);
     }
     // If the literal has attached data, use that instead of the value
-    const valueObject: ValueObject = {
-      '@value': object.typed != null ? object.typed.data : object.value,
-      '@type': type === RDF.JSON ? '@json' :
-        ctx.compactIri(type, { vocab: true })
-    };
-    if (object.typed != null && isSharedDatatype(object.typed.type))
-      valueObject['@id'] = object.value;
-    return valueObject;
+    const jrqlType = type === RDF.JSON ? '@json' :
+      ctx.compactIri(type, { vocab: true });
+    if (object.typed == null) {
+      return { '@value': object.value, '@type': jrqlType };
+    } else {
+      const { data, type: datatype } = object.typed;
+      if (isSharedDatatype(datatype)) {
+        return {
+          '@id': object.value,
+          '@value': serial ?
+            datatype.toJSON?.(data) ?? data :
+            datatype.toValue?.(data) ?? data,
+          '@type': jrqlType
+        };
+      } else {
+        return { '@value': data, '@type': jrqlType };
+      }
+    }
   } else {
     throw new Error(`Cannot include ${object.termType} in a Subject`);
   }

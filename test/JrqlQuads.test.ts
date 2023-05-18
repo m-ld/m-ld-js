@@ -2,10 +2,10 @@ import { JrqlQuads } from '../src/engine/dataset/JrqlQuads';
 import * as N3 from 'n3';
 import { Graph } from '../src/engine/dataset';
 import { mock } from 'jest-mock-extended';
-import { Constraint } from '../src';
+import { Constraint, Datatype } from '../src';
 import { JrqlMode } from '../src/engine/jrql-util';
 import { JrqlContext } from '../src/engine/SubjectQuads';
-import { RdfFactory } from '../src/engine/quads';
+import { Literal, RdfFactory } from '../src/engine/quads';
 
 describe('json-rql Quads translation', () => {
   const rdf = new RdfFactory('http://test.m-ld.org');
@@ -118,6 +118,56 @@ describe('json-rql Quads translation', () => {
     expect(rdf.namedNode('http://test.m-ld.org/#age').equals(quads[0].predicate)).toBe(true);
     expect(quads[0].object.termType).toBe('Variable');
     expect(filters).toEqual([{ '@gt': [`?${quads[0].object.value}`, 40] }]);
+  });
+
+  const dateDatatype: Datatype = {
+    '@id': 'http://ex.org/date',
+    validate: value => new Date(value),
+    toLexical: date => date.toDateString(),
+    toJSON: date => ({
+      year: date.getYear(), month: date.getMonth() + 1, date: date.getDate()
+    }),
+    fromJSON: json => new Date(`${json.year}-${json.month}-${json.date}`)
+  };
+
+  test('serialises json-able datatype', () => {
+    const quads = jrql.in(JrqlMode.serial, ctx.withDatatypes(id => {
+      if (id === 'http://ex.org/date')
+        return dateDatatype;
+    })).toQuads({
+      '@id': 'fred',
+      birthday: {
+        '@type': 'http://ex.org/date',
+        '@value': { year: 0, month: 1, date: 1 }
+      }
+    });
+    expect(quads.length).toBe(1);
+    expect(quads[0].subject.value).toBe('http://test.m-ld.org/fred');
+    expect(quads[0].predicate.value).toBe('http://test.m-ld.org/#birthday');
+    expect(quads[0].object.termType).toBe('Literal');
+    expect(quads[0].object.value).toBe('Sat Jan 01 2000');
+    expect((<Literal>quads[0].object).typed!.type).toBe(dateDatatype);
+    expect((<Literal>quads[0].object).typed!.data).toEqual(new Date('01-01-2000'));
+  });
+
+  test('validates json-able datatype', () => {
+    const quads = jrql.in(JrqlMode.graph, ctx.withDatatypes(id => {
+      if (id === 'http://ex.org/date')
+        return dateDatatype;
+    })).toQuads({
+      '@id': 'fred',
+      birthday: {
+        '@type': 'http://ex.org/date',
+        '@value': '01-01-2000'
+      }
+    });
+    expect(quads.length).toBe(1);
+    expect(quads[0].subject.value).toBe('http://test.m-ld.org/fred');
+    expect(quads[0].predicate.value).toBe('http://test.m-ld.org/#birthday');
+    expect(quads[0].object.termType).toBe('Literal');
+    expect(quads[0].object.value).toBe('Sat Jan 01 2000');
+    expect((<Literal>quads[0].object).typed!.type).toBe(dateDatatype);
+    expect((<Literal>quads[0].object).typed!.data).toEqual(new Date('01-01-2000'));
   });
 
   describe('lists', () => {

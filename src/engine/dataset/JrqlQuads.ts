@@ -212,8 +212,8 @@ export class JrqlQuads {
     }
     for (let quad of patch.inserts) {
       if (isTypedTriple(quad)) {
-        const { type, data } = quad.object.typed;
-        const json = type.toJSON ? type.toJSON(data) : data;
+        const { type: datatype, data } = quad.object.typed;
+        const json = datatype.toJSON ? datatype.toJSON(data) : data;
         batch.put(DATA_KEY_GEN.keyFor(quad, this.graph), MsgPack.encode(json));
       }
     }

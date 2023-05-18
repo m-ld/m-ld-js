@@ -952,7 +952,7 @@ describe('SU-Set Dataset', () => {
         remote.sentOperation({}, { '@id': 'fred', photo }),
         local.join(remote.time)
       )).resolves.toBe(null);
-      expect(validate).toBeCalledWith(new Buffer('abc'));
+      expect(validate).not.toBeCalled(); // coming from protocol, not app
       expect(toLexical).toBeCalled();
       await expect(drain(ssd.read<Describe>({
         '@describe': 'http://test.m-ld.org/fred'

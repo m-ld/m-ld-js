@@ -775,8 +775,7 @@ export interface Datatype<T = any> {
   /**
    * Checks whether the provided data is valid for this datatype. This may give
    * the application some leeway in type strictness; but note that the data
-   * provided back to the application will be of type `T` unless an
-   * {@link AbstractDatatype} is used.
+   * provided back to the application will be of type `T`.
    *
    * This method should ideally allow for values that might have been naively
    * parsed from JSON in the app, for example in a data import, such that
@@ -807,13 +806,6 @@ export interface Datatype<T = any> {
   fromJSON?(json: any): T;
 }
 
-export interface AbstractDatatype<T, I> extends Datatype<T> {
-  /**
-   * Provides a value to appear as the literal `@value` when retrieved
-   */
-  toValue(data: T): I;
-}
-
 /**
  * @typeParam O operation type; must be JSON-serialisable
  */
@@ -823,6 +815,12 @@ export interface SharedDatatype<T, O> extends Datatype<T> {
    * value, for which mutable state will exist.
    */
   toLexical(): UUID;
+  /**
+   * Provides a value to appear as the literal `@value` when retrieved. This
+   * allows the shared datatype to abstract its implementation type, `T`. The
+   * datatype will typically accept the abstract type in its `validate` method.
+   */
+  toValue?(data: T): any;
   /**
    * Intercepts update of data. The implementation may mutate the passed `data`;
    * the backend may later undo the returned operation in case of rollback.
