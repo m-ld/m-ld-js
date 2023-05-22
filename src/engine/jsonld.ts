@@ -6,7 +6,7 @@
 /// <reference path="../types/jsonld-types.ts" />
 
 import { Context, ExpandedTermDefinition, Iri, Options, processContext } from '@m-ld/jsonld';
-import { compactIri } from '@m-ld/jsonld/lib/compact';
+import { compactIri, compactValue } from '@m-ld/jsonld/lib/compact';
 import { compareValues as _compareValues } from '@m-ld/jsonld/lib/util';
 import {
   ActiveContext,
@@ -54,6 +54,7 @@ export interface JsonldCompacter extends JsonldTermDefiner {
     iri: Iri,
     options?: Options.CompactIri & { vocab?: boolean }
   ): string;
+  compactValue(property: Iri, value: any): any;
 }
 
 export interface JsonldExpander extends JsonldTermDefiner {
@@ -72,7 +73,8 @@ export class JsonldContext implements JsonldCompacter, JsonldExpander {
   }
 
   static NONE: JsonldCompacter = {
-    compactIri: (iri: Iri) => iri,
+    compactIri: iri => iri,
+    compactValue: (property, value) => value,
     getTermDetail: () => null
   };
 
@@ -108,6 +110,12 @@ export class JsonldContext implements JsonldCompacter, JsonldExpander {
     });
   }
 
+  compactValue(property: Iri, value: any) {
+    return compactValue({
+      activeCtx: this.ctx, activeProperty: property, value
+    });
+  }
+
   getTermDetail(key: string, type: keyof ExpandedTermDef): string | null {
     return getContextValue(this.ctx, key, <keyof ExpandedTermDefinition>type);
   }
@@ -137,7 +145,8 @@ export function asValues(value: any) {
 }
 
 export function canonicalDouble(value: number) {
-  return value.toExponential(15).replace(/(\d)0*e\+?/, '$1E');
+  return value.toExponential(15)
+    .replace(/(\d)0*e\+?/, '$1E');
 }
 
 export function minimiseValue(v: any) {

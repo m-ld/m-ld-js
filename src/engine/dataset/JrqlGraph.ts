@@ -285,9 +285,8 @@ export class JrqlGraph {
       if (this.where != null) {
         // If there is a @where clause, use variable substitutions per solution
         return this.graph.solutions(
-          this.where,
-          this.graph.project,
-          this.ctx, this.vars, this.inlineFilters, this.inlineBinds
+          this.where, this.graph.project, this.ctx,
+          this.vars, this.inlineFilters, this.inlineBinds
         );
       } else if (this.vars.size > 0) {
         // A @delete clause with no @where may be used to bind variables
@@ -303,7 +302,7 @@ export class JrqlGraph {
       const { deletes, inserts } = this;
       const patch = new JrqlPatchQuads();
       // Establish a stream of solutions
-      let solutions = this.solutions();
+      const solutions = this.solutions();
       if (solutions != null) {
         await each(solutions, async solution => {
           // If there are variables in the update for which there is no value in the
@@ -448,15 +447,6 @@ export class JrqlGraph {
       op, this.constraintExpr(filter, ctx)) : op;
     const valued = values.length ? this.sparql.createJoin(
       [this.valuesExpr(values, ctx), filtered]) : filtered;
-    return this.extendedOperation(valued, bind, rtnVars, ctx);
-  }
-
-  private extendedOperation(
-    operation: Algebra.Operation,
-    bind: ReadonlyArray<VariableExpression>,
-    rtnVars: Set<string>,
-    ctx: JrqlContext
-  ): Algebra.Operation {
     return flatten(bind.map(expr => Object.entries(expr)))
       .reduce((operation, [variable, expr]) => {
         const varName = JRQL.matchVar(variable);
@@ -465,14 +455,19 @@ export class JrqlGraph {
         rtnVars.add(varName);
         const varTerm = this.rdf.variable(varName);
         if (isConstraint(expr)) {
-          return Object.entries(expr).reduce((operation, [operator, expr]) =>
-            this.sparql.createExtend(operation, varTerm,
-              this.operatorExpr(operator, expr, ctx)), operation);
+          return Object.entries(expr).reduce((operation, [operator, expr]) => {
+            // If the operator is not supported by SPARQL, we just extend the
+            // input variable. The custom datatype may handle it later
+            const opExpr = this.operatorExpr(operator, expr, ctx) ??
+              this.sparql.createTermExpression(varTerm);
+            return this.sparql.createExtend(operation, varTerm, opExpr);
+          }, operation);
         } else {
           return this.sparql.createExtend(operation, varTerm,
-            this.sparql.createTermExpression(this.jrql.toObjectTerm(expr, ctx)));
+            this.sparql.createTermExpression(this.jrql.toObjectTerm(expr, ctx))
+          );
         }
-      }, operation);
+      }, valued);
   }
 
   private valuesExpr(
@@ -509,9 +504,14 @@ export class JrqlGraph {
     const expression = binaryFold(
       // Every constraint and every entry in a constraint is ANDed
       flatten(constraints.map(constraint => Object.entries(constraint))),
-      ([operator, expr]) => this.operatorExpr(operator, expr, ctx),
-      (left, right) =>
-        this.sparql.createOperatorExpression('&&', [left, right]));
+      ([operator, expr]) => {
+        const operatorExpr = this.operatorExpr(operator, expr, ctx);
+        if (operatorExpr != null)
+          return operatorExpr;
+        else
+          throw new Error(`No SPARQL operator: ${operator}`);
+      },
+      (...lr) => this.sparql.createOperatorExpression('&&', lr));
     if (expression == null)
       throw new Error('Missing expression');
     return expression;
@@ -521,13 +521,16 @@ export class JrqlGraph {
     operator: string,
     expr: Expression | Expression[],
     ctx: JrqlContext
-  ): Algebra.Expression {
-    if (operator in operators)
-      return this.sparql.createOperatorExpression(
-        (<any>operators)[operator].sparql,
-        array(expr).map(expr => this.exprExpr(expr, ctx)));
-    else
+  ): Algebra.Expression | undefined {
+    if (operator in operators) {
+      const sparqlOperator = operators[operator].sparql;
+      if (sparqlOperator != null)
+        return this.sparql.createOperatorExpression(
+          sparqlOperator, array(expr).map(expr => this.exprExpr(expr, ctx)));
+      // Otherwise no SPARQL equivalent, return undefined but do not fail
+    } else {
       throw new Error(`Unrecognised operator: ${operator}`);
+    }
   }
 
   private exprExpr(expr: Expression, ctx: JrqlContext): Algebra.Expression {

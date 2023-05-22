@@ -1,7 +1,12 @@
 import {
-  GraphSubject, InterimUpdate, MeldConstraint, MeldExtensions, MeldPreUpdate, MeldReadState
+  GraphSubject,
+  InterimUpdate,
+  MeldConstraint,
+  MeldExtensions,
+  MeldPreUpdate,
+  MeldReadState
 } from '../api';
-import { ExtensionSubject, OrmUpdating } from '../orm/index';
+import { ExtensionSubject, OrmUpdating } from '../orm';
 import { Shape } from './Shape';
 import { isReference, Reference, Subject } from '../jrql-support';
 import { M_LD } from '../ns';
@@ -114,7 +119,7 @@ export class ShapeConstrained implements ExtensionSubjectInstance, MeldExtension
   }];
 
   /** @internal */
-  initialise(src: GraphSubject, orm: OrmUpdating, ext: ExtensionSubject<this>): this {
+  initFromData(src: GraphSubject, orm: OrmUpdating, ext: ExtensionSubject<this>): this {
     // We know we're a singleton; add our controlled shapes property
     ext.initSrcProperty(src,
       [this, 'shapes'],

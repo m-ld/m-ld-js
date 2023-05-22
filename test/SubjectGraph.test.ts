@@ -65,7 +65,7 @@ describe('json-rql typed values', () => {
     const date = new Date('01-01-2000');
     expect(jrqlValue(
       'date',
-      rdf.literal(dateDatatype.toLexical(date), dateDatatype, date)
+      rdf.literal(dateDatatype.getDataId(date), dateDatatype, date)
     )).toEqual({
       '@type': dateDatatype['@id'],
       '@value': date
@@ -77,7 +77,7 @@ describe('json-rql typed values', () => {
     const date = new Date('01-01-2000');
     expect(jrqlValue(
       'date',
-      rdf.literal(dateDatatype.toLexical(date), dateDatatype, date),
+      rdf.literal(dateDatatype.getDataId(date), dateDatatype, date),
       JsonldContext.NONE,
       true
     )).toEqual({

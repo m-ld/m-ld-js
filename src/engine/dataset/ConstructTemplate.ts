@@ -172,10 +172,13 @@ class SubjectTemplate {
   private propertyPopulator(result: Subject, solution: Binding) {
     // Mapping from pattern property to result property
     const resultProps = new Map<SubjectProperty, SubjectProperty>();
-    for (let [patternProp, variable] of this.variableProps)
+    for (let [patternProp, variable] of this.variableProps) {
+      const predicate = solution[variable];
       if (variable in solution)
         // TODO: jrqlProperty will translate any numeric to a list index
-        resultProps.set(patternProp, jrqlProperty(solution[variable].value, this.ctx));
+        // TODO: pass the matched triple object, to allow for matching value objects
+        resultProps.set(patternProp, jrqlProperty(predicate.value, null, this.ctx));
+    }
     return (patternProp: SubjectProperty, includeAll = true) => {
       const substitute = resultProps.get(patternProp);
       let populateWith: (getObject: (resultProp: SubjectProperty) => Value) => void;

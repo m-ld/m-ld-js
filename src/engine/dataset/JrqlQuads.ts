@@ -231,7 +231,7 @@ export class JrqlQuads {
   private encodeOpTriple(triple: LiteralTriple, operation: any): TypedTriple {
     const data = [triple.object.value, operation]; // @see SharedDatatype#toLexical
     // Insist on the default JSON datatype, because this is protocol-level
-    const opLiteral = this.rdf.literal(jsonDatatype.toLexical(data), jsonDatatype, data);
+    const opLiteral = this.rdf.literal(jsonDatatype.getDataId(data), jsonDatatype, data);
     return <TypedTriple>this.rdf.quad(triple.subject, triple.predicate, opLiteral);
   }
 

@@ -2,7 +2,7 @@ import { GraphSubject, MeldConstraint, MeldExtensions, MeldPreUpdate, MeldReadSt
 import { Context, Subject } from '../jrql-support';
 import { constraintFromConfig } from '../constraints';
 import { DefaultList } from '../lseq/DefaultList';
-import { InitialApp, MeldApp, MeldConfig } from '../config';
+import { InitialApp, MeldApp, MeldAppContext, MeldConfig } from '../config';
 import { M_LD, RDF } from '../ns';
 import { Logger } from 'loglevel';
 import { OrmDomain, OrmSubject, OrmUpdating } from '../orm';
@@ -24,10 +24,14 @@ export class CloneExtensions extends OrmDomain implements StateManaged, MeldExte
     app: InitialApp,
     context: Context
   ) {
+    app.setExtensionContext?.({ config, app });
     const { datatypes, agreementConditions, transportSecurity } = app;
     const constraints = await this.constraintsFromConfig(config, app.constraints, context);
     return new CloneExtensions({
-      constraints, datatypes, agreementConditions, transportSecurity
+      constraints,
+      datatypes: datatypes?.bind(app),
+      agreementConditions,
+      transportSecurity
     }, config, app);
   }
 
@@ -45,6 +49,7 @@ export class CloneExtensions extends OrmDomain implements StateManaged, MeldExte
   /** Represents the `@list` of the global `M_LD.extensions` list subject  */
   private readonly extensionSubjects: ManagedExtensionSubject[];
   private _extensions: MeldExtensions[];
+  private _defaultList: DefaultList;
 
   private constructor(
     private readonly initial: MeldExtensions,
@@ -75,7 +80,7 @@ export class CloneExtensions extends OrmDomain implements StateManaged, MeldExte
    */
   ready = () => this.upToDate().then(() => this);
 
-  initialise(state: MeldReadState) {
+  onInitial(state: MeldReadState) {
     return this.updating(state, async orm => {
       // Load the top-level extensions subject into our cache
       await this.loadAllExtensions(orm);
@@ -92,7 +97,14 @@ export class CloneExtensions extends OrmDomain implements StateManaged, MeldExte
   }
 
   get constraints() {
-    return iterable(() => constraints(this._extensions, this.config['@id']));
+    return iterable(() => this.getConstraints());
+  }
+
+  *getConstraints() {
+    yield *withDefaults(this._extensions, ext => ext.constraints, {
+      is: constraint => constraint instanceof DefaultList, get: () =>
+        this._defaultList ??= new DefaultList(this.config['@id'])
+    });
   }
 
   datatypes = (id: Iri) => {
@@ -106,11 +118,18 @@ export class CloneExtensions extends OrmDomain implements StateManaged, MeldExte
   }
 
   get agreementConditions() {
-    return iterable(() => agreementConditions(this._extensions));
+    return iterable(() => this.getAgreementConditions());
+  }
+
+  *getAgreementConditions() {
+    for (let ext of this._extensions)
+      yield *ext.agreementConditions ?? [];
   }
 
   get transportSecurity() {
-    return transportSecurity(this._extensions);
+    for (let ext of this._extensions)
+      if (ext.transportSecurity != null)
+        return ext.transportSecurity;
   }
 
   private async updateExtensions() {
@@ -148,6 +167,19 @@ export class CloneExtensions extends OrmDomain implements StateManaged, MeldExte
 
 class ManagedExtensionSubject
   extends SingletonExtensionSubject<MeldExtensions & ExtensionSubjectInstance> {
+  private readonly context: MeldAppContext;
+
+  constructor(src: GraphSubject, orm: OrmUpdating) {
+    super(src, orm);
+    const { config, app } = orm.domain;
+    this.context = { config, app };
+  }
+
+  protected newInstance() {
+    const extensions = super.newInstance();
+    extensions.setExtensionContext?.(this.context);
+    return extensions;
+  }
 }
 
 function *withDefaults<T>(
@@ -166,21 +198,4 @@ function *withDefaults<T>(
   for (let i = 0; i < defaults.length; i++)
     if (!foundDefault[i])
       yield defaults[i].get();
-}
-
-function *constraints(extensions: Iterable<MeldExtensions>, id: string) {
-  yield *withDefaults(extensions, ext => ext.constraints, {
-    is: constraint => constraint instanceof DefaultList, get: () => new DefaultList(id)
-  });
-}
-
-function *agreementConditions(extensions: Iterable<MeldExtensions>) {
-  for (let ext of extensions)
-    yield *ext.agreementConditions ?? [];
-}
-
-function transportSecurity(extensions: Awaited<MeldExtensions>[]) {
-  for (let ext of extensions)
-    if (ext.transportSecurity != null)
-      return ext.transportSecurity;
 }

@@ -13,7 +13,6 @@ import {
   MeldTransportSecurity,
   MeldUpdate,
   Select,
-  SharedDatatype,
   shortId
 } from '../src';
 import { jsonify } from './testUtil';
@@ -23,8 +22,7 @@ import { drain } from 'rx-flowable';
 import { mockFn } from 'jest-mock-extended';
 import { MeldOperationMessage } from '../src/engine/MeldOperationMessage';
 import { jsonDatatype } from '../src/datatype';
-import { Iri } from '@m-ld/jsonld';
-import { CounterType } from './datatypeFixtures';
+import { binaryDatatype, CounterType } from './datatypeFixtures';
 
 const fred = {
   '@id': 'http://test.m-ld.org/fred',
@@ -889,21 +887,15 @@ describe('SU-Set Dataset', () => {
   describe('datatypes', () => {
     let local: MockProcess, remote: MockProcess;
     let datatypes: Datatype[];
-    let counterType: SharedDatatype<number, string>;
 
     beforeEach(async () => {
       datatypes = [];
       datatypes.push(jsonDatatype);
-      counterType = new CounterType();
       let { left, right } = TreeClock.GENESIS.forked();
       local = new MockProcess(left);
       remote = new MockProcess(right);
       ssd = new SuSetDataset(state.dataset, {}, {
-        datatypes(id: Iri) {
-          for (let dt of datatypes)
-            if (dt['@id'] === id)
-              return dt;
-        }
+        datatypes: id => datatypes.find(dt => dt['@id'] === id)
       }, {}, { '@id': 'test', '@domain': 'test.m-ld.org' });
       await ssd.initialise();
       await ssd.resetClock(local.time);
@@ -913,7 +905,7 @@ describe('SU-Set Dataset', () => {
     test('insert binary-like datatype', async () => {
       const validate = mockFn().mockImplementation(data => new Buffer(data));
       const toLexical = mockFn().mockImplementation(data => shortId(data.toString()));
-      datatypes.push({ '@id': 'http://ex.org/#Binary', validate, toLexical });
+      datatypes.push({ '@id': 'http://ex.org/#Binary', validate, getDataId: toLexical });
       const willUpdate = firstValueFrom(ssd.updates);
       const photo = {
         '@type': 'http://ex.org/#Binary',
@@ -944,7 +936,7 @@ describe('SU-Set Dataset', () => {
     test('apply operation with binary-like data', async () => {
       const validate = mockFn().mockImplementation(data => new Buffer(data));
       const toLexical = mockFn().mockImplementation(data => shortId(data.toString()));
-      datatypes.push({ '@id': 'http://ex.org/#Binary', validate, toLexical });
+      datatypes.push({ '@id': 'http://ex.org/#Binary', validate, getDataId: toLexical });
       const photo = {
         '@type': 'http://ex.org/#Binary',
         '@value': new Buffer('abc')
@@ -964,11 +956,7 @@ describe('SU-Set Dataset', () => {
     });
 
     test('datatype data included in snapshot', async () => {
-      datatypes.push({
-        '@id': 'http://ex.org/#Binary',
-        validate: data => new Buffer(data),
-        toLexical: data => shortId(data.toString())
-      });
+      datatypes.push(binaryDatatype);
       const fredProfile = {
         '@id': 'http://test.m-ld.org/fred',
         'http://test.m-ld.org/#photo': {
@@ -995,7 +983,7 @@ describe('SU-Set Dataset', () => {
     });
 
     test('operates on counter-like datatype', async () => {
-      datatypes.push(counterType);
+      datatypes.push(new CounterType());
       await ssd.transact(local.tick().time, {
         '@id': 'http://test.m-ld.org/fred',
         'http://test.m-ld.org/#likes': {
@@ -1032,7 +1020,7 @@ describe('SU-Set Dataset', () => {
     });
 
     test('applies counter-like datatype operation', async () => {
-      datatypes.push(counterType);
+      datatypes.push(new CounterType());
       await expect(ssd.apply(
         remote.sentOperation({}, {
           '@id': 'fred',
@@ -1062,7 +1050,7 @@ describe('SU-Set Dataset', () => {
     });
 
     test('prevents conflicting counter-like inserts in write', async () => {
-      datatypes.push(counterType);
+      datatypes.push(new CounterType());
       await expect(ssd.transact(local.tick().time, {
         '@id': 'http://test.m-ld.org/fred',
         'http://test.m-ld.org/#likes': [{
@@ -1076,7 +1064,7 @@ describe('SU-Set Dataset', () => {
     });
 
     test('prevents conflicting counter-like inserts in state', async () => {
-      datatypes.push(counterType);
+      datatypes.push(new CounterType());
       await ssd.transact(local.tick().time, {
         '@id': 'http://test.m-ld.org/fred',
         'http://test.m-ld.org/#likes': {
@@ -1094,7 +1082,7 @@ describe('SU-Set Dataset', () => {
     });
 
     test('picks one from concurrent counter-like inserts', async () => {
-      datatypes.push(counterType);
+      datatypes.push(new CounterType());
       await ssd.transact(local.tick().time, {
         '@id': 'http://test.m-ld.org/fred',
         'http://test.m-ld.org/#likes': {

@@ -284,11 +284,11 @@ export interface StateManaged {
    * be used to read significant state into memory for the efficient
    * implementation of a component's function.
    */
-  readonly initialise?: StateProc;
+  readonly onInitial?: StateProc;
   /**
    * Called to inform the component of an update to the state, _after_ it has
    * been applied. If available, this procedure will be called for every state
-   * after that passed to {@link initialise}.
+   * after that passed to {@link onInitial}.
    */
   readonly onUpdate?: UpdateProc<MeldPreUpdate>;
 }

@@ -1,11 +1,11 @@
-import { ExtensionSubject, OrmSubject, OrmUpdating } from '../orm/index';
+import { ExtensionSubject, OrmSubject, OrmUpdating } from '../orm';
 import { GraphSubject, InterimUpdate, MeldError, MeldExtensions, MeldReadState } from '../api';
 import { Describe, Reference, Subject } from '../jrql-support';
 import { M_LD } from '../ns';
 import { Iri } from '@m-ld/jsonld';
 import { JsType } from '../js-support';
 import { property } from '../orm/OrmSubject';
-import { Shape } from '../shacl/Shape';
+import { Shape } from '../shacl';
 import { ExtensionSubjectInstance } from '../orm/ExtensionSubject';
 import { CacheMissListener, OrmScope } from '../orm/OrmDomain';
 
@@ -93,7 +93,7 @@ export class WritePermitted implements ExtensionSubjectInstance, MeldExtensions 
   /** @internal */
   private /*readonly*/ scope: OrmScope;
 
-  async initialise(_src: GraphSubject, orm: OrmUpdating): Promise<this> {
+  async initFromData(_src: GraphSubject, orm: OrmUpdating): Promise<this> {
     this.scope = orm.domain.createScope()
       .on('deleted', this.onSubjectDeleted)
       .on('cacheMiss', this.onSubjectInserted);

@@ -1,6 +1,13 @@
 import { Iri } from '@m-ld/jsonld';
-import { isReference, Reference, Subject, SubjectProperty, Value } from '../jrql-support';
-import { Quad_Predicate, Quad_Subject, Term, Triple } from './quads';
+import {
+  isReference,
+  Reference,
+  Subject,
+  SubjectProperty,
+  Value,
+  ValueObject
+} from '../jrql-support';
+import { Quad_Subject, Term, Triple } from './quads';
 import { JRQL, RDF, XS } from '../ns';
 import { GraphSubject, GraphSubjects, isSharedDatatype } from '../api';
 import { deepValues, isArray, setAtPath } from './util';
@@ -35,8 +42,7 @@ export class SubjectGraph extends Array<GraphSubject> implements GraphSubjects {
     return new SubjectGraph(Object.values(
       triples.reduce<{ [id: string]: GraphSubject }>((byId, triple, i) => {
         const subjectId = identifySubject(triple.subject, opts);
-        const property = identifyProperty(
-          triple.subject.value, triple.predicate, opts);
+        const property = identifyProperty(triple, opts);
         const value = opts.values?.(i, triple) ??
           jrqlValue(property, triple.object, opts.ctx, opts.serial);
         addPropertyObject(byId[subjectId] ??= { '@id': subjectId }, property, value);
@@ -114,14 +120,14 @@ function identifySubject(
 }
 
 function identifyProperty(
-  subjectIri: Iri,
-  predicate: Quad_Predicate,
+  triple: Triple,
   { aliases, ctx }: RdfOptions
 ): SubjectProperty {
-  if (predicate.termType !== 'Variable') {
-    const property = aliases?.(subjectIri, predicate.value) ??
-      aliases?.(null, predicate.value) ?? predicate.value;
-    return isArray(property) ? property : jrqlProperty(property, ctx);
+  if (triple.predicate.termType !== 'Variable') {
+    const property = aliases?.(triple.subject.value, triple.predicate.value) ??
+      aliases?.(null, triple.predicate.value) ?? triple.predicate.value;
+    return isArray(property) ? property :
+      jrqlProperty(triple.predicate.value, triple.object, ctx);
   }
   throw new SyntaxError('Subject property must be an IRI');
 }
@@ -162,32 +168,34 @@ export function jrqlValue(
     // If the literal has attached data, use that instead of the value
     const jrqlType = type === RDF.JSON ? '@json' :
       ctx.compactIri(type, { vocab: true });
+    let valueObject: ValueObject;
     if (object.typed == null) {
-      return { '@value': object.value, '@type': jrqlType };
+      valueObject = { '@value': object.value, '@type': jrqlType };
     } else {
       const { data, type: datatype } = object.typed;
-      if (isSharedDatatype(datatype)) {
-        return {
-          '@id': object.value,
-          '@value': serial ?
-            datatype.toJSON?.(data) ?? data :
-            datatype.toValue?.(data) ?? data,
-          '@type': jrqlType
-        };
-      } else {
-        return {
-          '@value': serial && datatype.toJSON ? datatype.toJSON(data) : data,
-          '@type': jrqlType
-        };
-      }
+      const isShared = isSharedDatatype(datatype);
+      valueObject = {
+        '@value': serial ?
+          datatype.toJSON?.(data) ?? data :
+          isShared ? datatype.toValue?.(data) ?? data : data,
+        '@type': jrqlType
+      };
+      if (serial && isShared)
+        valueObject['@id'] = object.value;
     }
+    return typeof property == 'string' ?
+      ctx.compactValue(property, valueObject) : valueObject;
   } else {
     throw new Error(`Cannot include ${object.termType} in a Subject`);
   }
 }
 
 /** Converts RDF predicate to json-rql keyword, Iri, or list indexes */
-export function jrqlProperty(predicate: Iri, ctx = JsonldContext.NONE): SubjectProperty {
+export function jrqlProperty(
+  predicate: Iri,
+  object: Triple['object'] | null,
+  ctx = JsonldContext.NONE
+): SubjectProperty {
   switch (predicate) {
     case RDF.type:
       return '@type';
@@ -197,7 +205,32 @@ export function jrqlProperty(predicate: Iri, ctx = JsonldContext.NONE): SubjectP
       return '@item';
   }
   const index = toIndexNumber(predicate);
-  return index != null ? ['@list', ...index] :
-    ctx.compactIri(predicate, { relativeTo: { vocab: true } });
+  if (index != null) {
+    return ['@list', ...index];
+  } else {
+    return ctx.compactIri(predicate, {
+      vocab: true, value: object != null ? previewValue(object) : null
+    });
+  }
+}
+
+/**
+ * This oddity helps jsonld.js determine the correct term mapping for a
+ * predicate, by giving it an insight into the forthcoming value so it can match
+ * the data type and language. The returned value is fully expanded.
+ */
+function previewValue(object: Triple['object']) {
+  if (object.termType.endsWith('Node')) {
+    return { '@id': object.value };
+  } else if (object.termType === 'Literal') {
+    const dv: ValueObject = { '@value': object.value };
+    if (object.language)
+      dv['@language'] = object.language;
+    else
+      dv['@type'] = object.datatype.value;
+    return dv;
+  } else {
+    throw new Error(`Cannot include ${object.termType} in a Subject`);
+  }
 }
 

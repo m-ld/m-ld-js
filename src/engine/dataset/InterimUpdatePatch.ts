@@ -211,16 +211,12 @@ export class InterimUpdatePatch implements InterimUpdate {
 
   private prioritiseSharedSiblings(quads: QuadSet<MaybeHiddenQuad>) {
     let topQuad: (MaybeHiddenQuad & LiteralTriple) | null = null;
-    const conflicts: MaybeHiddenQuad[] = [];
+    const conflicts: MaybeHiddenQuad[] = [...quads];
     for (let quad of quads) {
-      if (this.isShared(quad)) {
-        if (topQuad == null || quad.object.datatype > topQuad.object.datatype)
-          topQuad = quad;
-        else
-          conflicts.push(quad);
-      }
+      if (this.isShared(quad) && (topQuad == null || quad.object.value > topQuad.object.value))
+        topQuad = quad;
     }
-    return { topQuad, conflicts };
+    return { topQuad, conflicts: topQuad ? conflicts.filter(q => q !== topQuad) : conflicts };
   }
 
   private async finalSharedState(patch: JrqlPatchQuads) {

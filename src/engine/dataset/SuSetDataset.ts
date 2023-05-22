@@ -121,7 +121,7 @@ export class SuSetDataset extends MeldEncoder {
 
   @SuSetDataset.checkStateLocked.async
   async allowTransact() {
-    await this.extensions.initialise?.(this.readState);
+    await this.extensions.onInitial?.(this.readState);
     this.readyForTxn = true;
   }
 

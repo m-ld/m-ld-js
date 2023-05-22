@@ -1,4 +1,5 @@
 import type { Context } from './jrql-support';
+// noinspection JSDeprecatedSymbols
 import type { ConstraintConfig } from './constraints';
 import type { LogLevelDesc } from 'loglevel';
 import type { AppPrincipal, MeldExtensions } from './api';
@@ -31,6 +32,7 @@ export interface MeldConfig {
    * * `@vocab` defaults to the resolution of `/#` against the base
    */
   '@context'?: Context;
+  // noinspection JSDeprecatedSymbols: deprecated using deprecated
   /**
    * Semantic constraints to apply to the domain data.
    * @deprecated see {@link MeldExtensions}
@@ -178,3 +180,11 @@ export interface MeldApp {
  * @category Configuration
  */
 export type InitialApp = MeldApp & MeldExtensions;
+
+/**
+ * Context typically required for extensions
+ */
+export interface MeldAppContext {
+  readonly config: MeldConfig;
+  readonly app: MeldApp;
+}

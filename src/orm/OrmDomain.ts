@@ -5,12 +5,12 @@ import { OrmSubject } from './OrmSubject';
 import { isArray, settled } from '../engine/util';
 import { isReference, Subject, Update } from '../jrql-support';
 import { SubjectUpdater } from '../updates';
-import { ReadLatchable } from '../engine/index';
+import { ReadLatchable } from '../engine';
 import { BehaviorSubject, firstValueFrom } from 'rxjs';
 import { filter } from 'rxjs/operators';
 import async from '../engine/async';
 import { array } from '../util';
-import { MeldApp, MeldConfig } from '../config';
+import { MeldApp, MeldAppContext, MeldConfig } from '../config';
 import { EventEmitter } from 'events';
 
 /**
@@ -89,14 +89,6 @@ export interface OrmUpdating extends ReadLatchable {
   updated(update?: GraphUpdate): Promise<void>;
 }
 
-/**
- * Utility type for the required m-ld context in which an ORM is operating
- */
-export interface OrmContext {
-  readonly config: MeldConfig;
-  readonly app: MeldApp;
-}
-
 export interface OrmScope extends EventEmitter {
   /** The domain to which this scope belongs */
   readonly domain: OrmDomain;
@@ -145,7 +137,7 @@ export interface OrmScope extends EventEmitter {
  * @experimental
  * @category Experimental
  */
-export class OrmDomain implements OrmContext {
+export class OrmDomain implements MeldAppContext {
   /**
    * Used to delay all attempts to access subjects until after any update.
    * Note that we're "up to date" with no state before the first update.
@@ -261,7 +253,7 @@ export class OrmDomain implements OrmContext {
   /** Global scope for the domain */
   readonly scope: OrmScope;
 
-  constructor({ config, app }: OrmContext) {
+  constructor({ config, app }: MeldAppContext) {
     this.app = app;
     this.config = config;
     this.scope = this.createScope();

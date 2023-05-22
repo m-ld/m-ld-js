@@ -56,6 +56,12 @@ export namespace EXT {
    * 'security/ACL'
    */
   export const $base = 'http://ext.m-ld.org/';
+  /**
+   * Helper function to declare a type name
+   */
+  export function extensionType(extModule: string, className: string) {
+    return `${$base}${extModule}/${className}`;
+  }
 }
 
 export namespace JS {

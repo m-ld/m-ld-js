@@ -174,8 +174,13 @@ export type Container = List | Set;
  */
 export type Expression = jrql.Atom | Constraint;
 /** @internal */
-export { operators } from 'json-rql';
-
+export const operators: { [jrql: string]: { sparql: string | undefined } } = {
+  ...jrql.operators,
+  '@concat': { sparql: 'concat' },
+  '@splice': { sparql: undefined }
+};
+/** @internal */
+export type Operator = keyof typeof jrql.operators | '@concat' | '@splice';
 /**
  * Used to express an ordered set of data. A List object is reified to a Subject
  * (unlike in JSON-LD) and so it has an @id, which can be set by the user.
@@ -408,9 +413,6 @@ export function isSubject(p: Pattern): p is Subject {
 export function isSubjectObject(o: SubjectPropertyObject): o is Subject {
   return typeof o == 'object' && !isReference(o) && !isVocabReference(o) && !isValueObject(o);
 }
-
-export type Operator = keyof typeof jrql.operators;
-
 /**
  * An operator-based constraint of the form `{ <operator> : [<expression>...]
  * }`. The key is the operator, and the value is the array of arguments. If the
@@ -434,7 +436,7 @@ export function isConstraint(value: Expression): value is Constraint {
   if (value == null || typeof value != 'object')
     return false;
   for (let key in value)
-    if (!(key in jrql.operators))
+    if (!(key in operators))
       return false;
   return true;
 }
@@ -450,7 +452,7 @@ export function isInlineConstraint(value: SubjectPropertyObject): value is Inlin
     return false;
   let empty = true;
   for (let key in value) {
-    if (!(key === '@value' || key in jrql.operators))
+    if (!(key === '@value' || key in operators))
       return false;
     empty = false;
   }

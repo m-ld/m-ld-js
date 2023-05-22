@@ -80,7 +80,7 @@ describe('Statutory', () => {
     test('passes an update if no statutes', async () => {
       const statutory = new Statutory();
       await appState.updating(state.graph.asReadState, orm =>
-        statutory.initialise({ '@id': 'statutes/Statutory' }, orm));
+        statutory.initFromData({ '@id': 'statutes/Statutory' }, orm));
       expect.hasAssertions();
       for (let constraint of statutory.constraints)
         await expect(constraint.check(state.graph.asReadState, mockInterim({
@@ -102,7 +102,7 @@ describe('Statutory', () => {
       });
       const statutory = new Statutory();
       await appState.updating(state.graph.asReadState, orm =>
-        statutory.initialise({ '@id': 'statutes/Statutory' }, orm));
+        statutory.initFromData({ '@id': 'statutes/Statutory' }, orm));
       expect.hasAssertions();
       for (let constraint of statutory.constraints)
         await expect(constraint.check(state.graph.asReadState, mockInterim({
@@ -128,7 +128,7 @@ describe('Statutory', () => {
       });
       const statutory = new Statutory();
       await appState.updating(state.graph.asReadState, orm =>
-        statutory.initialise({ '@id': 'statutes/Statutory' }, orm));
+        statutory.initFromData({ '@id': 'statutes/Statutory' }, orm));
       expect.hasAssertions();
       for (let constraint of statutory.constraints)
         await expect(constraint.check(state.graph.asReadState, mockInterim({
@@ -158,7 +158,7 @@ describe('Statutory', () => {
       });
       const statutory = new Statutory();
       await appState.updating(state.graph.asReadState, orm =>
-        statutory.initialise({ '@id': 'statutes/Statutory' }, orm));
+        statutory.initFromData({ '@id': 'statutes/Statutory' }, orm));
       expect.hasAssertions();
       for (let constraint of statutory.constraints)
         await expect(constraint.check(state.graph.asReadState, mockInterim({
@@ -185,7 +185,7 @@ describe('Statutory', () => {
       });
       const statutory = new Statutory();
       await appState.updating(state.graph.asReadState, orm =>
-        statutory.initialise({ '@id': 'statutes/Statutory' }, orm));
+        statutory.initFromData({ '@id': 'statutes/Statutory' }, orm));
       expect.hasAssertions();
       for (let constraint of statutory.constraints)
         await expect(constraint.check(state.graph.asReadState, mockInterim({
@@ -199,7 +199,7 @@ describe('Statutory', () => {
     test('can be initialised on update', async () => {
       const statutory = new Statutory();
       await appState.updating(state.graph.asReadState, orm =>
-        statutory.initialise({ '@id': 'statutes/Statutory' }, orm));
+        statutory.initFromData({ '@id': 'statutes/Statutory' }, orm));
       const update = await state.write({
         '@insert': [{
           '@id': 'http://test.m-ld.org/nameStatute',
@@ -245,7 +245,7 @@ describe('Statutory', () => {
       });
       const statutory = new Statutory();
       await appState.updating(state.graph.asReadState, orm =>
-        statutory.initialise({ '@id': 'statutes/Statutory' }, orm));
+        statutory.initFromData({ '@id': 'statutes/Statutory' }, orm));
       const update = await state.write({
         '@id': 'http://test.m-ld.org/hanna',
         [M_LD.hasAuthority]: nameShape
@@ -266,7 +266,7 @@ describe('Statutory', () => {
     test('loads a prover extension', async () => {
       module.exports.TestExtProver = class
         implements ShapeAgreementCondition, ExtensionSubjectInstance {
-        initialise = () => this;
+        initFromData = () => {};
         prove = async () => 'test_proof';
         test = async () => <true>true;
       };
@@ -284,7 +284,7 @@ describe('Statutory', () => {
       });
       const statutory = new Statutory();
       await appState.updating(state.graph.asReadState, orm =>
-        statutory.initialise({ '@id': 'statutes/Statutory' }, orm));
+        statutory.initFromData({ '@id': 'statutes/Statutory' }, orm));
       expect.hasAssertions();
       for (let constraint of statutory.constraints) {
         const update = mockInterim({

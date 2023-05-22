@@ -291,7 +291,7 @@ export class SubjectQuads extends EventEmitter {
         const data = this.mode === JrqlMode.serial ?
           datatype.fromJSON?.(raw) ?? raw : // coming from protocol
           datatype.validate(raw); // coming from the app
-        return this.rdf.literal(id || datatype.toLexical(data), datatype, data);
+        return this.rdf.literal(id || datatype.getDataId(data), datatype, data);
       } else {
         return this.rdf.literal(canonical, this.rdf.namedNode(type));
       }

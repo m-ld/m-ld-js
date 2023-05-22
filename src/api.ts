@@ -18,7 +18,7 @@ import { Iri } from '@m-ld/jsonld';
 import { QueryableRdfSource } from './rdfjs-support';
 import { Consumable, Flowable } from 'rx-flowable';
 import { MeldMessageType } from './ns/m-ld';
-import { MeldApp } from './config';
+import { MeldApp, MeldAppContext } from './config';
 import { EncodedOperation } from './engine';
 
 /**
@@ -552,6 +552,10 @@ export interface MeldContext {
  */
 export interface MeldExtensions {
   /**
+   * Give the extensions some context
+   */
+  setExtensionContext?(context: MeldAppContext): void;
+  /**
    * Data invariant constraints applicable to the domain.
    *
    * @experimental
@@ -764,9 +768,10 @@ export interface InterimUpdate {
 
 /**
  * @todo doc
+ * @typeParam Data data type
  * @see https://ci.mines-stetienne.fr/lindt/spec.html#interface-customdatatype
  */
-export interface Datatype<T = any> {
+export interface Datatype<Data = unknown> {
   /**
    * The identity of the datatype. Matched against value object literals.
    * @see ValueObject
@@ -784,43 +789,47 @@ export interface Datatype<T = any> {
    * @returns the valid data, or undefined if the data is not valid
    * @throws {TypeError} if a validation message is indicated
    */
-  validate(value: any): T | undefined;
+  validate(value: unknown): Data | undefined;
   /**
-   * Obtains the lexical value to be contained in the graph. The lexical value
-   * is visible to query filters, but the data is substituted in retrieval and
-   * updates.
+   * Obtains a (preferably short) identity for the given data, which is
+   * consistent with equality between data objects. The identity value is
+   * only visible to query filters; the data is substituted in retrieval and
+   * updates. The identity is usually one-way, such that it's not necessarily
+   * possible to re-constitute data from it.
+   * @see https://www.w3.org/TR/rdf11-concepts/#dfn-lexical-space
    */
-  toLexical(data: T): string;
+  getDataId(data: Data): string;
   /**
    * Convert data to a representation that can be stringified to JSON. If this
    * method is not provided, the data itself must be JSON serialisable. The
    * implementation should include a version if the format is likely to change.
    * @see fromSerial
    */
-  toJSON?(data: T): any;
+  toJSON?(data: Data): any;
   /**
    * Deserialises data. If this method is not provided, the data must be
    * directly deserialisable from JSON.
    * @see toJSON
    */
-  fromJSON?(json: any): T;
+  fromJSON?(json: any): Data;
 }
 
 /**
- * @typeParam O operation type; must be JSON-serialisable
+ * @typeParam Data data type
+ * @typeParam Op operation type; must be JSON-serialisable
  */
-export interface SharedDatatype<T, O> extends Datatype<T> {
+export interface SharedDatatype<Data, Op> extends Datatype<Data> {
   /**
    * A shared data type MUST always generate a new identity as its lexical
    * value, for which mutable state will exist.
    */
-  toLexical(): UUID;
+  getDataId(): UUID;
   /**
    * Provides a value to appear as the literal `@value` when retrieved. This
    * allows the shared datatype to abstract its implementation type, `T`. The
    * datatype will typically accept the abstract type in its `validate` method.
    */
-  toValue?(data: T): any;
+  toValue?(data: Data): unknown;
   /**
    * Intercepts update of data. The implementation may mutate the passed `data`;
    * the backend may later undo the returned operation in case of rollback.
@@ -829,7 +838,7 @@ export interface SharedDatatype<T, O> extends Datatype<T> {
    * @param update the json-rql expression used to perform the update
    * @returns an operation which can be {@link apply applied}
    */
-  update(state: T, update: Expression): [T, O];
+  update(state: Data, update: Expression): [Data, Op];
   /**
    * Applies an operation to some state. The implementation is welcome to mutate
    * the passed `state` and return it as the new state.
@@ -839,7 +848,7 @@ export interface SharedDatatype<T, O> extends Datatype<T> {
    * on another clone
    * @returns the new state (can be the input) and an update to notify the app
    */
-  apply(state: T, operation: O): [T, Expression];
+  apply(state: Data, operation: Op): [Data, Expression];
 }
 
 /**

@@ -118,7 +118,7 @@ export class Statutory implements ExtensionSubjectInstance, MeldExtensions {
   /** @internal */
   private /*readonly*/ log: Logger;
 
-  async initialise(_src: GraphSubject, orm: OrmUpdating): Promise<this> {
+  async initFromData(_src: GraphSubject, orm: OrmUpdating): Promise<this> {
     const config = orm.domain.config;
     this.log = getIdLogger(this.constructor, config['@id'], config.logLevel);
     this.scope = orm.domain.createScope()

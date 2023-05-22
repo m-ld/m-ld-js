@@ -1,11 +1,11 @@
 import { MockGraphState, testConfig, testContext } from './testClones';
 import { DefaultList } from '../src/lseq/DefaultList';
 import { SingleValued } from '../src/constraints/SingleValued';
-import { GraphSubject, MeldConstraint, MeldExtensions, MeldTransportSecurity } from '../src/index';
+import { GraphSubject, MeldConstraint, MeldExtensions, MeldTransportSecurity } from '../src';
 import { mock } from 'jest-mock-extended';
 import { M_LD } from '../src/ns';
 import { CloneExtensions } from '../src/engine/CloneExtensions';
-import { OrmUpdating } from '../src/orm/index';
+import { OrmUpdating } from '../src/orm';
 import { ExtensionSubjectInstance } from '../src/orm/ExtensionSubject';
 
 const thisModuleId = require.resolve('./CloneExtensions.test');
@@ -15,7 +15,7 @@ export class MockExtensions implements ExtensionSubjectInstance, MeldExtensions 
   static mockConstraint = mock<MeldConstraint>();
   static last: OrmUpdating;
 
-  initialise(src: GraphSubject, orm: OrmUpdating) {
+  initFromData(src: GraphSubject, orm: OrmUpdating) {
     MockExtensions.last = orm;
     return this;
   }
@@ -76,7 +76,7 @@ describe('Top-level extensions loading', () => {
 
     test('initialises with no modules', async () => {
       const cloneExtensions = await CloneExtensions.initial(testConfig(), {}, testContext);
-      await cloneExtensions.initialise(state.graph.asReadState);
+      await cloneExtensions.onInitial(state.graph.asReadState);
       const ext = await cloneExtensions.ready();
       expect(ext.transportSecurity).toBeUndefined();
     });
@@ -94,7 +94,7 @@ describe('Top-level extensions loading', () => {
           [M_LD.JS.className]: 'MockExtensions'
         }]
       }, new DefaultList('test'));
-      await cloneExtensions.initialise(state.graph.asReadState);
+      await cloneExtensions.onInitial(state.graph.asReadState);
       ext = await cloneExtensions.ready();
       expect(ext.transportSecurity).toBe(MockExtensions.mockTs);
       const constraints = [...ext.constraints!];
@@ -107,7 +107,7 @@ describe('Top-level extensions loading', () => {
     test('loads a module on update', async () => {
       const config = testConfig();
       const cloneExtensions = await CloneExtensions.initial(config, {}, testContext);
-      await cloneExtensions.initialise(state.graph.asReadState);
+      await cloneExtensions.onInitial(state.graph.asReadState);
       const update = await state.write({
         '@id': M_LD.extensions,
         '@list': [{
