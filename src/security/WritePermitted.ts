@@ -18,7 +18,7 @@ import { CacheMissListener, OrmScope } from '../orm/OrmDomain';
  * - Controlled shapes can be declared in the data using {@link declareControlled}.
  * - Permissions can be assigned to principals using {@link declarePermission}.
  *
- * @see [the white paper](https://github.com/m-ld/m-ld-security-spec/blob/main/design/suac.md)
+ * @see {@link https://github.com/m-ld/m-ld-security-spec/blob/main/design/suac.md the white paper}
  * @category Experimental
  * @experimental
  * @noInheritDoc
