@@ -2,10 +2,9 @@ import { GlobalClock, GlobalClockJson, TreeClock, TreeClockJson } from '../clock
 import { Kvps } from '../dataset';
 import { JournalEntry } from './JournalEntry';
 import { EncodedOperation } from '../index';
-import { Journal, tickKey } from '.';
-import { MeldOperation } from '../MeldOperation';
-import { TripleMap } from '../quads';
-import { Attribution, UUID } from '../../api';
+import { Journal, TICK_KEY_GEN } from '.';
+import { EntryReversion, MeldOperation } from '../MeldOperation';
+import { Attribution } from '../../api';
 
 interface JournalStateJson {
   /**
@@ -42,7 +41,7 @@ const BLOCKED = '!blocked!';
 export interface EntryBuilder {
   next(
     operation: MeldOperation,
-    deleted: TripleMap<UUID[]>,
+    reversion: EntryReversion,
     localTime: TreeClock,
     attribution: Attribution | null
   ): this;
@@ -103,7 +102,7 @@ export class JournalState {
 
       next(
         operation: MeldOperation,
-        deleted: TripleMap<UUID[]>,
+        reversion: EntryReversion,
         localTime: TreeClock,
         attribution: Attribution | null
       ) {
@@ -113,10 +112,10 @@ export class JournalState {
           throw new RangeError('Trying to process operation from a blocked remote!');
         this.appendEntries.push(JournalEntry.fromOperation(
           this.state.journal,
-          tickKey(localTime.ticks),
+          TICK_KEY_GEN.tickKey(localTime.ticks),
           [prevTicks, prevTid],
           operation,
-          deleted,
+          reversion,
           attribution));
         this.state = this.state.withTime(
           localTime,

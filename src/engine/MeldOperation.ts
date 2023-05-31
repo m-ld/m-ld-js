@@ -1,11 +1,31 @@
-import { CausalOperation, CausalOperator, CausalTimeRange, FusableCausalOperation } from './ops';
+import {
+  CausalOperation,
+  CausalOperator,
+  CausalTimeRange,
+  FusableCausalOperation,
+  ItemTids,
+  Operation
+} from './ops';
 import { Triple, tripleIndexKey, TripleMap } from './quads';
 import { TreeClock } from './clocks';
 import { EncodedOperation } from '.';
-import { MeldEncoder, RefTriple } from './MeldEncoding';
+import { MeldEncoder, RefTriplesOps } from './MeldEncoding';
 import { Iri } from '@m-ld/jsonld';
+import { RefTriple } from './jrql-util';
+import { UUID } from '../api';
+import { countIter } from './util';
 
 const inspect = Symbol.for('nodejs.util.inspect.custom');
+
+export interface MeldOperationParts<T extends Triple = Triple, UpdateMeta = unknown>
+  extends Operation<ItemTids<T>> {
+  /**
+   * Triple-operations pairs. Note that the same triple can appear multiple
+   * times. The resultant operation for a triple should be the application of
+   * all operations for that triple, in depth-first order.
+   */
+  readonly updates: Iterable<[T, UpdateMeta[]]>;
+}
 
 /**
  * The 'range' of an operation comprises the information required to determine
@@ -21,16 +41,23 @@ export interface MeldOperationRange extends CausalTimeRange<TreeClock> {
  * data types
  */
 export interface MeldOperationSpec<T extends Triple = RefTriple>
-  extends MeldOperationRange, CausalOperation<T, TreeClock> {
+  extends MeldOperationParts<T>, MeldOperationRange, CausalOperation<T, TreeClock> {
   readonly agreed: OperationAgreedSpec | null;
-  /**
-   * Triples having shared datatype operation literal as rdf:JSON
-   * @todo improve typing
-   */
-  readonly sharedDataOps?: Triple[];
 }
 
 export type OperationAgreedSpec = { tick: number, proof: any };
+
+/**
+ * Reversion information keyed by reference triple identifier as recorded in an
+ * operation. Includes TID arrays for operation deletions, and shared data type
+ * reversions for operation updates.
+ */
+export type EntryReversion = { [key: Iri]: unknown[] };
+/**
+ * Utility type to capture combination of shared data operation (from a m-ld
+ * Operation) and corresponding revert metadata (from the Journal)
+ */
+export type OperationReversion = { operation: unknown, revert: unknown };
 
 /**
  * An immutable operation, fully expanded from the wire or journal encoding to
@@ -59,25 +86,28 @@ export class MeldOperation
    */
   static fromOperation(
     encoder: MeldEncoder,
-    { from, time, deletes, inserts, sharedDataOps, principalId, agreed }: MeldOperationSpec<Triple>
+    { from, time, deletes, inserts, updates, principalId, agreed }: MeldOperationSpec<Triple>
   ): MeldOperation {
     const refDeletes = encoder.identifyTriplesData(deletes);
     const refInserts = encoder.identifyTriplesData(inserts);
-    const delTriples = encoder.reifyTriplesTids(refDeletes);
+    const refUpdates = encoder.identifyTriplesData(updates);
     // Encoded inserts are only reified if fused
     const insTriples = from === time.ticks ?
       [...inserts].map(([triple]) => triple) :
       encoder.reifyTriplesTids(refInserts);
+    const delTriples = encoder.reifyTriplesTids(refDeletes);
     const jsons = [delTriples, insTriples].map(encoder.jsonFromTriples);
-    if (sharedDataOps && sharedDataOps.length > 0)
-      jsons.push(encoder.jsonFromTriples(sharedDataOps));
+    if (refUpdates.length > 0) {
+      const opTriples = encoder.reifyTriplesOp(refUpdates);
+      jsons.push(encoder.jsonFromTriples(opTriples));
+    }
     const [update, encoding] = MeldEncoder.bufferFromJson(jsons);
     return new MeldOperation({
       from,
       time,
       deletes: refDeletes,
       inserts: refInserts,
-      sharedDataOps,
+      updates: refUpdates,
       principalId,
       agreed
     }, [4,
@@ -103,20 +133,21 @@ export class MeldOperation
       throw new Error(`Encoded operation version ${ver} not supported`);
     let [, from, timeJson, update, encoding, principalId, encAgree] = encoded;
     const jsons: [object, object, object?] = MeldEncoder.jsonFromBuffer(update, encoding);
-    const [delTriples, insTriples, sharedDataOps] = jsons.map(encoder.triplesFromJson);
+    const [delTriples, insTriples, updTriples] = jsons.map(encoder.triplesFromJson);
     const time = TreeClock.fromJson(timeJson);
-    const deletes = MeldEncoder.unreifyTriplesTids(delTriples);
+    const deletes = encoder.unreifyTriplesTids(delTriples);
     let inserts: MeldOperation['inserts'];
     if (from === time.ticks) {
       const tid = time.hash;
       inserts = insTriples.map(triple => [encoder.identifyTriple(triple), [tid]]);
     } else {
       // No need to calculate transaction ID if the encoding is fused
-      inserts = MeldEncoder.unreifyTriplesTids(insTriples);
+      inserts = encoder.unreifyTriplesTids(insTriples);
     }
+    const updates = (updTriples && encoder.unreifyTriplesOp(updTriples)) ?? [];
     principalId = principalId != null ? encoder.expandTerm(principalId) : null;
     const agreed = this.agreed(encAgree);
-    const spec = { from, time, deletes, inserts, sharedDataOps, principalId, agreed };
+    const spec = { from, time, deletes, inserts, updates, principalId, agreed };
     return new MeldOperation(spec, encoded, jsons);
   }
 
@@ -130,7 +161,7 @@ export class MeldOperation
 
   readonly agreed: OperationAgreedSpec | null;
   readonly principalId: Iri | null;
-  readonly sharedDataOps: Triple[];
+  readonly updates: RefTriplesOps;
 
   /**
    * Serialisation of triples is not required to be normalised. For any m-ld
@@ -150,48 +181,87 @@ export class MeldOperation
     super(spec, tripleIndexKey);
     this.agreed = spec.agreed;
     this.principalId = spec.principalId;
-    this.sharedDataOps = spec.sharedDataOps ?? [];
+    this.updates = [...spec.updates];
   }
 
   fusion(): CausalOperator<MeldOperationSpec> {
     return new class extends MeldOperationOperator {
       update(next: MeldOperationSpec) {
         // TODO: Custom operation fusion
-        this.addTailSharedDataOps(next.sharedDataOps);
+        this.addTailUpdates([...next.updates]);
         // Most recent agreement is significant
         if (next.agreed != null)
           this.agreed = next.agreed;
       }
-    }(super.fusion(), this.sharedDataOps, this.principalId, this.agreed);
+    }(super.fusion(), this.updates, this.principalId, this.agreed);
   }
 
   cutting(): CausalOperator<MeldOperationSpec> {
     return new class extends MeldOperationOperator {
       update(prev: MeldOperationSpec) {
         // TODO: Custom operation cutting
-        this.removeHeadSharedDataOps(prev.sharedDataOps?.length);
+        this.removeHeadUpdates(countIter(prev.updates));
         // Check if the last agreement is being cut away
         if (this.agreed != null && prev.time.ticks >= this.agreed.tick)
           this.agreed = null;
       }
-    }(super.cutting(), this.sharedDataOps, this.principalId, this.agreed);
+    }(super.cutting(), this.updates, this.principalId, this.agreed);
   }
 
-  byRef<T>(key: 'deletes' | 'inserts', byTriple: TripleMap<T>): { [id: Iri]: T } {
-    return this[key].reduce<{ [id: Iri]: T }>((result, [triple]) => {
+  /**
+   * Creates a pseudo-operation that removes this operation's effect
+   */
+  revert(reversion: EntryReversion): MeldOperationParts<Triple, OperationReversion> {
+    return {
+      // 1. Deleting triples that were inserted. The TIDs of the inserted
+      // triples always come from the entry itself, so we know exactly what
+      // TripleTids were added and we can safely remove them.
+      deletes: this.inserts,
+      // 2. Inserting triples that were deleted. From the MeldOperation by
+      // itself we don't know which TripleTids were actually removed (a prior
+      // transaction may have removed the same ones). Instead, the journal keeps
+      // track of the actual deletes made.
+      inserts: this.deleteTidsByTriple(reversion),
+      // 3. Reverting shared datatype operations. For each triple, provides the
+      // operation performed and the corresponding reversion metadata, in
+      // reverse order of application
+      updates: this.updateMetaByTriple(reversion)
+    };
+  }
+
+  byRef<T>(
+    byTriple: Pick<TripleMap<T[]>, 'get'>,
+    key: keyof MeldOperationParts
+  ): { [p: Iri]: T[] } {
+    const result: { [id: Iri]: T[] } = {};
+    for (let [triple] of this[key]) {
       const value = byTriple.get(triple);
       if (value != null)
         result[triple['@id']] = value;
-      return result;
-    }, {});
+    }
+    return result;
   }
 
-  byTriple<T>(key: 'deletes' | 'inserts', byRef: { [id: Iri]: T }): TripleMap<T> {
-    return this[key].reduce<TripleMap<T>>((result, [triple]) => {
+  *deleteTidsByTriple(byRef: { [p: Iri]: unknown[] }): Iterable<[Triple, UUID[]]> {
+    for (let [triple] of this.deletes) {
       if (triple['@id'] in byRef)
-        result.set(triple, byRef[triple['@id']]);
-      return result;
-    }, new TripleMap<T>());
+        yield [triple, <UUID[]>byRef[triple['@id']]];
+    }
+  }
+
+  updateMetaByTriple(byRef: { [p: Iri]: unknown[] }) {
+    const result = new TripleMap<OperationReversion[]>();
+    for (let [triple, operations] of this.updates) {
+      const opMeta = result.with(triple, () => []);
+      // TODO: This assumes precisely one revert meta per operation,
+      // no matter how much either this.updates or byRef has changed
+      // See Fusion#trackEntry, this.fusion, this.cutting
+      for (let operation of operations) { // forwards
+        const revert = byRef[triple['@id']]?.[opMeta.length] ?? null;
+        opMeta.unshift({ operation, revert }); // backwards
+      }
+    }
+    return result;
   }
 
   toString() {
@@ -209,19 +279,19 @@ export class MeldOperation
 abstract class MeldOperationOperator implements CausalOperator<MeldOperationSpec> {
   constructor(
     protected operator: CausalOperator<CausalOperation<RefTriple, TreeClock>>,
-    private sharedDataOps: Triple[], // Note, immutable
+    private updates: RefTriplesOps, // Note, immutable
     protected principalId: Iri | null,
     protected agreed: OperationAgreedSpec | null
   ) {}
 
   abstract update(op: MeldOperationSpec): void;
-  
-  protected addTailSharedDataOps(ops: Triple[] = []) {
-    ops.length > 0 && (this.sharedDataOps = this.sharedDataOps.concat(ops));
+
+  protected addTailUpdates(ops: RefTriplesOps = []) {
+    ops.length > 0 && (this.updates = this.updates.concat(ops));
   }
-  
-  protected removeHeadSharedDataOps(count = 0) {
-    count > 0 && (this.sharedDataOps = this.sharedDataOps.slice(count));
+
+  protected removeHeadUpdates(count = 0) {
+    count > 0 && (this.updates = this.updates.slice(count));
   }
 
   next(op: MeldOperationSpec): this {
@@ -231,8 +301,8 @@ abstract class MeldOperationOperator implements CausalOperator<MeldOperationSpec
   }
 
   commit() {
-    const { principalId, agreed, sharedDataOps } = this;
-    return { ...this.operator.commit(), sharedDataOps: sharedDataOps, principalId, agreed };
+    const { principalId, agreed, updates } = this;
+    return { ...this.operator.commit(), updates, principalId, agreed };
   }
 
   get footprint() {

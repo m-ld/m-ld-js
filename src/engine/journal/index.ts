@@ -23,12 +23,14 @@ const JOURNAL_KEY = '_qs:journal';
  * 36^8, about 3 trillion, about 90 years in milliseconds.
  */
 export type TickKey = string;
-const TICK_KEY_GEN = new IndexKeyGenerator;
-const TICK_KEY_MIN = '_qs:tick:!'; // < '0'
-const TICK_KEY_MAX = '_qs:tick:~'; // > 'z'
-export function tickKey(tick: number): TickKey {
-  return `_qs:tick:${TICK_KEY_GEN.key(tick)}`;
-}
+export const TICK_KEY_GEN = new class extends IndexKeyGenerator {
+  min = '_qs:tick:!'; // < '0'
+  max = '_qs:tick:~'; // > 'z'
+
+  tickKey(tick: number): TickKey {
+    return `_qs:tick:${this.key(tick)}`;
+  }
+}();
 
 /** Operations indexed by time hash (TID) */
 function tidOpKey(tid: string) {
@@ -120,10 +122,10 @@ export class Journal {
    * @returns the entry after the entry or operation identified by `key`, if it
    * exists
    */
-  async entryAfter(key: number | TickKey = TICK_KEY_MIN): Promise<JournalEntry | undefined> {
+  async entryAfter(key: number | TickKey = TICK_KEY_GEN.min): Promise<JournalEntry | undefined> {
     return this.entryInTickRange({
-      gt: typeof key == 'number' ? tickKey(key) : key,
-      lt: TICK_KEY_MAX
+      gt: typeof key == 'number' ? TICK_KEY_GEN.tickKey(key) : key,
+      lt: TICK_KEY_GEN.max
     });
   }
 
@@ -136,10 +138,10 @@ export class Journal {
    * @returns the entry before the entry or operation identified by `key`, if it
    * exists
    */
-  async entryBefore(key: number | TickKey = TICK_KEY_MAX): Promise<JournalEntry | undefined> {
+  async entryBefore(key: number | TickKey = TICK_KEY_GEN.max): Promise<JournalEntry | undefined> {
     return this.entryInTickRange({
-      gt: TICK_KEY_MIN,
-      lt: typeof key == 'number' ? tickKey(key) : key,
+      gt: TICK_KEY_GEN.min,
+      lt: typeof key == 'number' ? TICK_KEY_GEN.tickKey(key) : key,
       reverse: true
     });
   }

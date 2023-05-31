@@ -1001,7 +1001,11 @@ describe('SU-Set Dataset', () => {
       // Operation has custom operation
       const [, , , upd, enc] = msg!.data;
       expect(MeldEncoder.jsonFromBuffer(upd, enc)).toEqual([{}, {}, {
-        '@id': 'fred', likes: { '@value': ['counter1', '+1'], '@type': '@json' }
+        '@id': expect.stringMatching(/[0-9a-z_]{6,}/),
+        s: 'fred',
+        p: '#likes',
+        o: { '@type': 'http://ex.org/#Counter', '@value': 'counter1' },
+        op: { '@type': '@json', '@value': '+1' }
       }]);
       // Update has custom operation
       await expect(willUpdate).resolves.toMatchObject({
@@ -1031,7 +1035,13 @@ describe('SU-Set Dataset', () => {
       const willUpdate = firstValueFrom(ssd.updates);
       await expect(ssd.apply(
         remote.sentOperation({}, {}, {
-          operations: { '@id': 'fred', likes: { '@value': ['counterX', '+1'], '@type': '@json' } }
+          operations: {
+            '@id': 'ab',
+            s: 'fred',
+            p: '#likes',
+            o: { '@type': 'http://ex.org/#Counter', '@value': 'counterX' },
+            op: { '@type': '@json', '@value': '+1' }
+          }
         }),
         local.join(remote.time)
       )).resolves.toBe(null);
@@ -1107,7 +1117,44 @@ describe('SU-Set Dataset', () => {
       }]);
     });
 
-    test.todo('voids counter-like operations');
+    test.skip('voids counter-like operations', async () => {
+      datatypes.push(new CounterType());
+      await ssd.transact(local.tick().time, {
+        '@id': 'http://test.m-ld.org/fred',
+        'http://test.m-ld.org/#likes': {
+          '@type': 'http://ex.org/#Counter',
+          '@value': 0
+        }
+      });
+      remote.join(local.time);
+      await ssd.transact(local.tick().time, {
+        '@update': {
+          '@id': 'http://test.m-ld.org/fred',
+          'http://test.m-ld.org/#likes': { '@plus': 1 }
+        }
+      });
+      // Not joining with local time here
+      const willUpdate = firstValueFrom(ssd.updates);
+      await expect(ssd.apply(
+        remote.sentOperation({}, { '@id': 'wilma', 'name': 'Wilma' }, { agree: true }),
+        local.join(remote.time)
+      )).resolves.toBe(null);
+      // Check fred's likes have been voided out
+      const update = await willUpdate;
+      expect(update).toMatchObject({
+        '@insert': [wilma],
+        '@update': [{
+          '@id': 'http://test.m-ld.org/fred',
+          'http://test.m-ld.org/#likes': { '@plus': -1 }
+        }]
+      });
+      await expect(drain(ssd.read<Describe>({
+        '@describe': 'http://test.m-ld.org/fred'
+      }))).resolves.toMatchObject([{
+        '@id': 'http://test.m-ld.org/fred',
+        'http://test.m-ld.org/#likes': { '@type': 'http://ex.org/#Counter', '@value': 0 }
+      }]);
+    });
   });
 
   describe('agreements', () => {

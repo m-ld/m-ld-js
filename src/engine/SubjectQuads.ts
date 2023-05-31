@@ -1,4 +1,4 @@
-import { any, anyName, blank, Datatype } from '../api';
+import { any, anyName, blank, Datatype, isSharedDatatype } from '../api';
 import {
   Atom,
   Constraint,
@@ -287,14 +287,15 @@ export class SubjectQuads extends EventEmitter {
       return this.rdf.literal(canonical, language);
     } else if (type !== '@none') {
       const datatype = this.ctx.getDatatype(type);
-      if (datatype) {
-        const data = this.mode === JrqlMode.serial ?
+      const serialising = this.mode === JrqlMode.serial;
+      // When serialising, shared datatype without an @id is id-only
+      if (datatype != null && (!serialising || !isSharedDatatype(datatype) || id)) {
+        const data = serialising ?
           datatype.fromJSON?.(raw) ?? raw : // coming from protocol
           datatype.validate(raw); // coming from the app
         return this.rdf.literal(id || datatype.getDataId(data), datatype, data);
-      } else {
-        return this.rdf.literal(canonical, this.rdf.namedNode(type));
       }
+      return this.rdf.literal(canonical, this.rdf.namedNode(type));
     } else {
       return this.rdf.literal(canonical);
     }

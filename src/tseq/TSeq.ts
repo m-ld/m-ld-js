@@ -32,7 +32,9 @@ abstract class TSeqNode implements Iterable<TSeqCharNode> {
   }
 
   /** @returns the actually-affected character nodes (ignoring empty -> empty) */
-  *applyAt([[[pid, index], ...tail], content]: TSeqOperation): Iterable<TSeqCharNode> {
+  *applyAt(
+    [[[pid, index], ...tail], content]: TSeqOperation
+  ): Iterable<[TSeqCharNode, TSeqCharTick]> {
     // If a pure delete, don't force creation
     const restIndex = this.getRestIndex(pid, content.some(([char]) => char));
     if (restIndex > -1)
@@ -115,14 +117,16 @@ class TSeqCharNode extends TSeqNode {
     return this._tick;
   }
 
-  set(char: ''): void;
-  set(char: string, tick: number): void;
+  set(char: ''): TSeqCharTick;
+  set(char: string, tick: number): TSeqCharTick;
   set(char: string, tick?: number) {
     if (char.length > 1)
       throw new RangeError('TSeq node value is one character');
+    const old = [this.char, this.tick];
     this._char = char;
     if (tick != null)
       this._tick = tick;
+    return old;
   }
 
   /**
@@ -302,7 +306,10 @@ class TSeqArray implements Iterable<TSeqCharNode> {
     }
   }
 
-  *applyAt(index: number, [path, content]: TSeqOperation): Iterable<TSeqCharNode> {
+  *applyAt(
+    index: number,
+    [path, content]: TSeqOperation
+  ): Iterable<[TSeqCharNode, TSeqCharTick]> {
     if (path.length) {
       // Don't create a non-existent node if it's just deletes
       const node = content.some(([char]) => char) ? this.ensureAt(index) : this.at(index);
@@ -317,14 +324,12 @@ class TSeqArray implements Iterable<TSeqCharNode> {
           if (node != null && tick <= node.tick)
             continue;
           node ??= this.ensureAt(index);
-          node.set(char, tick);
-          yield node;
+          yield [node, node.set(char, tick)];
         } else if (node?.char) {
           // Ignore if our tick is ahead
           if (tick < node.tick)
             return;
-          node.set(char, tick);
-          yield node;
+          yield [node, node.set(char, tick)];
         }
       }
     }
@@ -349,6 +354,7 @@ class TSeqArray implements Iterable<TSeqCharNode> {
 type TSeqName = [pid: string, index: number];
 type TSeqCharTick = [char: string, tick: number];
 export type TSeqOperation = [path: TSeqName[], content: TSeqCharTick[]];
+export type TSeqRevertOperation = TSeqOperation;
 
 export class TSeq extends TSeqNode {
   private tick = 0;
@@ -378,13 +384,14 @@ export class TSeq extends TSeqNode {
     return rtn;
   }
 
-  apply(operations: TSeqOperation[]) {
-    const affected: TSeqCharNode[] = [];
+  apply(operations: TSeqOperation[], cb?: (revert: TSeqRevertOperation[]) => void) {
+    const affected: [TSeqCharNode, TSeqCharTick][] = [];
     // TODO: Return splices
     for (let operation of operations)
       affected.push(...this.applyAt(operation));
-    for (let node of affected)
+    for (let [node] of affected)
       node.container.gc(node);
+    cb?.([...this.toRuns(affected)]);
     return affected.length > 0;
   }
 
@@ -393,15 +400,17 @@ export class TSeq extends TSeqNode {
       throw new RangeError();
     if (!deleteCount && !content.length)
       return []; // Shortcut
-    // Seek to just-before the given index
     const deletes = this.delete(index, deleteCount);
     const inserts = this.insert(index, content);
-    const ops = [...this.toRuns(...deletes, ...inserts)];
+    // TODO: Supply the reverts to a callback, as per the apply method
+    const ops = [...this.toRuns(
+      [...deletes, ...inserts].map(node => [node, [node.char, node.tick]]))];
     for (let node of deletes)
       node.container.gc(node);
     return ops;
   }
 
+  /** Seeks to just-before the given index */
   private charItFrom(index: number) {
     const charIt = new TSeqCharIterator(this);
     if (index > 0)
@@ -410,7 +419,6 @@ export class TSeq extends TSeqNode {
   }
 
   private delete(index: number, deleteCount: number) {
-    // If the char iterator has no node, nothing to delete
     if (deleteCount > 0) {
       const charIt = this.charItFrom(index);
       const deletes: TSeqCharNode[] = Array(deleteCount);
@@ -455,23 +463,24 @@ export class TSeq extends TSeqNode {
     return inserts;
   }
 
-  private *toRuns(...nodes: TSeqCharNode[]): Iterable<TSeqOperation> {
+  private *toRuns(nodeStates: [TSeqCharNode, TSeqCharTick][]): Iterable<TSeqOperation> {
+    const nodeState = new Map(nodeStates);
     // TODO: This reconstructs runs which are already about known in the insert
-    // method, but interlacing them with deletes
-    const affected = new Map<TSeqCharNode, TSeqCharNode[]>(
-      nodes.map(node => [node, []]));
+    // method, but adding them to the deletes
+    const affected = new Map<TSeqCharNode, TSeqCharTick[]>(
+      [...nodeState].map(([node]) => [node, []]));
     for (let [node, run] of affected) {
       for (let next: TSeqCharNode | undefined = node; next != null;) {
         next = next.container.at(next.index + 1);
         if (next && affected.has(next)) {
-          run.push(next, ...affected.get(next)!);
+          run.push(nodeState.get(next)!, ...affected.get(next)!);
           affected.delete(next);
         }
       }
     }
     for (let [node, run] of affected) {
-      run.unshift(node);
-      yield [node.path, run.map(({ char, tick }) => [char, tick])];
+      run.unshift(nodeState.get(node)!);
+      yield [node.path, run];
     }
   }
 }

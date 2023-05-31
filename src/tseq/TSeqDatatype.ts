@@ -86,4 +86,9 @@ export class TSeqDatatype implements MeldExtensions, SharedDatatype<TSeq, TSeqOp
       '@value': state.toString()
     }];
   }
+
+  revert(state: TSeq, operation: TSeqOperation[], revert: null): [TSeq, Expression] {
+    // @ts-ignore
+    return [undefined, undefined];
+  }
 }

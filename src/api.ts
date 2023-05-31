@@ -817,8 +817,9 @@ export interface Datatype<Data = unknown> {
 /**
  * @typeParam Data data type
  * @typeParam Op operation type; must be JSON-serialisable
+ * @typeParam Revert reversion metadata type; must be JSON-serialisable
  */
-export interface SharedDatatype<Data, Op> extends Datatype<Data> {
+export interface SharedDatatype<Data, Operation, Revert = null> extends Datatype<Data> {
   /**
    * A shared data type MUST always generate a new identity as its lexical
    * value, for which mutable state will exist.
@@ -832,13 +833,16 @@ export interface SharedDatatype<Data, Op> extends Datatype<Data> {
   toValue?(data: Data): unknown;
   /**
    * Intercepts update of data. The implementation may mutate the passed `data`;
-   * the backend may later undo the returned operation in case of rollback.
+   * the backend may later revert the returned operation in case of rollback.
    *
    * @param state the existing state of the shared value
    * @param update the json-rql expression used to perform the update
-   * @returns an operation which can be {@link apply applied}
+   * @returns the new state of the data, an operation which can be
+   * {@link apply applied}, and any additional local metadata required to revert
+   * the operation (if applicable). If the revert is not supplied, it is assumed
+   * to be `null`.
    */
-  update(state: Data, update: Expression): [Data, Op];
+  update(state: Data, update: Expression): [Data, Operation, Revert?];
   /**
    * Applies an operation to some state. The implementation is welcome to mutate
    * the passed `state` and return it as the new state.
@@ -846,9 +850,23 @@ export interface SharedDatatype<Data, Op> extends Datatype<Data> {
    * @param state the existing state of the shared value
    * @param operation the operation being applied, created using {@link update}
    * on another clone
-   * @returns the new state (can be the input) and an update to notify the app
+   * @returns the new state (can be the input), an update expression to notify
+   * the app, and local metadata required to revert the operation (if applicable).
    */
-  apply(state: Data, operation: Op): [Data, Expression];
+  apply(state: Data, operation: Operation): [Data, Expression, Revert?];
+  /**
+   * Reverts an operation from the state. The implementation is welcome to
+   * mutate the passed `state` and return it as the new (old) state.
+   *
+   * @param state the existing state of the shared value
+   * @param operation the operation being reverted, created using {@link update}
+   * on another clone
+   * @param revert the additional local metadata provided by {@link update},
+   * or `null` if no reversion metadata was provided.
+   * @returns the new state (can be the input), and an update expression to
+   * notify the app.
+   */
+  revert(state: Data, operation: Operation, revert: Revert): [Data, Expression];
 }
 
 /**

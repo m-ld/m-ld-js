@@ -154,6 +154,16 @@ export class PauseableSource<T> extends Observable<T> implements Observer<T> {
   }
 }
 
+/**
+ * @param term the object to clone with its prototype chain
+ * @param ownProperties own properties to set/override. Note, using this with an
+ * incomplete set of properties for the semantics of the object subverts the
+ * type system.
+ */
+export function clone<T extends object>(term: T, ownProperties: object = {}) {
+  return Object.assign(Object.create(Object.getPrototypeOf(term)), ownProperties);
+}
+
 export function poisson(mean: number) {
   const threshold = Math.exp(-mean);
   let rtn = 0;
@@ -203,6 +213,15 @@ export function *mapIter<T, R>(it: Iterable<T>, fn: (v: T) => R): Iterable<R> {
 export function *concatIter<T>(...its: Iterable<T>[]) {
   for (let it of its)
     yield *it;
+}
+
+export function countIter(it: Iterable<unknown>) {
+  if (isArray(it))
+    return it.length;
+  let count = 0;
+  for (let item of it)
+    count++;
+  return count;
 }
 
 export function iterable<T>(genIt: () => Iterator<T> | undefined): Iterable<T> {

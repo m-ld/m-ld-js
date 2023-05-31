@@ -3,6 +3,7 @@ import {
   Construct,
   Describe,
   isSubjectObject,
+  Reference,
   Subject,
   SubjectProperty,
   SubjectPropertyObject,
@@ -12,6 +13,7 @@ import { JRQL } from '../ns';
 import { isArray, isNaturalNumber, setAtPath, trimTail } from './util';
 import { SubjectPropertyValues } from '../subjects';
 import { JsonldCompacter } from './jsonld';
+import { Triple } from './quads';
 import validDataUrl = require('valid-data-url');
 
 export enum JrqlMode {
@@ -189,3 +191,8 @@ export function getContextType(
   return typeof property == 'string' && ctx != null ?
     ctx.getTermDetail(property, '@type') : null;
 }
+
+/**
+ * A reference triple carries a blank node identifier
+ */
+export type RefTriple = Triple & Reference;

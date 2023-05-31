@@ -32,4 +32,9 @@ export class CounterType implements SharedDatatype<number, string> {
     const inc = Number(/\+(\d+)/.exec(operation)![1]);
     return [data + inc, { '@plus': inc }];
   }
+
+  revert(data: number, operation: string, revert: null): [number, Expression] {
+    const inc = Number(/\+(\d+)/.exec(operation)![1]);
+    return [data - inc, { '@plus': -inc }];
+  }
 }

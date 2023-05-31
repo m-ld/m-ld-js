@@ -208,8 +208,10 @@ export function expandValue(
   }
   if (type == null && property != null && ctx != null)
     type = ctx.getTermDetail(property, '@type') ?? undefined;
-
-  if (typeof value == 'string') {
+  if (type === '@json') {
+    type = RDF.JSON;
+    // Do not attempt to canonicalise
+  } else if (typeof value == 'string') {
     if (property === '@type' || type === '@id' || type === '@vocab') {
       const vocab = property === '@type' || type === '@vocab';
       canonical = ctx?.expandTerm(value, { vocab }) ?? value;
@@ -238,8 +240,6 @@ export function expandValue(
       canonical = value.toFixed(0);
       type ??= XS.integer;
     }
-  } else if (type === '@json') {
-    type = RDF.JSON;
   }
   return {
     raw: value,

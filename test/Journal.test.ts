@@ -8,7 +8,6 @@ import { EmptyError, firstValueFrom, Observer, of, Subject } from 'rxjs';
 import { JournalClerk } from '../src/engine/journal/JournalClerk';
 import { JournalAdmin, JournalCheckPoint, JournalConfig } from '../src';
 import { MeldOperation } from '../src/engine/MeldOperation';
-import { TripleMap } from '../src/engine/quads';
 
 describe('Dataset Journal', () => {
   let store: Dataset;
@@ -53,7 +52,7 @@ describe('Dataset Journal', () => {
     const op = opAt(remote ?? local, content);
     const localTime = remote ? local.join(op.time).tick().time : local.time;
     return transact(journaling => journaling.next(
-      op, new TripleMap, localTime, null
+      op, {}, localTime, null
     ), op);
   }
 
@@ -302,7 +301,7 @@ describe('Dataset Journal', () => {
             kvps: journal.spliceEntries(
               [remoteEntry.index, nextEntry.index],
               [JournalEntry.fromOperation(
-                journal, nextEntry.key, remoteEntry.prev, fused, new TripleMap, null)],
+                journal, nextEntry.key, remoteEntry.prev, fused, {}, null)],
               { appending: false })
           })
         });
@@ -321,7 +320,7 @@ describe('Dataset Journal', () => {
         // fuse r2-r3, so journal says l1 -> r1 -> l2 -> (r2-r3) -> l3 -> r4
         const fusedOp = MeldOperation.fromOperation(encoder, r2o.fusion().next(r3o).commit());
         await journal.spliceEntries([r2.index, r3.index],
-          [JournalEntry.fromOperation(journal, r3.key, r2.prev, fusedOp, new TripleMap, null)],
+          [JournalEntry.fromOperation(journal, r3.key, r2.prev, fusedOp, {}, null)],
           { appending: false });
         // first of causal reduce from r4 should be r1
         const [, from, time] = await r4.operation.fusedPast();
@@ -372,7 +371,7 @@ describe('Dataset Journal', () => {
         const fused = MeldOperation.fromOperation(
           encoder, remoteOp.fusion().next(nextOp1).commit());
         const fusedEntry = JournalEntry.fromOperation(
-          journal, nextEntry1.key, remoteEntry.prev, fused, new TripleMap, null);
+          journal, nextEntry1.key, remoteEntry.prev, fused, {}, null);
         await journal.spliceEntries([remoteEntry.index, nextEntry1.index],
           [fusedEntry], { appending: false });
         const expectedFused = MeldOperation.fromOperation(

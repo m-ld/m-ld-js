@@ -40,12 +40,16 @@ export interface TypedLiteral extends Literal {
   typed: { type: Datatype, data: any };
 }
 
+export function isTypedLiteral(term: Term): term is TypedLiteral {
+  return term.termType === 'Literal' && term.typed != null;
+}
+
 export interface TypedTriple extends LiteralTriple {
   object: TypedLiteral;
 }
 
 export function isTypedTriple(triple: Triple): triple is TypedTriple {
-  return triple.object.termType === 'Literal' && triple.object.typed != null;
+  return isTypedLiteral(triple.object);
 }
 
 export abstract class QueryableRdfSourceProxy implements QueryableRdfSource {

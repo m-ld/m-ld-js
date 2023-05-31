@@ -1,5 +1,5 @@
 import { Graph, KvpBatch, PatchQuads } from '.';
-import { blank, Datatype, GraphSubject, isSharedDatatype, UUID } from '../../api';
+import { blank, Datatype, GraphSubject, isSharedDatatype } from '../../api';
 import { Atom, Expression, Result, Subject, Value } from '../../jrql-support';
 import {
   inPosition,
@@ -10,20 +10,18 @@ import {
   Quad_Object,
   Term,
   Triple,
-  tripleKey,
-  TypedTriple
+  tripleKey
 } from '../quads';
-import { JRQL, RDF } from '../../ns';
+import { JRQL } from '../../ns';
 import { SubjectGraph } from '../SubjectGraph';
 import { JrqlMode, toIndexDataUrl } from '../jrql-util';
-import { concatIter, IndexKeyGenerator, isArray, mapIter, mapObject } from '../util';
+import { clone, concatIter, IndexKeyGenerator, isArray, mapIter, mapObject } from '../util';
 import { JrqlContext, SubjectQuads } from '../SubjectQuads';
 import { Binding } from '../../rdfjs-support';
 import * as MsgPack from '../msgPack';
 import { Operation } from '../ops';
 import { takeWhile } from 'rxjs/operators';
 import { drain } from 'rx-flowable';
-import { jsonDatatype } from '../../datatype';
 
 export class JrqlQuads {
   constructor(
@@ -118,17 +116,17 @@ export class JrqlQuads {
     triple: Quad,
     update: Expression,
     ctx: JrqlContext
-  ): Promise<SharedDataOpMeta | undefined> {
+  ): Promise<UpdateMeta | undefined> {
     if (isLiteralTriple(triple)) {
       const datatype = ctx.getDatatype(triple.object.datatype.value);
       // TODO: Bug: what if the datatype is no longer shared?
       if (datatype != null && isSharedDatatype(datatype)) {
         await this.loadDataOfType(triple, datatype);
         if (isTypedTriple(triple)) {
-          const [data, operation] = datatype.update(triple.object.typed.data, update);
+          const [data, operation, revert] =
+            datatype.update(triple.object.typed.data, update);
           triple.object.typed.data = data; // In case immutable
-          const opTriple = this.encodeOpTriple(triple, operation);
-          return { triple, opTriple, update };
+          return { operation, update, revert };
         }
       }
     }
@@ -136,20 +134,17 @@ export class JrqlQuads {
 
   async applyTripleOperation(
     triple: Quad,
-    opTriple: TypedTriple,
+    operation: unknown,
     ctx: JrqlContext
-  ): Promise<SharedDataOpMeta | undefined> {
+  ): Promise<UpdateMeta | undefined> {
     if (isLiteralTriple(triple)) {
-      const { dataId, operation } = this.decodeOpTriple(opTriple);
-      if (triple.object.value === dataId) {
-        await this.loadData(triple, ctx);
-        if (isTypedTriple(triple) && isSharedDatatype(triple.object.typed.type)) {
-          // Shared datatypes have UUID values, so the type should be correct
-          const [data, update] = triple.object.typed.type.apply(
-            triple.object.typed.data, operation);
-          triple.object.typed.data = data; // In case immutable
-          return { triple, opTriple, update };
-        }
+      await this.loadData(triple, ctx);
+      if (isTypedTriple(triple) && isSharedDatatype(triple.object.typed.type)) {
+        // Shared datatypes have UUID values, so the type should be correct
+        const [data, update, revert] = triple.object.typed.type.apply(
+          triple.object.typed.data, operation);
+        triple.object.typed.data = data; // In case immutable
+        return { operation, update, revert };
       }
     }
   }
@@ -204,10 +199,12 @@ export class JrqlQuads {
 
   saveData(patch: JrqlQuadOperation, batch: KvpBatch, tick?: number) {
     for (let triple of concatIter(patch.deletes, patch.inserts)) {
-      batch.del(DATA_KEY_GEN.keyFor(triple, this.graph));
-      if (triple.hasData && triple.hasData.shared) {
-        for (let tick of triple.hasData.ticks)
-          batch.del(DATA_KEY_GEN.keyFor(triple, this.graph, tick));
+      if (triple.hasData) {
+        batch.del(DATA_KEY_GEN.keyFor(triple, this.graph));
+        if (triple.hasData.shared) {
+          for (let tick of triple.hasData.ticks)
+            batch.del(DATA_KEY_GEN.keyFor(triple, this.graph, tick));
+        }
       }
     }
     for (let quad of patch.inserts) {
@@ -217,29 +214,15 @@ export class JrqlQuads {
         batch.put(DATA_KEY_GEN.keyFor(quad, this.graph), MsgPack.encode(json));
       }
     }
-    for (let { triple, opTriple } of patch.sharedDataOpMeta) {
+    for (let [quad, { operation }] of patch.updates) {
       if (tick == null)
         throw new RangeError('Saving shared data operations requires a tick');
-      const [, operation] = opTriple.object.typed.data; // @see #operationTriple
       batch.put(
-        DATA_KEY_GEN.keyFor(triple, this.graph, tick),
+        // FIXME: If the same triple appears twice!
+        DATA_KEY_GEN.keyFor(quad, this.graph, tick),
         MsgPack.encode(operation)
       );
     }
-  }
-
-  private encodeOpTriple(triple: LiteralTriple, operation: any): TypedTriple {
-    const data = [triple.object.value, operation]; // @see SharedDatatype#toLexical
-    // Insist on the default JSON datatype, because this is protocol-level
-    const opLiteral = this.rdf.literal(jsonDatatype.getDataId(data), jsonDatatype, data);
-    return <TypedTriple>this.rdf.quad(triple.subject, triple.predicate, opLiteral);
-  }
-
-  private decodeOpTriple(opTriple: TypedTriple): { dataId: UUID; operation: any } {
-    if (opTriple.object.datatype.value !== RDF.JSON)
-      throw new RangeError('Operation triple incorrectly encoded');
-    const [dataId, operation] = opTriple.object.typed.data;
-    return { dataId, operation };
   }
 }
 
@@ -264,36 +247,31 @@ export interface JrqlQuad extends Quad {
   hasData?: false | { shared: false } | { shared: true, ticks: number[] };
 }
 
-export interface SharedDataOpMeta {
-  /** The triple having shared data that was operated on */
-  triple: LiteralTriple,
-  /** The operation, encoded as a literal triple having rdf:JSON type */
-  opTriple: TypedTriple,
+export interface UpdateMeta {
+  /** The operation */
+  operation: unknown,
   /** The json-rql expression used to perform the update */
-  update: Expression
+  update: Expression,
+  /** Journaled metadata required to revert the operation */
+  revert: unknown
 }
 
 /** Operation over quads, with attached metadata (interface is read-only) */
 export interface JrqlQuadOperation extends Operation<JrqlQuad> {
   /** Metadata of shared datatype operations */
-  sharedDataOpMeta: Iterable<SharedDataOpMeta>;
+  updates: Iterable<[Quad, UpdateMeta]>;
 }
 
 export class JrqlPatchQuads extends PatchQuads implements JrqlQuadOperation {
-  readonly sharedDataOpMeta: SharedDataOpMeta[] = [];
+  /**
+   * Quad, having shared data, with operation on that data
+   */
+  readonly updates: [Quad, UpdateMeta][] = [];
 
   constructor(patch: Partial<JrqlQuadOperation> = {}) {
     super(patch);
     this.inheritMeta(patch);
   }
-
-  *sharedDataOps() {
-    for (let { opTriple } of this.sharedDataOpMeta)
-      yield opTriple;
-  }
-
-  getDataOpUpdate = (index: number) =>
-    this.sharedDataOpMeta[index].update;
 
   include(patch: Partial<JrqlQuadOperation>) {
     this.inheritMeta(patch);
@@ -305,13 +283,26 @@ export class JrqlPatchQuads extends PatchQuads implements JrqlQuadOperation {
     return super.append(patch);
   }
 
+  addUpdateMeta(triple: Quad, opMeta: UpdateMeta) {
+    if (!isLiteralTriple(triple))
+      throw new RangeError('Shared data triple must have a literal object');
+    if (isTypedTriple(triple)) {
+      // Un-type a typed triple, as the data is not relevant
+      const { typed: _, ...object } = triple.object;
+      triple = clone(triple, { ...triple, object: clone(triple.object, object) });
+    }
+    this.updates.push([triple, opMeta]);
+  }
+
   get isEmpty(): boolean {
-    return super.isEmpty && this.sharedDataOpMeta.length === 0;
+    return super.isEmpty && this.updates.length === 0;
   }
 
   private inheritMeta(patch: Partial<JrqlQuadOperation>) {
-    if (patch.sharedDataOpMeta != null)
-      this.sharedDataOpMeta.push(...patch.sharedDataOpMeta);
+    if (patch.updates != null) {
+      for (let [triple, opMetas] of patch.updates)
+        this.addUpdateMeta(triple, opMetas);
+    }
   }
 }
 

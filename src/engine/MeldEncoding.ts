@@ -1,9 +1,9 @@
 import { BufferEncoding } from '.';
-import { flatten, lazy } from './util';
+import { clone, flatten, lazy } from './util';
 import * as MsgPack from './msgPack';
-import { Context, ExpandedTermDef, Reference } from '../jrql-support';
+import { Context, ExpandedTermDef } from '../jrql-support';
 import { Iri } from '@m-ld/jsonld';
-import { Quad_Subject, RdfFactory, Triple } from './quads';
+import { inPosition, isTypedLiteral, Literal, RdfFactory, Triple } from './quads';
 import { M_LD, RDF, XS } from '../ns';
 import { SubjectGraph } from './SubjectGraph';
 import { JrqlContext, SubjectQuads } from './SubjectQuads';
@@ -11,7 +11,10 @@ import { JrqlContext, SubjectQuads } from './SubjectQuads';
 import { gunzipSync, gzipSync } from 'zlib';
 import { baseVocab, domainBase } from './dataset';
 import { Datatype, MeldError, UUID } from '../api';
-import { JrqlMode } from './jrql-util';
+import { JrqlMode, RefTriple } from './jrql-util';
+import { jsonDatatype } from '../datatype';
+import { array } from '../util';
+import { Quad_Object } from 'rdf-js';
 
 const COMPRESS_THRESHOLD_BYTES = 1024;
 
@@ -41,12 +44,8 @@ const OPERATION_CONTEXT = {
   o: 'rdf:object'
 };
 
-/**
- * A reference triple carries a blank node identifier
- */
-export type RefTriple = Triple & Reference;
-
 export type RefTriplesTids = [RefTriple, UUID[]][];
+export type RefTriplesOps = [RefTriple, unknown[]][];
 
 export class MeldEncoder {
   private /*readonly*/ ctx: JrqlContext;
@@ -70,8 +69,8 @@ export class MeldEncoder {
   compactIri = (iri: Iri) => this.ctx.compactIri(iri);
   expandTerm = (value: string) => this.ctx.expandTerm(value);
 
-  identifyTriple = <T extends Triple>(triple: T): RefTriple & T =>
-    ({ '@id': `_:${this.rdf.blankNode().value}`, ...triple });
+  identifyTriple = <T extends Triple>(triple: T, id?: Iri): RefTriple & T =>
+    clone(triple, { '@id': id ?? `_:${this.rdf.blankNode().value}`, ...triple });
 
   identifyTriplesData = <E>(triplesTids: Iterable<[Triple, E]> = []): [RefTriple, E][] =>
     [...triplesTids].map(([triple, tids]) => [this.identifyTriple(triple), tids]);
@@ -91,54 +90,72 @@ export class MeldEncoder {
 
   reifyTriplesData<T extends RefTriple, E>(
     triplesData: [T, E][],
-    toQuads: (data: E, rid: Quad_Subject) => Triple | Triple[]
+    dataPredicate: Iri,
+    toObject: (data: E) => Literal | Literal[]
   ): Triple[] {
     return flatten(triplesData.map(([triple, data]) => {
       const reified = this.reifyTriple(triple);
       const rid = reified[0].subject; // Cheeky but safe
-      return reified.concat(toQuads(data, rid));
+      for (let object of array(toObject(data)))
+        reified.push(this.rdf.quad(rid, this.name(dataPredicate), object));
+      return reified;
     }));
   }
 
   reifyTriplesTids(triplesTids: RefTriplesTids): Triple[] {
-    return this.reifyTriplesData(triplesTids, (tids, rid) =>
-      tids.map(tid => this.rdf.quad(rid, this.name(M_LD.tid), this.rdf.literal(tid))));
+    return this.reifyTriplesData(triplesTids, M_LD.tid, tids =>
+      tids.map(tid => this.rdf.literal(tid)));
   }
 
-  private static unreifyTriplesData<T extends RefTriple, E>(
+  reifyTriplesOp(triplesOps: RefTriplesOps): Triple[] {
+    return this.reifyTriplesData(triplesOps, M_LD.op, operations =>
+      // Insist on the default JSON datatype, because this is protocol-level
+      operations.map(op => this.rdf.literal('', jsonDatatype, op)));
+  }
+
+  private unreifyTriplesData<E>(
     reifications: Triple[],
-    newData: () => E | undefined,
-    addToData: (data: E, triple: Triple) => E
-  ): [T, E][] {
+    dataPredicate: Iri,
+    getData: (object: Quad_Object) => E
+  ): [RefTriple, E[]][] {
     return Object.values(reifications.reduce((rids, reification) => {
       const rid = reification.subject.value; // Blank node value
       // Add the blank node IRI prefix to a new triple
-      let [triple, data] = rids[rid] || [{ '@id': `_:${rid}` }, newData()];
+      let [triple, data] = rids[rid] || [{ '@id': `_:${rid}` }, []];
       switch (reification.predicate.value) {
         case RDF.subject:
-          if (reification.object.termType == 'NamedNode')
-            triple.subject = reification.object;
+          triple.subject = inPosition('subject', reification.object);
           break;
         case RDF.predicate:
-          if (reification.object.termType == 'NamedNode')
-            triple.predicate = reification.object;
+          triple.predicate = inPosition('predicate', reification.object);
           break;
         case RDF.object:
-          triple.object = reification.object;
+          triple.object = inPosition('object', reification.object);
           break;
-        default:
-          data = addToData(data, reification);
+        case dataPredicate:
+          data.push(getData(reification.object));
           break;
       }
       rids[rid] = [triple, data];
       return rids;
-    }, {} as { [rid: string]: [T, E] }));
+    }, {} as { [rid: string]: [RefTriple, E[]] })).map(([triple, data]) => [
+      this.identifyTriple(this.rdf.quad(
+        triple.subject,
+        triple.predicate,
+        triple.object
+      ), triple['@id']),
+      data
+    ]);
   }
 
-  static unreifyTriplesTids(reifications: Triple[]): RefTriplesTids {
-    return this.unreifyTriplesData<RefTriple, UUID[]>(
-      reifications, () => [], (data, t) =>
-        t.predicate.value === M_LD.tid ? data.concat(t.object.value) : data);
+  unreifyTriplesTids(reifications: Triple[]): RefTriplesTids {
+    return this.unreifyTriplesData(
+      reifications, M_LD.tid, object => object.value);
+  }
+
+  unreifyTriplesOp(reifications: Triple[]): RefTriplesOps {
+    return this.unreifyTriplesData(
+      reifications, M_LD.op, object => isTypedLiteral(object) && object.typed.data);
   }
 
   jsonFromTriples = (triples: Triple[]): object => {
