@@ -3,9 +3,20 @@ import { jsonify } from './testUtil';
 
 describe('TSeq CRDT', () => {
   describe('local mutations', () => {
+    let tSeq: TSeq;
+
+    beforeEach(() => {
+      tSeq = new TSeq('p1');
+    });
+
+    afterEach(() => {
+      expect(() => tSeq.checkInvariants()).not.toThrow();
+    });
+
     test('create with process ID and string', () => {
-      const tSeq = new TSeq('p1');
       expect(tSeq.toString()).toBe('');
+      expect(tSeq.charLength).toBe(0);
+      expect(() => tSeq.checkInvariants()).not.toThrow();
       const operation = tSeq.splice(0, 0, 'hello world');
       expect(tSeq.toString()).toBe('hello world');
       expect(operation).toEqual([[
@@ -16,7 +27,6 @@ describe('TSeq CRDT', () => {
     });
 
     test('append content', () => {
-      const tSeq = new TSeq('p1');
       tSeq.splice(0, 0, 'hello');
       const operation = tSeq.splice(5, 0, ' world');
       expect(tSeq.toString()).toBe('hello world');
@@ -26,7 +36,6 @@ describe('TSeq CRDT', () => {
     });
 
     test('prepend content', () => {
-      const tSeq = new TSeq('p1');
       tSeq.splice(0, 0, ' world');
       const operation = tSeq.splice(0, 0, 'hello');
       expect(tSeq.toString()).toBe('hello world');
@@ -36,7 +45,6 @@ describe('TSeq CRDT', () => {
     });
 
     test('inject content', () => {
-      const tSeq = new TSeq('p1');
       tSeq.splice(0, 0, 'hell world');
       const operation = tSeq.splice(4, 0, 'o');
       expect(tSeq.toString()).toBe('hello world');
@@ -46,7 +54,6 @@ describe('TSeq CRDT', () => {
     });
 
     test('remove content', () => {
-      const tSeq = new TSeq('p1');
       tSeq.splice(0, 0, 'hello world');
       const operation = tSeq.splice(0, 6);
       expect(tSeq.toString()).toBe('world');
@@ -56,14 +63,12 @@ describe('TSeq CRDT', () => {
     });
 
     test('remove all content', () => {
-      const tSeq = new TSeq('p1');
       tSeq.splice(0, 0, 'hello world');
       tSeq.splice(0, 11);
       expect(tSeq.toString()).toBe('');
     });
 
     test('replace content', () => {
-      const tSeq = new TSeq('p1');
       tSeq.splice(0, 0, 'hello world');
       const operation = tSeq.splice(6, 5, 'bob');
       expect(tSeq.toString()).toBe('hello bob');
@@ -77,20 +82,20 @@ describe('TSeq CRDT', () => {
     test('ignores replay insert', () => {
       const tSeq = new TSeq('p1');
       const operations = tSeq.splice(0, 0, 'hello world');
-      expect(tSeq.apply(operations)).toBe(false);
+      expect(tSeq.apply(operations)).toEqual([]);
     });
 
     test('ignores replay delete', () => {
       const tSeq = new TSeq('p1');
       tSeq.splice(0, 0, 'hello world');
       const operations = tSeq.splice(5, 6);
-      expect(tSeq.apply(operations)).toBe(false);
+      expect(tSeq.apply(operations)).toEqual([]);
     });
 
     test('applies initial content', () => {
       const tSeq1 = new TSeq('p1'), tSeq2 = new TSeq('p2');
       const operations = tSeq1.splice(0, 0, 'hello world');
-      expect(tSeq2.apply(operations)).toBe(true);
+      expect(tSeq2.apply(operations)).toEqual([[0, 0, 'hello world']]);
       expect(tSeq2.toString()).toBe('hello world');
     });
 
@@ -98,7 +103,7 @@ describe('TSeq CRDT', () => {
       const tSeq1 = new TSeq('p1'), tSeq2 = new TSeq('p2');
       tSeq2.apply(tSeq1.splice(0, 0, 'hell world'));
       tSeq2.apply(tSeq1.splice(4, 0, 'o'));
-      tSeq2.apply(tSeq1.splice(0, 6));
+      expect(tSeq2.apply(tSeq1.splice(0, 6))).toEqual([[0, 6, '']]);
       expect(tSeq1.toString()).toBe('world');
       expect(tSeq2.toString()).toBe('world');
     });
@@ -106,16 +111,16 @@ describe('TSeq CRDT', () => {
     test('ignores duplicate insert', () => {
       const tSeq1 = new TSeq('p1'), tSeq2 = new TSeq('p2');
       const operations = tSeq1.splice(0, 0, 'hello world');
-      expect(tSeq2.apply(operations)).toBe(true);
-      expect(tSeq2.apply(operations)).toBe(false);
+      expect(tSeq2.apply(operations)).toEqual([[0, 0, 'hello world']]);
+      expect(tSeq2.apply(operations)).toEqual([]);
     });
 
     test('appends independent content', () => {
       const tSeq1 = new TSeq('p1'), tSeq2 = new TSeq('p2');
       const op1 = tSeq1.splice(0, 0, 'hello');
       const op2 = tSeq2.splice(0, 0, ' world');
-      tSeq2.apply(op1);
-      tSeq1.apply(op2);
+      expect(tSeq2.apply(op1)).toEqual([[0, 0, 'hello']]);
+      expect(tSeq1.apply(op2)).toEqual([[5, 0, ' world']]);
       expect(tSeq1.toString()).toBe('hello world');
       expect(tSeq2.toString()).toBe('hello world');
     });
@@ -125,9 +130,19 @@ describe('TSeq CRDT', () => {
       const op1 = tSeq1.splice(0, 0, 'hello world');
       tSeq2.apply(op1);
       const op2 = tSeq2.splice(0, 5, 'hi');
-      tSeq1.apply(op2);
+      expect(tSeq1.apply(op2)).toEqual([[0, 5, 'hi']]);
       expect(tSeq1.toString()).toBe('hi world');
       expect(tSeq2.toString()).toBe('hi world');
+    });
+
+    test('applies multi-splice operation', () => {
+      const tSeq1 = new TSeq('p1'), tSeq2 = new TSeq('p2');
+      tSeq2.apply(tSeq1.splice(0, 0, 'hello world'));
+      tSeq2.splice(5, 0, ' my'); // 'hello my world'
+      const two = tSeq2.apply(tSeq1.splice(2, 7));
+      expect(tSeq1.toString()).toBe('held');
+      expect(tSeq2.toString()).toBe('he myld');
+      expect(two).toEqual([[2, 3, ''], [8, 4, '']]);
     });
 
     test('applies historical delete', () => {
@@ -158,6 +173,7 @@ describe('TSeq CRDT', () => {
       expect(tSeq2.toString()).toBe('abc');
       tSeq2.splice(1, 1);
       expect(tSeq2.toString()).toBe('ac');
+      expect(() => tSeq2.checkInvariants()).not.toThrow();
     });
 
     test('jsonify plain string', () => {
@@ -178,6 +194,7 @@ describe('TSeq CRDT', () => {
       const clone = TSeq.fromJSON('p2', json);
       expect(clone.toString()).toBe('hello world!');
       expect(jsonify(clone.toJSON())).toEqual(json);
+      expect(() => clone.checkInvariants()).not.toThrow();
     });
 
     test('jsonify with garbage collected nodes', () => {
@@ -189,6 +206,17 @@ describe('TSeq CRDT', () => {
         tick: 1,
         rest: [['p1', 6, ['w', 1], ['o', 1], ['r', 1]]]
       });
+    });
+
+    test('jsonify with mid-array empty nodes', () => {
+      const tSeq = new TSeq('p1');
+      tSeq.splice(0, 0, 'hello world');
+      tSeq.splice(4, 1);
+      expect(tSeq.toString()).toBe('hell world');
+      const json = tSeq.toJSON();
+      const tSeq2 = TSeq.fromJSON('p2', json);
+      expect(tSeq2.toString()).toBe('hell world');
+      expect(() => tSeq2.checkInvariants()).not.toThrow();
     });
 
     test('jsonify mixed string', () => {
