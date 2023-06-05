@@ -1,7 +1,8 @@
 import { clone } from '../src';
 import { MemoryLevel } from 'memory-level';
 import { MockRemotes, testConfig } from './testClones';
-import { TSeqDatatype } from '../src/tseq/TSeqDatatype';
+import { TSeqDatatype } from '../src/tseq';
+import { MeldUpdate } from '@m-ld/m-ld-spec/types';
 
 describe('TSeq datatype', () => {
   test('can insert and retrieve a TSeq', async () => {
@@ -60,9 +61,14 @@ describe('TSeq datatype', () => {
     await meld.write({
       '@id': 'fred', story: 'Flintstones, tweet the Flintstones'
     });
+    const updates: MeldUpdate[] = [];
+    meld.follow(update => { updates.push(update); });
     await meld.write({
       '@update': { '@id': 'fred', story: { '@splice': [13, 2, 'm'] } }
     });
+    expect(updates).toMatchObject([{
+      '@update': [{ '@id': 'fred', story: { '@splice': [13, 2, 'm'] } }]
+    }]);
     await expect(meld.get('fred')).resolves.toEqual({
       '@id': 'fred', story: 'Flintstones, meet the Flintstones'
     });

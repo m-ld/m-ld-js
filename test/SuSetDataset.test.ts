@@ -1,7 +1,7 @@
 import { SuSetDataset } from '../src/engine/dataset/SuSetDataset';
 import { decodeOpUpdate, MockProcess, MockState, testOp } from './testClones';
 import { GlobalClock, TreeClock } from '../src/engine/clocks';
-import { toArray } from 'rxjs/operators';
+import { take, toArray } from 'rxjs/operators';
 import { EmptyError, firstValueFrom, lastValueFrom, Subject } from 'rxjs';
 import {
   AgreementCondition,
@@ -981,8 +981,52 @@ describe('SU-Set Dataset', () => {
         '@describe': 'http://test.m-ld.org/fred'
       }))).resolves.toEqual([fredProfile]);
     });
+    
+    test('inserts and deletes a shared datatype', async () => {
+      datatypes.push(new CounterType());
+      const willUpdates = firstValueFrom(ssd.updates.pipe(take(2), toArray()));
+      await ssd.transact(local.tick().time, {
+        '@id': 'http://test.m-ld.org/fred',
+        'http://test.m-ld.org/#likes': {
+          '@type': 'http://ex.org/#Counter',
+          '@value': 0
+        }
+      });
+      await expect(drain(ssd.read<Describe>({
+        '@describe': 'http://test.m-ld.org/fred'
+      }))).resolves.toMatchObject([{
+        '@id': 'http://test.m-ld.org/fred',
+        'http://test.m-ld.org/#likes': { '@type': 'http://ex.org/#Counter', '@value': 0 }
+      }]);
+      await ssd.transact(local.tick().time, {
+        '@delete': {
+          '@id': 'http://test.m-ld.org/fred',
+          'http://test.m-ld.org/#likes': '?'
+        }
+      });
+      await expect(drain(ssd.read<Describe>({
+        '@describe': 'http://test.m-ld.org/fred'
+      }))).resolves.toEqual([]);
+      await expect(willUpdates).resolves.toMatchObject([{
+        '@insert': [{
+          '@id': 'http://test.m-ld.org/fred',
+          'http://test.m-ld.org/#likes': {
+            '@type': 'http://ex.org/#Counter',
+            '@value': 0
+          }
+        }]
+      }, {
+        '@delete': [{
+          '@id': 'http://test.m-ld.org/fred',
+          'http://test.m-ld.org/#likes': {
+            '@type': 'http://ex.org/#Counter',
+            '@value': 0
+          }
+        }]
+      }]);
+    });
 
-    test('operates on counter-like datatype', async () => {
+    test('operates on shared datatype', async () => {
       datatypes.push(new CounterType());
       await ssd.transact(local.tick().time, {
         '@id': 'http://test.m-ld.org/fred',
@@ -1022,8 +1066,8 @@ describe('SU-Set Dataset', () => {
         'http://test.m-ld.org/#likes': { '@type': 'http://ex.org/#Counter', '@value': 1 }
       }]);
     });
-
-    test('applies counter-like datatype operation', async () => {
+    
+    test('applies shared datatype operation', async () => {
       datatypes.push(new CounterType());
       await expect(ssd.apply(
         remote.sentOperation({}, {
@@ -1059,7 +1103,37 @@ describe('SU-Set Dataset', () => {
       }]);
     });
 
-    test('prevents conflicting counter-like inserts in write', async () => {
+    test('shared data included in snapshot', async () => {
+      datatypes.push(new CounterType());
+      const fredProfile = {
+        '@id': 'http://test.m-ld.org/fred',
+        'http://test.m-ld.org/#likes': {
+          '@type': 'http://ex.org/#Counter',
+          '@value': 1
+        }
+      };
+      await ssd.transact(local.tick().time, fredProfile);
+      await ssd.transact(local.tick().time, {
+        '@update': {
+          '@id': 'http://test.m-ld.org/fred',
+          'http://test.m-ld.org/#likes': { '@plus': 1 }
+        }
+      });
+      const snapshot = await ssd.takeSnapshot();
+      // Snapshot data should have one operation and one triple
+      const data = await firstValueFrom(snapshot.data.pipe(toArray()));
+      expect(data.length).toBe(2);
+      const datum = data.find((v): v is Snapshot.Inserts => 'inserts' in v)!;
+      expect(datum).toBeDefined();
+      expect(MeldEncoder.jsonFromBuffer<any>(datum.inserts, datum.encoding).o).toEqual({
+        // identity must be included in value, so operations can match
+        '@id': expect.stringMatching(/counter\d/),
+        '@type': 'http://ex.org/#Counter',
+        '@value': 2
+      });
+    });
+
+    test('prevents conflicting shared inserts in write', async () => {
       datatypes.push(new CounterType());
       await expect(ssd.transact(local.tick().time, {
         '@id': 'http://test.m-ld.org/fred',
@@ -1073,7 +1147,7 @@ describe('SU-Set Dataset', () => {
       })).rejects.toMatch(/Multiple shared data values/);
     });
 
-    test('prevents conflicting counter-like inserts in state', async () => {
+    test('prevents conflicting shared inserts in state', async () => {
       datatypes.push(new CounterType());
       await ssd.transact(local.tick().time, {
         '@id': 'http://test.m-ld.org/fred',
@@ -1091,7 +1165,7 @@ describe('SU-Set Dataset', () => {
       })).rejects.toMatch(/Multiple shared data values/);
     });
 
-    test('picks one from concurrent counter-like inserts', async () => {
+    test('picks one from concurrent shared inserts', async () => {
       datatypes.push(new CounterType());
       await ssd.transact(local.tick().time, {
         '@id': 'http://test.m-ld.org/fred',
@@ -1117,7 +1191,7 @@ describe('SU-Set Dataset', () => {
       }]);
     });
 
-    test.skip('voids counter-like operations', async () => {
+    test.skip('voids shared operations', async () => {
       datatypes.push(new CounterType());
       await ssd.transact(local.tick().time, {
         '@id': 'http://test.m-ld.org/fred',

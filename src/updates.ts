@@ -101,6 +101,8 @@ export function asSubjectUpdates(update: SubjectsUpdate, copy?: true): SubjectUp
  *
  * @param subject the resource to apply the update to
  * @param update the update, as a {@link MeldUpdate} or obtained from
+ * @param ignoreSharedData if `false`, any shared data expressions in the update
+ * will cause a `RangeError` – useful in development to catch problems early
  * {@link asSubjectUpdates}
  * @typeParam T the app-specific subject type of interest
  * @see [m-ld data semantics](http://spec.m-ld.org/#data-semantics)
@@ -108,9 +110,10 @@ export function asSubjectUpdates(update: SubjectsUpdate, copy?: true): SubjectUp
  */
 export function updateSubject<T extends Subject & Reference>(
   subject: T,
-  update: SubjectUpdates | GraphUpdate
+  update: SubjectUpdates | GraphUpdate,
+  ignoreSharedData = true
 ): T {
-  return new SubjectUpdater(update).update(subject);
+  return new SubjectUpdater(update, ignoreSharedData).update(subject);
 }
 
 /** @internal */
@@ -130,7 +133,10 @@ export class SubjectUpdater {
     (subject: GraphSubject, key: keyof GraphUpdate) => GraphSubject | undefined;
   private readonly done = new Set<object>();
 
-  constructor(update: SubjectUpdates | GraphUpdate) {
+  constructor(
+    update: SubjectUpdates | GraphUpdate,
+    readonly ignoreSharedData = true
+  ) {
     if (isGraphUpdate(update)) {
       this.verbForSubject = (subject, key) =>
         update[key].graph.get(subject['@id']);
@@ -149,7 +155,7 @@ export class SubjectUpdater {
   update<T extends Subject & Reference>(subject: T): T {
     if (!this.done.has(subject)) {
       this.done.add(subject);
-      if (this.verbForSubject(subject, '@update') != null)
+      if (!this.ignoreSharedData && this.verbForSubject(subject, '@update') != null)
         throw new RangeError('Subject updater cannot apply shared data type updates');
       const deletes = this.verbForSubject(subject, '@delete');
       const inserts = this.verbForSubject(subject, '@insert');

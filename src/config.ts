@@ -5,6 +5,8 @@ import type { LogLevelDesc } from 'loglevel';
 import type { AppPrincipal, MeldExtensions } from './api';
 import type { EventEmitter } from 'events';
 import { Observable } from 'rxjs';
+import { iterable } from './engine/util';
+import { Iri } from '@m-ld/jsonld';
 
 /**
  * **m-ld** clone configuration, used to initialise a {@link MeldClone} for use.
@@ -187,4 +189,52 @@ export type InitialApp = MeldApp & MeldExtensions;
 export interface MeldAppContext {
   readonly config: MeldConfig;
   readonly app: MeldApp;
+}
+
+/**
+ * Combines extensions. The extensions are dynamically iterated, so the passed
+ * `Iterable` can change content after this function is called.
+ * @param extensions the extensions to combine
+ * @param object an object to combine the extensions into
+ */
+export function combineExtensions<T>(
+  extensions: Iterable<MeldExtensions>,
+  object = {}
+): MeldExtensions & typeof object {
+  return Object.defineProperties(object, {
+    setExtensionContext: {
+      value: (context: MeldAppContext) => {
+        for (let ext of extensions)
+          ext.setExtensionContext?.(context);
+      }
+    },
+    constraints: {
+      value: iterable(function *() {
+        for (let ext of extensions)
+          yield *ext.constraints ?? [];
+      })
+    },
+    datatypes: {
+      value: (id: Iri) => {
+        for (let ext of extensions) {
+          const dt = ext.datatypes?.(id);
+          if (dt) return dt;
+        }
+      }
+    },
+    agreementConditions: {
+      value: iterable(function *() {
+        for (let ext of extensions)
+          yield *ext.agreementConditions ?? [];
+      })
+    },
+    transportSecurity: {
+      get: () => {
+        for (let ext of extensions) {
+          const ts = ext.transportSecurity;
+          if (ts) return ts;
+        }
+      }
+    }
+  });
 }

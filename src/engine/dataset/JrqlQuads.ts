@@ -250,8 +250,8 @@ export interface JrqlQuad extends Quad {
 export interface UpdateMeta {
   /** The operation */
   operation: unknown,
-  /** The json-rql expression used to perform the update */
-  update: Expression,
+  /** The json-rql expression(s) used to perform the update */
+  update: Expression | Expression[],
   /** Journaled metadata required to revert the operation */
   revert: unknown
 }

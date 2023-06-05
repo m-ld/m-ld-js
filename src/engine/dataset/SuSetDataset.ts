@@ -823,12 +823,13 @@ export class SuSetDataset extends MeldEncoder {
     }
   };
 
-  private toSharedDataOpMeta = ([triple, operation]: [RefTriple, unknown]) => {
+  private toSharedDataOpMeta = ([triple, operations]: [RefTriple, unknown[]]) => {
     return this.tidsStore.findTriples(triple.subject, triple.predicate).pipe(
       flatMap(literal => {
         const quad = this.userGraph.quads.quad(triple.subject, triple.predicate, literal);
-        return consume(this.userGraph.jrql.applyTripleOperation(quad, operation, this.userCtx)
-          .then(upMeta => upMeta && [this.toUserQuad(triple), upMeta] as [Quad, UpdateMeta]));
+        return consume(operations).pipe(flatMap(operation =>
+          consume(this.userGraph.jrql.applyTripleOperation(quad, operation, this.userCtx)
+            .then(upMeta => upMeta && [this.toUserQuad(triple), upMeta] as [Quad, UpdateMeta]))));
       }),
       ignoreIf(null)
     );

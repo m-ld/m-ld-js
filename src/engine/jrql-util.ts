@@ -2,7 +2,6 @@ import { Url } from '@m-ld/jsonld';
 import {
   Construct,
   Describe,
-  isSubjectObject,
   Reference,
   Subject,
   SubjectProperty,
@@ -107,14 +106,13 @@ function *subItems(
 export function addPropertyObject(
   subject: Subject,
   property: SubjectProperty,
-  object: Value,
+  object: Value | Value[],
   createList = () => ({})
 ): Subject {
   if (typeof property == 'string') {
     const spv = new SubjectPropertyValues(subject, property);
-    // Favour a subject over an existing reference
-    if (isSubjectObject(object))
-      spv.update([object], [object]);
+    if (isArray(object))
+      spv.insert(...object);
     else
       spv.insert(object);
   } else {

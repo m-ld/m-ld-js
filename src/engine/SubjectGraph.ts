@@ -16,7 +16,7 @@ import { JsonldContext } from './jsonld';
 
 export type GraphAliases =
   (subject: Iri | null, property: '@id' | string) => Iri | SubjectProperty | undefined;
-export type ValueAliases = (i: number, triple: Triple) => Value | undefined;
+export type ValueAliases = (i: number, triple: Triple) => Value | Value[] | undefined;
 
 export interface RdfOptions {
   aliases?: GraphAliases,
@@ -42,10 +42,11 @@ export class SubjectGraph extends Array<GraphSubject> implements GraphSubjects {
     return new SubjectGraph(Object.values(
       triples.reduce<{ [id: string]: GraphSubject }>((byId, triple, i) => {
         const subjectId = identifySubject(triple.subject, opts);
+        const subject = byId[subjectId] ??= { '@id': subjectId };
         const property = identifyProperty(triple, opts);
         const value = opts.values?.(i, triple) ??
           jrqlValue(property, triple.object, opts.ctx, opts.serial);
-        addPropertyObject(byId[subjectId] ??= { '@id': subjectId }, property, value);
+        addPropertyObject(subject, property, value);
         return byId;
       }, {})));
   }
@@ -183,7 +184,7 @@ export function jrqlValue(
       if (serial && isShared)
         valueObject['@id'] = object.value;
     }
-    return typeof property == 'string' ?
+    return !serial && typeof property == 'string' ?
       ctx.compactValue(property, valueObject) : valueObject;
   } else {
     throw new Error(`Cannot include ${object.termType} in a Subject`);

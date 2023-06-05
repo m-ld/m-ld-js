@@ -2,14 +2,13 @@ import { GraphSubject, MeldConstraint, MeldExtensions, MeldPreUpdate, MeldReadSt
 import { Context, Subject } from '../jrql-support';
 import { constraintFromConfig } from '../constraints';
 import { DefaultList } from '../lseq/DefaultList';
-import { InitialApp, MeldApp, MeldAppContext, MeldConfig } from '../config';
+import { combineExtensions, InitialApp, MeldApp, MeldAppContext, MeldConfig } from '../config';
 import { M_LD, RDF } from '../ns';
 import { Logger } from 'loglevel';
 import { OrmDomain, OrmSubject, OrmUpdating } from '../orm';
 import { getIdLogger } from './logging';
 import { ExtensionSubjectInstance, SingletonExtensionSubject } from '../orm/ExtensionSubject';
 import { StateManaged } from './index';
-import { iterable } from './util';
 import { jsonDatatype } from '../datatype';
 import { Iri } from '@m-ld/jsonld';
 
@@ -48,6 +47,7 @@ export class CloneExtensions extends OrmDomain implements StateManaged, MeldExte
   private readonly log: Logger;
   /** Represents the `@list` of the global `M_LD.extensions` list subject  */
   private readonly extensionSubjects: ManagedExtensionSubject[];
+  private readonly combinedExtensions: MeldExtensions;
   private _extensions: MeldExtensions[];
   private _defaultList: DefaultList;
 
@@ -70,7 +70,7 @@ export class CloneExtensions extends OrmDomain implements StateManaged, MeldExte
         // OrmSubject cannot cope with list update syntax, so load from state
         await this.loadAllExtensions(orm);
     });
-    this._extensions = [this.initial];
+    this.combinedExtensions = combineExtensions(this._extensions = [initial]);
   }
 
   /**
@@ -97,43 +97,31 @@ export class CloneExtensions extends OrmDomain implements StateManaged, MeldExte
   }
 
   get constraints() {
-    return iterable(() => this.getConstraints());
-  }
-
-  *getConstraints() {
-    yield *withDefaults(this._extensions, ext => ext.constraints, {
+    return withDefaults(this.combinedExtensions.constraints, {
       is: constraint => constraint instanceof DefaultList, get: () =>
         this._defaultList ??= new DefaultList(this.config['@id'])
     });
   }
 
   datatypes = (id: Iri) => {
-    for (let ext of this._extensions) {
-      const dt = ext.datatypes?.(id);
-      if (dt)
-        return dt;
-    }
-    if (id === RDF.JSON)
+    const dt = this.combinedExtensions.datatypes?.(id);
+    if (dt == null && id === RDF.JSON)
       return jsonDatatype;
+    return dt;
   }
 
   get agreementConditions() {
-    return iterable(() => this.getAgreementConditions());
-  }
-
-  *getAgreementConditions() {
-    for (let ext of this._extensions)
-      yield *ext.agreementConditions ?? [];
+    return this.combinedExtensions.agreementConditions;
   }
 
   get transportSecurity() {
-    for (let ext of this._extensions)
-      if (ext.transportSecurity != null)
-        return ext.transportSecurity;
+    return this.combinedExtensions.transportSecurity;
   }
 
   private async updateExtensions() {
-    return this._extensions = await Promise.all(this.iterateExtensions());
+    // Leave the 'initial' extensions in place
+    this._extensions.splice(1, this._extensions.length,
+      ...(await Promise.all(this.iterateExtensions())));
   }
 
   private async loadAllExtensions(orm: OrmUpdating) {
@@ -154,13 +142,11 @@ export class CloneExtensions extends OrmDomain implements StateManaged, MeldExte
   }
 
   private *iterateExtensions() {
-    yield this.initial;
     for (let extSubject of this.extensionSubjects) {
-      try {
-        yield extSubject.singleton;
-      } catch (e) {
+      yield Promise.resolve(extSubject.singleton).catch(e => {
         this.log.warn('Failed to load extension', extSubject.className, e);
-      }
+        return {}; // Empty extensions
+      });
     }
   }
 }
@@ -183,16 +169,13 @@ class ManagedExtensionSubject
 }
 
 function *withDefaults<T>(
-  extensions: Iterable<MeldExtensions>,
-  getOfType: (ext: MeldExtensions) => Iterable<T> | undefined,
+  extensions: Iterable<T> | undefined,
   ...defaults: { is: (ext: T) => boolean, get: () => T }[]
 ) {
   const foundDefault = Array<boolean>(defaults.length);
-  for (let ext of extensions) {
-    for (let extOfType of getOfType(ext) ?? []) {
-      yield extOfType;
-      defaults.forEach((d, i) => foundDefault[i] ||= defaults[i].is(extOfType));
-    }
+  for (let ext of extensions ?? []) {
+    yield ext;
+    defaults.forEach((d, i) => foundDefault[i] ||= defaults[i].is(ext));
   }
   // Ensure the defaults exist
   for (let i = 0; i < defaults.length; i++)

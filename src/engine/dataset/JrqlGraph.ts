@@ -324,6 +324,10 @@ export class JrqlGraph {
                   // TODO: What is the correct behaviour if so?
                   solution[returnVar] = quad.object;
                 }
+              } else {
+                // When deleting a matched variable, load the data so it gets
+                // reported to the app in the update
+                await this.graph.jrql.loadData(quad, this.ctx);
               }
             }));
           patch.inserts.addAll(await this.fillTemplate(inserts, solution));

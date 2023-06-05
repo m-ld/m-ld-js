@@ -29,6 +29,9 @@ export class CounterType implements SharedDatatype<number, string> {
   }
 
   apply(data: number, operation: string): [number, Expression] {
+    // noinspection SuspiciousTypeOfGuard: for testing
+    if (typeof operation != 'string')
+      throw new RangeError();
     const inc = Number(/\+(\d+)/.exec(operation)![1]);
     return [data + inc, { '@plus': inc }];
   }

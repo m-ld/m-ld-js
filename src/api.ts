@@ -853,7 +853,7 @@ export interface SharedDatatype<Data, Operation, Revert = null> extends Datatype
    * @returns the new state (can be the input), an update expression to notify
    * the app, and local metadata required to revert the operation (if applicable).
    */
-  apply(state: Data, operation: Operation): [Data, Expression, Revert?];
+  apply(state: Data, operation: Operation): [Data, Expression | Expression[], Revert?];
   /**
    * Reverts an operation from the state. The implementation is welcome to
    * mutate the passed `state` and return it as the new (old) state.
@@ -866,7 +866,7 @@ export interface SharedDatatype<Data, Operation, Revert = null> extends Datatype
    * @returns the new state (can be the input), and an update expression to
    * notify the app.
    */
-  revert(state: Data, operation: Operation, revert: Revert): [Data, Expression];
+  revert(state: Data, operation: Operation, revert: Revert): [Data, Expression | Expression[]];
 }
 
 /**

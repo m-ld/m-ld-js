@@ -1,10 +1,10 @@
 import { ExtensionSubject } from '../orm';
 import { MeldExtensions, SharedDatatype, UUID } from '../api';
-import { Expression, isConstraint, Subject } from '../jrql-support';
+import { Constraint, Expression, isConstraint, Subject } from '../jrql-support';
 import { M_LD } from '../ns';
 import { Iri } from '@m-ld/jsonld';
 import { TSeq, TSeqOperation } from './TSeq';
-import { uuid } from '../util';
+import { array, uuid } from '../util';
 import { MeldAppContext } from '../config';
 
 export class TSeqDatatype implements MeldExtensions, SharedDatatype<TSeq, TSeqOperation[]> {
@@ -22,7 +22,7 @@ export class TSeqDatatype implements MeldExtensions, SharedDatatype<TSeq, TSeqOp
     this.pid = config['@id'];
   }
 
-  datatypes(id: Iri) {
+  datatypes = (id: Iri) => {
     if (id === this['@id'])
       return this;
   }
@@ -78,13 +78,10 @@ export class TSeqDatatype implements MeldExtensions, SharedDatatype<TSeq, TSeqOp
     throw new RangeError(`Invalid update expression: ${update}`);
   }
 
-  apply(state: TSeq, operation: TSeqOperation[]): [TSeq, Expression] {
-    // TODO: Return the splice(s). Requires support from TSeq
-    state.apply(operation);
-    return [state, {
-      '@type': this['@id'],
-      '@value': state.toString()
-    }];
+  apply(state: TSeq, operation: TSeqOperation[]): [TSeq, Expression[]] {
+    const splices = state.apply(operation)
+      .map<Constraint>(splice => ({ '@splice': array(splice) }));
+    return [state, splices];
   }
 
   revert(state: TSeq, operation: TSeqOperation[], revert: null): [TSeq, Expression] {

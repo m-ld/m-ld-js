@@ -230,7 +230,7 @@ describe('Update utilities', () => {
     const box: Box = { '@id': 'foo', size: 10 };
     expect(() => updateSubject(box, {
       foo: { '@update': { '@id': 'foo', size: { '@plus': 1 } } }
-    })).toThrow();
+    }, false)).toThrow();
   });
 
   describe('with defined properties', () => {

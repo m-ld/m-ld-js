@@ -432,7 +432,7 @@ export type Constraint = Partial<{
 }>
 
 /** @internal */
-export function isConstraint(value: Expression): value is Constraint {
+export function isConstraint(value: Expression | SubjectPropertyObject): value is Constraint {
   if (value == null || typeof value != 'object')
     return false;
   for (let key in value)

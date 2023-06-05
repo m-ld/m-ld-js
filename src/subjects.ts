@@ -1,4 +1,11 @@
-import { isPropertyObject, isSet, Reference, Subject, Value } from './jrql-support';
+import {
+  isPropertyObject,
+  isSet,
+  isSubjectObject,
+  Reference,
+  Subject,
+  Value
+} from './jrql-support';
 import { isArray } from './engine/util';
 import { compareValues, expandValue, getValues, hasProperty, hasValue } from './engine/jsonld';
 
@@ -41,7 +48,8 @@ export class SubjectPropertyValues<S extends Subject = Subject> {
   }
 
   insert(...values: any[]) {
-    return this.update([], values);
+    // Favour a subject over an existing reference
+    return this.update(values.filter(isSubjectObject), values);
   }
 
   delete(...values: any[]) {
