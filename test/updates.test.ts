@@ -1,19 +1,7 @@
 import { mockFn } from 'jest-mock-extended';
 import {
-  asSubjectUpdates,
-  includesValue,
-  includeValues,
-  JsAtomType,
-  JsContainerType,
-  JsProperty,
-  maxValue,
-  noMerge,
-  Optional,
-  propertyValue,
-  Reference,
-  Subject,
-  updateSubject,
-  VocabReference
+  asSubjectUpdates, includesValue, includeValues, JsAtomType, JsContainerType, JsProperty, maxValue,
+  noMerge, Optional, propertyValue, Reference, Subject, updateSubject, VocabReference
 } from '../src';
 import { XS } from '../src/ns';
 import { mockUpdate } from './testClones';
@@ -606,6 +594,9 @@ describe('Update utilities', () => {
       const avatar = Buffer.of(0, 1);
       expect(avatar.equals(propertyValue({
         avatar: { '@type': XS.base64Binary, '@value': avatar.toString('base64') }
+      }, 'avatar', Uint8Array))).toBe(true);
+      expect(avatar.equals(propertyValue({
+        avatar // Plain Uint8Array works too
       }, 'avatar', Uint8Array))).toBe(true);
       expect(() => propertyValue({
         avatar: avatar.toString('base64')

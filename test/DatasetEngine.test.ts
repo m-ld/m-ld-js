@@ -1,28 +1,18 @@
 import { DatasetEngine } from '../src/engine/dataset/DatasetEngine';
 import {
-  decodeOpUpdate,
-  hotLive,
-  memStore,
-  MockProcess,
-  mockRemotes,
-  testConfig
+  decodeOpUpdate, hotLive, memStore, MockProcess, mockRemotes, testConfig
 } from './testClones';
 import {
-  asapScheduler,
-  BehaviorSubject,
-  EMPTY,
-  EmptyError,
-  firstValueFrom,
-  NEVER,
-  of,
-  Subject as Source,
+  asapScheduler, BehaviorSubject, EMPTY, EmptyError, firstValueFrom, NEVER, of, Subject as Source,
   throwError
 } from 'rxjs';
 import { comesAlive } from '../src/engine/AbstractMeld';
 import { count, map, observeOn, take, toArray } from 'rxjs/operators';
 import { TreeClock } from '../src/engine/clocks';
 import { MeldRemotes, Snapshot } from '../src/engine';
-import { Describe, GraphSubject, MeldError, MeldReadState, Read, Update, Write } from '../src';
+import {
+  combinePlugins, Describe, GraphSubject, MeldError, MeldReadState, Read, Update, Write
+} from '../src';
 import { AbstractLevel } from 'abstract-level';
 import { jsonify } from './testUtil';
 import { MemoryLevel } from 'memory-level';
@@ -54,7 +44,7 @@ class TestDatasetEngine extends DatasetEngine {
     const fullConfig = testConfig({ genesis: params?.genesis ?? true });
     const suset = new SuSetDataset(
       await memStore({ backend: params?.backend }),
-      {}, {}, {}, fullConfig
+      {}, combinePlugins([]), {}, fullConfig
     );
     const clone = new TestDatasetEngine(
       suset, params?.remotes ?? mockRemotes(), fullConfig

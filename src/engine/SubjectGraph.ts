@@ -1,11 +1,6 @@
 import { Iri } from '@m-ld/jsonld';
 import {
-  isReference,
-  Reference,
-  Subject,
-  SubjectProperty,
-  Value,
-  ValueObject
+  isReference, isValueObject, Reference, Subject, SubjectProperty, Value, ValueObject
 } from '../jrql-support';
 import { Quad_Subject, Term, Triple } from './quads';
 import { JRQL, RDF, XS } from '../ns';
@@ -152,38 +147,45 @@ export function jrqlValue(
   } else if (object.termType === 'Literal') {
     if (object.language)
       return { '@value': object.value, '@language': object.language };
-    const type = object.datatype == null ?
+    let type = object.datatype == null ?
       getContextType(property, ctx) : object.datatype.value;
-    if (type == null) {
+    if (type == null)
       return object.value;
-    } else if (object.typed == null) {
-      if (type === XS.string)
-        return object.value;
-      else if (type === XS.boolean)
-        return object.value === 'true';
-      else if (type === XS.integer)
-        return parseInt(object.value, 10);
-      else if (type === XS.double)
-        return parseFloat(object.value);
-    }
+    let value: any = object.value, id: string | null = null;
     // If the literal has attached data, use that instead of the value
-    const jrqlType = type === RDF.JSON ? '@json' :
-      ctx.compactIri(type, { vocab: true });
-    let valueObject: ValueObject;
-    if (object.typed == null) {
-      valueObject = { '@value': object.value, '@type': jrqlType };
-    } else {
+    if (object.typed != null) {
       const { data, type: datatype } = object.typed;
       const isShared = isSharedDatatype(datatype);
-      valueObject = {
-        '@value': serial ?
-          datatype.toJSON?.(data) ?? data :
-          isShared ? datatype.toValue?.(data) ?? data : data,
-        '@type': jrqlType
-      };
+      value = serial ?
+        datatype.toJSON?.(data) ?? data :
+        datatype.toValue?.(data) ?? data;
       if (serial && isShared)
-        valueObject['@id'] = object.value;
+        id = object.value;
+      if (isValueObject(value)) {
+        type = value['@type'] ?? type;
+        value = value['@value'];
+      }
     }
+    // Always inline m-ld API compatible types
+    if (id == null) {
+      if (type === XS.string)
+        return value;
+      else if (type === XS.boolean)
+        return value === true || value === 'true';
+      else if (type === XS.integer)
+        return parseInt(value, 10);
+      else if (type === XS.double)
+        return parseFloat(value);
+      else if (type === XS.base64Binary)
+        return Buffer.isBuffer(value) ? value :
+          Buffer.from(value, 'base64');
+    }
+    // Construct a value object
+    const jrqlType = type === RDF.JSON ? '@json' :
+      ctx.compactIri(type, { vocab: true });
+    const valueObject: ValueObject = { '@value': value, '@type': jrqlType };
+    if (id != null)
+      valueObject['@id'] = id;
     return !serial && typeof property == 'string' ?
       ctx.compactValue(property, valueObject) : valueObject;
   } else {

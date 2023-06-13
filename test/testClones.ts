@@ -1,11 +1,5 @@
 import {
-  BufferEncoding,
-  EncodedOperation,
-  MeldLocal,
-  MeldRemotes,
-  OperationMessage,
-  Revup,
-  Snapshot
+  BufferEncoding, EncodedOperation, MeldLocal, MeldRemotes, OperationMessage, Revup, Snapshot
 } from '../src/engine';
 import { mock, mockFn, MockProxy } from 'jest-mock-extended';
 import { asapScheduler, BehaviorSubject, EMPTY, from, NEVER, Observable, Observer } from 'rxjs';
@@ -15,18 +9,8 @@ import { AsyncMqttClient, IPublishPacket } from 'async-mqtt';
 import { EventEmitter } from 'events';
 import { observeOn } from 'rxjs/operators';
 import {
-  Attribution,
-  Context,
-  GraphSubject,
-  GraphSubjects,
-  InterimUpdate,
-  MeldConfig,
-  MeldConstraint,
-  MeldPreUpdate,
-  MeldReadState,
-  StateProc,
-  SubjectsUpdate,
-  Write
+  Attribution, Context, GraphSubject, GraphSubjects, IndirectedData, InterimUpdate, MeldConfig,
+  MeldConstraint, MeldPreUpdate, MeldReadState, StateProc, SubjectsUpdate, Write
 } from '../src';
 import { AbstractLevel } from 'abstract-level';
 import { LiveValue } from '../src/engine/api-support';
@@ -41,7 +25,7 @@ import { MeldOperationMessage } from '../src/engine/MeldOperationMessage';
 import { Future } from '../src/engine/Future';
 import { SubjectGraph } from '../src/engine/SubjectGraph';
 import { TidsStore } from '../src/engine/dataset/TidsStore';
-import { JrqlContext } from '../src/engine/SubjectQuads';
+import { JsonldContext } from '../src/engine/jsonld';
 
 export const testDomain = 'test.m-ld.org';
 export const testContext = new DomainContext(testDomain);
@@ -124,13 +108,17 @@ type GraphStateWriteOpts = {
 };
 
 export class MockGraphState {
-  static async create({ dataset, context, domain }: {
-    dataset?: Dataset, context?: Context, domain?: string
+  static async create({ dataset, context, domain, indirectedData }: {
+    dataset?: Dataset,
+    context?: Context,
+    domain?: string,
+    indirectedData?: IndirectedData
   } = {}) {
     context ??= testContext;
     return new MockGraphState(
       await MockState.create({ dataset, domain }),
-      await JrqlContext.active(context ?? {}));
+      await JsonldContext.active(context ?? {}),
+      indirectedData ?? (() => undefined));
   }
 
   readonly graph: JrqlGraph;
@@ -138,9 +126,10 @@ export class MockGraphState {
 
   protected constructor(
     readonly state: MockState,
-    readonly ctx: JrqlContext
+    readonly ctx: JsonldContext,
+    readonly indirectedData: IndirectedData
   ) {
-    this.graph = new JrqlGraph(state.dataset.graph());
+    this.graph = new JrqlGraph(state.dataset.graph(), indirectedData);
     this.tidsStore = mock();
   }
 

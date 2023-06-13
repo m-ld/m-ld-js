@@ -1,4 +1,5 @@
 import { IoRemotes } from '../src/socket.io';
+import { MeldExtensions, noTransportSecurity } from '../src';
 import { IoRemotesService } from '../src/socket.io/server';
 import { createServer } from 'http';
 import { Server as ServerIo } from 'socket.io';
@@ -14,7 +15,9 @@ describe('Socket.io Remotes', () => {
   let localRemotes: IoRemotes;
   let domain: string;
   let port: number;
-  const extensions = () => Promise.resolve({});
+  const extensions = () => Promise.resolve(mock<MeldExtensions>({
+    transportSecurity: noTransportSecurity
+  }));
 
   beforeAll(done => {
     const server = createServer();

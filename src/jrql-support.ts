@@ -109,10 +109,13 @@ export type ExpandedTermDef = jrql.ExpandedTermDef;
  */
 export type Variable = jrql.Variable;
 /**
- * @see [json-rql atom](https://json-rql.org/#atom)
- * @category json-rql
+ * A basic atomic value used as a concrete value or in a filter. Note that the
+ * m-ld Javascript engine natively supports `Uint8Array` for binary data.
+ * @see [json-rql atom](https://json-rql.org/#atom) @category json-rql
  */
-export type Atom = number | string | boolean | Variable | ValueObject | Reference | VocabReference;
+export type Atom =
+  number | string | boolean | Uint8Array |
+  Variable | ValueObject | Reference | VocabReference;
 /**
  * @category json-rql
  * @see [json-rql value object](https://json-rql.org/interfaces/valueobject.html)
@@ -411,7 +414,12 @@ export function isSubject(p: Pattern): p is Subject {
 
 /** @internal */
 export function isSubjectObject(o: SubjectPropertyObject): o is Subject {
-  return typeof o == 'object' && !isReference(o) && !isVocabReference(o) && !isValueObject(o);
+  return typeof o == 'object' &&
+      !(o instanceof Uint8Array) &&
+      !isValueObject(o) &&
+      !isReference(o) &&
+      !isVocabReference(o) &&
+      !isInlineConstraint(o);
 }
 /**
  * An operator-based constraint of the form `{ <operator> : [<expression>...]

@@ -11,7 +11,6 @@ import { TidsStore } from './TidsStore';
 import { flatMap, ignoreIf } from 'rx-flowable/operators';
 import { consume } from 'rx-flowable/consume';
 import { map } from 'rxjs/operators';
-import { JrqlContext } from '../SubjectQuads';
 import { JrqlPatchQuads, JrqlQuad, JrqlQuadOperation } from './JrqlQuads';
 import { concatIter, mapIter } from '../util';
 import async from '../async';
@@ -42,7 +41,7 @@ export class InterimUpdatePatch implements InterimUpdate {
     patch: JrqlPatchQuads,
     private readonly graph: JrqlGraph,
     private readonly tidsStore: TidsStore,
-    private readonly userCtx: JrqlContext,
+    private readonly userCtx: JsonldContext,
     private readonly principalId: Iri | null,
     private agree: any,
     { mutable }: { mutable: boolean }
@@ -183,13 +182,13 @@ export class InterimUpdatePatch implements InterimUpdate {
   private async processSharedData(patch: JrqlPatchQuads) {
     // Ensure the final patch knows about triples with data attached
     await this.graph.jrql.loadHasData(
-      concatIter(patch.deletes, patch.inserts), this.userCtx);
+      concatIter(patch.deletes, patch.inserts));
     // Ensure that every property with a shared literal is single-valued
     // The 'winning' literal is defined as the shared data with the highest UUID
     // Everything else should be either deleted or entailed away
     await Promise.all(mapIter(await this.finalSharedState(patch), async ([, quads]) => {
       // Load has-data state for any objects recovered from the backend
-      await this.graph.jrql.loadHasData(quads, this.userCtx);
+      await this.graph.jrql.loadHasData(quads);
       const { topQuad, conflicts } = this.prioritiseSharedSiblings(quads);
       if (topQuad) {
         if (this.mutable) {

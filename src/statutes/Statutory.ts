@@ -1,13 +1,6 @@
 import {
-  AgreementCondition,
-  GraphSubject,
-  GraphUpdate,
-  InterimUpdate,
-  MeldConstraint,
-  MeldError,
-  MeldExtensions,
-  MeldPreUpdate,
-  MeldReadState
+  AgreementCondition, GraphSubject, GraphUpdate, InterimUpdate, MeldConstraint, MeldError,
+  MeldPlugin, MeldPreUpdate, MeldReadState
 } from '../api';
 import { M_LD } from '../ns';
 import { Describe, isPropertyObject, isReference, Reference, Subject } from '../jrql-support';
@@ -38,7 +31,7 @@ import { ExtensionSubjectInstance } from '../orm/ExtensionSubject';
  * @experimental
  * @noInheritDoc
  */
-export class Statutory implements ExtensionSubjectInstance, MeldExtensions {
+export class Statutory implements ExtensionSubjectInstance, MeldPlugin {
   /**
    * Extension declaration. Insert into the domain data to install the
    * extension. For example (assuming a **m-ld** `clone` object):

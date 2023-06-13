@@ -2,7 +2,8 @@ import type { Context } from './jrql-support';
 // noinspection JSDeprecatedSymbols
 import type { ConstraintConfig } from './constraints';
 import type { LogLevelDesc } from 'loglevel';
-import type { AppPrincipal, MeldExtensions } from './api';
+import type { AppPrincipal, MeldPlugin } from './api';
+import { MeldExtensions, noTransportSecurity } from './api';
 import type { EventEmitter } from 'events';
 import { Observable } from 'rxjs';
 import { iterable } from './engine/util';
@@ -37,7 +38,7 @@ export interface MeldConfig {
   // noinspection JSDeprecatedSymbols: deprecated using deprecated
   /**
    * Semantic constraints to apply to the domain data.
-   * @deprecated see {@link MeldExtensions}
+   * @deprecated see {@link MeldPlugin}
    */
   constraints?: ConstraintConfig[];
   /**
@@ -181,7 +182,7 @@ export interface MeldApp {
  *
  * @category Configuration
  */
-export type InitialApp = MeldApp & MeldExtensions;
+export type InitialApp = MeldApp & MeldPlugin;
 
 /**
  * Context typically required for extensions
@@ -192,49 +193,34 @@ export interface MeldAppContext {
 }
 
 /**
- * Combines extensions. The extensions are dynamically iterated, so the passed
+ * Combines plugins. The extensions are dynamically iterated, so the passed
  * `Iterable` can change content after this function is called.
  * @param extensions the extensions to combine
- * @param object an object to combine the extensions into
  */
-export function combineExtensions<T>(
-  extensions: Iterable<MeldExtensions>,
-  object = {}
-): MeldExtensions & typeof object {
-  return Object.defineProperties(object, {
-    setExtensionContext: {
-      value: (context: MeldAppContext) => {
-        for (let ext of extensions)
-          ext.setExtensionContext?.(context);
+export function combinePlugins<T>(
+  extensions: Iterable<MeldPlugin>
+): MeldExtensions {
+  return {
+    constraints: iterable(function *() {
+      for (let ext of extensions)
+        yield *ext.constraints ?? [];
+    }),
+    indirectedData(property: Iri, datatype: Iri) {
+      for (let ext of extensions) {
+        const dt = ext.indirectedData?.(property, datatype);
+        if (dt) return dt;
       }
     },
-    constraints: {
-      value: iterable(function *() {
-        for (let ext of extensions)
-          yield *ext.constraints ?? [];
-      })
-    },
-    datatypes: {
-      value: (id: Iri) => {
-        for (let ext of extensions) {
-          const dt = ext.datatypes?.(id);
-          if (dt) return dt;
-        }
+    agreementConditions: iterable(function *() {
+      for (let ext of extensions)
+        yield *ext.agreementConditions ?? [];
+    }),
+    get transportSecurity() {
+      for (let ext of extensions) {
+        const ts = ext.transportSecurity;
+        if (ts) return ts;
       }
-    },
-    agreementConditions: {
-      value: iterable(function *() {
-        for (let ext of extensions)
-          yield *ext.agreementConditions ?? [];
-      })
-    },
-    transportSecurity: {
-      get: () => {
-        for (let ext of extensions) {
-          const ts = ext.transportSecurity;
-          if (ts) return ts;
-        }
-      }
+      return noTransportSecurity;
     }
-  });
+  };
 }

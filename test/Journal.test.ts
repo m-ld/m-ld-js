@@ -16,7 +16,8 @@ describe('Dataset Journal', () => {
 
   beforeEach(async () => {
     store = await memStore();
-    encoder = new MeldEncoder('test.m-ld.org', store.rdf);
+    encoder = new MeldEncoder('test.m-ld.org', store.rdf, () => undefined);
+    await encoder.initialise();
     journal = new Journal(store, encoder);
   });
 

@@ -163,7 +163,7 @@ export abstract class OrmSubject {
    *
    * @param src the initial graph subject – only used for its property value
    * @param local the local property name. If the type in the graph
-   * cannot be cast to the property type, {@link updated} will be rejected.
+   * cannot be cast to the property type, {@link #updated} will be rejected.
    * @param property the property definition
    * @param access custom property access information
    * @throws {RangeError} if the property has already been initialised

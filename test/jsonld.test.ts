@@ -1,9 +1,5 @@
 import {
-  compareValues,
-  expandValue,
-  getValues,
-  JsonldContext,
-  minimiseValue
+  compareValues, expandValue, getValues, JsonldContext, minimiseValue
 } from '../src/engine/jsonld';
 
 describe('JSON-LD', () => {
@@ -110,7 +106,7 @@ describe('JSON-LD', () => {
     test('plain JSON values', () => {
       expect(expandValue(
         'name', 'Fred'))
-        .toEqual({ raw: 'Fred', canonical: 'Fred', type: '@none' });
+        .toEqual({ raw: 'Fred', canonical: 'Fred', type: 'http://www.w3.org/2001/XMLSchema#string' });
       expect(expandValue(
         'height', 1))
         .toEqual({ raw: 1, canonical: '1', type: 'http://www.w3.org/2001/XMLSchema#integer' });
@@ -149,7 +145,12 @@ describe('JSON-LD', () => {
     test('value objects', () => {
       expect(expandValue(
         'name', { '@value': 'Fred' }))
-        .toEqual({ raw: 'Fred', canonical: 'Fred', type: '@none', id: '' });
+        .toEqual({
+          raw: 'Fred',
+          canonical: 'Fred',
+          type: 'http://www.w3.org/2001/XMLSchema#string',
+          id: ''
+        });
       expect(expandValue(
         'name', {
           '@value': 'Fred',

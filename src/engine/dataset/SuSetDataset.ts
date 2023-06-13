@@ -1,16 +1,6 @@
 import {
-  Attribution,
-  AuditOperation,
-  GraphSubject,
-  GraphSubjects,
-  MeldConstraint,
-  MeldError,
-  MeldExtensions,
-  MeldPreUpdate,
-  MeldUpdate,
-  noTransportSecurity,
-  UpdateTrace,
-  UUID
+  Attribution, AuditOperation, GraphSubject, GraphSubjects, MeldConstraint, MeldError,
+  MeldExtensions, MeldPreUpdate, MeldUpdate, UpdateTrace, UUID
 } from '../../api';
 import { BufferEncoding, EncodedOperation, OperationMessage, Snapshot, StateManaged } from '..';
 import { GlobalClock, TickTree, TreeClock } from '../clocks';
@@ -41,9 +31,9 @@ import { MeldOperationMessage } from '../MeldOperationMessage';
 import { check } from '../check';
 import { getIdLogger } from '../logging';
 import { Future } from '../Future';
-import { JrqlContext } from '../SubjectQuads';
 import { JrqlPatchQuads, UpdateMeta } from './JrqlQuads';
 import { RefTriple } from '../jrql-util';
+import { JsonldContext } from '../jsonld';
 
 export type DatasetSnapshot = Omit<Snapshot, 'updates'>;
 
@@ -68,7 +58,7 @@ export class SuSetDataset extends MeldEncoder {
     d.readyForTxn, () => new MeldError('Unknown error', 'Dataset not ready'));
 
   /** External context used for reads, writes and updates, but not for constraints. */
-  /*readonly*/ userCtx: JrqlContext;
+  /*readonly*/ userCtx: JsonldContext;
 
   private /*readonly*/ userGraph: JrqlGraph;
   private readonly tidsStore: TidsStore;
@@ -86,7 +76,7 @@ export class SuSetDataset extends MeldEncoder {
     private readonly app: MeldApp,
     config: DatasetConfig
   ) {
-    super(config['@domain'], dataset.rdf, extensions.datatypes);
+    super(config['@domain'], dataset.rdf, extensions.indirectedData);
     if (app.principal?.['@id'] === M_LD.localEngine)
       throw new MeldError('Unauthorised', 'Application principal cannot be local engine');
     this.log = getIdLogger(this.constructor, config['@id'], config.logLevel);
@@ -99,13 +89,12 @@ export class SuSetDataset extends MeldEncoder {
   @SuSetDataset.checkNotClosed.async
   async initialise() {
     await super.initialise();
-    this.userCtx = (await JrqlContext.active(this.context))
-      .withDatatypes(this.extensions.datatypes);
-    this.userGraph = new JrqlGraph(this.dataset.graph());
+    this.userCtx = await JsonldContext.active(this.context);
+    this.userGraph = new JrqlGraph(this.dataset.graph(), this.indirectedData);
   }
 
   private get transportSecurity() {
-    return this.extensions.transportSecurity ?? noTransportSecurity;
+    return this.extensions.transportSecurity;
   }
 
   get lock() {
@@ -286,7 +275,7 @@ export class SuSetDataset extends MeldEncoder {
       agree,
       { mutable: verb === 'check' }
     );
-    for (let constraint of this.extensions.constraints ?? [])
+    for (let constraint of this.extensions.constraints)
       await constraint[verb]?.(this.readState, interim);
     return interim.finalise();
   }
@@ -828,7 +817,7 @@ export class SuSetDataset extends MeldEncoder {
       flatMap(literal => {
         const quad = this.userGraph.quads.quad(triple.subject, triple.predicate, literal);
         return consume(operations).pipe(flatMap(operation =>
-          consume(this.userGraph.jrql.applyTripleOperation(quad, operation, this.userCtx)
+          consume(this.userGraph.jrql.applyTripleOperation(quad, operation)
             .then(upMeta => upMeta && [this.toUserQuad(triple), upMeta] as [Quad, UpdateMeta]))));
       }),
       ignoreIf(null)
@@ -890,7 +879,7 @@ export class SuSetDataset extends MeldEncoder {
         const tidQuads = await this.tidsStore
           .findTriplesTids(quads, 'includeEmpty');
         await Promise.all(mapIter(tidQuads, ([triple]) =>
-          this.userGraph.jrql.loadData(triple, this.userCtx)));
+          this.userGraph.jrql.loadData(triple)));
         const reified = this.reifyTriplesTids(this.identifyTriplesData(tidQuads));
         const [inserts, encoding] = this.bufferFromTriples(reified);
         return { value: { inserts, encoding }, next };

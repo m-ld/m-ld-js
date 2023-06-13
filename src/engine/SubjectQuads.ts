@@ -1,59 +1,23 @@
-import { any, anyName, blank, Datatype, isSharedDatatype } from '../api';
+import { any, anyName, blank, IndirectedData, isSharedDatatype } from '../api';
 import {
-  Atom,
-  Constraint,
-  Expression,
-  InlineConstraint,
-  isInlineConstraint,
-  isPropertyObject,
-  isReference,
-  isSet,
-  isValueObject,
-  isVocabReference,
-  Reference,
-  Subject,
-  SubjectPropertyObject,
-  Variable
+  Atom, Constraint, Expression, InlineConstraint, isInlineConstraint, isPropertyObject, isReference,
+  isSet, isSubjectObject, Reference, Subject, SubjectPropertyObject, Variable
 } from '../jrql-support';
-import { ActiveContext, expandValue, JsonldContext } from './jsonld';
+import { expandValue, JsonldContext } from './jsonld';
 import { asQueryVar, Quad, Quad_Object, Quad_Subject, RdfFactory } from './quads';
 import { JRQL, RDF } from '../ns';
 import { JrqlMode, ListIndex, listItems, toIndexDataUrl } from './jrql-util';
 import { isArray, lazy, mapObject } from './util';
 import { array } from '../util';
 import { EventEmitter } from 'events';
-import { Context, Iri, Options } from '@m-ld/jsonld';
-
-export class JrqlContext extends JsonldContext {
-  static active(context: Context, options?: Options.DocLoader) {
-    return new JrqlContext().next(context, options);
-  }
-
-  constructor(
-    private readonly datatypes: (id: Iri) => Datatype | undefined = () => undefined,
-    ctx?: ActiveContext
-  ) {
-    super(ctx);
-  }
-
-  withDatatypes(datatypes?: (id: Iri) => Datatype | undefined) {
-    return new JrqlContext(datatypes, this.ctx);
-  }
-
-  protected withCtx(ctx: ActiveContext) {
-    return new JrqlContext(this.datatypes, ctx) as this;
-  }
-
-  getDatatype(id: Iri) {
-    return this.datatypes?.(id);
-  }
-}
+import { Iri } from '@m-ld/jsonld';
 
 export class SubjectQuads extends EventEmitter {
   constructor(
     readonly rdf: RdfFactory,
     readonly mode: JrqlMode,
-    readonly ctx: JrqlContext
+    readonly ctx: JsonldContext,
+    readonly indirectedData: IndirectedData
   ) {
     super();
   }
@@ -91,11 +55,8 @@ export class SubjectQuads extends EventEmitter {
       else if (isSet(value))
         // @set is elided
         yield *this.process(value['@set'], outer, property);
-      else if (typeof value === 'object' &&
-        !isValueObject(value) &&
-        !isVocabReference(value) &&
-        !isInlineConstraint(value))
-        // TODO: @json type, nested @context object
+      else if (isSubjectObject(value) || isReference(value))
+        // TODO: nested @context object
         yield *this.subjectQuads(value, outer, property);
       else if (outer != null && property != null)
         // This is an atom, so yield one quad
@@ -133,7 +94,9 @@ export class SubjectQuads extends EventEmitter {
       // Return variable unless bound to a new one
       return this.rdf.quad(subject, predicate, variable);
     }
-    return this.rdf.quad(subject, predicate, this.objectTerm(value, property));
+    const propContext = predicate.termType === 'NamedNode' ?
+      { property, predicate: predicate.value } : undefined;
+    return this.rdf.quad(subject, predicate, this.objectTerm(value, propContext));
   }
 
   private *subjectQuads(
@@ -218,7 +181,7 @@ export class SubjectQuads extends EventEmitter {
       // A nested list is a nested list (not flattened or a set)
       return { '@item': { '@list': item } };
     }
-    if (typeof item == 'object' && (
+    if ((isSubjectObject(item) || isReference(item)) && (
       '@item' in item ||
       this.mode === JrqlMode.graph ||
       this.mode === JrqlMode.serial
@@ -275,29 +238,34 @@ export class SubjectQuads extends EventEmitter {
     return this.rdf.variable(this.genVarName());
   }
 
-  objectTerm(value: Atom | InlineConstraint, property?: string): Quad_Object {
-    const { raw, canonical, type, language, id } =
-      expandValue(property ?? null, value, this.ctx);
-    const variable = id == null && this.matchVar(raw);
+  objectTerm(
+    value: Atom | InlineConstraint,
+    context?: { property: string, predicate: Iri }
+  ): Quad_Object {
+    // Note using indexer access to allow for lazy properties
+    const ex = expandValue(context?.property ?? null, value, this.ctx);
+    const variable = ex.id == null && this.matchVar(ex.raw);
     if (variable) {
       return variable;
-    } else if (type === '@id' || type === '@vocab') {
-      return this.rdf.namedNode(canonical);
-    } else if (language) {
-      return this.rdf.literal(canonical, language);
-    } else if (type !== '@none') {
-      const datatype = this.ctx.getDatatype(type);
-      const serialising = this.mode === JrqlMode.serial;
-      // When serialising, shared datatype without an @id is id-only
-      if (datatype != null && (!serialising || !isSharedDatatype(datatype) || id)) {
-        const data = serialising ?
-          datatype.fromJSON?.(raw) ?? raw : // coming from protocol
-          datatype.validate(raw); // coming from the app
-        return this.rdf.literal(id || datatype.getDataId(data), datatype, data);
+    } else if (ex.type === '@id' || ex.type === '@vocab') {
+      return this.rdf.namedNode(ex.canonical);
+    } else if (ex.language) {
+      return this.rdf.literal(ex.canonical, ex.language);
+    } else if (ex.type !== '@none') {
+      if (context != null) {
+        const datatype = this.indirectedData?.(context.predicate, ex.type);
+        const serialising = this.mode === JrqlMode.serial;
+        // When serialising, shared datatype without an @id is id-only
+        if (datatype != null && (!serialising || !isSharedDatatype(datatype) || ex.id)) {
+          const data = serialising ?
+            datatype.fromJSON?.(ex.raw) ?? ex.raw : // coming from protocol
+            datatype.validate(ex.raw); // coming from the app
+          return this.rdf.literal(ex.id || datatype.getDataId(data), datatype, data);
+        }
       }
-      return this.rdf.literal(canonical, this.rdf.namedNode(type));
+      return this.rdf.literal(ex.canonical, this.rdf.namedNode(ex.type));
     } else {
-      return this.rdf.literal(canonical);
+      throw new RangeError('Cannot construct a literal with no type');
     }
   }
 

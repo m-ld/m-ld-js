@@ -1,15 +1,18 @@
-import { GraphSubject, MeldConstraint, MeldExtensions, MeldPreUpdate, MeldReadState } from '../api';
+import {
+  GraphSubject, IndirectedDatatype, MeldConstraint, MeldExtensions, MeldPlugin, MeldPreUpdate,
+  MeldReadState
+} from '../api';
 import { Context, Subject } from '../jrql-support';
 import { constraintFromConfig } from '../constraints';
 import { DefaultList } from '../lseq/DefaultList';
-import { combineExtensions, InitialApp, MeldApp, MeldAppContext, MeldConfig } from '../config';
-import { M_LD, RDF } from '../ns';
+import { combinePlugins, InitialApp, MeldApp, MeldConfig } from '../config';
+import { M_LD, RDF, XS } from '../ns';
 import { Logger } from 'loglevel';
 import { OrmDomain, OrmSubject, OrmUpdating } from '../orm';
 import { getIdLogger } from './logging';
 import { ExtensionSubjectInstance, SingletonExtensionSubject } from '../orm/ExtensionSubject';
 import { StateManaged } from './index';
-import { jsonDatatype } from '../datatype';
+import { byteArrayDatatype, jsonDatatype } from '../datatype';
 import { Iri } from '@m-ld/jsonld';
 
 /**
@@ -24,11 +27,11 @@ export class CloneExtensions extends OrmDomain implements StateManaged, MeldExte
     context: Context
   ) {
     app.setExtensionContext?.({ config, app });
-    const { datatypes, agreementConditions, transportSecurity } = app;
+    const { indirectedData, agreementConditions, transportSecurity } = app;
     const constraints = await this.constraintsFromConfig(config, app.constraints, context);
     return new CloneExtensions({
       constraints,
-      datatypes: datatypes?.bind(app),
+      indirectedData: indirectedData?.bind(app),
       agreementConditions,
       transportSecurity
     }, config, app);
@@ -47,12 +50,12 @@ export class CloneExtensions extends OrmDomain implements StateManaged, MeldExte
   private readonly log: Logger;
   /** Represents the `@list` of the global `M_LD.extensions` list subject  */
   private readonly extensionSubjects: ManagedExtensionSubject[];
-  private readonly combinedExtensions: MeldExtensions;
-  private _extensions: MeldExtensions[];
+  private readonly combinedPlugins: MeldExtensions;
+  private _extensions: MeldPlugin[];
   private _defaultList: DefaultList;
 
   private constructor(
-    private readonly initial: MeldExtensions,
+    private readonly initial: MeldPlugin,
     config: MeldConfig,
     app: MeldApp
   ) {
@@ -70,7 +73,7 @@ export class CloneExtensions extends OrmDomain implements StateManaged, MeldExte
         // OrmSubject cannot cope with list update syntax, so load from state
         await this.loadAllExtensions(orm);
     });
-    this.combinedExtensions = combineExtensions(this._extensions = [initial]);
+    this.combinedPlugins = combinePlugins(this._extensions = [initial]);
   }
 
   /**
@@ -97,25 +100,27 @@ export class CloneExtensions extends OrmDomain implements StateManaged, MeldExte
   }
 
   get constraints() {
-    return withDefaults(this.combinedExtensions.constraints, {
+    return withDefaults(this.combinedPlugins.constraints, {
       is: constraint => constraint instanceof DefaultList, get: () =>
         this._defaultList ??= new DefaultList(this.config['@id'])
     });
   }
 
-  datatypes = (id: Iri) => {
-    const dt = this.combinedExtensions.datatypes?.(id);
-    if (dt == null && id === RDF.JSON)
-      return jsonDatatype;
+  indirectedData = (property: Iri, datatype: Iri): IndirectedDatatype | undefined => {
+    const dt = this.combinedPlugins.indirectedData?.(property, datatype);
+    if (dt == null) {
+      if (datatype === RDF.JSON) return jsonDatatype;
+      if (datatype === XS.base64Binary) return byteArrayDatatype;
+    }
     return dt;
-  }
+  };
 
   get agreementConditions() {
-    return this.combinedExtensions.agreementConditions;
+    return this.combinedPlugins.agreementConditions;
   }
 
   get transportSecurity() {
-    return this.combinedExtensions.transportSecurity;
+    return this.combinedPlugins.transportSecurity;
   }
 
   private async updateExtensions() {
@@ -152,18 +157,10 @@ export class CloneExtensions extends OrmDomain implements StateManaged, MeldExte
 }
 
 class ManagedExtensionSubject
-  extends SingletonExtensionSubject<MeldExtensions & ExtensionSubjectInstance> {
-  private readonly context: MeldAppContext;
-
-  constructor(src: GraphSubject, orm: OrmUpdating) {
-    super(src, orm);
-    const { config, app } = orm.domain;
-    this.context = { config, app };
-  }
-
-  protected newInstance() {
-    const extensions = super.newInstance();
-    extensions.setExtensionContext?.(this.context);
+  extends SingletonExtensionSubject<MeldPlugin & ExtensionSubjectInstance> {
+  protected newInstance(src: GraphSubject, orm: OrmUpdating) {
+    const extensions = super.newInstance(src, orm);
+    extensions.setExtensionContext?.(orm.domain);
     return extensions;
   }
 }

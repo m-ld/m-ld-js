@@ -68,7 +68,7 @@ describe('json-rql typed values', () => {
       rdf.literal(dateDatatype.getDataId(date), dateDatatype, date)
     )).toEqual({
       '@type': dateDatatype['@id'],
-      '@value': date
+      '@value': date.toISOString()
     });
   });
 

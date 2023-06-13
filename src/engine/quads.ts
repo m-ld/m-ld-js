@@ -3,7 +3,7 @@ import { DataFactory as RdfDataFactory } from 'rdf-data-factory';
 import { IndexMap, IndexSet } from './indices';
 import { Binding, QueryableRdfSource } from '../rdfjs-support';
 import { Prefixes } from 'quadstore';
-import { Datatype } from '../api';
+import { IndirectedDatatype } from '../api';
 import { Iri } from '@m-ld/jsonld';
 import { uuid } from '../util';
 
@@ -23,7 +23,7 @@ declare module './quads' {
     before?: Quad_Object;
   }
   export interface Literal {
-    typed?: { type: Datatype, data: any };
+    typed?: { type: IndirectedDatatype, data: any };
   }
 }
 
@@ -37,7 +37,7 @@ export function isLiteralTriple(triple: Triple): triple is LiteralTriple {
 
 /** Note `datatype.value === typed.type['@id']` */
 export interface TypedLiteral extends Literal {
-  typed: { type: Datatype, data: any };
+  typed: { type: IndirectedDatatype, data: any };
 }
 
 export function isTypedLiteral(term: Term): term is TypedLiteral {
@@ -177,11 +177,11 @@ export class RdfFactory extends RdfDataFactory {
   /**
    * Creates a typed literal with a specific custom datatype
    */
-  literal(value: string, datatype: Datatype, data: any): TypedLiteral;
+  literal(value: string, datatype: IndirectedDatatype, data: any): TypedLiteral;
   /** @internal */
   literal(
     value: string,
-    languageOrDatatype?: string | NamedNode | Datatype,
+    languageOrDatatype?: string | NamedNode | IndirectedDatatype,
     data?: any
   ): Literal {
     if (languageOrDatatype == null ||

@@ -6,15 +6,16 @@ import { Iri } from '@m-ld/jsonld';
 import { inPosition, isTypedLiteral, Literal, RdfFactory, Triple } from './quads';
 import { M_LD, RDF, XS } from '../ns';
 import { SubjectGraph } from './SubjectGraph';
-import { JrqlContext, SubjectQuads } from './SubjectQuads';
+import { SubjectQuads } from './SubjectQuads';
 // TODO: Switch to fflate. Node.js zlib uses Pako in the browser
 import { gunzipSync, gzipSync } from 'zlib';
 import { baseVocab, domainBase } from './dataset';
-import { Datatype, MeldError, UUID } from '../api';
+import { IndirectedData, MeldError, UUID } from '../api';
 import { JrqlMode, RefTriple } from './jrql-util';
 import { jsonDatatype } from '../datatype';
 import { array } from '../util';
 import { Quad_Object } from 'rdf-js';
+import { JsonldContext } from './jsonld';
 
 const COMPRESS_THRESHOLD_BYTES = 1024;
 
@@ -48,20 +49,19 @@ export type RefTriplesTids = [RefTriple, UUID[]][];
 export type RefTriplesOps = [RefTriple, unknown[]][];
 
 export class MeldEncoder {
-  private /*readonly*/ ctx: JrqlContext;
-  private readonly ready: Promise<unknown>;
+  private /*readonly*/ ctx: JsonldContext;
+  private readonly ready: Promise<JsonldContext>;
 
   constructor(
     readonly domain: string,
     readonly rdf: RdfFactory,
-    datatypes?: (id: Iri) => Datatype | undefined
+    readonly indirectedData: IndirectedData
   ) {
-    this.ready = JrqlContext.active(new DomainContext(domain, OPERATION_CONTEXT))
-      .then(ctx => this.ctx = ctx.withDatatypes(datatypes));
+    this.ready = JsonldContext.active(new DomainContext(domain, OPERATION_CONTEXT));
   }
 
   async initialise() {
-    await this.ready;
+    this.ctx = await this.ready;
   }
 
   private name = lazy(name => this.rdf.namedNode(name));
@@ -165,7 +165,7 @@ export class MeldEncoder {
   };
 
   triplesFromJson = (json: object): Triple[] =>
-    new SubjectQuads(this.rdf, JrqlMode.serial, this.ctx).toQuads(<any>json);
+    new SubjectQuads(this.rdf, JrqlMode.serial, this.ctx, this.indirectedData).toQuads(<any>json);
 
   triplesFromBuffer = (encoded: Buffer, encoding: BufferEncoding[]): Triple[] =>
     this.triplesFromJson(MeldEncoder.jsonFromBuffer(encoded, encoding));

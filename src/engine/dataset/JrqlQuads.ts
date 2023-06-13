@@ -1,37 +1,34 @@
 import { Graph, KvpBatch, PatchQuads } from '.';
-import { blank, Datatype, GraphSubject, isSharedDatatype } from '../../api';
+import {
+  blank, GraphSubject, IndirectedData, IndirectedDatatype, isSharedDatatype
+} from '../../api';
 import { Atom, Expression, Result, Subject, Value } from '../../jrql-support';
 import {
-  inPosition,
-  isLiteralTriple,
-  isTypedTriple,
-  LiteralTriple,
-  Quad,
-  Quad_Object,
-  Term,
-  Triple,
+  inPosition, isLiteralTriple, isTypedTriple, LiteralTriple, Quad, Quad_Object, Term, Triple,
   tripleKey
 } from '../quads';
 import { JRQL } from '../../ns';
 import { SubjectGraph } from '../SubjectGraph';
 import { JrqlMode, toIndexDataUrl } from '../jrql-util';
 import { clone, concatIter, IndexKeyGenerator, isArray, mapIter, mapObject } from '../util';
-import { JrqlContext, SubjectQuads } from '../SubjectQuads';
+import { SubjectQuads } from '../SubjectQuads';
 import { Binding } from '../../rdfjs-support';
 import * as MsgPack from '../msgPack';
 import { Operation } from '../ops';
 import { takeWhile } from 'rxjs/operators';
 import { drain } from 'rx-flowable';
+import { JsonldContext } from '../jsonld';
 
 export class JrqlQuads {
   constructor(
-    readonly graph: Graph
+    readonly graph: Graph,
+    readonly indirectedData: IndirectedData
   ) {}
 
   async solutionSubject(
     results: Result[] | Result,
     solution: Binding,
-    ctx: JrqlContext
+    ctx: JsonldContext
   ): Promise<GraphSubject> {
     const solutionId = this.rdf.blankNode(blank());
     const pseudoPropertyQuads = Object.entries(solution).map(([variable, term]) => this.graph.quad(
@@ -59,14 +56,14 @@ export class JrqlQuads {
     return this.graph.rdf;
   }
 
-  in(mode: JrqlMode, ctx: JrqlContext) {
-    return new SubjectQuads(this.rdf, mode, ctx);
+  in(mode: JrqlMode, ctx: JsonldContext) {
+    return new SubjectQuads(this.rdf, mode, ctx, this.indirectedData);
   }
 
   toQuads(
     subjects: Subject | Subject[],
     mode: JrqlMode,
-    ctx: JrqlContext
+    ctx: JsonldContext
   ): Quad[] {
     return this.in(mode, ctx).toQuads(subjects);
   }
@@ -80,9 +77,9 @@ export class JrqlQuads {
   async toApiSubject(
     propertyQuads: Quad[],
     listItemQuads: Quad[],
-    ctx: JrqlContext
+    ctx: JsonldContext
   ): Promise<GraphSubject> {
-    await Promise.all(propertyQuads.map(quad => this.loadData(quad, ctx)));
+    await Promise.all(propertyQuads.map(quad => this.loadData(quad)));
     const subjects = SubjectGraph.fromRDF(propertyQuads, { ctx });
     const subject = { ...subjects[0] };
     if (listItemQuads.length) {
@@ -108,17 +105,17 @@ export class JrqlQuads {
     }
   }
 
-  toObjectTerm(value: Atom, ctx: JrqlContext): Quad_Object {
-    return new SubjectQuads(this.rdf, JrqlMode.match, ctx).objectTerm(value);
+  toObjectTerm(value: Atom, ctx: JsonldContext): Quad_Object {
+    return this.in(JrqlMode.match, ctx).objectTerm(value);
   }
 
   async applyTripleUpdate(
     triple: Quad,
-    update: Expression,
-    ctx: JrqlContext
+    update: Expression
   ): Promise<UpdateMeta | undefined> {
     if (isLiteralTriple(triple)) {
-      const datatype = ctx.getDatatype(triple.object.datatype.value);
+      const datatype = this.indirectedData(
+        triple.predicate.value, triple.object.datatype.value);
       // TODO: Bug: what if the datatype is no longer shared?
       if (datatype != null && isSharedDatatype(datatype)) {
         await this.loadDataOfType(triple, datatype);
@@ -134,11 +131,10 @@ export class JrqlQuads {
 
   async applyTripleOperation(
     triple: Quad,
-    operation: unknown,
-    ctx: JrqlContext
+    operation: unknown
   ): Promise<UpdateMeta | undefined> {
     if (isLiteralTriple(triple)) {
-      await this.loadData(triple, ctx);
+      await this.loadData(triple);
       if (isTypedTriple(triple) && isSharedDatatype(triple.object.typed.type)) {
         // Shared datatypes have UUID values, so the type should be correct
         const [data, update, revert] = triple.object.typed.type.apply(
@@ -149,10 +145,11 @@ export class JrqlQuads {
     }
   }
 
-  loadHasData(triples: Iterable<JrqlQuad>, ctx: JrqlContext) {
+  loadHasData(triples: Iterable<JrqlQuad>) {
     return Promise.all(mapIter(triples, async triple => {
       if (isLiteralTriple(triple) && triple.hasData == null) {
-        const datatype = ctx.getDatatype(triple.object.datatype.value);
+        const datatype = this.indirectedData(
+          triple.predicate.value, triple.object.datatype.value);
         if (datatype != null) {
           const keys = await this.loadDataAndOps(triple, { values: false });
           if (keys.length > 0) {
@@ -173,15 +170,16 @@ export class JrqlQuads {
       takeWhile(({ value: [key] }) => key.startsWith(tripleKey))));
   }
 
-  async loadData(triple: Triple, ctx: JrqlContext) {
+  async loadData(triple: Triple) {
     if (isLiteralTriple(triple)) {
-      const datatype = ctx.getDatatype(triple.object.datatype.value);
+      const datatype = this.indirectedData(
+        triple.predicate.value, triple.object.datatype.value);
       if (datatype != null)
         await this.loadDataOfType(triple, datatype);
     }
   }
 
-  private async loadDataOfType(triple: LiteralTriple, datatype: Datatype) {
+  private async loadDataOfType(triple: LiteralTriple, datatype: IndirectedDatatype) {
     // TODO: Allow for datatype caching
     const keyValues = await this.loadDataAndOps(triple);
     if (keyValues.length > 0) {

@@ -234,13 +234,13 @@ export class ExtensionSubject<T extends ExtensionSubjectInstance> extends OrmSub
 
   /** Override to provide custom post-initialisation behaviour */
   protected initialisedInstance(src: GraphSubject, orm: OrmUpdating) {
-    const inst = this.newInstance();
+    const inst = this.newInstance(src, orm);
     inst.initFromData?.(src, orm, this);
     return inst;
   }
 
   /** Override to provide custom pre-initialisation behaviour */
-  protected newInstance() {
+  protected newInstance(src: GraphSubject, orm: OrmUpdating) {
     return new this.factory.construct!();
   }
 }

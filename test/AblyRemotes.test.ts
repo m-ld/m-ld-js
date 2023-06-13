@@ -9,7 +9,7 @@ import { NewClockRequest, NewClockResponse } from '../src/engine/remotes/Control
 import { DeepMockProxy } from 'jest-mock-extended/lib/Mock';
 import { MeldOperationMessage } from '../src/engine/MeldOperationMessage';
 import { Future } from '../src/engine/Future';
-import { array } from '../src/index';
+import { array, MeldExtensions, noTransportSecurity } from '../src/index';
 import MockInstance = jest.MockInstance;
 
 /** The connection callback overload used by AblyRemotes */
@@ -29,7 +29,9 @@ describe('Ably remotes', () => {
   const config: MeldAblyConfig = {
     '@id': 'test', '@domain': 'test.m-ld.org', genesis: true, ably: { token: 'token' }
   };
-  const extensions = () => Promise.resolve({});
+  const extensions = () => Promise.resolve(mock<MeldExtensions>({
+    transportSecurity: noTransportSecurity
+  }));
   function otherPresent() {
     const [subscriber] = operations.presence.subscribe.mock.calls[0];
     if (typeof subscriber != 'function')

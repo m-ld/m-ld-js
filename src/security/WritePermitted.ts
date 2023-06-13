@@ -1,5 +1,5 @@
 import { ExtensionSubject, OrmSubject, OrmUpdating } from '../orm';
-import { GraphSubject, InterimUpdate, MeldError, MeldExtensions, MeldReadState } from '../api';
+import { GraphSubject, InterimUpdate, MeldError, MeldPlugin, MeldReadState } from '../api';
 import { Describe, Reference, Subject } from '../jrql-support';
 import { M_LD } from '../ns';
 import { Iri } from '@m-ld/jsonld';
@@ -23,7 +23,7 @@ import { CacheMissListener, OrmScope } from '../orm/OrmDomain';
  * @experimental
  * @noInheritDoc
  */
-export class WritePermitted implements ExtensionSubjectInstance, MeldExtensions {
+export class WritePermitted implements ExtensionSubjectInstance, MeldPlugin {
   /**
    * Extension declaration. Insert into the domain data to install the
    * extension. For example (assuming a **m-ld** `clone` object):

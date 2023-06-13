@@ -1,15 +1,7 @@
 import * as spec from '@m-ld/m-ld-spec';
 import { MeldErrorStatus } from '@m-ld/m-ld-spec';
 import type {
-  ExpandedTermDef,
-  Query,
-  Read,
-  Reference,
-  Subject,
-  SubjectProperty,
-  Update,
-  Variable,
-  Write
+  ExpandedTermDef, Query, Read, Reference, Subject, SubjectProperty, Update, Variable, Write
 } from './jrql-support';
 import { Expression, Value } from './jrql-support';
 import { Subscription } from 'rxjs';
@@ -550,27 +542,33 @@ export interface MeldContext {
  * @experimental
  * @category Experimental
  */
-export interface MeldExtensions {
+export interface MeldPlugin extends Partial<MeldExtensions> {
   /**
    * Give the extensions some context
    */
   setExtensionContext?(context: MeldAppContext): void;
+}
+
+/**
+ * Strict definitions of the extension types available
+ */
+export interface MeldExtensions {
   /**
    * Data invariant constraints applicable to the domain.
    *
    * @experimental
    */
-  readonly constraints?: Iterable<MeldConstraint>;
+  readonly constraints: Iterable<MeldConstraint>;
   /**
    * @todo
    */
-  readonly datatypes?: (id: Iri) => Datatype | undefined;
+  readonly indirectedData: IndirectedData;
   /**
    * Agreement preconditions applicable to the domain.
    *
    * @experimental
    */
-  readonly agreementConditions?: Iterable<AgreementCondition>;
+  readonly agreementConditions: Iterable<AgreementCondition>;
   /**
    * A transport security interceptor. If the initial transport security is not
    * compatible with the rest of the domain, this clone may not be able to join
@@ -578,7 +576,7 @@ export interface MeldExtensions {
    *
    * @experimental
    */
-  readonly transportSecurity?: MeldTransportSecurity;
+  readonly transportSecurity: MeldTransportSecurity;
 }
 
 /**
@@ -767,38 +765,56 @@ export interface InterimUpdate {
 }
 
 /**
+ * @todo
+ */
+export type IndirectedData = (property: Iri, datatype: Iri) => IndirectedDatatype | undefined;
+
+/**
  * @todo doc
  * @typeParam Data data type
  * @see https://ci.mines-stetienne.fr/lindt/spec.html#interface-customdatatype
  */
-export interface Datatype<Data = unknown> {
+export interface IndirectedDatatype<Data = unknown> {
   /**
-   * The identity of the datatype. Matched against value object literals.
-   * @see ValueObject
+   * The identity of the datatype itself. Used in the internal representation,
+   * which is visible to query filters; but a canonical json-rql Value is
+   * substituted in retrieval and updates.
    */
   readonly '@id': string;
   /**
-   * Checks whether the provided data is valid for this datatype. This may give
-   * the application some leeway in type strictness; but note that the data
-   * provided back to the application will be of type `T`.
+   * Obtains a (preferably short) identity for the given data, which is
+   * consistent with equality between data objects. The identity value is only
+   * visible to query filters; the data is {@link toValue indirected} in
+   * retrieval and updates.
+   */
+  getDataId(data: Data): string;
+  /**
+   * Parses a value provided by the app. This may give the application some
+   * leeway in type strictness; but note that the value provided back to the app
+   * will always be that returned by {@link IndirectedDatatype#toValue}, if
+   * provided, or the `Data` itself if not.
    *
-   * This method should ideally allow for values that might have been naively
-   * parsed from JSON in the app, for example in a data import, such that
-   * `value` is the JSON encoding of `T`.
+   * If the provided value is an expanded `ValueObject`, its datatype will be a
+   * fully pre-expanded IRI.
    *
    * @returns the valid data, or undefined if the data is not valid
    * @throws {TypeError} if a validation message is indicated
    */
-  validate(value: unknown): Data | undefined;
+  validate(value: Value): Data | undefined;
   /**
-   * Obtains a (preferably short) identity for the given data, which is
-   * consistent with equality between data objects. The identity value is
-   * only visible to query filters; the data is substituted in retrieval and
-   * updates. The identity is usually one-way, such that it's not necessarily
-   * possible to re-constitute data from it.
-   * @see https://www.w3.org/TR/rdf11-concepts/#dfn-lexical-space
+   * Provides a value to appear when the data is retrieved. The datatype should
+   * always accept the returned value forms in its `validate` method. If the
+   * value's type should be anything other than this datatype's `@id`, a
+   * `ValueObject` should be returned including the desired `@type`, even if
+   * it's a built-in type like xs:string. The value object will be compacted as
+   * normal in the application API.
+   *
+   * If the returned value is an expanded `ValueObject`, its datatype MUST be a
+   * fully expanded IRI.
+   *
+   * If this method is not provided, the data itself MUST be a valid API value.
    */
-  getDataId(data: Data): string;
+  toValue?(data: Data): Value;
   /**
    * Convert data to a representation that can be stringified to JSON. If this
    * method is not provided, the data itself must be JSON serialisable. The
@@ -819,18 +835,13 @@ export interface Datatype<Data = unknown> {
  * @typeParam Op operation type; must be JSON-serialisable
  * @typeParam Revert reversion metadata type; must be JSON-serialisable
  */
-export interface SharedDatatype<Data, Operation, Revert = null> extends Datatype<Data> {
+export interface SharedDatatype<Data, Operation, Revert = null> extends IndirectedDatatype<Data> {
   /**
-   * A shared data type MUST always generate a new identity as its lexical
-   * value, for which mutable state will exist.
+   * A shared data type MUST always generate a new unique identity as its
+   * lexical value, for which mutable state will exist. This will only be called
+   * once per logical instance.
    */
   getDataId(): UUID;
-  /**
-   * Provides a value to appear as the literal `@value` when retrieved. This
-   * allows the shared datatype to abstract its implementation type, `T`. The
-   * datatype will typically accept the abstract type in its `validate` method.
-   */
-  toValue?(data: Data): unknown;
   /**
    * Intercepts update of data. The implementation may mutate the passed `data`;
    * the backend may later revert the returned operation in case of rollback.
@@ -872,7 +883,7 @@ export interface SharedDatatype<Data, Operation, Revert = null> extends Datatype
 /**
  * @todo
  */
-export function isSharedDatatype<T>(dt: Datatype<T>): dt is SharedDatatype<T, unknown> {
+export function isSharedDatatype<T>(dt: IndirectedDatatype<T>): dt is SharedDatatype<T, unknown> {
   return 'update' in dt;
 }
 

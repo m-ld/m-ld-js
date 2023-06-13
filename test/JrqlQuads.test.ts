@@ -2,25 +2,29 @@ import { JrqlQuads } from '../src/engine/dataset/JrqlQuads';
 import * as N3 from 'n3';
 import { Graph } from '../src/engine/dataset';
 import { mock } from 'jest-mock-extended';
-import { Constraint } from '../src';
+import { Constraint, IndirectedData } from '../src';
 import { JrqlMode } from '../src/engine/jrql-util';
-import { JrqlContext } from '../src/engine/SubjectQuads';
 import { Literal, RdfFactory } from '../src/engine/quads';
 import { dateDatatype } from './datatypeFixtures';
+import { JsonldContext } from '../src/engine/jsonld';
 
 describe('json-rql Quads translation', () => {
   const rdf = new RdfFactory('http://test.m-ld.org');
 
   let jrql: JrqlQuads;
-  let ctx: JrqlContext;
+  let ctx: JsonldContext;
+  let indirectedData: IndirectedData;
 
   beforeEach(async () => {
-    ctx = await JrqlContext.active({
+    ctx = await JsonldContext.active({
       '@base': 'http://test.m-ld.org/',
       '@vocab': '#',
       'ex': 'http://example.org/'
     });
-    jrql = new JrqlQuads(mock<Graph>({ rdf }));
+    jrql = new JrqlQuads(
+      mock<Graph>({ rdf }),
+      (...args) => indirectedData?.(...args) // Deferred
+    );
   });
 
   test('quadifies @id-only top-level subject with variable p-o', () => {
@@ -121,13 +125,12 @@ describe('json-rql Quads translation', () => {
     expect(filters).toEqual([{ '@gt': [`?${quads[0].object.value}`, 40] }]);
   });
 
-
-
   test('serialises json-able datatype', () => {
-    const quads = jrql.in(JrqlMode.serial, ctx.withDatatypes(id => {
-      if (id === dateDatatype['@id'])
+    indirectedData = (property, datatype) => {
+      if (datatype === dateDatatype['@id'])
         return dateDatatype;
-    })).toQuads({
+    }
+    const quads = jrql.in(JrqlMode.serial, ctx).toQuads({
       '@id': 'fred',
       birthday: {
         '@type': 'http://ex.org/date',
@@ -144,10 +147,11 @@ describe('json-rql Quads translation', () => {
   });
 
   test('validates json-able datatype', () => {
-    const quads = jrql.in(JrqlMode.graph, ctx.withDatatypes(id => {
-      if (id === dateDatatype['@id'])
+    indirectedData = (property, datatype) => {
+      if (datatype === dateDatatype['@id'])
         return dateDatatype;
-    })).toQuads({
+    }
+    const quads = jrql.in(JrqlMode.graph, ctx).toQuads({
       '@id': 'fred',
       birthday: {
         '@type': 'http://ex.org/date',

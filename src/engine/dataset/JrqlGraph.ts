@@ -1,43 +1,19 @@
 import { Iri } from '@m-ld/jsonld';
 import {
-  Constraint,
-  Expression,
-  Group,
-  isConstraint,
-  isConstruct,
-  isDescribe,
-  isGroup,
-  isSelect,
-  isSubject,
-  isUpdate,
-  operators,
-  Query,
-  Read,
-  Result,
-  Subject,
-  SubjectProperty,
-  Update,
-  Variable,
-  VariableExpression,
-  Write
+  Constraint, Expression, Group, isConstraint, isConstruct, isDescribe, isGroup, isSelect,
+  isSubject, isUpdate, operators, Query, Read, Result, Subject, SubjectProperty, Update, Variable,
+  VariableExpression, Write
 } from '../../jrql-support';
 import { Graph } from '.';
 import { finalize, mergeMap, reduce } from 'rxjs/operators';
 import { concat, EMPTY, Observable, throwError } from 'rxjs';
 import {
-  asQueryVar,
-  canPosition,
-  Literal,
-  NamedNode,
-  Quad,
-  QueryableRdfSourceProxy,
-  Term,
-  TriplePos
+  asQueryVar, canPosition, Literal, NamedNode, Quad, QueryableRdfSourceProxy, Term, TriplePos
 } from '../quads';
 import { Algebra, Factory as SparqlFactory } from 'sparqlalgebrajs';
 import { JRQL } from '../../ns';
 import { JrqlPatchQuads, JrqlQuads } from './JrqlQuads';
-import { GraphSubject, MeldError, MeldReadState, ReadResult } from '../../api';
+import { GraphSubject, IndirectedData, MeldError, MeldReadState, ReadResult } from '../../api';
 import { binaryFold, first, flatten, inflate, isArray } from '../util';
 import { ConstructTemplate } from './ConstructTemplate';
 import { Binding, QueryableRdfSource } from '../../rdfjs-support';
@@ -48,7 +24,7 @@ import { constructSubject, JrqlMode } from '../jrql-util';
 import { array } from '../../util';
 import { readResult } from '../api-support';
 import { Future } from '../Future';
-import { JrqlContext } from '../SubjectQuads';
+import { JsonldContext } from '../jsonld';
 
 /**
  * A graph wrapper that provides low-level json-rql handling for queries. The
@@ -62,17 +38,19 @@ export class JrqlGraph {
 
   /**
    * @param quads a quads graph to operate on
+   * @param indirectedData data indirection extension config
    */
   constructor(
-    readonly quads: Graph
+    readonly quads: Graph,
+    indirectedData: IndirectedData
   ) {
     this.sparql = new SparqlFactory(quads.rdf);
-    this.jrql = new JrqlQuads(quads);
+    this.jrql = new JrqlQuads(quads, indirectedData);
     // Map ourselves to a top-level read state, used for constraints
     const jrqlGraph = this;
     this.asReadState = new (class extends QueryableRdfSourceProxy implements MeldReadState {
       // This uses the default initial context, so no prefix mappings or datatypes
-      ctx = new JrqlContext();
+      ctx = new JsonldContext();
       get src(): QueryableRdfSource {
         return quads;
       }
@@ -93,7 +71,7 @@ export class JrqlGraph {
     return this.quads.rdf;
   }
 
-  read(query: Read, ctx: JrqlContext): Consumable<GraphSubject> {
+  read(query: Read, ctx: JsonldContext): Consumable<GraphSubject> {
     // For describe, we have to extend the state lock for all sub-queries
     const finished = this.quads.lock.extend('state', 'read', new Future);
     return inflate(
@@ -112,7 +90,7 @@ export class JrqlGraph {
     ).pipe(finalize(finished.resolve));
   }
 
-  async write(query: Write, ctx: JrqlContext): Promise<JrqlPatchQuads> {
+  async write(query: Write, ctx: JsonldContext): Promise<JrqlPatchQuads> {
     ctx = await ctx.next(query['@context']);
     // @unions not supported unless in a where clause
     if (isGroup(query) && query['@graph'] != null && query['@union'] == null)
@@ -125,7 +103,7 @@ export class JrqlGraph {
       throw new MeldError('Unsupported pattern', 'Write type not supported.');
   }
 
-  async ask(query: Query, ctx: JrqlContext): Promise<boolean> {
+  async ask(query: Query, ctx: JsonldContext): Promise<boolean> {
     return this.quads.lock.extend('state', 'ask',
       ctx.next(query['@context']).then(activeCtx => this.quads.ask(this.sparql.createAsk(
         this.operation(query['@where'] ?? {}, activeCtx)))));
@@ -134,7 +112,7 @@ export class JrqlGraph {
   select(
     select: Result,
     where: Subject | Subject[] | Group,
-    ctx: JrqlContext
+    ctx: JsonldContext
   ): Consumable<GraphSubject> {
     return this.solutions(where, this.project, ctx).pipe(
       flatMap(solution =>
@@ -145,7 +123,7 @@ export class JrqlGraph {
   describe(
     describes: (Iri | Variable)[],
     where: Subject | Subject[] | Group | undefined,
-    ctx: JrqlContext
+    ctx: JsonldContext
   ): Consumable<GraphSubject> {
     return concat(...describes.map(describe => {
       // noinspection TypeScriptValidateJSTypes
@@ -166,7 +144,7 @@ export class JrqlGraph {
     }));
   }
 
-  get(id: Iri, ctx: JrqlContext): Promise<GraphSubject | undefined> {
+  get(id: Iri, ctx: JsonldContext): Promise<GraphSubject | undefined> {
     return this.quads.lock.extend('state', 'get',
       this.describe1(this.resolve(id, ctx), ctx));
   }
@@ -174,14 +152,14 @@ export class JrqlGraph {
   pick(
     id: Iri,
     properties: SubjectProperty[],
-    ctx: JrqlContext
+    ctx: JsonldContext
   ): Promise<GraphSubject | undefined> {
     return this.quads.lock.extend('state', 'pick',
       first(this.constructResult(
         constructSubject(id, properties), undefined, ctx)));
   }
 
-  private async describe1(subjectId: Term, ctx: JrqlContext): Promise<GraphSubject | undefined> {
+  private async describe1(subjectId: Term, ctx: JsonldContext): Promise<GraphSubject | undefined> {
     const propertyQuads: Quad[] = [], listItemQuads: Quad[] = [];
     await each(consume(this.quads.query(subjectId)), async propertyQuad => {
       let isSlot = false;
@@ -208,7 +186,7 @@ export class JrqlGraph {
   construct(
     construct: Subject | Subject[],
     where: Subject | Subject[] | Group | undefined,
-    ctx: JrqlContext
+    ctx: JsonldContext
   ): Consumable<GraphSubject> {
     return consume(this.constructResult(construct, where, ctx));
   }
@@ -217,7 +195,7 @@ export class JrqlGraph {
   constructResult(
     construct: Subject | Subject[],
     where: Subject | Subject[] | Group | undefined,
-    ctx: JrqlContext
+    ctx: JsonldContext
   ): Observable<GraphSubject> {
     const template = new ConstructTemplate(construct, ctx);
     // If no where, use the construct as the pattern
@@ -232,7 +210,7 @@ export class JrqlGraph {
       mergeMap(template => template.results()));
   }
 
-  private async update(update: Update, ctx: JrqlContext): Promise<JrqlPatchQuads> {
+  private async update(update: Update, ctx: JsonldContext): Promise<JrqlPatchQuads> {
     return new JrqlGraph.Update(this, ctx, update).toPatch();
   }
 
@@ -248,7 +226,7 @@ export class JrqlGraph {
 
     constructor(
       readonly graph: JrqlGraph,
-      readonly ctx: JrqlContext,
+      readonly ctx: JsonldContext,
       update: Update
     ) {
       this.deletes = this.graph.jrql.in(JrqlMode.match, ctx)
@@ -317,7 +295,7 @@ export class JrqlGraph {
                 const [returnVar, constraint] = this.updateConstraints[queryVar];
                 // TODO: Bind any variables in the constraint
                 const opMeta = await this.graph.jrql
-                  .applyTripleUpdate(quad, constraint, this.ctx);
+                  .applyTripleUpdate(quad, constraint);
                 if (opMeta != null) {
                   patch.addUpdateMeta(quad, opMeta);
                   // This theoretically overrides a binding that was generated by SPARQL
@@ -327,7 +305,7 @@ export class JrqlGraph {
               } else {
                 // When deleting a matched variable, load the data so it gets
                 // reported to the app in the update
-                await this.graph.jrql.loadData(quad, this.ctx);
+                await this.graph.jrql.loadData(quad);
               }
             }));
           patch.inserts.addAll(await this.fillTemplate(inserts, solution));
@@ -386,7 +364,7 @@ export class JrqlGraph {
     }
   };
 
-  graphQuads(pattern: Subject | Subject[], ctx: JrqlContext) {
+  graphQuads(pattern: Subject | Subject[], ctx: JsonldContext) {
     const vars = new Set<string>();
     const quads = this.jrql.in(JrqlMode.graph, ctx)
       .on('var', v => vars.add(v))
@@ -404,7 +382,7 @@ export class JrqlGraph {
   private solutions<T>(
     where: Subject | Subject[] | Group,
     exec: (op: Algebra.Operation, rtnVars: Iterable<string>) => Consumable<T>,
-    ctx: JrqlContext,
+    ctx: JsonldContext,
     rtnVars = new Set<string>(),
     filters: ReadonlyArray<Constraint> = [],
     binds: ReadonlyArray<VariableExpression> = []
@@ -415,7 +393,7 @@ export class JrqlGraph {
 
   private operation(
     where: Subject | Subject[] | Group,
-    ctx: JrqlContext,
+    ctx: JsonldContext,
     vars = new Set<string>(),
     filters: ReadonlyArray<Constraint> = [],
     binds: ReadonlyArray<VariableExpression> = []
@@ -441,7 +419,7 @@ export class JrqlGraph {
 
   private constrainedOperation(
     op: Algebra.Operation,
-    ctx: JrqlContext,
+    ctx: JsonldContext,
     rtnVars: Set<string>,
     filter: ReadonlyArray<Constraint>,
     bind: ReadonlyArray<VariableExpression>,
@@ -476,7 +454,7 @@ export class JrqlGraph {
 
   private valuesExpr(
     values: ReadonlyArray<VariableExpression>,
-    ctx: JrqlContext
+    ctx: JsonldContext
   ): Algebra.Operation {
     const variableNames = new Set<string>();
     const variablesTerms = values.map(
@@ -503,7 +481,7 @@ export class JrqlGraph {
 
   private constraintExpr(
     constraints: ReadonlyArray<Constraint>,
-    ctx: JrqlContext
+    ctx: JsonldContext
   ): Algebra.Expression {
     const expression = binaryFold(
       // Every constraint and every entry in a constraint is ANDed
@@ -524,7 +502,7 @@ export class JrqlGraph {
   private operatorExpr(
     operator: string,
     expr: Expression | Expression[],
-    ctx: JrqlContext
+    ctx: JsonldContext
   ): Algebra.Expression | undefined {
     if (operator in operators) {
       const sparqlOperator = operators[operator].sparql;
@@ -537,7 +515,7 @@ export class JrqlGraph {
     }
   }
 
-  private exprExpr(expr: Expression, ctx: JrqlContext): Algebra.Expression {
+  private exprExpr(expr: Expression, ctx: JsonldContext): Algebra.Expression {
     if (isConstraint(expr)) {
       return this.constraintExpr([expr], ctx);
     } else {
@@ -553,7 +531,7 @@ export class JrqlGraph {
       [...rtnVars].map(varName => this.rdf.variable(varName)))));
   };
 
-  private resolve(iri: Iri, ctx: JrqlContext): NamedNode {
+  private resolve(iri: Iri, ctx: JsonldContext): NamedNode {
     return this.rdf.namedNode(ctx.expandTerm(iri));
   }
 

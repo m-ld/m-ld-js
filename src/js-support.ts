@@ -271,6 +271,19 @@ export class JsContainerType<T, S> extends JsType<T, S> {
  */
 export class JsProperty<T, S = unknown> {
   /**
+   * Construct a property mapping for a known type and subtype.
+   * @see JsType#for
+   * @category Utility
+   */
+  static for<T, S>(
+    property: string,
+    type: PropertyType<T>,
+    subType?: AtomType<S>
+  ) {
+    return new JsProperty(property, JsType.for(type, subType));
+  }
+
+  /**
    * @param name the JSON-LD property to inspect
    * @param type the property type
    */
@@ -455,7 +468,10 @@ function castValue<T>(value: Value, type: JsAtomValueConstructor): T {
         if (typeof value == 'string')
           return <T>value;
         break;
-      // Do not support Buffer here
+      case Uint8Array:
+        if (value instanceof Uint8Array)
+          return <T>value;
+        break;
     }
   }
   throw new TypeError(`${value} is not a ${type.name}`);
@@ -541,11 +557,6 @@ function normaliseAtomValue(
         return {
           '@type': XS.dateTime,
           '@value': value.toISOString()
-        };
-      else if (value instanceof Uint8Array)
-        return {
-          '@type': XS.base64Binary,
-          '@value': Buffer.from(value).toString('base64')
         };
       else if (value != null)
         return <Subject>value; // Could also be a reference or a value object

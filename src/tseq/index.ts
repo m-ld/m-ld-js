@@ -1,2 +1,2 @@
 export { TSeq, TSeqOperation } from './TSeq';
-export { TSeqDatatype } from './TSeqDatatype';
+export { TSeqText } from './TSeqText';

@@ -9,20 +9,12 @@ import { Context, ExpandedTermDefinition, Iri, Options, processContext } from '@
 import { compactIri, compactValue } from '@m-ld/jsonld/lib/compact';
 import { compareValues as _compareValues } from '@m-ld/jsonld/lib/util';
 import {
-  ActiveContext,
-  expandIri,
-  getContextValue,
-  getInitialContext
+  ActiveContext, expandIri, getContextValue, getInitialContext
 } from '@m-ld/jsonld/lib/context';
 import { isAbsolute } from '@m-ld/jsonld/lib/url';
 import { isBoolean, isDouble, isNumber, isString } from '@m-ld/jsonld/lib/types';
 import {
-  ExpandedTermDef,
-  isReference,
-  isSet,
-  isSubjectObject,
-  isValueObject,
-  isVocabReference
+  ExpandedTermDef, isReference, isSet, isSubjectObject, isValueObject, isVocabReference
 } from '../jrql-support';
 import { array } from '../util';
 import { RDF, XS } from '../ns';
@@ -162,7 +154,7 @@ export function minimiseValue(v: any) {
 /**
  * Maps the canonical JSON-LD property value to some target type.
  *
- * @param property the property
+ * @param property the property, or `null` if unknown
  * @param value the JSON-LD value (raw values, value objects, references).
  * Subjects are minimised to references.
  * @param ctx the JSON-LD context, to establish the type
@@ -174,7 +166,7 @@ export function expandValue(
   ctx?: JsonldExpander
 ): {
   raw: any,
-  canonical: string,
+  canonical: string, // Canonical expanded or lexical value
   type: '@id' | '@vocab' | Iri | '@none',
   language?: string,
   id?: string // Indicates a value object if not-null, may be blank
@@ -182,18 +174,12 @@ export function expandValue(
   value = minimiseValue(value);
   if (isReference(value)) {
     value = value['@id'];
-    return {
-      raw: value,
-      canonical: ctx?.expandTerm(value) ?? value,
-      type: '@id'
-    };
+    const canonical = ctx?.expandTerm(value) ?? value;
+    return { raw: value, canonical, type: '@id' };
   } else if (isVocabReference(value)) {
     value = value['@vocab'];
-    return {
-      raw: value,
-      canonical: ctx?.expandTerm(value, { vocab: true }) ?? value,
-      type: '@vocab'
-    };
+    const canonical = ctx?.expandTerm(value, { vocab: true }) ?? value;
+    return { raw: value, canonical, type: '@vocab' };
   }
   let canonical: string | undefined,
     type: string | undefined,
@@ -209,26 +195,33 @@ export function expandValue(
   if (type == null && property != null && ctx != null)
     type = ctx.getTermDetail(property, '@type') ?? undefined;
   if (type === '@json') {
-    type = RDF.JSON;
-    // Do not attempt to canonicalise
+    return {
+      raw: value,
+      get canonical() { return JSON.stringify(value); },
+      type: RDF.JSON,
+      id
+    };
+  } else if (value instanceof Uint8Array) {
+    return {
+      raw: value,
+      get canonical() { return Buffer.from(value).toString('base64'); },
+      type: XS.base64Binary,
+      id
+    };
   } else if (typeof value == 'string') {
     if (property === '@type' || type === '@id' || type === '@vocab') {
       const vocab = property === '@type' || type === '@vocab';
       canonical = ctx?.expandTerm(value, { vocab }) ?? value;
-      return { raw: value, canonical, type: vocab ? '@vocab' : '@id' };
+      return { raw: value, canonical, type: vocab ? '@vocab' : '@id', id };
     }
     if (property != null && ctx != null)
       language = ctx.getTermDetail(property, '@language') ?? undefined;
     if (language != null)
-      return {
-        raw: value,
-        canonical: value,
-        type: XS.string,
-        language
-      };
+      return { raw: value, canonical: value, type: XS.string, language, id };
     if (type === XS.double)
       canonical = canonicalDouble(parseFloat(value));
     canonical ??= value;
+    type ??= XS.string;
   } else if (isBoolean(value)) {
     canonical = value.toString();
     type ??= XS.boolean;
@@ -241,11 +234,7 @@ export function expandValue(
       type ??= XS.integer;
     }
   }
-  return {
-    raw: value,
-    canonical: canonical ?? '',
-    type: type ?? '@none',
-    language,
-    id
-  };
+  canonical ??= '';
+  type ??= '@none';
+  return { raw: value, canonical, type, language, id };
 }
