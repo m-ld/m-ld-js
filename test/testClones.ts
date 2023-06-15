@@ -3,7 +3,7 @@ import {
 } from '../src/engine';
 import { mock, mockFn, MockProxy } from 'jest-mock-extended';
 import { asapScheduler, BehaviorSubject, EMPTY, from, NEVER, Observable, Observer } from 'rxjs';
-import { Dataset, Patch, PatchQuads, QuadStoreDataset } from '../src/engine/dataset';
+import { Dataset, Patch, PatchQuads, QuadStoreDataset, TxnContext } from '../src/engine/dataset';
 import { GlobalClock, TreeClock } from '../src/engine/clocks';
 import { AsyncMqttClient, IPublishPacket } from 'async-mqtt';
 import { EventEmitter } from 'events';
@@ -26,6 +26,9 @@ import { Future } from '../src/engine/Future';
 import { SubjectGraph } from '../src/engine/SubjectGraph';
 import { TidsStore } from '../src/engine/dataset/TidsStore';
 import { JsonldContext } from '../src/engine/jsonld';
+import { JrqlQuads } from '../src/engine/dataset/JrqlQuads';
+import { Stopwatch } from '../src/engine/Stopwatch';
+import { CacheFactory } from '../src/engine/cache';
 
 export const testDomain = 'test.m-ld.org';
 export const testContext = new DomainContext(testDomain);
@@ -90,6 +93,8 @@ export class MockState {
       await dataset.lock.acquire('state', 'test', 'share'));
   }
 
+  txnId = 0;
+
   protected constructor(
     readonly dataset: Dataset,
     readonly close: () => void
@@ -100,6 +105,15 @@ export class MockState {
       prepare: async () => ({ patch: await txn() })
     });
   }
+
+  newTxnContext() {
+    const id = `${++this.txnId}`;
+    const txc = new class extends EventEmitter implements TxnContext {
+      sw = new Stopwatch('txn', id);
+      id = id;
+    }();
+    return txc;
+  }
 }
 
 type GraphStateWriteOpts = {
@@ -108,17 +122,21 @@ type GraphStateWriteOpts = {
 };
 
 export class MockGraphState {
-  static async create({ dataset, context, domain, indirectedData }: {
+  static async create({ dataset, context, domain, indirectedData, cacheFactory }: {
     dataset?: Dataset,
     context?: Context,
     domain?: string,
-    indirectedData?: IndirectedData
+    indirectedData?: IndirectedData,
+    cacheFactory?: CacheFactory
   } = {}) {
     context ??= testContext;
     return new MockGraphState(
       await MockState.create({ dataset, domain }),
       await JsonldContext.active(context ?? {}),
-      indirectedData ?? (() => undefined));
+      indirectedData ?? (() => undefined),
+      // Turn caching off by default
+      cacheFactory ?? new CacheFactory({ max: 0 })
+    );
   }
 
   readonly graph: JrqlGraph;
@@ -127,9 +145,12 @@ export class MockGraphState {
   protected constructor(
     readonly state: MockState,
     readonly ctx: JsonldContext,
-    readonly indirectedData: IndirectedData
+    readonly indirectedData: IndirectedData,
+    cacheFactory: CacheFactory
   ) {
-    this.graph = new JrqlGraph(state.dataset.graph(), indirectedData);
+    const graph = state.dataset.graph();
+    const quads = new JrqlQuads(graph, indirectedData, cacheFactory);
+    this.graph = new JrqlGraph(graph, quads);
     this.tidsStore = mock();
   }
 
@@ -141,7 +162,8 @@ export class MockGraphState {
       opts != null ? ('check' in opts ? { constraint: opts } : opts) : {};
     const update = new Future<MeldPreUpdate>();
     await this.state.write(async () => {
-      const patch = await this.graph.write(request, this.ctx);
+      const txc = this.state.newTxnContext();
+      const patch = await this.graph.write(request, this.ctx, txc);
       const interim = new InterimUpdatePatch(
         patch,
         this.graph,
@@ -149,6 +171,7 @@ export class MockGraphState {
         this.ctx,
         null,
         null,
+        txc,
         { mutable: true }
       );
       await constraint?.check(this.graph.asReadState, interim);
@@ -287,7 +310,7 @@ export class MockProcess implements ClockHolder<TreeClock> {
       gwc: this.gwc,
       updates,
       cancel: mockFn()
-    }
+    };
   }
 
   snapshot(data: Snapshot.Datum[] = []): DatasetSnapshot {

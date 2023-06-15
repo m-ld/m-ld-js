@@ -31,14 +31,15 @@ import { MeldOperationMessage } from '../MeldOperationMessage';
 import { check } from '../check';
 import { getIdLogger } from '../logging';
 import { Future } from '../Future';
-import { JrqlPatchQuads, UpdateMeta } from './JrqlQuads';
+import { JrqlPatchQuads, JrqlQuads, UpdateMeta } from './JrqlQuads';
 import { RefTriple } from '../jrql-util';
 import { JsonldContext } from '../jsonld';
+import { CacheFactory } from '../cache';
 
 export type DatasetSnapshot = Omit<Snapshot, 'updates'>;
 
 type DatasetConfig = Pick<MeldConfig,
-  '@id' | '@domain' | 'maxOperationSize' | 'logLevel' | 'journal'>;
+  '@id' | '@domain' | 'maxOperationSize' | 'logLevel' | 'journal' | 'maxDataCacheSize'>;
 
 type SuSetDataPatch = { quads: JrqlPatchQuads, tids: PatchTids };
 
@@ -57,15 +58,20 @@ export class SuSetDataset extends MeldEncoder {
   private static checkReadyForTxn = check((d: SuSetDataset) =>
     d.readyForTxn, () => new MeldError('Unknown error', 'Dataset not ready'));
 
+  private static getCacheFactory(config: DatasetConfig) {
+    return new CacheFactory({
+      max: config.maxDataCacheSize ?? 10_000_000 // ~10MB
+    });
+  }
+
   /** External context used for reads, writes and updates, but not for constraints. */
-  /*readonly*/ userCtx: JsonldContext;
+  public /*readonly*/ userCtx: JsonldContext;
 
   private /*readonly*/ userGraph: JrqlGraph;
   private readonly tidsStore: TidsStore;
   private readonly journal: Journal;
   private readonly journalClerk: JournalClerk;
   private readonly updateSource: Source<MeldUpdate> = new Source;
-  private readonly maxOperationSize: number;
   private readonly log: Logger;
   private readyForTxn = false;
 
@@ -74,7 +80,9 @@ export class SuSetDataset extends MeldEncoder {
     private readonly context: Context,
     private readonly extensions: StateManaged & MeldExtensions,
     private readonly app: MeldApp,
-    config: DatasetConfig
+    config: DatasetConfig,
+    private readonly maxOperationSize = config.maxOperationSize ?? Infinity,
+    private readonly cacheFactory = SuSetDataset.getCacheFactory(config)
   ) {
     super(config['@domain'], dataset.rdf, extensions.indirectedData);
     if (app.principal?.['@id'] === M_LD.localEngine)
@@ -83,14 +91,15 @@ export class SuSetDataset extends MeldEncoder {
     this.journal = new Journal(dataset, this);
     this.tidsStore = new TidsStore(dataset);
     this.journalClerk = new JournalClerk(this.journal, this.sign, config, app.journalAdmin);
-    this.maxOperationSize = config.maxOperationSize ?? Infinity;
   }
 
   @SuSetDataset.checkNotClosed.async
   async initialise() {
     await super.initialise();
     this.userCtx = await JsonldContext.active(this.context);
-    this.userGraph = new JrqlGraph(this.dataset.graph(), this.indirectedData);
+    const graph = this.dataset.graph();
+    this.userGraph = new JrqlGraph(graph,
+      new JrqlQuads(graph, this.indirectedData, this.cacheFactory));
   }
 
   private get transportSecurity() {
@@ -121,8 +130,8 @@ export class SuSetDataset extends MeldEncoder {
   }
 
   @SuSetDataset.checkStateLocked.async
-  write(request: Write) {
-    return this.userGraph.write(request, this.userCtx);
+  write(request: Write, txc: TxnContext) {
+    return this.userGraph.write(request, this.userCtx, txc);
   }
 
   @SuSetDataset.checkStateLocked.async
@@ -226,14 +235,14 @@ export class SuSetDataset extends MeldEncoder {
   async transact(time: TreeClock, request: Write): Promise<OperationMessage | null> {
     return this.dataset.transact<OperationMessage | null>({
       prepare: async txc => {
-        const patch = await this.write(request);
+        const patch = await this.write(request, txc);
         if (patch.isEmpty)
           return { return: null };
 
         txc.sw.next('check-constraints');
         const pid = this.app.principal?.['@id'] ?? null;
         const agree = isUpdate(request) ? request['@agree'] : undefined;
-        const txn = await this.constrain(patch, 'check', pid, agree);
+        const txn = await this.constrain(patch, 'check', pid, agree, txc);
 
         txc.sw.next('find-tids');
         const deletedTriplesTids =
@@ -254,7 +263,7 @@ export class SuSetDataset extends MeldEncoder {
           trigger: msg.toAuditOperation(), voids: []
         });
         return this.txnResult({
-          ...txn, tidPatch, journaling, msg, trace
+          ...txn, tidPatch, journaling, msg, trace, txc
         });
       }
     });
@@ -264,7 +273,8 @@ export class SuSetDataset extends MeldEncoder {
     patch: JrqlPatchQuads,
     verb: keyof MeldConstraint,
     principalId: Iri | null,
-    agree: any | null
+    agree: any | null,
+    txc: TxnContext
   ) {
     const interim = new InterimUpdatePatch(
       patch,
@@ -273,6 +283,7 @@ export class SuSetDataset extends MeldEncoder {
       this.userCtx,
       principalId,
       agree,
+      txc,
       { mutable: verb === 'check' }
     );
     for (let constraint of this.extensions.constraints)
@@ -283,7 +294,7 @@ export class SuSetDataset extends MeldEncoder {
   /**
    * Rolls up the given transaction details into a single patch to the store.
    */
-  private async txnResult({ tidPatch, journaling, ...txn }: {
+  private async txnResult({ txc, tidPatch, journaling, ...txn }: {
     assertions: PatchQuads,
     entailments: PatchQuads,
     tidPatch: PatchTids,
@@ -291,39 +302,43 @@ export class SuSetDataset extends MeldEncoder {
     msg: OperationMessage | null,
     internalUpdate: MeldPreUpdate,
     userUpdate: MeldPreUpdate,
-    trace: MeldUpdate['trace']
+    trace: MeldUpdate['trace'],
+    txc: TxnContext
   }): Promise<PatchResult<OperationMessage | null>> {
     this.log.debug(`patch ${journaling.appendEntries.map(e => e.operation.time)}:
     deletes: ${[...txn.assertions.deletes].map(triple => tripleIndexKey(triple))}
     inserts: ${[...txn.assertions.inserts].map(triple => tripleIndexKey(triple))}`);
     const patch = new JrqlPatchQuads(txn.assertions).append(txn.entailments);
+    txc.on('commit', async () => {
+      if (this.readyForTxn)
+        await this.extensions.onUpdate?.(txn.internalUpdate, this.readState);
+      this.emitUpdate({
+        ...txn.userUpdate,
+        '@ticks': journaling.state.time.ticks,
+        trace: txn.trace
+      });
+    });
     return {
       patch,
-      kvps: await this.txnKvps({ tidPatch, journaling, patch }),
-      return: txn.msg,
-      after: async () => {
-        if (this.readyForTxn)
-          await this.extensions.onUpdate?.(txn.internalUpdate, this.readState);
-        this.emitUpdate({
-          ...txn.userUpdate,
-          '@ticks': journaling.state.time.ticks,
-          trace: txn.trace
-        });
-      }
+      kvps: await this.txnKvps({
+        tidPatch, journaling, patch, txc
+      }),
+      return: txn.msg
     };
   }
 
-  private async txnKvps({ tidPatch, journaling, patch }: {
+  private async txnKvps({ tidPatch, journaling, patch, txc }: {
     tidPatch?: PatchTids,
     journaling?: EntryBuilder,
-    patch?: JrqlPatchQuads
+    patch?: JrqlPatchQuads,
+    txc: TxnContext
   }): Promise<Kvps> {
     const commitTids = tidPatch && await this.tidsStore.commit(tidPatch);
     return batch => {
       commitTids?.(batch);
       journaling?.commit(batch);
       patch && this.userGraph.jrql.saveData(
-        patch, batch, journaling?.state.time.ticks);
+        txc, patch, batch, journaling?.state.time.ticks);
     };
   }
 
@@ -437,7 +452,7 @@ export class SuSetDataset extends MeldEncoder {
           .map(([, meta]) => [meta.revert, tick]);
         return meta.length > 0 ? meta : null;
       }
-    }
+    };
     return {
       ...operation.byRef(removals, 'deletes'),
       ...operation.byRef(revertMeta, 'updates')
@@ -526,7 +541,12 @@ export class SuSetDataset extends MeldEncoder {
 
         this.txc.sw.next('apply-cx'); // "cx" = constraint
         const { assertions: cxnAssertions, ...txn } = await this.ssd.constrain(
-          patch.quads, 'apply', this.operation.principalId, this.operation.agreed?.proof);
+          patch.quads,
+          'apply',
+          this.operation.principalId,
+          this.operation.agreed?.proof,
+          this.txc
+        );
 
         if (processAgreement && this.operation.agreed != null) {
           // Check agreement conditions. This is done against the non-rewound
@@ -574,7 +594,8 @@ export class SuSetDataset extends MeldEncoder {
           tidPatch: patch.tids,
           journaling: this.journaling,
           msg: cxnMsg,
-          trace: this.tracer({ applied: true, cxnMsg })
+          trace: this.tracer({ applied: true, cxnMsg }),
+          txc: this.txc
         });
       } catch (e) {
         // 4000-5000 are bad request errors, leading to an error update
@@ -652,42 +673,44 @@ export class SuSetDataset extends MeldEncoder {
         this.ssd.userCtx,
         M_LD.localEngine,
         null,
+        this.txc,
         { mutable: false }
       ).finalise();
+      this.txc.on('commit', async () => {
+        this.ssd.emitUpdate({
+          ...userUpdate,
+          '@ticks': this.journaling.state.time.ticks,
+          trace: this.tracer({ applied: false })
+        });
+        throw new MeldError('Update out of order',
+          'Journal rewind missing agreement causes');
+      });
       return {
         patch: rewindPatch.quads,
-        kvps: await this.ssd.txnKvps(
-          { tidPatch: rewindPatch.tids, journaling: this.journaling }),
-        return: null,
-        after: () => {
-          this.ssd.emitUpdate({
-            ...userUpdate,
-            '@ticks': this.journaling.state.time.ticks,
-            trace: this.tracer({ applied: false })
-          });
-          throw new MeldError('Update out of order',
-            'Journal rewind missing agreement causes');
-        }
+        kvps: await this.ssd.txnKvps({
+          tidPatch: rewindPatch.tids, journaling: this.journaling, txc: this.txc
+        }),
+        return: null
       };
     }
 
     private badOperationResult(error: MeldError): PatchResult<null> {
       // Put a block on any more operations from this remote
       this.journaling.block(this.operation.time);
+      this.txc.on('commit', () => {
+        this.ssd.emitUpdate({
+          '@delete': GraphSubjects.EMPTY,
+          '@insert': GraphSubjects.EMPTY,
+          '@update': GraphSubjects.EMPTY,
+          '@principal': InterimUpdatePatch.principalRef(
+            this.operation.principalId, this.ssd.userCtx),
+          '@ticks': this.journaling.state.time.ticks,
+          trace: this.tracer({ error, applied: false })
+        }, true);
+      });
       return {
-        return: null,
         kvps: this.journaling.commit, // Commit the block
-        after: () => {
-          this.ssd.emitUpdate({
-            '@delete': GraphSubjects.EMPTY,
-            '@insert': GraphSubjects.EMPTY,
-            '@update': GraphSubjects.EMPTY,
-            '@principal': InterimUpdatePatch.principalRef(
-              this.operation.principalId, this.ssd.userCtx),
-            '@ticks': this.journaling.state.time.ticks,
-            trace: this.tracer({ error, applied: false })
-          }, true);
-        }
+        return: null
       };
     }
 
@@ -759,7 +782,7 @@ export class SuSetDataset extends MeldEncoder {
       // Now modify the patch with deletions, insertions and custom operations
       patch.tids.append({ deletes: deletions.tids });
       const updates = await drain(inflate(
-        this.operation.updates, this.ssd.toSharedDataOpMeta));
+        this.operation.updates, this.toSharedDataOpMeta));
       patch.quads.append({
         deletes: deletions.triples.map(this.ssd.toUserQuad),
         inserts: this.operation.inserts.map(([triple]) => this.ssd.toUserQuad(triple)),
@@ -810,18 +833,22 @@ export class SuSetDataset extends MeldEncoder {
         };
       }
     }
-  };
 
-  private toSharedDataOpMeta = ([triple, operations]: [RefTriple, unknown[]]) => {
-    return this.tidsStore.findTriples(triple.subject, triple.predicate).pipe(
-      flatMap(literal => {
-        const quad = this.userGraph.quads.quad(triple.subject, triple.predicate, literal);
-        return consume(operations).pipe(flatMap(operation =>
-          consume(this.userGraph.jrql.applyTripleOperation(quad, operation)
-            .then(upMeta => upMeta && [this.toUserQuad(triple), upMeta] as [Quad, UpdateMeta]))));
-      }),
-      ignoreIf(null)
-    );
+    private toSharedDataOpMeta = ([triple, operations]: [RefTriple, unknown[]]) => {
+      return this.ssd.tidsStore.findTriples(triple.subject, triple.predicate).pipe(
+        flatMap(literal => {
+          const quad = this.ssd.userGraph.quads.quad(triple.subject, triple.predicate, literal);
+          return consume(operations).pipe(flatMap(operation =>
+            consume(this.ssd.userGraph.jrql.applyTripleOperation(quad, operation, this.txc)
+              .then(upMeta => upMeta && this.toQuadUpdate(triple, upMeta)))));
+        }),
+        ignoreIf(null)
+      );
+    };
+
+    private toQuadUpdate(triple: RefTriple, upMeta: UpdateMeta): [Quad, UpdateMeta] {
+      return [this.ssd.toUserQuad(triple), upMeta];
+    }
   };
 
   /**
@@ -846,7 +873,7 @@ export class SuSetDataset extends MeldEncoder {
     });
     await completed(inflate(snapshot.data, async batch => this.dataset.transact({
       id: 'snapshot-batch',
-      prepare: async () => {
+      prepare: async txc => {
         if ('inserts' in batch) {
           const reified = this.triplesFromBuffer(batch.inserts, batch.encoding);
           const triplesTids = this.unreifyTriplesTids(reified);
@@ -857,7 +884,8 @@ export class SuSetDataset extends MeldEncoder {
           const patch = new JrqlPatchQuads({
             inserts: triplesTids.map(([triple]) => this.toUserQuad(triple))
           });
-          return { kvps: await this.txnKvps({ tidPatch, patch }), patch };
+          const kvps = await this.txnKvps({ tidPatch, patch, txc });
+          return { kvps, patch };
         } else {
           return { kvps: this.journal.insertPastOperation(batch.operation) };
         }

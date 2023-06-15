@@ -767,14 +767,14 @@ export interface InterimUpdate {
 /**
  * @todo
  */
-export type IndirectedData = (property: Iri, datatype: Iri) => IndirectedDatatype | undefined;
+export type IndirectedData = (property: Iri, datatype: Iri) => Datatype | undefined;
 
 /**
  * @todo doc
  * @typeParam Data data type
  * @see https://ci.mines-stetienne.fr/lindt/spec.html#interface-customdatatype
  */
-export interface IndirectedDatatype<Data = unknown> {
+export interface Datatype<Data = unknown> {
   /**
    * The identity of the datatype itself. Used in the internal representation,
    * which is visible to query filters; but a canonical json-rql Value is
@@ -791,7 +791,7 @@ export interface IndirectedDatatype<Data = unknown> {
   /**
    * Parses a value provided by the app. This may give the application some
    * leeway in type strictness; but note that the value provided back to the app
-   * will always be that returned by {@link IndirectedDatatype#toValue}, if
+   * will always be that returned by {@link Datatype#toValue}, if
    * provided, or the `Data` itself if not.
    *
    * If the provided value is an expanded `ValueObject`, its datatype will be a
@@ -816,6 +816,10 @@ export interface IndirectedDatatype<Data = unknown> {
    */
   toValue?(data: Data): Value;
   /**
+   * Returns the (approximate) size of the data in-memory (NOT as stringified).
+   */
+  sizeOf(data: Data): number;
+  /**
    * Convert data to a representation that can be stringified to JSON. If this
    * method is not provided, the data itself must be JSON serialisable. The
    * implementation should include a version if the format is likely to change.
@@ -835,7 +839,7 @@ export interface IndirectedDatatype<Data = unknown> {
  * @typeParam Op operation type; must be JSON-serialisable
  * @typeParam Revert reversion metadata type; must be JSON-serialisable
  */
-export interface SharedDatatype<Data, Operation, Revert = null> extends IndirectedDatatype<Data> {
+export interface SharedDatatype<Data, Operation, Revert = null> extends Datatype<Data> {
   /**
    * A shared data type MUST always generate a new unique identity as its
    * lexical value, for which mutable state will exist. This will only be called
@@ -883,7 +887,7 @@ export interface SharedDatatype<Data, Operation, Revert = null> extends Indirect
 /**
  * @todo
  */
-export function isSharedDatatype<T>(dt: IndirectedDatatype<T>): dt is SharedDatatype<T, unknown> {
+export function isSharedDatatype<T>(dt: Datatype<T>): dt is SharedDatatype<T, unknown> {
   return 'update' in dt;
 }
 

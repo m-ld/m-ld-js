@@ -30,6 +30,15 @@ export interface MeldConfig {
    */
   '@domain': string;
   /**
+   * Set to `true` to indicate that this clone will be 'genesis'; that is, the
+   * first new clone on a new domain. This flag will be ignored if the clone is
+   * not new. If `false`, and this clone is new, successful clone initialisation
+   * is dependent on the availability of another clone. If set to true, and
+   * subsequently another non-new clone appears on the same domain, either or
+   * both clones will immediately close to preserve their data integrity.
+   */
+  genesis: boolean;
+  /**
    * An optional JSON-LD context for the domain data. If not specified:
    * * `@base` defaults to `http://{domain}`
    * * `@vocab` defaults to the resolution of `/#` against the base
@@ -46,15 +55,6 @@ export interface MeldConfig {
    */
   journal?: JournalConfig;
   /**
-   * Set to `true` to indicate that this clone will be 'genesis'; that is, the
-   * first new clone on a new domain. This flag will be ignored if the clone is
-   * not new. If `false`, and this clone is new, successful clone initialisation
-   * is dependent on the availability of another clone. If set to true, and
-   * subsequently another non-new clone appears on the same domain, either or
-   * both clones will immediately close to preserve their data integrity.
-   */
-  genesis: boolean;
-  /**
    * An sane upper bound on how long any to wait for a response over the
    * network, in milliseconds. Used for message send timeouts and to trigger
    * fallback behaviours. Default is five seconds.
@@ -65,8 +65,18 @@ export interface MeldConfig {
    * message publishing implementation. Default is infinity. Exceeding this
    * limit will cause a transaction to fail, to prevent a clone from being
    * unable to transmit the update to its peers.
+   * @default Infinity
    */
   maxOperationSize?: number;
+  /**
+   * Size of the data cache, in bytes. Increasing the size can improve the
+   * performance of operations on large data objects such as binary and text, at
+   * the expense of memory utilisation. Note that calculating the size of a
+   * Javascript object in memory is usually approximate and an underestimate, so
+   * this value should be set conservatively.
+   * @default 10MB
+   */
+  maxDataCacheSize?: number;
   /**
    * Log level for the clone
    * @see https://github.com/pimterry/loglevel#documentation
@@ -93,7 +103,7 @@ export interface JournalConfig {
    * A threshold of approximate entry size, in bytes, beyond which a fused entry will be
    * committed rather than further extended. The entry storage size may be less than this if it
    * compresses well, and can also be greater if the last (or only) individual transaction was
-   * itself large. Default is 10K.
+   * itself large. Default is 10KB.
    * @default 10000
    */
   maxEntryFootprint?: number;

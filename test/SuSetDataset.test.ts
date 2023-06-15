@@ -245,7 +245,7 @@ describe('SU-Set Dataset', () => {
               '@id': 'http://test.m-ld.org/fred',
               'http://test.m-ld.org/#sex': 'male'
             }
-          }));
+          }, state.newTxnContext()));
           const snapshot = await ssd.takeSnapshot();
           const data = await firstValueFrom(snapshot.data.pipe(toArray()));
           expect(data.length).toBe(2);
@@ -877,7 +877,9 @@ describe('SU-Set Dataset', () => {
     });
   });
 
-  describe('indirected datatypes', () => {
+  describe.each(
+    [Infinity, 0] // Testing with unbounded data cache and none
+  )('indirected datatypes', (maxDataCacheSize) => {
     let local: MockProcess, remote: MockProcess;
     let extensions: MeldPlugin[];
 
@@ -891,14 +893,14 @@ describe('SU-Set Dataset', () => {
         {},
         combinePlugins(extensions),
         {},
-        { '@id': 'test', '@domain': 'test.m-ld.org' }
+        { '@id': 'test', '@domain': 'test.m-ld.org', maxDataCacheSize }
       );
       await ssd.initialise();
       await ssd.resetClock(local.time);
       await ssd.allowTransact();
     });
 
-    test('insert binary-like datatype', async () => {
+    test('insert indirected datatype', async () => {
       const validate = jest.spyOn(byteArrayDatatype, 'validate').mockReset();
       const getDataId = jest.spyOn(byteArrayDatatype, 'getDataId').mockReset();
       extensions.push(byteArrayDatatype);
@@ -909,7 +911,8 @@ describe('SU-Set Dataset', () => {
         'http://test.m-ld.org/#photo': photo
       };
       const msg = await ssd.transact(local.tick().time, fredProfile);
-      expect(validate).toBeCalledWith(new Buffer('abc'));
+      expect(validate).toBeCalledWith(photo);
+      const validationResult = validate.mock.results[0];
       expect(getDataId).toBeCalled();
       // Operation has buffer value
       const [, , , upd, enc] = msg!.data;
@@ -917,16 +920,20 @@ describe('SU-Set Dataset', () => {
       // Update has value as given
       await expect(willUpdate).resolves.toMatchObject({ '@insert': [fredProfile] });
       // Retrieved state has value as given
-      await expect(drain(ssd.read<Describe>({
+      const [retrieved] = await drain(ssd.read<Describe>({
         '@describe': 'http://test.m-ld.org/fred'
-      }))).resolves.toEqual([fredProfile]);
+      }));
+      expect(retrieved).toEqual(fredProfile);
+      // If caching, we expect the photo retrieved to be the validation result
+      expect(validationResult.value === retrieved['http://test.m-ld.org/#photo'])
+        .toBe(maxDataCacheSize > photo.length);
       // Query equates value
       await expect(drain(ssd.read<Select>({
         '@select': '?f', '@where': { ...fredProfile, '@id': '?f' }
       }))).resolves.toMatchObject([{ '?f': { '@id': 'http://test.m-ld.org/fred' } }]);
     });
 
-    test('apply operation with binary-like data', async () => {
+    test('apply operation with indirected data', async () => {
       const validate = jest.spyOn(byteArrayDatatype, 'validate').mockReset();
       const getDataId = jest.spyOn(byteArrayDatatype, 'getDataId').mockReset();
       extensions.push(byteArrayDatatype);
@@ -995,7 +1002,9 @@ describe('SU-Set Dataset', () => {
     });
 
     test('operates on shared datatype', async () => {
-      extensions.push(new CounterType('http://test.m-ld.org/#likes'));
+      const counterType = new CounterType('http://test.m-ld.org/#likes');
+      const counterUpdate = jest.spyOn(counterType, 'update');
+      extensions.push(counterType);
       await ssd.transact(local.tick().time, {
         '@id': 'http://test.m-ld.org/fred',
         'http://test.m-ld.org/#likes': 0
@@ -1007,6 +1016,7 @@ describe('SU-Set Dataset', () => {
           'http://test.m-ld.org/#likes': { '@plus': 1 }
         }
       });
+      expect(counterUpdate).toHaveBeenCalled();
       // Operation has custom operation
       const [, , , upd, enc] = msg!.data;
       expect(MeldEncoder.jsonFromBuffer(upd, enc)).toEqual([{}, {}, {
@@ -1024,11 +1034,42 @@ describe('SU-Set Dataset', () => {
         }]
       });
       // Final state has increment
+      const counterApply = jest.spyOn(counterType, 'apply');
       await expect(drain(ssd.read<Describe>({
         '@describe': 'http://test.m-ld.org/fred'
       }))).resolves.toMatchObject([{
         '@id': 'http://test.m-ld.org/fred',
         'http://test.m-ld.org/#likes': 1
+      }]);
+      // If caching, should return from cache; otherwise, should re-apply
+      if (maxDataCacheSize > counterType.sizeOf(1))
+        expect(counterApply).not.toHaveBeenCalled();
+      else
+        expect(counterApply).toHaveBeenCalled();
+    });
+
+    test('rolls back shared data update on failure', async () => {
+      const counterType = new CounterType('http://test.m-ld.org/#likes');
+      extensions.push(counterType);
+      await ssd.transact(local.tick().time, {
+        '@id': 'http://test.m-ld.org/fred',
+        'http://test.m-ld.org/#likes': 0
+      });
+      // Also push a constraint which summarily fails
+      extensions.push({ constraints: [{ check: () => Promise.reject('bork') }] });
+      const counterUpdate = jest.spyOn(counterType, 'update');
+      await expect(ssd.transact(local.tick().time, {
+        '@update': {
+          '@id': 'http://test.m-ld.org/fred',
+          'http://test.m-ld.org/#likes': { '@plus': 1 }
+        }
+      })).rejects.toBe('bork');
+      expect(counterUpdate).toHaveBeenCalledWith(0, { '@plus': 1 });
+      await expect(drain(ssd.read<Describe>({
+        '@describe': 'http://test.m-ld.org/fred'
+      }))).resolves.toMatchObject([{
+        '@id': 'http://test.m-ld.org/fred',
+        'http://test.m-ld.org/#likes': 0
       }]);
     });
 

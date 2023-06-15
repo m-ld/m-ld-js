@@ -1,12 +1,13 @@
-import { Expression, IndirectedDatatype, MeldPlugin, SharedDatatype } from '../src';
+import { Datatype, Expression, MeldPlugin, SharedDatatype } from '../src';
 import { XS } from '../src/ns';
 import { Iri } from '@m-ld/jsonld';
 
-export const dateDatatype: IndirectedDatatype<Date> = {
+export const dateDatatype: Datatype<Date> = {
   '@id': 'http://ex.org/date',
   validate: (value: string) => new Date(value),
   getDataId: date => date.toDateString(),
   toValue: date => date.toISOString(),
+  sizeOf: date => JSON.stringify(date).length,
   toJSON: date => ({
     year: date.getFullYear(), month: date.getMonth() + 1, date: date.getDate()
   }),
@@ -27,11 +28,15 @@ export class CounterType implements SharedDatatype<number, string>, MeldPlugin {
       return this;
   }
 
+  getDataId() { return `counter${this.counterSeq++}`; }
+
   toValue(data: number) {
     return { '@type': XS.integer, '@value': data };
   }
 
-  getDataId() { return `counter${this.counterSeq++}`; }
+  sizeOf(data: number): number {
+    return 8; // Javascript number
+  }
 
   update(data: number, update: Expression): [number, string] {
     const inc = (<any>update)['@plus'];

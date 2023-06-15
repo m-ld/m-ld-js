@@ -11,9 +11,10 @@ import { TidsStore } from './TidsStore';
 import { flatMap, ignoreIf } from 'rx-flowable/operators';
 import { consume } from 'rx-flowable/consume';
 import { map } from 'rxjs/operators';
-import { JrqlPatchQuads, JrqlQuad, JrqlQuadOperation } from './JrqlQuads';
+import { JrqlDataQuad, JrqlPatchQuads, JrqlQuadOperation } from './JrqlQuads';
 import { concatIter, mapIter } from '../util';
 import async from '../async';
+import { TxnContext } from './index';
 
 export class InterimUpdatePatch implements InterimUpdate {
   /** The immutable starting app patch (will be mutated via assertions if 'mutable') */
@@ -44,6 +45,7 @@ export class InterimUpdatePatch implements InterimUpdate {
     private readonly userCtx: JsonldContext,
     private readonly principalId: Iri | null,
     private agree: any,
+    private txc: TxnContext,
     { mutable }: { mutable: boolean }
   ) {
     this.patch = patch;
@@ -58,14 +60,11 @@ export class InterimUpdatePatch implements InterimUpdate {
     this.needsUpdate = { then: () => { throw 'Interim update has been finalised'; } };
     // The final update to the app will include all assertions and entailments
     const finalPatch = await this.finalisePatch();
-    return {
-      userUpdate: this.createUpdate(finalPatch, this.userCtx),
-      // TODO: Make the internal update conditional on anyone wanting it
-      internalUpdate: this.createUpdate(finalPatch),
-      assertions: this.assertions,
-      entailments: this.entailments,
-      agree: this.agree
-    };
+    const userUpdate = this.createUpdate(finalPatch, this.userCtx);
+    // TODO: Make the internal update conditional on anyone wanting it
+    const internalUpdate = this.createUpdate(finalPatch);
+    const { assertions, entailments, agree } = this;
+    return { userUpdate, internalUpdate, assertions, entailments, agree };
   }
 
   /** If mutable, we allow mutation of the input patch */
@@ -98,7 +97,7 @@ export class InterimUpdatePatch implements InterimUpdate {
   assert = (update: Update) => this.mutate(async () => {
     let changed = false;
     if (update['@delete'] != null || update['@insert'] != null) {
-      const patch = await this.graph.write(update, this.userCtx);
+      const patch = await this.graph.write(update, this.userCtx, this.txc);
       this.assertions.append(patch);
       changed ||= !patch.isEmpty;
     }
@@ -113,7 +112,7 @@ export class InterimUpdatePatch implements InterimUpdate {
   });
 
   entail = (update: Update) => this.mutate(async () => {
-    const patch = await this.graph.write(update, this.userCtx);
+    const patch = await this.graph.write(update, this.userCtx, this.txc);
     this.entailments.append(patch);
     return false;
   });
@@ -253,7 +252,7 @@ export class InterimUpdatePatch implements InterimUpdate {
     return quadState;
   }
 
-  private isShared(quad: JrqlQuad): quad is LiteralTriple & MaybeHiddenQuad {
+  private isShared(quad: JrqlDataQuad): quad is LiteralTriple & MaybeHiddenQuad {
     return isLiteralTriple(quad) && (
       (!!quad.hasData && quad.hasData.shared) || // if loaded from state
       (quad.object.typed != null && isSharedDatatype(quad.object.typed.type)) // if in patch
@@ -261,4 +260,4 @@ export class InterimUpdatePatch implements InterimUpdate {
   }
 }
 
-type MaybeHiddenQuad = JrqlQuad & { hidden?: boolean };
+type MaybeHiddenQuad = JrqlDataQuad & { hidden?: boolean };

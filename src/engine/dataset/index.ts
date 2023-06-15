@@ -1,16 +1,6 @@
 import {
-  Bindings,
-  DefaultGraph,
-  NamedNode,
-  Prefixes,
-  Quad,
-  Quad_Object,
-  Quad_Predicate,
-  Quad_Subject,
-  QuadSet,
-  QuadSource,
-  RdfFactory,
-  toBinding
+  Bindings, DefaultGraph, NamedNode, Prefixes, Quad, Quad_Object, Quad_Predicate, Quad_Subject,
+  QuadSet, QuadSource, RdfFactory, toBinding
 } from '../quads';
 import { BatchOpts, Quadstore } from 'quadstore';
 import { AbstractChainedBatch, AbstractIteratorOptions, AbstractLevel } from 'abstract-level';
@@ -29,7 +19,7 @@ import { Stopwatch } from '../Stopwatch';
 import { check } from '../check';
 import { Consumable } from 'rx-flowable';
 import { MeldError } from '../../api';
-import type EventEmitter = require('events');
+import EventEmitter = require('events');
 
 /**
  * Atomically-applied patch to a quad-store.
@@ -101,10 +91,12 @@ export type KvpBatch = Pick<AbstractChainedBatch<any, string, Buffer>, 'put' | '
 export type Kvps = // NonNullable<BatchOpts['preWrite']> with strong kv types
   (batch: KvpBatch) => Promise<unknown> | unknown;
 
-export interface KvpResult<T = unknown> {
-  kvps?: Kvps;
-  after?(): unknown | Promise<unknown>;
+export interface TxnResult<T = unknown> {
   return?: T;
+}
+
+export interface KvpResult<T = unknown> extends TxnResult<T> {
+  kvps?: Kvps;
 }
 
 export interface PatchResult<T = unknown> extends KvpResult<T> {
@@ -119,6 +111,8 @@ export interface TxnOptions<T extends KvpResult> extends Partial<TxnContext> {
 export interface TxnContext {
   id: string,
   sw: Stopwatch
+  on(state: 'commit', handler: () => unknown | Promise<unknown>): this;
+  on(state: 'rollback', handler: (err: any) => unknown | Promise<unknown>): this;
 }
 
 const notClosed = check((d: Dataset) => !d.closed,
@@ -233,6 +227,10 @@ export class QuadStoreDataset implements Dataset {
     const lockKey = txn.lock ?? 'txn';
     const id = txn.id ?? uuid();
     const sw = txn.sw ?? new Stopwatch(lockKey, id);
+    const txc = new class extends EventEmitter implements TxnContext {
+      sw: Stopwatch;
+      id = id;
+    }();
     // The transaction lock ensures that read operations that are part of a
     // transaction (e.g. evaluating the @where clause) are not affected by
     // concurrent transactions (fully serialisable consistency). This is
@@ -244,7 +242,8 @@ export class QuadStoreDataset implements Dataset {
     sw.next('lock-wait');
     return this.lock.exclusive(lockKey, 'transaction', async () => {
       sw.next('prepare');
-      const result = await txn.prepare({ id, sw: sw.lap });
+      txc.sw = sw.lap;
+      const result = await txn.prepare(txc);
       sw.next('apply');
       if (result.patch != null) {
         await this.applyQuads(result.patch, {
@@ -254,13 +253,15 @@ export class QuadStoreDataset implements Dataset {
         await this.applyKvps(result.kvps);
       }
       sw.next('after');
-      await result.after?.();
+      txc.removeAllListeners('rollback'); // Fail in commit != rollback
+      await Promise.all(txc.listeners('commit').map(fn => fn()));
       sw.stop();
       return <T>result.return;
     }).then(result => {
       this.events?.emit('commit', txn.id);
       return result;
-    }, err => {
+    }, async err => {
+      await Promise.all(txc.listeners('rollback').map(fn => fn(err)));
       this.events?.emit('error', err);
       throw err;
     });

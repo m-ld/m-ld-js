@@ -69,6 +69,21 @@ export class TSeqText
     return uuid();
   }
 
+  sizeOf(data: TSeq): number {
+    // Every character:
+    // - object = 50 bytes
+    // - 2 fields = 2*8 bytes
+    // - _char = 2 bytes + string overhead = 10 bytes
+    // - _tick = 2 bytes (optimised as a short integer)
+    // Tree overhead, ideally O(log length)
+    // - object = 50 bytes
+    // - 2-3 fields = 20 bytes
+    // @see https://www.mattzeunert.com/2016/07/24/javascript-array-object-sizes.html
+    // TODO: Verify these claims!
+    const strLen = data.charLength;
+    return strLen * 70 + strLen.toString(2).length * 70;
+  }
+
   fromJSON(json: any): TSeq {
     return TSeq.fromJSON(this.pid, json);
   }

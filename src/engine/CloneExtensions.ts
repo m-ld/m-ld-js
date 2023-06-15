@@ -1,6 +1,5 @@
 import {
-  GraphSubject, IndirectedDatatype, MeldConstraint, MeldExtensions, MeldPlugin, MeldPreUpdate,
-  MeldReadState
+  Datatype, GraphSubject, MeldConstraint, MeldExtensions, MeldPlugin, MeldPreUpdate, MeldReadState
 } from '../api';
 import { Context, Subject } from '../jrql-support';
 import { constraintFromConfig } from '../constraints';
@@ -106,7 +105,7 @@ export class CloneExtensions extends OrmDomain implements StateManaged, MeldExte
     });
   }
 
-  indirectedData = (property: Iri, datatype: Iri): IndirectedDatatype | undefined => {
+  indirectedData = (property: Iri, datatype: Iri): Datatype | undefined => {
     const dt = this.combinedPlugins.indirectedData?.(property, datatype);
     if (dt == null) {
       if (datatype === RDF.JSON) return jsonDatatype;
