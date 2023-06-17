@@ -1,19 +1,6 @@
 import {
-  BehaviorSubject,
-  concat,
-  connect,
-  defaultIfEmpty,
-  EMPTY,
-  firstValueFrom,
-  from,
-  NEVER,
-  Observable,
-  ObservableInput,
-  ObservedValueOf,
-  Observer,
-  onErrorResumeNext,
-  OperatorFunction,
-  Subject,
+  BehaviorSubject, concat, connect, defaultIfEmpty, EMPTY, firstValueFrom, from, NEVER, Observable,
+  ObservableInput, ObservedValueOf, Observer, onErrorResumeNext, OperatorFunction, Subject,
   Subscription
 } from 'rxjs';
 import { mergeMap, switchAll } from 'rxjs/operators';
@@ -224,10 +211,13 @@ export function countIter(it: Iterable<unknown>) {
   return count;
 }
 
-export function iterable<T>(genIt: () => Iterator<T> | undefined): Iterable<T> {
+export function iterable<T, This>(
+  genIt: (this: This) => Iterator<T> | undefined,
+  callThis?: This
+): Iterable<T> {
   return {
     [Symbol.iterator]() {
-      return genIt() ?? [][Symbol.iterator]();
+      return genIt.call(callThis) ?? [][Symbol.iterator]();
     }
   };
 }

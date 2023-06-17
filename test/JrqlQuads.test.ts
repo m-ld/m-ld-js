@@ -128,7 +128,7 @@ describe('json-rql Quads translation', () => {
   });
 
   test('serialises json-able datatype', () => {
-    indirectedData = (property, datatype) => {
+    indirectedData = datatype => {
       if (datatype === dateDatatype['@id'])
         return dateDatatype;
     }
@@ -149,7 +149,7 @@ describe('json-rql Quads translation', () => {
   });
 
   test('validates json-able datatype', () => {
-    indirectedData = (property, datatype) => {
+    indirectedData = datatype => {
       if (datatype === dateDatatype['@id'])
         return dateDatatype;
     }

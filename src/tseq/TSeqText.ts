@@ -31,8 +31,11 @@ export class TSeqText
     this.properties = new Set(properties);
   }
 
-  setExtensionContext({ config }: MeldAppContext) {
+  setExtensionContext({ config, context }: MeldAppContext) {
     this.pid = config['@id'];
+    // Expand any property terms given in the constructor
+    this.properties = new Set([...this.properties].map(
+      p => context.expandTerm(p, { vocab: true })));
   }
 
   /** @internal */
@@ -45,7 +48,7 @@ export class TSeqText
   }
 
   /** @implements MeldExtensions#indirectedData */
-  indirectedData(property: Iri, datatype: Iri) {
+  indirectedData(datatype: Iri, property: Iri) {
     if (datatype === this['@id'] ||
       (this.properties.has(property) && datatype === XS.string))
       return this;
@@ -126,5 +129,15 @@ export class TSeqText
   revert(state: TSeq, operation: TSeqOperation[], revert: null): [TSeq, Expression] {
     // @ts-ignore
     return [undefined, undefined];
+  }
+
+  fuse(op1: TSeqOperation[], op2: TSeqOperation[]): [TSeqOperation[]] {
+    // TODO: resultant can be optimised
+    return [op1.concat(op2)];
+  }
+
+  cut(prefix: TSeqOperation[], operation: TSeqOperation[]): TSeqOperation[] | undefined {
+    // TODO: will need to be smarter when fusion is optimised
+    return operation.slice(prefix.length);
   }
 }

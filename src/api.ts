@@ -765,14 +765,17 @@ export interface InterimUpdate {
 }
 
 /**
- * @todo
+ * If `property` is provided, `datatype` is the datatype of a literal at the
+ * given property position in a Subject. Otherwise, it is the identity of the
+ * datatype itself (which may be the same).
+ * @see Datatype
  */
-export type IndirectedData = (property: Iri, datatype: Iri) => Datatype | undefined;
+export type IndirectedData =
+  (datatype: Iri, property?: Iri) => Datatype | undefined;
 
 /**
  * @todo doc
- * @typeParam Data data type
- * @see https://ci.mines-stetienne.fr/lindt/spec.html#interface-customdatatype
+ * @typeParam Data - data type
  */
 export interface Datatype<Data = unknown> {
   /**
@@ -835,11 +838,11 @@ export interface Datatype<Data = unknown> {
 }
 
 /**
- * @typeParam Data data type
- * @typeParam Op operation type; must be JSON-serialisable
- * @typeParam Revert reversion metadata type; must be JSON-serialisable
+ * @typeParam Data - data type
+ * @typeParam Operation - operation type; must be JSON-serialisable
+ * @typeParam Revert - reversion metadata type; must be JSON-serialisable
  */
-export interface SharedDatatype<Data, Operation, Revert = null> extends Datatype<Data> {
+export interface SharedDatatype<Data, Operation, Revert = never> extends Datatype<Data> {
   /**
    * A shared data type MUST always generate a new unique identity as its
    * lexical value, for which mutable state will exist. This will only be called
@@ -882,6 +885,34 @@ export interface SharedDatatype<Data, Operation, Revert = null> extends Datatype
    * notify the app.
    */
   revert(state: Data, operation: Operation, revert: Revert): [Data, Expression | Expression[]];
+  /**
+   * Fuses operations into a single operation. Operations are be provided in
+   * contiguous causal order: `op1` happened-before `op2` OR `op1` is concurrent
+   * with `op2`; AND there exists no `op'` where `op'` happened-before `op2` and
+   * `op1` happened-before `op'`.
+   */
+  fuse(operation: Operation, suffix: Operation): [Operation];
+  /**
+   * Fuses operations into a single operation, with reversion metadata. Note
+   * that if a fusion request has reversion information in the input it should
+   * be provided in the return.
+   * @see #fuse
+   */
+  fuse(
+    operation: Operation,
+    suffix: Operation,
+    opRevert: Revert,
+    suffixRevert: Revert
+  ): [Operation, Revert?];
+  /**
+   * Cuts the prefix from the given operation and returns an operation which can
+   * be safely applied to a state that has the prefix already applied, e.g.
+   * - If the operation type is a list of sequential operations, the result can
+   * be a slice of the given operation at the prefix length.
+   * - If this datatype's operations are idempotent, the operation can be
+   * returned as-is.
+   */
+  cut(prefix: Operation, operation: Operation): Operation | undefined;
 }
 
 /**

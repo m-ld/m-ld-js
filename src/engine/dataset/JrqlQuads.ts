@@ -1,14 +1,16 @@
 import { Graph, KvpBatch, PatchQuads, TxnContext } from '.';
-import { blank, Datatype, GraphSubject, IndirectedData, isSharedDatatype } from '../../api';
+import {
+  blank, Datatype, GraphSubject, IndirectedData, isSharedDatatype, MeldError
+} from '../../api';
 import { Atom, Expression, Result, Subject, Value } from '../../jrql-support';
 import {
   inPosition, isLiteralTriple, isTypedTriple, LiteralTriple, Quad, Quad_Object, Term, Triple,
-  tripleKey, TypedData
+  tripleKey, TripleMap, TypedData, TypedTriple
 } from '../quads';
 import { JRQL } from '../../ns';
 import { SubjectGraph } from '../SubjectGraph';
 import { JrqlMode, toIndexDataUrl } from '../jrql-util';
-import { clone, concatIter, IndexKeyGenerator, isArray, mapIter, mapObject } from '../util';
+import { concatIter, IndexKeyGenerator, isArray, mapIter, mapObject } from '../util';
 import { SubjectQuads } from '../SubjectQuads';
 import { Binding } from '../../rdfjs-support';
 import * as MsgPack from '../msgPack';
@@ -158,7 +160,7 @@ export class JrqlQuads {
   ): Promise<UpdateMeta | undefined> {
     if (isLiteralTriple(triple)) {
       const datatype = this.indirectedData(
-        triple.predicate.value, triple.object.datatype.value);
+        triple.object.datatype.value, triple.predicate.value);
       // TODO: Bug: what if the datatype is no longer shared?
       if (datatype != null && isSharedDatatype(datatype)) {
         const loaded = await this.loadDataOfType(triple, datatype);
@@ -192,7 +194,7 @@ export class JrqlQuads {
     return Promise.all(mapIter(triples, async triple => {
       if (isLiteralTriple(triple) && triple.hasData == null) {
         const datatype = this.indirectedData(
-          triple.predicate.value, triple.object.datatype.value);
+          triple.object.datatype.value, triple.predicate.value);
         if (datatype != null) {
           const tripleKey = this.dataKeyFor(triple);
           const cached = this.dataCache.get(tripleKey);
@@ -223,7 +225,7 @@ export class JrqlQuads {
   async loadData(triple: Triple): Promise<LoadedData | undefined> {
     if (isLiteralTriple(triple)) {
       const datatype = this.indirectedData(
-        triple.predicate.value, triple.object.datatype.value);
+        triple.object.datatype.value, triple.predicate.value);
       if (datatype != null)
         return this.loadDataOfType(triple, datatype);
     }
@@ -335,7 +337,8 @@ export class JrqlPatchQuads extends PatchQuads implements JrqlQuadOperation {
   /**
    * Quad, having shared data, with operation on that data
    */
-  readonly updates: [Quad, UpdateMeta][] = [];
+
+  readonly updates = new TripleMap<UpdateMeta, Quad & TypedTriple>();
 
   constructor(patch: Partial<JrqlQuadOperation> = {}) {
     super(patch);
@@ -353,18 +356,16 @@ export class JrqlPatchQuads extends PatchQuads implements JrqlQuadOperation {
   }
 
   addUpdateMeta(triple: Quad, opMeta: UpdateMeta) {
-    if (!isLiteralTriple(triple))
-      throw new RangeError('Shared data triple must have a literal object');
-    if (isTypedTriple(triple)) {
-      // Un-type a typed triple, as the data is not relevant
-      const { typed: _, ...object } = triple.object;
-      triple = clone(triple, { ...triple, object: clone(triple.object, object) });
-    }
-    this.updates.push([triple, opMeta]);
+    if (!isTypedTriple(triple))
+      throw new RangeError('Shared data triple must have typed data');
+    if (this.updates.get(triple) != null)
+      throw new MeldError('Unsupported pattern',
+        'Multiple operations on a shared data item are not supported');
+    this.updates.set(triple, opMeta);
   }
 
   get isEmpty(): boolean {
-    return super.isEmpty && this.updates.length === 0;
+    return super.isEmpty && this.updates.size === 0;
   }
 
   private inheritMeta(patch: Partial<JrqlQuadOperation>) {

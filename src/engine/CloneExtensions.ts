@@ -13,6 +13,7 @@ import { ExtensionSubjectInstance, SingletonExtensionSubject } from '../orm/Exte
 import { StateManaged } from './index';
 import { byteArrayDatatype, jsonDatatype } from '../datatype';
 import { Iri } from '@m-ld/jsonld';
+import { JsonldContext } from './jsonld';
 
 /**
  * Top-level aggregation of extensions. Created from the configuration and
@@ -25,7 +26,8 @@ export class CloneExtensions extends OrmDomain implements StateManaged, MeldExte
     app: InitialApp,
     context: Context
   ) {
-    app.setExtensionContext?.({ config, app });
+    const activeCtx = await JsonldContext.active(context);
+    app.setExtensionContext?.({ config, app, context: activeCtx });
     const { indirectedData, agreementConditions, transportSecurity } = app;
     const constraints = await this.constraintsFromConfig(config, app.constraints, context);
     return new CloneExtensions({
@@ -33,7 +35,7 @@ export class CloneExtensions extends OrmDomain implements StateManaged, MeldExte
       indirectedData: indirectedData?.bind(app),
       agreementConditions,
       transportSecurity
-    }, config, app);
+    }, config, app, activeCtx);
   }
 
   private static async constraintsFromConfig(
@@ -56,9 +58,10 @@ export class CloneExtensions extends OrmDomain implements StateManaged, MeldExte
   private constructor(
     private readonly initial: MeldPlugin,
     config: MeldConfig,
-    app: MeldApp
+    app: MeldApp,
+    readonly context: JsonldContext
   ) {
-    super({ config, app });
+    super({ config, app, context });
     this.log = getIdLogger(this.constructor, config['@id'], config.logLevel);
     this.extensionSubjects = [];
     this.scope.on('deleted', deleted => {
@@ -105,8 +108,8 @@ export class CloneExtensions extends OrmDomain implements StateManaged, MeldExte
     });
   }
 
-  indirectedData = (property: Iri, datatype: Iri): Datatype | undefined => {
-    const dt = this.combinedPlugins.indirectedData?.(property, datatype);
+  indirectedData = (datatype: Iri, property: Iri): Datatype | undefined => {
+    const dt = this.combinedPlugins.indirectedData?.(datatype, property);
     if (dt == null) {
       if (datatype === RDF.JSON) return jsonDatatype;
       if (datatype === XS.base64Binary) return byteArrayDatatype;

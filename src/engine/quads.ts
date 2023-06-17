@@ -6,6 +6,7 @@ import { Prefixes } from 'quadstore';
 import { Datatype } from '../api';
 import { Iri } from '@m-ld/jsonld';
 import { uuid } from '../util';
+import { clone } from './util';
 
 export type Triple = Omit<Quad, 'graph'>;
 export type TriplePos = 'subject' | 'predicate' | 'object';
@@ -27,6 +28,7 @@ declare module './quads' {
   export interface Quad {
     before?: Quad_Object;
   }
+
   export interface Literal {
     typed?: TypedData;
   }
@@ -57,6 +59,16 @@ export function isTypedTriple(triple: Triple): triple is TypedTriple {
   return isTypedLiteral(triple.object);
 }
 
+export function unTypeTriple<T extends Triple>(triple: T): Omit<T, 'typed'> {
+  if (isTypedTriple(triple)) {
+    const { typed: _, ...untypedLiteral } = triple.object;
+    return clone(triple, {
+      ...triple, object: clone(triple.object, untypedLiteral)
+    });
+  }
+  return triple;
+}
+
 export abstract class QueryableRdfSourceProxy implements QueryableRdfSource {
   match: QueryableRdfSource['match'] = (...args) => this.src.match(...args);
   // @ts-ignore - TS can't cope with overloaded query method
@@ -66,7 +78,7 @@ export abstract class QueryableRdfSourceProxy implements QueryableRdfSource {
   protected abstract get src(): QueryableRdfSource;
 }
 
-export class TripleMap<T> extends IndexMap<Triple, T> {
+export class TripleMap<T, Q extends Triple = Triple> extends IndexMap<Q, T> {
   protected getIndex(key: Triple): string {
     return tripleIndexKey(key);
   }

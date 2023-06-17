@@ -24,7 +24,7 @@ export const jsonDatatype = new class implements Datatype, MeldPlugin {
    */
   _sizeCache = new WeakMap<object, number>();
 
-  indirectedData(property: Iri, datatype: Iri): Datatype | undefined {
+  indirectedData(datatype: Iri): Datatype | undefined {
     if (datatype === RDF.JSON)
       return this;
   }
@@ -65,7 +65,7 @@ export const jsonDatatype = new class implements Datatype, MeldPlugin {
  * Datatype for Uint8Array/Buffer values.
  */
 export const byteArrayDatatype: Datatype<Buffer> & MeldPlugin = {
-  indirectedData: (_, type) => {
+  indirectedData: type => {
     if (type === XS.base64Binary)
       return byteArrayDatatype;
   },

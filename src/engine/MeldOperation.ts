@@ -1,30 +1,23 @@
 import {
-  CausalOperation,
-  CausalOperator,
-  CausalTimeRange,
-  FusableCausalOperation,
-  ItemTids,
-  Operation
+  CausalOperation, CausalOperator, CausalTimeRange, FusableCausalOperation, ItemTids, Operation
 } from './ops';
-import { Triple, tripleIndexKey, TripleMap } from './quads';
+import { isLiteralTriple, Triple, tripleIndexKey, TripleMap, unTypeTriple } from './quads';
 import { TreeClock } from './clocks';
 import { EncodedOperation } from '.';
-import { MeldEncoder, RefTriplesOps } from './MeldEncoding';
+import { MeldEncoder, RefTriplesOp } from './MeldEncoding';
 import { Iri } from '@m-ld/jsonld';
 import { RefTriple } from './jrql-util';
-import { UUID } from '../api';
-import { countIter } from './util';
+import { IndirectedData, isSharedDatatype, MeldError, SharedDatatype, UUID } from '../api';
 
 const inspect = Symbol.for('nodejs.util.inspect.custom');
 
 export interface MeldOperationParts<T extends Triple = Triple, UpdateMeta = unknown>
   extends Operation<ItemTids<T>> {
   /**
-   * Triple-operations pairs. Note that the same triple can appear multiple
-   * times. The resultant operation for a triple should be the application of
-   * all operations for that triple, in depth-first order.
+   * Triple-operations pairs.
+   * The same triple should not appear multiple times.
    */
-  readonly updates: Iterable<[T, UpdateMeta[]]>;
+  readonly updates: Iterable<[T, UpdateMeta]>;
 }
 
 /**
@@ -98,7 +91,9 @@ export class MeldOperation
     const delTriples = encoder.reifyTriplesTids(refDeletes);
     const jsons = [delTriples, insTriples].map(encoder.jsonFromTriples);
     if (refUpdates.length > 0) {
-      const opTriples = encoder.reifyTriplesOp(refUpdates);
+      const opTriples = encoder.reifyTriplesOp(refUpdates.map(
+        // Operations MUST NOT include the actual typed data
+        ([triple, data]) => [unTypeTriple(triple), data]));
       jsons.push(encoder.jsonFromTriples(opTriples));
     }
     const [update, encoding] = MeldEncoder.bufferFromJson(jsons);
@@ -117,7 +112,7 @@ export class MeldOperation
       encoding,
       principalId != null ? encoder.compactIri(principalId) : null,
       agreed != null ? [agreed.tick, agreed.proof] : null
-    ], jsons);
+    ], jsons, encoder.indirectedData);
   };
 
   /**
@@ -148,7 +143,7 @@ export class MeldOperation
     principalId = principalId != null ? encoder.expandTerm(principalId) : null;
     const agreed = this.agreed(encAgree);
     const spec = { from, time, deletes, inserts, updates, principalId, agreed };
-    return new MeldOperation(spec, encoded, jsons);
+    return new MeldOperation(spec, encoded, jsons, encoder.indirectedData);
   }
 
   static agreed(encoded: [number, any] | null) {
@@ -161,7 +156,7 @@ export class MeldOperation
 
   readonly agreed: OperationAgreedSpec | null;
   readonly principalId: Iri | null;
-  readonly updates: RefTriplesOps;
+  readonly updates: RefTriplesOp;
 
   /**
    * Serialisation of triples is not required to be normalised. For any m-ld
@@ -171,12 +166,14 @@ export class MeldOperation
    * @param spec fully-expanded operation specification
    * @param encoded ready for wire or journal
    * @param jsons used for logging
+   * @param indirectedData the active indirected data, used for fusions
    * @private because the parameters are mutually redundant
    */
   private constructor(
     spec: MeldOperationSpec,
     readonly encoded: EncodedOperation,
-    readonly jsons: object
+    readonly jsons: object,
+    readonly indirectedData: IndirectedData
   ) {
     super(spec, tripleIndexKey);
     this.agreed = spec.agreed;
@@ -187,25 +184,25 @@ export class MeldOperation
   fusion(): CausalOperator<MeldOperationSpec> {
     return new class extends MeldOperationOperator {
       update(next: MeldOperationSpec) {
-        // TODO: Custom operation fusion
-        this.addTailUpdates([...next.updates]);
+        this.updateOperations(next, (dt, thisOp, nextOp) =>
+          thisOp != null ? dt.fuse(thisOp, nextOp)[0] : nextOp);
         // Most recent agreement is significant
         if (next.agreed != null)
           this.agreed = next.agreed;
       }
-    }(super.fusion(), this.updates, this.principalId, this.agreed);
+    }(super.fusion(), this);
   }
 
   cutting(): CausalOperator<MeldOperationSpec> {
     return new class extends MeldOperationOperator {
-      update(prev: MeldOperationSpec) {
-        // TODO: Custom operation cutting
-        this.removeHeadUpdates(countIter(prev.updates));
+      update(pre: MeldOperationSpec) {
+        this.updateOperations(pre, (dt, thisOp, preOp) =>
+          dt.cut(preOp, thisOp ?? this.missingOp));
         // Check if the last agreement is being cut away
-        if (this.agreed != null && prev.time.ticks >= this.agreed.tick)
+        if (this.agreed != null && pre.time.ticks >= this.agreed.tick)
           this.agreed = null;
       }
-    }(super.cutting(), this.updates, this.principalId, this.agreed);
+    }(super.cutting(), this);
   }
 
   /**
@@ -223,8 +220,7 @@ export class MeldOperation
       // track of the actual deletes made.
       inserts: this.deleteTidsByTriple(reversion),
       // 3. Reverting shared datatype operations. For each triple, provides the
-      // operation performed and the corresponding reversion metadata, in
-      // reverse order of application
+      // operation performed and the corresponding reversion metadata
       updates: this.updateMetaByTriple(reversion)
     };
   }
@@ -249,19 +245,11 @@ export class MeldOperation
     }
   }
 
-  updateMetaByTriple(byRef: { [p: Iri]: unknown[] }) {
-    const result = new TripleMap<OperationReversion[]>();
-    for (let [triple, operations] of this.updates) {
-      const opMeta = result.with(triple, () => []);
-      // TODO: This assumes precisely one revert meta per operation,
-      // no matter how much either this.updates or byRef has changed
-      // See Fusion#trackEntry, this.fusion, this.cutting
-      for (let operation of operations) { // forwards
-        const revert = byRef[triple['@id']]?.[opMeta.length] ?? null;
-        opMeta.unshift({ operation, revert }); // backwards
-      }
+  *updateMetaByTriple(byRef: { [p: Iri]: unknown }): Iterable<[Triple, OperationReversion]> {
+    for (let [triple, operation] of this.updates) {
+      if (triple['@id'] in byRef)
+        yield [triple, { operation, revert: byRef[triple['@id']] }];
     }
-    return result;
   }
 
   toString() {
@@ -277,22 +265,20 @@ export class MeldOperation
 }
 
 abstract class MeldOperationOperator implements CausalOperator<MeldOperationSpec> {
+  protected readonly updates = new TripleMap<unknown, RefTriple>();
+  protected principalId: Iri | null;
+  protected agreed: OperationAgreedSpec | null;
+
   constructor(
     protected operator: CausalOperator<CausalOperation<RefTriple, TreeClock>>,
-    private updates: RefTriplesOps, // Note, immutable
-    protected principalId: Iri | null,
-    protected agreed: OperationAgreedSpec | null
-  ) {}
+    protected original: MeldOperation
+  ) {
+    this.updates.setAll(original.updates);
+    this.principalId = original.principalId;
+    this.agreed = original.agreed;
+  }
 
   abstract update(op: MeldOperationSpec): void;
-
-  protected addTailUpdates(ops: RefTriplesOps = []) {
-    ops.length > 0 && (this.updates = this.updates.concat(ops));
-  }
-
-  protected removeHeadUpdates(count = 0) {
-    count > 0 && (this.updates = this.updates.slice(count));
-  }
 
   next(op: MeldOperationSpec): this {
     this.operator.next(op);
@@ -300,12 +286,36 @@ abstract class MeldOperationOperator implements CausalOperator<MeldOperationSpec
     return this;
   }
 
-  commit() {
+  commit(): MeldOperationSpec {
     const { principalId, agreed, updates } = this;
     return { ...this.operator.commit(), updates, principalId, agreed };
   }
 
   get footprint() {
     return this.operator.footprint;
+  }
+
+  protected updateOperations(
+    op: MeldOperationSpec,
+    operate: <O>(dt: SharedDatatype<unknown, O>, thisOp: O | null, opOp: O) => O | undefined
+  ) {
+    for (let [triple, opOp] of op.updates) {
+      const thisOp = this.updates.get(triple);
+      if (!isLiteralTriple(triple)) // TODO: `updates` type should mandate this
+        throw new MeldError('Bad update', 'Bad shared operation encoding');
+      // Note, the datatype value here is the shared datatype IRI
+      const dt = this.original.indirectedData(triple.object.datatype.value);
+      if (dt == null || !isSharedDatatype(dt))
+        throw new MeldError('Bad update', 'Shared datatype not available');
+      const op = operate(dt, thisOp, opOp);
+      if (op != null)
+        this.updates.set(triple, op);
+      else if (thisOp != null)
+        this.updates.delete(triple);
+    }
+  }
+
+  protected get missingOp(): never {
+    throw new MeldError('Bad update', 'Operation missing');
   }
 }

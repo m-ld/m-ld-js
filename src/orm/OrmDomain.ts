@@ -1,4 +1,4 @@
-import { GraphSubject, GraphUpdate, MeldReadState, StateProc } from '../api';
+import { GraphSubject, GraphUpdate, MeldContext, MeldReadState, StateProc } from '../api';
 import { SharedPromise } from '../engine/locks';
 import { Iri } from '@m-ld/jsonld';
 import { OrmSubject } from './OrmSubject';
@@ -250,12 +250,14 @@ export class OrmDomain implements MeldAppContext {
 
   readonly config: MeldConfig;
   readonly app: MeldApp;
+  readonly context: MeldContext;
   /** Global scope for the domain */
   readonly scope: OrmScope;
 
-  constructor({ config, app }: MeldAppContext) {
+  constructor({ config, app, context }: MeldAppContext) {
     this.app = app;
     this.config = config;
+    this.context = context;
     this.scope = this.createScope();
   }
 

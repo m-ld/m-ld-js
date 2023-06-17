@@ -5,7 +5,7 @@ import { TSeqText } from '../src/tseq';
 
 describe('TSeq datatype', () => {
   test('can insert and retrieve a TSeq', async () => {
-    const datatype = new TSeqText('http://test.m-ld.org/#story');
+    const datatype = new TSeqText('story');
     const meld = await clone(new MemoryLevel,
       MockRemotes,
       testConfig(),
@@ -27,7 +27,7 @@ describe('TSeq datatype', () => {
     const meld = await clone(new MemoryLevel,
       MockRemotes,
       testConfig(),
-      new TSeqText('http://test.m-ld.org/#story')
+      new TSeqText('story')
     );
     await meld.write({
       '@id': 'fred', story: 'Flintstones, meet the Flintstones'
@@ -48,7 +48,7 @@ describe('TSeq datatype', () => {
     const meld = await clone(new MemoryLevel,
       MockRemotes,
       testConfig(),
-      new TSeqText('http://test.m-ld.org/#story')
+      new TSeqText('story')
     );
     await meld.write({
       '@id': 'fred', story: 'Flintstones, tweet the Flintstones'

@@ -46,7 +46,7 @@ const OPERATION_CONTEXT = {
 };
 
 export type RefTriplesTids = [RefTriple, UUID[]][];
-export type RefTriplesOps = [RefTriple, unknown[]][];
+export type RefTriplesOp = [RefTriple, unknown][];
 
 export class MeldEncoder {
   private /*readonly*/ ctx: JsonldContext;
@@ -72,8 +72,8 @@ export class MeldEncoder {
   identifyTriple = <T extends Triple>(triple: T, id?: Iri): RefTriple & T =>
     clone(triple, { '@id': id ?? `_:${this.rdf.blankNode().value}`, ...triple });
 
-  identifyTriplesData = <E>(triplesTids: Iterable<[Triple, E]> = []): [RefTriple, E][] =>
-    [...triplesTids].map(([triple, tids]) => [this.identifyTriple(triple), tids]);
+  identifyTriplesData = <E>(triplesData: Iterable<[Triple, E]> = []): [RefTriple, E][] =>
+    [...triplesData].map(([triple, data]) => [this.identifyTriple(triple), data]);
 
   private reifyTriple(triple: RefTriple): [Triple, Triple, Triple] {
     if (!triple['@id'].startsWith('_:'))
@@ -107,21 +107,21 @@ export class MeldEncoder {
       tids.map(tid => this.rdf.literal(tid)));
   }
 
-  reifyTriplesOp(triplesOps: RefTriplesOps): Triple[] {
-    return this.reifyTriplesData(triplesOps, M_LD.op, operations =>
+  reifyTriplesOp(triplesOp: RefTriplesOp): Triple[] {
+    return this.reifyTriplesData(triplesOp, M_LD.op, operation =>
       // Insist on the default JSON datatype, because this is protocol-level
-      operations.map(op => this.rdf.literal('', jsonDatatype, op)));
+      this.rdf.literal('', jsonDatatype, operation));
   }
 
   private unreifyTriplesData<E>(
     reifications: Triple[],
     dataPredicate: Iri,
-    getData: (object: Quad_Object) => E
-  ): [RefTriple, E[]][] {
+    accData: (object: Quad_Object, data?: E) => E
+  ): [RefTriple, E][] {
     return Object.values(reifications.reduce((rids, reification) => {
       const rid = reification.subject.value; // Blank node value
       // Add the blank node IRI prefix to a new triple
-      let [triple, data] = rids[rid] || [{ '@id': `_:${rid}` }, []];
+      let [triple, data] = rids[rid] || [{ '@id': `_:${rid}` }, undefined];
       switch (reification.predicate.value) {
         case RDF.subject:
           triple.subject = inPosition('subject', reification.object);
@@ -133,12 +133,12 @@ export class MeldEncoder {
           triple.object = inPosition('object', reification.object);
           break;
         case dataPredicate:
-          data.push(getData(reification.object));
+          data = accData(reification.object, data);
           break;
       }
       rids[rid] = [triple, data];
       return rids;
-    }, {} as { [rid: string]: [RefTriple, E[]] })).map(([triple, data]) => [
+    }, {} as { [rid: string]: [RefTriple, E] })).map(([triple, data]) => [
       this.identifyTriple(this.rdf.quad(
         triple.subject,
         triple.predicate,
@@ -150,10 +150,10 @@ export class MeldEncoder {
 
   unreifyTriplesTids(reifications: Triple[]): RefTriplesTids {
     return this.unreifyTriplesData(
-      reifications, M_LD.tid, object => object.value);
+      reifications, M_LD.tid, (object, tids) => (tids ?? []).concat(object.value));
   }
 
-  unreifyTriplesOp(reifications: Triple[]): RefTriplesOps {
+  unreifyTriplesOp(reifications: Triple[]): RefTriplesOp {
     return this.unreifyTriplesData(
       reifications, M_LD.op, object => isTypedLiteral(object) && object.typed.data);
   }

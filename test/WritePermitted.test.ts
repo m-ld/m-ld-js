@@ -1,5 +1,5 @@
 import { SH } from '../src/ns';
-import { MockGraphState, mockInterim, testConfig } from './testClones';
+import { MockGraphState, mockInterim, testConfig, testContext } from './testClones';
 import { WritePermitted } from '../src/security';
 import { SubjectGraph } from '../src/engine/SubjectGraph';
 import { OrmDomain } from '../src/orm';
@@ -11,7 +11,9 @@ describe('Write permissions', () => {
 
   beforeEach(async () => {
     state = await MockGraphState.create();
-    domain = new OrmDomain({ config: testConfig(), app: {} });
+    domain = new OrmDomain({
+      config: testConfig(), app: {}, context: await testContext
+    });
   });
 
   afterEach(() => state.close());

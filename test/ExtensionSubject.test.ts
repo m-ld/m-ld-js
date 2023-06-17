@@ -1,4 +1,4 @@
-import { MockGraphState, testConfig } from './testClones';
+import { MockGraphState, testConfig, testContext } from './testClones';
 import { M_LD } from '../src/ns';
 import { ExtensionSubject, OrmDomain } from '../src/orm';
 import { ExtensionSubjectInstance, SingletonExtensionSubject } from '../src/orm/ExtensionSubject';
@@ -17,7 +17,9 @@ describe('Extension subject', () => {
 
   beforeEach(async () => {
     state = await MockGraphState.create();
-    domain = new OrmDomain({ config: testConfig(), app: {} });
+    domain = new OrmDomain({
+      config: testConfig(), app: {}, context: await testContext
+    });
   });
 
   afterEach(() => state.close());

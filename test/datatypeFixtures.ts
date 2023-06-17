@@ -14,7 +14,7 @@ export const dateDatatype: Datatype<Date> = {
   fromJSON: json => new Date(`${json.year}-${json.month}-${json.date}`)
 };
 
-export class CounterType implements SharedDatatype<number, string>, MeldPlugin {
+export class CounterType implements SharedDatatype<number, number>, MeldPlugin {
   counterSeq = 1;
   '@id' = 'http://ex.org/#Counter';
   validate = Number;
@@ -22,37 +22,43 @@ export class CounterType implements SharedDatatype<number, string>, MeldPlugin {
   constructor(readonly property: string) {}
 
   // noinspection JSUnusedGlobalSymbols - IDE snafu
-  /** @implements MeldExtensions#indirectedData */
-  indirectedData(property: string, datatype: Iri) {
+  /** @implements MeldPlugin#indirectedData */
+  indirectedData(datatype: Iri, property: string) {
     if (property === this.property || datatype === this['@id'])
       return this;
   }
 
   getDataId() { return `counter${this.counterSeq++}`; }
 
-  toValue(data: number) {
-    return { '@type': XS.integer, '@value': data };
+  toValue(value: number) {
+    return { '@type': XS.integer, '@value': value };
   }
 
-  sizeOf(data: number): number {
+  sizeOf(value: number): number {
     return 8; // Javascript number
   }
 
-  update(data: number, update: Expression): [number, string] {
+  update(value: number, update: Expression): [number, number] {
     const inc = (<any>update)['@plus'];
-    return [data + inc, `+${inc}`];
+    return [value + inc, inc];
   }
 
-  apply(data: number, operation: string): [number, Expression] {
+  apply(value: number, inc: number): [number, Expression] {
     // noinspection SuspiciousTypeOfGuard: for testing
-    if (typeof operation != 'string')
+    if (typeof inc != 'number')
       throw new RangeError();
-    const inc = Number(/\+(\d+)/.exec(operation)![1]);
-    return [data + inc, { '@plus': inc }];
+    return [value + inc, { '@plus': inc }];
   }
 
-  revert(data: number, operation: string, revert: null): [number, Expression] {
-    const inc = Number(/\+(\d+)/.exec(operation)![1]);
-    return [data - inc, { '@plus': -inc }];
+  revert(value: number, inc: number, revert: null): [number, Expression] {
+    return [value - inc, { '@plus': -inc }];
+  }
+
+  fuse(inc1: number, inc2: number): [number] {
+    return [inc1 + inc2];
+  }
+
+  cut(prefix: number, inc: number): number {
+    return inc - prefix;
   }
 }

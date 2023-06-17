@@ -21,6 +21,7 @@ import { inflateFrom } from '../src/engine/util';
 import { MeldOperationMessage } from '../src/engine/MeldOperationMessage';
 import { mockFn } from 'jest-mock-extended';
 import { SuSetDataset } from '../src/engine/dataset/SuSetDataset';
+import { JsonldContext } from '../src/engine/jsonld';
 
 const fred = {
   '@id': 'http://test.m-ld.org/fred',
@@ -44,7 +45,7 @@ class TestDatasetEngine extends DatasetEngine {
     const fullConfig = testConfig({ genesis: params?.genesis ?? true });
     const suset = new SuSetDataset(
       await memStore({ backend: params?.backend }),
-      {}, combinePlugins([]), {}, fullConfig
+      new JsonldContext(), combinePlugins([]), {}, fullConfig
     );
     const clone = new TestDatasetEngine(
       suset, params?.remotes ?? mockRemotes(), fullConfig

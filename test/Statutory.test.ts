@@ -1,11 +1,8 @@
-import { MockGraphState, mockInterim, mockUpdate, testConfig } from './testClones';
+import { MockGraphState, mockInterim, mockUpdate, testConfig, testContext } from './testClones';
 import { SubjectGraph } from '../src/engine/SubjectGraph';
 import { M_LD, SH } from '../src/ns';
 import {
-  HasAuthority,
-  ShapeAgreementCondition,
-  Statute,
-  Statutory
+  HasAuthority, ShapeAgreementCondition, Statute, Statutory
 } from '../src/statutes/Statutory';
 import { GraphSubject, MeldError } from '../src';
 import { DefaultList } from '../src/lseq/DefaultList';
@@ -74,7 +71,9 @@ describe('Statutory', () => {
     let appState: OrmDomain;
 
     beforeEach(async () => {
-      appState = new OrmDomain({ config: testConfig(), app: {} });
+      appState = new OrmDomain({
+        config: testConfig(), app: {}, context: await testContext
+      });
     });
 
     test('passes an update if no statutes', async () => {
@@ -316,8 +315,10 @@ describe('Statutory', () => {
 
     const testProver = (src: GraphSubject) => Promise.resolve(new TestProver(src));
 
-    beforeEach(() => {
-      appState = new OrmDomain({ config: testConfig(), app: {} });
+    beforeEach(async () => {
+      appState = new OrmDomain({
+        config: testConfig(), app: {}, context: await testContext
+      });
     });
 
     test('passes an update of non-statutes', async () => {
@@ -475,8 +476,10 @@ describe('Statutory', () => {
   describe('has-authority agreement prover', () => {
     let appState: OrmDomain;
 
-    beforeEach(() => {
-      appState = new OrmDomain({ config: testConfig(), app: {} });
+    beforeEach(async () => {
+      appState = new OrmDomain({
+        config: testConfig(), app: {}, context: await testContext
+      });
     });
 
     test('throws if no principal', async () => {

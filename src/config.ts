@@ -2,7 +2,7 @@ import type { Context } from './jrql-support';
 // noinspection JSDeprecatedSymbols
 import type { ConstraintConfig } from './constraints';
 import type { LogLevelDesc } from 'loglevel';
-import type { AppPrincipal, MeldPlugin } from './api';
+import type { AppPrincipal, MeldContext, MeldPlugin } from './api';
 import { MeldExtensions, noTransportSecurity } from './api';
 import type { EventEmitter } from 'events';
 import { Observable } from 'rxjs';
@@ -200,6 +200,7 @@ export type InitialApp = MeldApp & MeldPlugin;
 export interface MeldAppContext {
   readonly config: MeldConfig;
   readonly app: MeldApp;
+  readonly context: MeldContext;
 }
 
 /**
@@ -209,15 +210,19 @@ export interface MeldAppContext {
  */
 export function combinePlugins<T>(
   extensions: Iterable<MeldPlugin>
-): MeldExtensions {
+): MeldExtensions & MeldPlugin {
   return {
+    setExtensionContext(context: MeldAppContext) {
+      for (let ext of extensions)
+        ext.setExtensionContext?.(context);
+    },
     constraints: iterable(function *() {
       for (let ext of extensions)
         yield *ext.constraints ?? [];
     }),
-    indirectedData(property: Iri, datatype: Iri) {
+    indirectedData(datatype: Iri, property: Iri) {
       for (let ext of extensions) {
-        const dt = ext.indirectedData?.(property, datatype);
+        const dt = ext.indirectedData?.(datatype, property);
         if (dt) return dt;
       }
     },

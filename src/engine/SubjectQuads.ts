@@ -253,7 +253,7 @@ export class SubjectQuads extends EventEmitter {
       return this.rdf.literal(ex.canonical, ex.language);
     } else if (ex.type !== '@none') {
       if (context != null) {
-        const datatype = this.indirectedData?.(context.predicate, ex.type);
+        const datatype = this.indirectedData?.(ex.type, context.predicate);
         const serialising = this.mode === JrqlMode.serial;
         // When serialising, shared datatype without an @id is id-only
         if (datatype != null && (!serialising || !isSharedDatatype(datatype) || ex.id)) {

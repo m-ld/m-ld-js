@@ -31,7 +31,8 @@ import { Stopwatch } from '../src/engine/Stopwatch';
 import { CacheFactory } from '../src/engine/cache';
 
 export const testDomain = 'test.m-ld.org';
-export const testContext = new DomainContext(testDomain);
+export const testDomainContext = new DomainContext(testDomain);
+export const testContext = JsonldContext.active(testDomainContext);
 export function testConfig(config?: Partial<MeldConfig>): MeldConfig {
   return {
     '@id': 'test',
@@ -129,10 +130,9 @@ export class MockGraphState {
     indirectedData?: IndirectedData,
     cacheFactory?: CacheFactory
   } = {}) {
-    context ??= testContext;
     return new MockGraphState(
       await MockState.create({ dataset, domain }),
-      await JsonldContext.active(context ?? {}),
+      await (context ? JsonldContext.active(context) : testContext),
       indirectedData ?? (() => undefined),
       // Turn caching off by default
       cacheFactory ?? new CacheFactory({ max: 0 })
@@ -210,14 +210,17 @@ export function testOp(
     from?: number,
     principalId?: string,
     agreed?: [number, any],
-    operations?: object
+    updates?: object
   } = {}
 ): EncodedOperation {
+  const update = [deletes, inserts];
+  if (opts.updates)
+    update.push(opts.updates);
   return [
     4,
     opts.from ?? time.ticks,
     time.toJSON(),
-    MsgPack.encode([deletes, inserts].concat(opts.operations ?? [])),
+    MsgPack.encode(update),
     [BufferEncoding.MSGPACK],
     opts.principalId ?? null,
     opts.agreed ?? null
@@ -282,17 +285,17 @@ export class MockProcess implements ClockHolder<TreeClock> {
   sentOperation(
     deletes: object,
     inserts: object,
-    { agree, attr, operations }: { agree?: true, attr?: Attribution, operations?: object } = {}
-  ) {
+    { agree, attr, updates }: { agree?: true, attr?: Attribution, updates?: object } = {}
+  ): MeldOperationMessage {
     // Do not inline: this sets prev
-    const op = this.operated(deletes, inserts, { agree, pid: attr?.pid, operations });
+    const op = this.operated(deletes, inserts, { agree, pid: attr?.pid, updates });
     return MeldOperationMessage.fromOperation(this.prev, op, attr ?? null);
   }
 
   operated(
     deletes: object,
     inserts: object,
-    opts: { agree?: any, pid?: string, operations?: object } = {}
+    opts: { agree?: any, pid?: string, updates?: object } = {}
   ): EncodedOperation {
     this.tick();
     let agreed: [number, any] | undefined;
@@ -301,7 +304,7 @@ export class MockProcess implements ClockHolder<TreeClock> {
       agreed = [this.time.ticks, opts.agree];
     }
     return testOp(this.time, deletes, inserts, {
-      agreed, principalId: opts.pid, operations: opts.operations
+      agreed, principalId: opts.pid, updates: opts.updates
     });
   }
 

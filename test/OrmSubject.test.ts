@@ -1,4 +1,4 @@
-import { MockGraphState, testContext } from './testClones';
+import { MockGraphState } from './testClones';
 import { GraphSubject, updateSubject } from '../src';
 import { DefaultList } from '../src/lseq/DefaultList';
 import { OrmSubject, OrmUpdating } from '../src/orm';
@@ -10,7 +10,7 @@ describe('Object-RDF Mapping Subjects', () => {
   let orm: OrmUpdating;
 
   beforeEach(async () => {
-    state = await MockGraphState.create({ context: testContext });
+    state = await MockGraphState.create();
     orm = mock<OrmUpdating>({
       async get(src, construct) {
         if (Array.isArray(src))

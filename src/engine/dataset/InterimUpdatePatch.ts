@@ -161,11 +161,12 @@ export class InterimUpdatePatch implements InterimUpdate {
     const opts: RdfOptions = {
       ctx, aliases: (subject, property) => this.subjectAliases.get(subject)?.[property]
     };
+    const updates = [...patch.updates];
     return {
       '@delete': SubjectGraph.fromRDF([...patch.deletes], opts),
       '@insert': SubjectGraph.fromRDF([...patch.inserts], opts),
-      '@update': SubjectGraph.fromRDF([...patch.updates].map(([triple]) => triple), {
-        ...opts, values: i => patch.updates[i][1].update
+      '@update': SubjectGraph.fromRDF(updates.map(([triple]) => triple), {
+        ...opts, values: i => updates[i][1].update
       }),
       '@principal': InterimUpdatePatch.principalRef(this.principalId, ctx),
       // Note that agreement specifically checks truthy-ness, not just non-null

@@ -143,6 +143,7 @@ export abstract class FusableCausalOperation<T, C extends CausalClock>
   readonly deletes: ItemTids<T>[];
   readonly inserts: ItemTids<T>[];
 
+  /** @protected, but for unit tests */
   constructor(
     { from, time, deletes, inserts }: CausalOperation<T, C>,
     readonly getIndex: (item: T) => string = item => `${item}`
@@ -201,6 +202,7 @@ export abstract class FusableCausalOperation<T, C extends CausalClock>
         }
       }
 
+      // noinspection JSUnusedGlobalSymbols - implements CausalOperator#footprint
       get footprint() {
         return (this.fused ?? original).footprint;
       }
@@ -258,6 +260,7 @@ export abstract class FusableCausalOperation<T, C extends CausalClock>
         }
       }
 
+      // noinspection JSUnusedGlobalSymbols - implements CausalOperator#footprint
       get footprint() {
         return (this.cut ?? original).footprint;
       }

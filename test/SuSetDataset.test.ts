@@ -15,6 +15,7 @@ import { mockFn } from 'jest-mock-extended';
 import { MeldOperationMessage } from '../src/engine/MeldOperationMessage';
 import { byteArrayDatatype, jsonDatatype } from '../src/datatype';
 import { CounterType } from './datatypeFixtures';
+import { JsonldContext } from '../src/engine/jsonld';
 
 const fred = {
   '@id': 'http://test.m-ld.org/fred',
@@ -47,7 +48,7 @@ describe('SU-Set Dataset', () => {
   describe('with basic config', () => {
     beforeEach(async () => {
       ssd = new SuSetDataset(state.dataset,
-        {},
+        new JsonldContext(),
         combinePlugins([]),
         {},
         { '@id': 'test', '@domain': 'test.m-ld.org' });
@@ -630,7 +631,9 @@ describe('SU-Set Dataset', () => {
       remote = new MockProcess(right);
       constraint = { check: () => Promise.resolve() };
       ssd = new SuSetDataset(state.dataset,
-        {}, combinePlugins([{ constraints: [constraint] }]), {},
+        new JsonldContext(),
+        combinePlugins([{ constraints: [constraint] }]),
+        {},
         { '@id': 'test', '@domain': 'test.m-ld.org' });
       await ssd.initialise();
       await ssd.resetClock(local.tick().time);
@@ -882,6 +885,7 @@ describe('SU-Set Dataset', () => {
   )('indirected datatypes', (maxDataCacheSize) => {
     let local: MockProcess, remote: MockProcess;
     let extensions: MeldPlugin[];
+    let checkpoints: Subject<JournalCheckPoint>;
 
     beforeEach(async () => {
       extensions = [];
@@ -889,10 +893,11 @@ describe('SU-Set Dataset', () => {
       let { left, right } = TreeClock.GENESIS.forked();
       local = new MockProcess(left);
       remote = new MockProcess(right);
+      checkpoints = new Subject<JournalCheckPoint>();
       ssd = new SuSetDataset(state.dataset,
-        {},
+        new JsonldContext(),
         combinePlugins(extensions),
-        {},
+        { journalAdmin: { checkpoints } },
         { '@id': 'test', '@domain': 'test.m-ld.org', maxDataCacheSize }
       );
       await ssd.initialise();
@@ -1024,7 +1029,7 @@ describe('SU-Set Dataset', () => {
         s: 'fred',
         p: '#likes',
         o: { '@type': 'http://ex.org/#Counter', '@value': 'counter1' },
-        op: { '@type': '@json', '@value': '+1' }
+        op: { '@type': '@json', '@value': 1 }
       }]);
       // Update has custom operation
       await expect(willUpdate).resolves.toMatchObject({
@@ -1085,12 +1090,12 @@ describe('SU-Set Dataset', () => {
       const willUpdate = firstValueFrom(ssd.updates);
       await expect(ssd.apply(
         remote.sentOperation({}, {}, {
-          operations: {
+          updates: {
             '@id': 'ab',
             s: 'fred',
             p: '#likes',
             o: { '@type': 'http://ex.org/#Counter', '@value': 'counterX' },
-            op: { '@type': '@json', '@value': '+1' }
+            op: { '@type': '@json', '@value': 1 }
           }
         }),
         local.join(remote.time)
@@ -1179,6 +1184,92 @@ describe('SU-Set Dataset', () => {
       }]);
     });
 
+    test('fuses shared data operations', async () => {
+      extensions.push(new CounterType('http://test.m-ld.org/#likes'));
+      const fredProfile = {
+        '@id': 'http://test.m-ld.org/fred',
+        'http://test.m-ld.org/#likes': 1
+      };
+      await ssd.transact(local.tick().time, fredProfile);
+      await ssd.transact(local.tick().time, {
+        '@update': {
+          '@id': 'http://test.m-ld.org/fred',
+          'http://test.m-ld.org/#likes': { '@plus': 1 }
+        }
+      });
+      await ssd.transact(local.tick().time, {
+        '@update': {
+          '@id': 'http://test.m-ld.org/fred',
+          'http://test.m-ld.org/#likes': { '@plus': 2 }
+        }
+      });
+      checkpoints.next(JournalCheckPoint.SAVEPOINT);
+      const fused = await firstValueFrom((await ssd.operationsSince(TreeClock.GENESIS))!);
+      let [, from, time, upd, enc] = fused.data;
+      expect(TreeClock.fromJson(time).ticks - from).toBe(2);
+      expect(MeldEncoder.jsonFromBuffer(upd, enc)).toMatchObject([
+        {}, {
+          s: 'fred',
+          p: '#likes',
+          o: { '@id': 'counter1', '@type': 'http://ex.org/#Counter', '@value': 1 }
+        }, {
+          s: 'fred',
+          p: '#likes',
+          o: { '@type': 'http://ex.org/#Counter', '@value': 'counter1' },
+          op: { '@type': '@json', '@value': 3 }
+        }
+      ]);
+    });
+
+    test('cuts shared data operations from fused operation', async () => {
+      extensions.push(new CounterType('http://test.m-ld.org/#likes'));
+      const fredProfile = {
+        '@id': 'http://test.m-ld.org/fred',
+        'http://test.m-ld.org/#likes': 1
+      };
+      await ssd.transact(local.tick().time, fredProfile);
+      remote.join(local.time);
+      const beginTime = remote.time, beginPrev = remote.prev;
+      // The remote will have two transactions, which fuse in its journal.
+      // The local sees the first, incrementing once...
+      await ssd.apply(
+        remote.sentOperation({}, {}, {
+          updates: {
+            '@id': 'ab2', s: 'fred', p: '#likes',
+            o: { '@type': 'http://ex.org/#Counter', '@value': 'counter1' },
+            op: { '@type': '@json', '@value': 1 }
+          }
+        }),
+        local.join(remote.time)
+      );
+      // Then, the local sees a fused update with another increment
+      const willUpdate = firstValueFrom(ssd.updates);
+      const fusedOp = testOp(remote.tick().time, {}, {}, {
+        from: beginTime.ticks,
+        updates: {
+          '@id': 'ab2', s: 'fred', p: '#likes',
+          o: { '@type': 'http://ex.org/#Counter', '@value': 'counter1' },
+          op: { '@type': '@json', '@value': 3 } // Total increment in fusion
+        }
+      });
+      await expect(ssd.apply(
+        MeldOperationMessage.fromOperation(beginPrev, fusedOp, null),
+        local.join(remote.time)
+      )).resolves.toBe(null);
+      await expect(willUpdate).resolves.toMatchObject({
+        '@update': [{
+          '@id': 'http://test.m-ld.org/fred',
+          'http://test.m-ld.org/#likes': { '@plus': 2 } // Less already applied
+        }]
+      });
+      await expect(drain(ssd.read<Describe>({
+        '@describe': 'http://test.m-ld.org/fred'
+      }))).resolves.toMatchObject([{
+        '@id': 'http://test.m-ld.org/fred',
+        'http://test.m-ld.org/#likes': 4
+      }]);
+    });
+
     test.skip('voids shared operations', async () => {
       extensions.push(new CounterType('http://test.m-ld.org/#likes'));
       await ssd.transact(local.tick().time, {
@@ -1231,7 +1322,7 @@ describe('SU-Set Dataset', () => {
       checkpoints = new Subject<JournalCheckPoint>();
       agreementConditions = [];
       ssd = new SuSetDataset(state.dataset,
-        {},
+        new JsonldContext(),
         combinePlugins([{ agreementConditions }]),
         { journalAdmin: { checkpoints } },
         { '@id': 'test', '@domain': 'test.m-ld.org', journal: { adminDebounce: 0 } }
@@ -1448,7 +1539,7 @@ describe('SU-Set Dataset', () => {
       transportSecurity = { wire: data => data };
       constraint = { check: () => Promise.resolve() };
       ssd = new SuSetDataset(state.dataset,
-        {},
+        new JsonldContext(),
         combinePlugins([{ transportSecurity, constraints: [constraint] }]),
         {},
         { '@id': 'test', '@domain': 'test.m-ld.org' });
@@ -1529,7 +1620,7 @@ describe('SU-Set Dataset', () => {
   });
 
   test('enforces operation size limit', async () => {
-    ssd = new SuSetDataset(state.dataset, {}, combinePlugins([]), {}, {
+    ssd = new SuSetDataset(state.dataset, new JsonldContext(), combinePlugins([]), {}, {
       '@id': 'test',
       '@domain': 'test.m-ld.org',
       maxOperationSize: 1
