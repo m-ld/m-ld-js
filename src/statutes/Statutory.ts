@@ -26,7 +26,7 @@ import { ExtensionSubjectInstance } from '../orm/ExtensionSubject';
  * - _Statutes_ can be declared in the data using {@link declareStatute}.
  * - _Authorities_ can be declared in the data using {@link declareAuthority}.
  *
- * @see [the white paper](https://github.com/m-ld/m-ld-security-spec/blob/main/design/suac.md)
+ * @see {@link https://github.com/m-ld/m-ld-security-spec/blob/main/design/suac.md the white paper}
  * @category Experimental
  * @experimental
  * @noInheritDoc
