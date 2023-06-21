@@ -3,14 +3,15 @@ import { GraphSubject, MeldPlugin, SharedDatatype, UUID } from '../api';
 import { Constraint, Expression, isConstraint, Subject, VocabReference } from '../jrql-support';
 import { M_LD, SH, XS } from '../ns';
 import { Iri } from '@m-ld/jsonld';
-import { TSeq, TSeqOperation } from './TSeq';
+import { TSeq, TSeqOperation } from '.';
 import { array, uuid } from '../util';
 import { MeldAppContext } from '../config';
 import { ExtensionSubjectInstance } from '../orm/ExtensionSubject';
 import { JsProperty } from '../js-support';
+import { TSeqOperable } from './TSeqOperable';
 
 export class TSeqText
-  implements MeldPlugin, SharedDatatype<TSeq, TSeqOperation[]>, ExtensionSubjectInstance {
+  implements MeldPlugin, SharedDatatype<TSeq, TSeqOperation>, ExtensionSubjectInstance {
   static declare = (priority: number, ...properties: Iri[]): Subject => ({
     '@id': M_LD.extensions,
     '@list': {
@@ -95,7 +96,7 @@ export class TSeqText
     return data.toJSON();
   }
 
-  update(state: TSeq, update: Expression): [TSeq, TSeqOperation[]] {
+  update(state: TSeq, update: Expression): [TSeq, TSeqOperation] {
     if (isConstraint(update)) {
       for (let [key, args] of Object.entries(update)) {
         switch (key) {
@@ -120,24 +121,22 @@ export class TSeqText
     throw new RangeError(`Invalid update expression: ${update}`);
   }
 
-  apply(state: TSeq, operation: TSeqOperation[]): [TSeq, Expression[]] {
+  apply(state: TSeq, operation: TSeqOperation): [TSeq, Expression[]] {
     const splices = state.apply(operation)
       .map<Constraint>(splice => ({ '@splice': array(splice) }));
     return [state, splices];
   }
 
-  revert(state: TSeq, operation: TSeqOperation[], revert: null): [TSeq, Expression] {
+  revert(state: TSeq, operation: TSeqOperation, revert: null): [TSeq, Expression] {
     // @ts-ignore
     return [undefined, undefined];
   }
 
-  fuse(op1: TSeqOperation[], op2: TSeqOperation[]): [TSeqOperation[]] {
-    // TODO: resultant can be optimised
-    return [op1.concat(op2)];
+  fuse(op1: TSeqOperation, op2: TSeqOperation): [TSeqOperation] {
+    return [TSeqOperable.concat(op1, op2)];
   }
 
-  cut(prefix: TSeqOperation[], operation: TSeqOperation[]): TSeqOperation[] | undefined {
-    // TODO: will need to be smarter when fusion is optimised
-    return operation.slice(prefix.length);
+  cut(prefix: TSeqOperation, operation: TSeqOperation): TSeqOperation | undefined {
+    return TSeqOperable.rmPrefix(prefix, operation);
   }
 }

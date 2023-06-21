@@ -1,2 +1,3 @@
-export { TSeq, TSeqOperation } from './TSeq';
+export * from './types';
+export { TSeq } from './TSeq';
 export { TSeqText } from './TSeqText';

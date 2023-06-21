@@ -1,5 +1,11 @@
 import { TSeq } from '../src/tseq';
 import { jsonify } from './testUtil';
+import fc from 'fast-check';
+import {
+  arbitraryProcessIds, SpliceStringModel, TSeqProcessGroupCheckConvergedCommand,
+  TSeqProcessGroupCommand, TSeqProcessGroupDeliverCommand, TSeqProcessGroupForceSyncCommand,
+  TSeqProcessGroupSpliceCommand, TSeqSpliceCommand
+} from './TSeqPropertyFixtures';
 
 describe('TSeq CRDT', () => {
   describe('local mutations', () => {
@@ -241,6 +247,71 @@ describe('TSeq CRDT', () => {
         'rest': [['p1', 0, ['h', 1], ['e', 1], ['l', 1], ['l', 1],
           [' ', 1], ['w', 1], ['o', 1], ['r', 1], ['l', 1], ['d', 1]]]
       });
+    });
+  });
+
+  describe('property tests', () => {
+    test('presents a starting state', () => {
+      fc.assert(
+        fc.property(fc.string(), value => {
+          const tseq = new TSeq('p1');
+          tseq.splice(0, 0, value);
+          expect(tseq.toString()).toBe(value);
+        })
+      );
+    });
+
+    test('can splice', () => {
+      fc.assert(
+        fc.property(
+          fc.commands([
+            TSeqSpliceCommand.arbitrary()
+          ]), cmds => {
+            fc.modelRun(() => ({
+              model: new SpliceStringModel(),
+              real: new TSeq('p1')
+            }), cmds);
+          }
+        )
+      );
+    });
+
+    test('process group converges with forced sync', () => {
+      const numProcs = 3;
+      fc.assert(
+        fc.property(
+          fc.commands([
+            TSeqProcessGroupSpliceCommand.arbitrary(numProcs),
+            TSeqProcessGroupForceSyncCommand.arbitrary()
+          ], {
+            size: '+1' // good coverage, <1sec runtime
+          }),
+          arbitraryProcessIds(numProcs),
+          TSeqProcessGroupCommand.runModel
+        )
+      );
+    });
+
+    test.each([
+      [false, false],
+      [true, false],
+      [false, true],
+      [true, true]
+    ])('process group converges with partial deliveries', (fuse, redeliver) => {
+      const numProcs = 3;
+      fc.assert(
+        fc.property(
+          fc.commands([
+            TSeqProcessGroupSpliceCommand.arbitrary(numProcs),
+            TSeqProcessGroupDeliverCommand.arbitrary(numProcs, fuse, redeliver),
+            TSeqProcessGroupCheckConvergedCommand.arbitrary()
+          ], {
+            size: '+1' // good coverage, <1sec runtime
+          }),
+          arbitraryProcessIds(numProcs),
+          TSeqProcessGroupCommand.runModel
+        )
+      );
     });
   });
 });
