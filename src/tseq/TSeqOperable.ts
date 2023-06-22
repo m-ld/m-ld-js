@@ -34,37 +34,40 @@ export namespace TSeqOperable {
 
     process(operation: Iterable<TSeqRun>, remove = false) {
       for (let [runPath, content] of operation) {
-        let node: TSeqPathTreeNode | null = null, tree = this.root;
-        for (let name of runPath) {
-          if (node != null) tree = (node.branch ??= {});
-          const [pid, index] = name;
-          node = (tree[pid] ??= {})[index] ??= { name };
-        }
+        const { tree, anchor } = this.anchorAt(runPath);
         const parentPath = runPath.slice(0, -1);
-        if (node != null) { // Should now be the leaf, i.e. anchor of the run
-          const anchor = node;
-          const [leafPid, leafIndex] = anchor.name;
-          for (let i = 0; i < content.length; i++) {
-            const charTick = content[i];
-            const charIndex = leafIndex + i;
-            const byIndex = tree[leafPid];
-            const charNode = byIndex[charIndex] ??= { name: [leafPid, charIndex] };
-            if (!remove) {
-              // If there's redundancy between ops1 & ops2, this will remove it
-              const path = charNode === anchor ? runPath : [...parentPath, charNode.name];
-              const operable = Object.defineProperty({ path, charTick }, 'next', {
-                get: () => this.operables.get(byIndex[charIndex + 1])
-              });
-              this.operables.set(charNode, operable);
-            } else {
-              // Remove operable ONLY IF it's strictly older
-              const operable = this.operables.get(charNode);
-              if (operable != null && !TSeqCharTick.inApplyOrder(charTick, operable.charTick))
-                this.operables.delete(charNode);
-            }
+        const [leafPid, leafIndex] = anchor.name;
+        for (let i = 0; i < content.length; i++) {
+          const charTick = content[i];
+          const charIndex = leafIndex + i;
+          const byIndex = tree[leafPid];
+          const charNode = byIndex[charIndex] ??= { name: [leafPid, charIndex] };
+          if (!remove) {
+            const path = charNode === anchor ? runPath : [...parentPath, charNode.name];
+            const operable = { path, charTick };
+            Object.defineProperty(operable, 'next', {
+              get: () => this.operables.get(byIndex[charIndex + 1])
+            });
+            // If there's redundancy between ops1 & ops2, this will remove it
+            this.operables.set(charNode, operable);
+          } else {
+            // Remove operable ONLY IF it's strictly older
+            const operable = this.operables.get(charNode);
+            if (operable != null && !TSeqCharTick.inApplyOrder(charTick, operable.charTick))
+              this.operables.delete(charNode);
           }
         }
       }
+    }
+
+    private anchorAt(runPath: TSeqName[]) {
+      let node: TSeqPathTreeNode | null = null, tree = this.root;
+      for (let name of runPath) {
+        if (node != null) tree = (node.branch ??= {});
+        const [pid, index] = name;
+        node = (tree[pid] ??= {})[index] ??= { name };
+      }
+      return { tree, anchor: node! };
     }
 
     toRuns() {
@@ -72,7 +75,7 @@ export namespace TSeqOperable {
     }
   }
 
-  // Nodes will be used as map keys, so must be unique in the tree
+  /** Nodes will be used as map keys, so must be unique in the tree */
   type TSeqPathTreeNode = { name: TSeqName, branch?: TSeqOperationTree['root'] };
 
   /**
@@ -85,6 +88,11 @@ export namespace TSeqOperable {
     return [...pathTree.toRuns()];
   }
 
+  /**
+   * If an operation has been created by {@link concat concatenation}, and the
+   * local replica has already applied part of the concatenated operation, this
+   * utility safely removes the already-applied prefix.
+   */
   export function rmPrefix(prefix: TSeqOperation, operation: TSeqOperation) {
     const pathTree = new TSeqOperationTree();
     pathTree.process(operation);
