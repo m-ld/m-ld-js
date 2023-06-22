@@ -1,4 +1,4 @@
-import { MockGraphState, mockInterim, MockRemotes, testConfig } from './testClones';
+import { MockGraphState, mockInterim, MockRemotes, testConfig, testContext } from './testClones';
 import { OrmDomain } from '../src/orm';
 import { PropertyShape, ShapeConstrained } from '../src/shacl';
 import { SingletonExtensionSubject } from '../src/orm/ExtensionSubject';
@@ -32,7 +32,9 @@ describe('Shape constrained extension', () => {
 
     beforeEach(async () => {
       state = await MockGraphState.create();
-      domain = new OrmDomain({ config: testConfig(), app: {} });
+      domain = new OrmDomain({
+        config: testConfig(), app: {}, context: await testContext
+      });
     });
 
     afterEach(() => state.close());

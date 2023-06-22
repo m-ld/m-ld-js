@@ -1,9 +1,9 @@
 import { SH } from '../src/ns';
-import { MockGraphState, mockInterim, testConfig } from './testClones';
+import { MockGraphState, mockInterim, testConfig, testContext } from './testClones';
 import { WritePermitted } from '../src/security';
 import { SubjectGraph } from '../src/engine/SubjectGraph';
-import { OrmDomain } from '../src/orm/index';
-import { MeldError } from '../src/index';
+import { OrmDomain } from '../src/orm';
+import { MeldError } from '../src';
 
 describe('Write permissions', () => {
   let state: MockGraphState;
@@ -11,7 +11,9 @@ describe('Write permissions', () => {
 
   beforeEach(async () => {
     state = await MockGraphState.create();
-    domain = new OrmDomain({ config: testConfig(), app: {} });
+    domain = new OrmDomain({
+      config: testConfig(), app: {}, context: await testContext
+    });
   });
 
   afterEach(() => state.close());
@@ -24,7 +26,7 @@ describe('Write permissions', () => {
   test('allows anything if no permissions', async () => {
     const writePermitted = new WritePermitted();
     await domain.updating(state.graph.asReadState, orm =>
-      writePermitted.initialise({ '@id': 'security/WritePermitted' }, orm));
+      writePermitted.initFromData({ '@id': 'security/WritePermitted' }, orm));
     expect.hasAssertions();
     for (let constraint of writePermitted.constraints)
       await expect(constraint.check(state.graph.asReadState, mockInterim({
@@ -40,7 +42,7 @@ describe('Write permissions', () => {
       'http://test.m-ld.org/namePermission', nameShape));
     const writePermitted = new WritePermitted();
     await domain.updating(state.graph.asReadState, orm =>
-      writePermitted.initialise({ '@id': 'security/WritePermitted' }, orm));
+      writePermitted.initFromData({ '@id': 'security/WritePermitted' }, orm));
     expect.hasAssertions();
     for (let constraint of writePermitted.constraints)
       await expect(constraint.check(state.graph.asReadState, mockInterim({
@@ -56,7 +58,7 @@ describe('Write permissions', () => {
       'http://test.m-ld.org/namePermission', nameShape));
     const writePermitted = new WritePermitted();
     await domain.updating(state.graph.asReadState, orm =>
-      writePermitted.initialise({ '@id': 'security/WritePermitted' }, orm));
+      writePermitted.initFromData({ '@id': 'security/WritePermitted' }, orm));
     expect.hasAssertions();
     for (let constraint of writePermitted.constraints)
       await expect(constraint.check(state.graph.asReadState, mockInterim({
@@ -75,7 +77,7 @@ describe('Write permissions', () => {
       { '@id': 'http://test.m-ld.org/namePermission' }));
     const writePermitted = new WritePermitted();
     await domain.updating(state.graph.asReadState, orm =>
-      writePermitted.initialise({ '@id': 'security/WritePermitted' }, orm));
+      writePermitted.initFromData({ '@id': 'security/WritePermitted' }, orm));
     expect.hasAssertions();
     for (let constraint of writePermitted.constraints)
       await expect(constraint.check(state.graph.asReadState, mockInterim({

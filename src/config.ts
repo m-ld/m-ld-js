@@ -1,9 +1,13 @@
 import type { Context } from './jrql-support';
+// noinspection JSDeprecatedSymbols
 import type { ConstraintConfig } from './constraints';
 import type { LogLevelDesc } from 'loglevel';
-import type { AppPrincipal, MeldExtensions } from './api';
+import type { AppPrincipal, MeldContext, MeldPlugin } from './api';
+import { MeldExtensions, noTransportSecurity } from './api';
 import type { EventEmitter } from 'events';
 import { Observable } from 'rxjs';
+import { iterable } from './engine/util';
+import { Iri } from '@m-ld/jsonld';
 
 /**
  * **m-ld** clone configuration, used to initialise a {@link MeldClone} for use.
@@ -26,21 +30,6 @@ export interface MeldConfig {
    */
   '@domain': string;
   /**
-   * An optional JSON-LD context for the domain data. If not specified:
-   * * `@base` defaults to `http://{domain}`
-   * * `@vocab` defaults to the resolution of `/#` against the base
-   */
-  '@context'?: Context;
-  /**
-   * Semantic constraints to apply to the domain data.
-   * @deprecated see {@link MeldExtensions}
-   */
-  constraints?: ConstraintConfig[];
-  /**
-   * Journaling configuration
-   */
-  journal?: JournalConfig;
-  /**
    * Set to `true` to indicate that this clone will be 'genesis'; that is, the
    * first new clone on a new domain. This flag will be ignored if the clone is
    * not new. If `false`, and this clone is new, successful clone initialisation
@@ -49,6 +38,22 @@ export interface MeldConfig {
    * both clones will immediately close to preserve their data integrity.
    */
   genesis: boolean;
+  /**
+   * An optional JSON-LD context for the domain data. If not specified:
+   * * `@base` defaults to `http://{domain}`
+   * * `@vocab` defaults to the resolution of `/#` against the base
+   */
+  '@context'?: Context;
+  // noinspection JSDeprecatedSymbols: deprecated using deprecated
+  /**
+   * Semantic constraints to apply to the domain data.
+   * @deprecated see {@link MeldPlugin}
+   */
+  constraints?: ConstraintConfig[];
+  /**
+   * Journaling configuration
+   */
+  journal?: JournalConfig;
   /**
    * An sane upper bound on how long any to wait for a response over the
    * network, in milliseconds. Used for message send timeouts and to trigger
@@ -60,8 +65,18 @@ export interface MeldConfig {
    * message publishing implementation. Default is infinity. Exceeding this
    * limit will cause a transaction to fail, to prevent a clone from being
    * unable to transmit the update to its peers.
+   * @default Infinity
    */
   maxOperationSize?: number;
+  /**
+   * Size of the data cache, in bytes. Increasing the size can improve the
+   * performance of operations on large data objects such as binary and text, at
+   * the expense of memory utilisation. Note that calculating the size of a
+   * Javascript object in memory is usually approximate and an underestimate, so
+   * this value should be set conservatively.
+   * @default 10MB
+   */
+  maxDataCacheSize?: number;
   /**
    * Log level for the clone
    * @see https://github.com/pimterry/loglevel#documentation
@@ -88,7 +103,7 @@ export interface JournalConfig {
    * A threshold of approximate entry size, in bytes, beyond which a fused entry will be
    * committed rather than further extended. The entry storage size may be less than this if it
    * compresses well, and can also be greater if the last (or only) individual transaction was
-   * itself large. Default is 10K.
+   * itself large. Default is 10KB.
    * @default 10000
    */
   maxEntryFootprint?: number;
@@ -177,4 +192,50 @@ export interface MeldApp {
  *
  * @category Configuration
  */
-export type InitialApp = MeldApp & MeldExtensions;
+export type InitialApp = MeldApp & MeldPlugin;
+
+/**
+ * Context typically required for extensions
+ */
+export interface MeldAppContext {
+  readonly config: MeldConfig;
+  readonly app: MeldApp;
+  readonly context: MeldContext;
+}
+
+/**
+ * Combines plugins. The extensions are dynamically iterated, so the passed
+ * `Iterable` can change content after this function is called.
+ * @param extensions the extensions to combine
+ */
+export function combinePlugins<T>(
+  extensions: Iterable<MeldPlugin>
+): MeldExtensions & MeldPlugin {
+  return {
+    setExtensionContext(context: MeldAppContext) {
+      for (let ext of extensions)
+        ext.setExtensionContext?.(context);
+    },
+    constraints: iterable(function *() {
+      for (let ext of extensions)
+        yield *ext.constraints ?? [];
+    }),
+    indirectedData(datatype: Iri, property: Iri) {
+      for (let ext of extensions) {
+        const dt = ext.indirectedData?.(datatype, property);
+        if (dt) return dt;
+      }
+    },
+    agreementConditions: iterable(function *() {
+      for (let ext of extensions)
+        yield *ext.agreementConditions ?? [];
+    }),
+    get transportSecurity() {
+      for (let ext of extensions) {
+        const ts = ext.transportSecurity;
+        if (ts) return ts;
+      }
+      return noTransportSecurity;
+    }
+  };
+}

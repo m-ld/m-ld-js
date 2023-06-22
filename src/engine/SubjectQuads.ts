@@ -1,25 +1,48 @@
-import { any, anyName, blank } from '../api';
+import { any, anyName, blank, IndirectedData, isSharedDatatype } from '../api';
 import {
-  Atom, isPropertyObject, isReference, isSet, isValueObject, isVocabReference, Reference, Subject,
-  SubjectPropertyObject
+  Atom, Constraint, Expression, InlineConstraint, isInlineConstraint, isPropertyObject, isReference,
+  isSet, isSubjectObject, Reference, Subject, SubjectPropertyObject, Variable
 } from '../jrql-support';
-import { JsonldContext, mapValue } from './jsonld';
-import { Quad, Quad_Object, Quad_Subject, RdfFactory } from './quads';
+import { expandValue, JsonldContext } from './jsonld';
+import { asQueryVar, Quad, Quad_Object, Quad_Subject, RdfFactory } from './quads';
 import { JRQL, RDF } from '../ns';
 import { JrqlMode, ListIndex, listItems, toIndexDataUrl } from './jrql-util';
-import { isArray, lazy } from './util';
+import { isArray, lazy, mapObject } from './util';
 import { array } from '../util';
+import { EventEmitter } from 'events';
+import { Iri } from '@m-ld/jsonld';
 
-export class SubjectQuads {
+export class SubjectQuads extends EventEmitter {
   constructor(
+    readonly rdf: RdfFactory,
     readonly mode: JrqlMode,
     readonly ctx: JsonldContext,
-    readonly rdf: RdfFactory,
-    readonly vars?: Set<string>
+    readonly indirectedData: IndirectedData
   ) {
+    super();
   }
 
-  *quads(
+  /** Called with with variable names found (sans '?') */
+  on(event: 'var', listener: (varName: string) => void): this;
+  /** Called with inline filters found, if mode is 'match' */
+  on(event: 'filter', listener: (filter: Constraint) => void): this;
+  /** Called with inline bindings found, if mode is 'load' */
+  on(event: 'bind', listener: (
+    returnVar: Variable,
+    binding: Expression,
+    queryVar: Variable,
+    constraint: Constraint
+  ) => void): this;
+  /** Called with metadata found when processing subjects */
+  on(eventName: string, listener: (...args: any[]) => void): this {
+    return super.on(eventName, listener);
+  }
+
+  toQuads(subjects?: Subject | Subject[]) {
+    return subjects ? [...this.process(subjects)] : [];
+  }
+
+  private *process(
     object: SubjectPropertyObject,
     outer: Quad_Subject | null = null,
     property: string | null = null
@@ -28,20 +51,52 @@ export class SubjectQuads {
     for (let value of array(object))
       if (isArray(value))
         // Nested array is flattened
-        yield *this.quads(value, outer, property);
+        yield *this.process(value, outer, property);
       else if (isSet(value))
         // @set is elided
-        yield *this.quads(value['@set'], outer, property);
-      else if (typeof value === 'object' && !isValueObject(value) && !isVocabReference(value))
-        // TODO: @json type, nested @context object
+        yield *this.process(value['@set'], outer, property);
+      else if (isSubjectObject(value) || isReference(value))
+        // TODO: nested @context object
         yield *this.subjectQuads(value, outer, property);
       else if (outer != null && property != null)
         // This is an atom, so yield one quad
-        yield this.rdf.quad(outer, this.predicate(property),
-          this.objectTerm(value, property));
+        yield this.quad(outer, property, value);
       // TODO: What if the property expands to a keyword in the context?
       else
         throw new Error(`Cannot yield quad from top-level value: ${value}`);
+  }
+
+  private quad(
+    subject: Quad_Subject,
+    property: string,
+    value: Atom | InlineConstraint
+  ): Quad {
+    const predicate = this.predicate(property);
+    if (isInlineConstraint(value)) {
+      const { variable, constraint } = this.inlineConstraintDetails(value);
+      // The variable is the 1st parameter of the resultant constraint expression.
+      const queryVar = asQueryVar(variable);
+      const uncurried = mapObject(constraint, (operator, expression) => ({
+        [operator]: [queryVar, ...array(expression)]
+      }));
+      if (this.mode === JrqlMode.match) {
+        // A filter, with the variable as the object e.g. ?o > 1
+        this.emit('filter', uncurried);
+      } else if (this.mode === JrqlMode.load) {
+        // A binding, with the return value of the expression e.g. ?o = ?x + 1
+        const returnVar = this.newVar();
+        this.emit('bind',
+          asQueryVar(returnVar), uncurried, queryVar, constraint);
+        const quad = this.rdf.quad(subject, predicate, returnVar);
+        quad.before = variable;
+        return quad;
+      }
+      // Return variable unless bound to a new one
+      return this.rdf.quad(subject, predicate, variable);
+    }
+    const propContext = predicate.termType === 'NamedNode' ?
+      { property, predicate: predicate.value } : undefined;
+    return this.rdf.quad(subject, predicate, this.objectTerm(value, propContext));
   }
 
   private *subjectQuads(
@@ -56,9 +111,9 @@ export class SubjectQuads {
     if (outer != null && property != null)
       // Yield the outer quad referencing this subject
       yield this.rdf.quad(outer, this.predicate(property), sid);
-    else if (this.mode === 'match' && isReference(subject))
+    else if (this.mode === JrqlMode.match && isReference(subject))
       // References at top level => implicit wildcard p-o
-      yield this.rdf.quad(sid, this.genVar(), this.genVar());
+      yield this.rdf.quad(sid, this.newVar(), this.newVar());
 
     // Process predicates and objects
     for (let [property, value] of Object.entries(subject))
@@ -66,7 +121,7 @@ export class SubjectQuads {
         if (property === '@list')
           yield *this.listQuads(sid, value);
         else
-          yield *this.quads(value, sid, property);
+          yield *this.process(value, sid, property);
   }
 
   private subjectId(subject: Subject) {
@@ -75,9 +130,9 @@ export class SubjectQuads {
         return this.rdf.blankNode(subject['@id']);
       else
         return this.expandNode(subject['@id']);
-    else if (this.mode === 'match')
-      return this.genVar();
-    else if (this.mode === 'load' && this.rdf.skolem != null)
+    else if (this.mode === JrqlMode.match)
+      return this.newVar();
+    else if (this.mode === JrqlMode.load && this.rdf.skolem != null)
       return this.rdf.skolem();
     else
       return this.rdf.blankNode(blank());
@@ -103,7 +158,7 @@ export class SubjectQuads {
       // Generate the slot id variable if not available
       if (!('@id' in slot))
         slot['@id'] = JRQL.subVar(index, 'slotId');
-    } else if (this.mode !== 'match') {
+    } else if (this.mode !== JrqlMode.match) {
       // Inserting at a numeric index
       indexKey = toIndexDataUrl(index);
     } else {
@@ -113,33 +168,43 @@ export class SubjectQuads {
       indexKey = slotVarName ? JRQL.subVar(slotVarName, 'listKey') : any();
     }
     // Slot index is never asserted, only entailed
-    if (this.mode === 'match')
+    if (this.mode === JrqlMode.match)
       // Sub-index should never exist for matching
       slot['@index'] = typeof index == 'string' ? `?${index}` : index[0];
     // This will yield the index key as a property, as well as the slot
-    yield *this.quads(slot, lid, indexKey);
+    yield *this.process(slot, lid, indexKey);
   }
 
   /** @returns a mutable proto-slot object */
   private asSlot(item: SubjectPropertyObject): Subject {
-    if (isArray(item))
+    if (isArray(item)) {
       // A nested list is a nested list (not flattened or a set)
       return { '@item': { '@list': item } };
-    if (typeof item == 'object' && ('@item' in item || this.mode === 'graph'))
+    }
+    if ((isSubjectObject(item) || isReference(item)) && (
+      '@item' in item ||
+      this.mode === JrqlMode.graph ||
+      this.mode === JrqlMode.serial
+    )) {
       // The item is already a slot (with an @item key)
       return { ...item };
-    else
+    } else {
       return { '@item': item };
+    }
   }
 
-  private matchVar = (term: string) => {
-    if (this.mode !== 'graph') {
+  private matchVar = (term: any) => {
+    if (
+      this.mode !== JrqlMode.graph &&
+      this.mode !== JrqlMode.serial &&
+      typeof term == 'string'
+    ) {
       const varName = JRQL.matchVar(term);
       if (varName != null) {
         if (!varName)
           // Allow anonymous variables as '?'
-          return this.genVar();
-        this.vars?.add(varName);
+          return this.newVar();
+        this.emit('var', varName);
         return this.rdf.variable(varName);
       }
     }
@@ -165,24 +230,54 @@ export class SubjectQuads {
 
   private genVarName() {
     const varName = anyName();
-    this.vars?.add(varName);
+    this.emit('var', varName);
     return varName;
   }
 
-  private genVar() {
+  newVar() {
     return this.rdf.variable(this.genVarName());
   }
 
-  objectTerm(value: Atom, property?: string): Quad_Object {
-    return mapValue<Quad_Object>(property ?? null, value, (value, type, language) => {
-      if (type === '@id' || type === '@vocab')
-        return this.rdf.namedNode(value);
-      else if (language)
-        return this.rdf.literal(value, language);
-      else if (type !== '@none')
-        return this.rdf.literal(value, this.rdf.namedNode(type));
-      else
-        return this.rdf.literal(value);
-    }, { ctx: this.ctx, interceptRaw: this.matchVar });
+  objectTerm(
+    value: Atom | InlineConstraint,
+    context?: { property: string, predicate: Iri }
+  ): Quad_Object {
+    // Note using indexer access to allow for lazy properties
+    const ex = expandValue(context?.property ?? null, value, this.ctx);
+    const variable = ex.id == null && this.matchVar(ex.raw);
+    if (variable) {
+      return variable;
+    } else if (ex.type === '@id' || ex.type === '@vocab') {
+      return this.rdf.namedNode(ex.canonical);
+    } else if (ex.language) {
+      return this.rdf.literal(ex.canonical, ex.language);
+    } else if (ex.type !== '@none') {
+      if (context != null) {
+        const datatype = this.indirectedData?.(ex.type, context.predicate);
+        const serialising = this.mode === JrqlMode.serial;
+        // When serialising, shared datatype without an @id is id-only
+        if (datatype != null && (!serialising || !isSharedDatatype(datatype) || ex.id)) {
+          const data = serialising ?
+            datatype.fromJSON?.(ex.raw) ?? ex.raw : // coming from protocol
+            datatype.validate(ex.raw); // coming from the app
+          return this.rdf.literal(ex.id || datatype.getDataId(data), datatype, data);
+        }
+      }
+      return this.rdf.literal(ex.canonical, this.rdf.namedNode(ex.type));
+    } else {
+      throw new RangeError('Cannot construct a literal with no type');
+    }
+  }
+
+  private inlineConstraintDetails(inlineConstraint: InlineConstraint) {
+    if ('@value' in inlineConstraint) {
+      const variable = this.matchVar(inlineConstraint['@value']);
+      if (variable == null)
+        throw new Error(`Invalid variable for inline constraint: ${inlineConstraint}`);
+      const { '@value': _, ...constraint } = inlineConstraint;
+      return { variable, constraint };
+    } else {
+      return { variable: this.newVar(), constraint: inlineConstraint };
+    }
   }
 }

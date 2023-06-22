@@ -1,6 +1,6 @@
 import {
-  AgreementCondition, DeleteInsert, GraphSubject, GraphUpdate, InterimUpdate, MeldConstraint,
-  MeldError, MeldExtensions, MeldPreUpdate, MeldReadState
+  AgreementCondition, GraphSubject, GraphUpdate, InterimUpdate, MeldConstraint, MeldError,
+  MeldPlugin, MeldPreUpdate, MeldReadState
 } from '../api';
 import { M_LD } from '../ns';
 import { Describe, isPropertyObject, isReference, Reference, Subject } from '../jrql-support';
@@ -13,7 +13,7 @@ import { getIdLogger } from '../engine/logging';
 import { JsType } from '../js-support';
 import { property } from '../orm/OrmSubject';
 import { CacheMissListener, OrmScope } from '../orm/OrmDomain';
-import { Shape } from '../shacl/Shape';
+import { Shape } from '../shacl';
 import { ExtensionSubjectInstance } from '../orm/ExtensionSubject';
 
 /**
@@ -31,7 +31,7 @@ import { ExtensionSubjectInstance } from '../orm/ExtensionSubject';
  * @experimental
  * @noInheritDoc
  */
-export class Statutory implements ExtensionSubjectInstance, MeldExtensions {
+export class Statutory implements ExtensionSubjectInstance, MeldPlugin {
   /**
    * Extension declaration. Insert into the domain data to install the
    * extension. For example (assuming a **m-ld** `clone` object):
@@ -111,7 +111,7 @@ export class Statutory implements ExtensionSubjectInstance, MeldExtensions {
   /** @internal */
   private /*readonly*/ log: Logger;
 
-  async initialise(_src: GraphSubject, orm: OrmUpdating): Promise<this> {
+  async initFromData(_src: GraphSubject, orm: OrmUpdating): Promise<this> {
     const config = orm.domain.config;
     this.log = getIdLogger(this.constructor, config['@id'], config.logLevel);
     this.scope = orm.domain.createScope()
@@ -229,26 +229,30 @@ export class Statute extends OrmSubject implements MeldConstraint, AgreementCond
 
 /** @internal */
 class AffectedUpdate {
+  /** Non read-only version of SubjectUpdates */
   affected: {
     [id: string]: {
       '@delete'?: Subject & Reference;
       '@insert'?: Subject & Reference;
+      '@update'?: Subject & Reference;
     }
   } = {};
 
   constructor(update?: GraphUpdate) {
     if (update != null)
-      this.affected = asSubjectUpdates(update);
+      this.affected = asSubjectUpdates(update, true);
   }
 
   add(update: GraphUpdate) {
     this.addKey('@delete', update);
     this.addKey('@insert', update);
+    this.addKey('@update', update);
   }
 
   subtract(update: GraphUpdate) {
     this.subtractKey('@delete', update);
     this.subtractKey('@insert', update);
+    this.subtractKey('@update', update);
   }
 
   get isEmpty() {
@@ -258,11 +262,12 @@ class AffectedUpdate {
   asUpdate() {
     return {
       '@delete': this.keyGraph('@delete'),
-      '@insert': this.keyGraph('@insert')
+      '@insert': this.keyGraph('@insert'),
+      '@update': this.keyGraph('@update')
     };
   }
 
-  private addKey(key: keyof DeleteInsert<any>, update: GraphUpdate) {
+  private addKey(key: keyof GraphUpdate, update: GraphUpdate) {
     for (let subject of update[key]) {
       (this.affected[subject['@id']] ??= {})[key] ??= { '@id': subject['@id'] };
       // FIXME: this assumes the values are irrelevant!
@@ -270,7 +275,7 @@ class AffectedUpdate {
     }
   }
 
-  private subtractKey(key: keyof DeleteInsert<any>, update: GraphUpdate) {
+  private subtractKey(key: keyof GraphUpdate, update: GraphUpdate) {
     for (let subject of update[key]) {
       const ourSubject = this.affected[subject['@id']]?.[key];
       if (ourSubject != null) {
@@ -286,7 +291,7 @@ class AffectedUpdate {
     }
   }
 
-  private keyGraph(key: keyof DeleteInsert<any>) {
+  private keyGraph(key: keyof GraphUpdate) {
     return new SubjectGraph(Object
       .values(this.affected)
       .map(subjectUpdate => subjectUpdate[key])

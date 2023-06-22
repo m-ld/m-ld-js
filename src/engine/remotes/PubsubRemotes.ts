@@ -13,7 +13,7 @@ import * as MsgPack from '../msgPack';
 import { delay, first, ignoreElements, map, reduce, tap, timeout, toArray } from 'rxjs/operators';
 import { AbstractMeld } from '../AbstractMeld';
 import {
-  MeldError, MeldErrorStatus, MeldExtensions, MeldReadState, noTransportSecurity, shortId, uuid
+  MeldError, MeldErrorStatus, MeldExtensions, MeldReadState, shortId, uuid
 } from '../../index';
 import { JsonNotification, NotifyParams, ReplyParams, SendParams } from './PubsubParams';
 import { consume } from 'rx-flowable/consume';
@@ -99,7 +99,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
   }
 
   private get transportSecurity() {
-    return this.extensions().then(ext => ext.transportSecurity ?? noTransportSecurity);
+    return this.extensions().then(ext => ext.transportSecurity);
   }
 
   setLocal(clone: MeldLocal | null) {

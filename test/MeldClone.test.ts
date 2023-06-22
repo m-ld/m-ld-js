@@ -1,9 +1,18 @@
 import {
-  any, clone, Construct, Describe, Group, MeldClone, MeldUpdate, Reference, Select, Subject, Update
+  any,
+  clone,
+  Construct,
+  Describe,
+  Group,
+  MeldClone,
+  MeldUpdate,
+  Reference,
+  Select,
+  Subject,
+  Update
 } from '../src';
 import { MockRemotes, testConfig } from './testClones';
 import { blankRegex, genIdRegex } from './testUtil';
-import { SubjectGraph } from '../src/engine/SubjectGraph';
 import { DataFactory as RdfDataFactory, Quad } from 'rdf-data-factory';
 import { Factory as SparqlFactory } from 'sparqlalgebrajs';
 import { Subscription } from 'rxjs';
@@ -25,8 +34,9 @@ describe('MeldClone', () => {
     await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
     await expect(captureUpdate).resolves.toEqual({
       '@ticks': 1,
-      '@insert': new SubjectGraph([{ '@id': 'fred', name: 'Fred' }]),
-      '@delete': new SubjectGraph([]),
+      '@delete': [],
+      '@insert': [{ '@id': 'fred', name: 'Fred' }],
+      '@update': [],
       trace: expect.any(Function)
     });
     await expect(api.get('fred'))
@@ -49,6 +59,7 @@ describe('MeldClone', () => {
         '@ticks': 2,
         '@delete': [{ '@id': 'fred', name: 'Fred' }],
         '@insert': [],
+        '@update': [],
         trace: expect.any(Function)
       });
     });
@@ -63,6 +74,7 @@ describe('MeldClone', () => {
         '@ticks': 2,
         '@delete': [{ '@id': 'fred', height: 5 }],
         '@insert': [],
+        '@update': [],
         trace: expect.any(Function)
       });
     });
@@ -87,6 +99,7 @@ describe('MeldClone', () => {
         '@ticks': 2,
         '@delete': [{ '@id': 'fred', height: 5 }],
         '@insert': [{ '@id': 'fred', height: 6 }],
+        '@update': [],
         trace: expect.any(Function)
       });
     });
@@ -144,6 +157,7 @@ describe('MeldClone', () => {
         '@ticks': 1,
         '@delete': [],
         '@insert': [{ '@id': 'fred', name: 'Fred' }],
+        '@update': [],
         trace: expect.any(Function)
       });
     });
@@ -157,6 +171,7 @@ describe('MeldClone', () => {
         '@ticks': 2,
         '@delete': [{ '@id': 'fred', name: 'Fred' }],
         '@insert': [],
+        '@update': [],
         trace: expect.any(Function)
       });
     });
@@ -171,6 +186,101 @@ describe('MeldClone', () => {
       await api.write<Subject>({ '@id': 'fred', wife: { '@id': 'wilma' } });
       await api.delete('wilma');
       await expect(api.get('fred')).resolves.toBeUndefined();
+    });
+
+    test('inserts with a bound variable', async () => {
+      await api.write<Subject>({ '@id': 'fred', likes: 1 });
+      await api.write({
+        '@delete': { '@id': 'fred', likes: '?likes' },
+        '@insert': { '@id': 'fred', likes: '?newLikes' },
+        '@where': {
+          '@graph': { '@id': 'fred', likes: '?likes' },
+          '@bind': { '?newLikes': { '@plus': ['?likes', 1] } }
+        }
+      });
+      await expect(api.get('fred')).resolves.toEqual({ '@id': 'fred', likes: 2 });
+    });
+
+    test('inserts with inline bound variable', async () => {
+      await api.write<Subject>({ '@id': 'fred', likes: 1 });
+      await api.write({
+        '@delete': { '@id': 'fred', likes: '?likes' },
+        '@insert': { '@id': 'fred', likes: { '@value': '?likes', '@plus': 1 } }
+      });
+      await expect(api.get('fred')).resolves.toEqual({ '@id': 'fred', likes: 2 });
+    });
+
+    test('inserts where with inline bound variable', async () => {
+      await api.write<Subject>({ '@id': 'fred', likes: 1 });
+      await api.write({
+        '@insert': { '@id': 'fred', likes: { '@value': '?likes', '@plus': 1 } },
+        '@where': { '@id': 'fred', likes: '?likes' }
+      });
+      await expect(api.get('fred')).resolves.toEqual({
+        '@id': 'fred', likes: expect.arrayContaining([1, 2])
+      });
+    });
+
+    test('deletes with inline filter', async () => {
+      await api.write<Subject>({ '@id': 'fred', age: 41 });
+      await api.write<Subject>({ '@id': 'wilma', age: 39 });
+      await api.write({
+        '@delete': { age: { '@gt': 39 } }
+      });
+      await expect(api.get('fred')).resolves.toBeUndefined();
+      await expect(api.get('wilma')).resolves.toEqual({ '@id': 'wilma', age: 39 });
+    });
+
+    test('deletes where with inline filter', async () => {
+      await api.write<Subject>({ '@id': 'fred', age: 41 });
+      await api.write<Subject>({ '@id': 'wilma', age: 39 });
+      await api.write<Subject>({ '@id': 'barney', age: 40 });
+      await api.write({
+        '@delete': { '@id': '?b', age: { '@value': '?age', '@gt': 39 } },
+        '@where': { '@id': '?b', age: { '@value': '?age', '@lt': 41 } }
+      });
+      await expect(api.get('barney')).resolves.toBeUndefined();
+      await expect(api.get('wilma')).resolves.toBeDefined();
+      await expect(api.get('fred')).resolves.toBeDefined();
+    });
+  });
+
+  describe('basic updates', () => {
+    test('updates a property', async () => {
+      await api.write<Subject>({ '@id': 'fred', likes: 1 });
+      await api.write({
+        '@update': { '@id': 'fred', likes: 2 }
+      });
+      await expect(api.get('fred')).resolves.toEqual({ '@id': 'fred', likes: 2 });
+    });
+
+    test('updates with an operator', async () => {
+      await api.write<Subject>({ '@id': 'fred', likes: 1 });
+      await api.write({
+        '@update': { '@id': 'fred', likes: { '@plus': 1 } }
+      });
+      await expect(api.get('fred')).resolves.toEqual({ '@id': 'fred', likes: 2 });
+    });
+
+    test('updates multiple with an operator', async () => {
+      await api.write<Subject>({ '@id': 'fred', likes: [1, 2] });
+      await api.write({
+        '@update': { '@id': 'fred', likes: { '@plus': 1 } }
+      });
+      await expect(api.get('fred')).resolves.toEqual({
+        '@id': 'fred', likes: expect.arrayContaining([2, 3])
+      });
+    });
+
+    test('updates with filtered variable', async () => {
+      await api.write<Subject>({ '@id': 'fred', likes: [1, 11] });
+      await api.write({
+        '@update': { '@id': 'fred', likes: { '@value': '?old', '@plus': 1 } },
+        '@where': { '@id': 'fred', likes: { '@value': '?old', '@lt': 10 } }
+      });
+      await expect(api.get('fred')).resolves.toEqual({
+        '@id': 'fred', likes: expect.arrayContaining([2, 11])
+      });
     });
   });
 
@@ -197,11 +307,14 @@ describe('MeldClone', () => {
 
     test('selects quad', done => {
       api.write<Subject>({ '@id': 'fred', name: 'Fred' }).then(() =>
-        api.query(sparql.createProject(sparql.createBgp([sparql.createPattern(
+        api.query(sparql.createProject(
+          sparql.createBgp([sparql.createPattern(
             rdf.namedNode('http://test.m-ld.org/fred'),
             rdf.namedNode('http://test.m-ld.org/#name'),
-            rdf.variable('name'))]),
-          [rdf.variable('name')])).on('data', (binding: Binding) => {
+            rdf.variable('name')
+          )]),
+          [rdf.variable('name')]
+        )).on('data', (binding: Binding) => {
           expect(binding['?name'].equals(rdf.literal('Fred'))).toBe(true);
           done();
         }));
@@ -605,6 +718,35 @@ describe('MeldClone', () => {
         { '@id': expect.stringMatching(blankRegex), '?f': { '@id': 'wilma' } }
       ]));
     });
+
+    test('selects where inline filtered', async () => {
+      await api.write<Subject>({ '@id': 'fred', age: 42 });
+      await api.write<Subject>({ '@id': 'wilma', age: 39 });
+      await expect(api.read<Select>({
+        '@select': '?f', '@where': { '@id': '?f', age: { '@gt': 40 } }
+      })).resolves.toMatchObject([{ '?f': { '@id': 'fred' } }]);
+    });
+
+    test('constructs where inline filtered', async () => {
+      await api.write<Subject>({ '@id': 'fred', age: 42 });
+      await api.write<Subject>({ '@id': 'wilma', age: 39 });
+      await expect(api.read<Construct>({
+        '@construct': { '@id': '?', age: { '@gt': 40 } }
+      })).resolves.toMatchObject([{ '@id': 'fred', age: 42 }]);
+    });
+
+    test('selects where inline and explicit filtered', async () => {
+      await api.write<Subject>({ '@id': 'fred', age: 42, height: 6 });
+      await api.write<Subject>({ '@id': 'barney', age: 41, height: 5 });
+      await api.write<Subject>({ '@id': 'wilma', age: 39, height: 5 });
+      await expect(api.read<Select>({
+        '@select': '?f',
+        '@where': {
+          '@graph': { '@id': '?f', age: { '@gt': 40 }, height: '?h' },
+          '@filter': { '@gt': ['?h', 5] }
+        }
+      })).resolves.toMatchObject([{ '?f': { '@id': 'fred' } }]);
+    });
   });
 
   describe('anonymous subjects', () => {
@@ -941,17 +1083,18 @@ describe('MeldClone', () => {
           '@id': 'shopping', '@list': { 0: { '@id': '?slot', '@item': '?item' } }
         }
       });
-      expect([...(await captureUpdate)['@delete'].graph.values()]).toContainEqual({
+      const update = await captureUpdate;
+      expect([...update['@delete'].graph.values()]).toContainEqual({
         '@id': 'shopping',
         '@list': {
           // @item is not included in delete for a move
           1: { '@id': expect.stringMatching(genIdRegex), '@index': 1 }
         }
       });
-      expect([...(await captureUpdate)['@insert'].graph.values()]).toContainEqual({
+      expect([...update['@insert'].graph.values()]).toContainEqual({
         '@id': 'shopping',
         '@list': {
-          0: [{ '@id': expect.stringMatching(genIdRegex), '@item': 'Bread', '@index': 0 }]
+          0: [{ '@id': expect.stringMatching(genIdRegex), '@index': 0 }]
         }
       });
       await expect(api.read<Describe>({ '@describe': 'shopping' }))
@@ -983,7 +1126,7 @@ describe('MeldClone', () => {
       expect([...(await captureUpdate)['@insert'].graph.values()]).toContainEqual({
         '@id': 'shopping',
         '@list': {
-          0: [{ '@id': expect.stringMatching(genIdRegex), '@item': 'Spam', '@index': 0 }]
+          0: [{ '@id': expect.stringMatching(genIdRegex), '@index': 0 }]
         }
       });
       await expect(api.read<Describe>({ '@describe': 'shopping' }))
@@ -1010,10 +1153,11 @@ describe('MeldClone', () => {
         '@delete': { '@id': 'shopping', '@list': { '?1': 'Bread' } },
         '@insert': { '@id': 'shopping', '@list': { '?1': 'Spam' } }
       });
-      expect([...(await captureUpdate)['@delete'].graph.values()]).toContainEqual({
+      const update = await captureUpdate;
+      expect([...update['@delete'].graph.values()]).toContainEqual({
         '@id': expect.stringMatching(genIdRegex), '@item': 'Bread'
       });
-      expect([...(await captureUpdate)['@insert'].graph.values()]).toContainEqual({
+      expect([...update['@insert'].graph.values()]).toContainEqual({
         '@id': expect.stringMatching(genIdRegex), '@item': 'Spam'
       });
       await expect(api.read<Describe>({ '@describe': 'shopping' }))

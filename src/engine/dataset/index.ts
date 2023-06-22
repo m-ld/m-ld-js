@@ -1,18 +1,15 @@
 import {
-  Bindings, DataFactory, DefaultGraph, NamedNode, Prefixes, Quad, Quad_Object, Quad_Predicate,
-  Quad_Subject, QuadSet, QuadSource, RdfFactory, toBinding
+  Bindings, DefaultGraph, NamedNode, Prefixes, Quad, Quad_Object, Quad_Predicate, Quad_Subject,
+  QuadSet, QuadSource, RdfFactory, toBinding
 } from '../quads';
 import { BatchOpts, Quadstore } from 'quadstore';
-import {
-  AbstractChainedBatch, AbstractIterator, AbstractIteratorOptions, AbstractLevel
-} from 'abstract-level';
+import { AbstractChainedBatch, AbstractIteratorOptions, AbstractLevel } from 'abstract-level';
 import { Observable } from 'rxjs';
 import { LockManager } from '../locks';
 import { Context, Iri } from '@m-ld/jsonld';
 import { JsonldContext } from '../jsonld';
 import { Algebra } from 'sparqlalgebrajs';
 import { Engine } from 'quadstore-comunica';
-import { DataFactory as RdfDataFactory } from 'rdf-data-factory';
 import { JRQL, M_LD, RDF, XS } from '../../ns';
 import async from '../async';
 import { MutableOperation } from '../ops';
@@ -22,7 +19,7 @@ import { Stopwatch } from '../Stopwatch';
 import { check } from '../check';
 import { Consumable } from 'rx-flowable';
 import { MeldError } from '../../api';
-import type EventEmitter = require('events');
+import EventEmitter = require('events');
 
 /**
  * Atomically-applied patch to a quad-store.
@@ -47,13 +44,18 @@ export class PatchQuads extends MutableOperation<Quad> implements Patch {
 
 export type GraphName = DefaultGraph | NamedNode;
 
-export interface KvpStore {
+export interface KvpSet {
   /** Exact match kvp retrieval */
   get(key: string): Promise<Buffer | undefined>;
   /** Exact match kvp retrieval */
   has(key: string): Promise<boolean>;
   /** Kvp retrieval by range options */
   read(range: AbstractIteratorOptions<string, Buffer>): Consumable<[string, Buffer]>;
+  /** Term storage compaction, if applicable */
+  readonly prefixes: Prefixes;
+}
+
+export interface KvpStore extends KvpSet {
   /**
    * Ensures that write transactions are executed serially against the store.
    * @param txn prepares a write operation to be performed
@@ -64,10 +66,7 @@ export interface KvpStore {
 }
 
 export interface TripleKeyStore extends KvpStore {
-  readonly rdf: Required<DataFactory>;
-
-  /** Term storage compaction, if applicable */
-  readonly prefixes: Prefixes;
+  readonly rdf: RdfFactory;
 }
 
 /**
@@ -88,14 +87,16 @@ export interface Dataset extends TripleKeyStore {
   readonly closed: boolean;
 }
 
-type KvpBatch = Pick<AbstractChainedBatch<any, string, Buffer>, 'put' | 'del'>;
+export type KvpBatch = Pick<AbstractChainedBatch<any, string, Buffer>, 'put' | 'del'>;
 export type Kvps = // NonNullable<BatchOpts['preWrite']> with strong kv types
   (batch: KvpBatch) => Promise<unknown> | unknown;
 
-export interface KvpResult<T = unknown> {
-  kvps?: Kvps;
-  after?(): unknown | Promise<unknown>;
+export interface TxnResult<T = unknown> {
   return?: T;
+}
+
+export interface KvpResult<T = unknown> extends TxnResult<T> {
+  kvps?: Kvps;
 }
 
 export interface PatchResult<T = unknown> extends KvpResult<T> {
@@ -110,6 +111,8 @@ export interface TxnOptions<T extends KvpResult> extends Partial<TxnContext> {
 export interface TxnContext {
   id: string,
   sw: Stopwatch
+  on(state: 'commit', handler: () => unknown | Promise<unknown>): this;
+  on(state: 'rollback', handler: (err: any) => unknown | Promise<unknown>): this;
 }
 
 const notClosed = check((d: Dataset) => !d.closed,
@@ -119,9 +122,12 @@ const notClosed = check((d: Dataset) => !d.closed,
 /**
  * Read-only utility interface for reading Quads from a Dataset.
  */
-export interface Graph extends RdfFactory, QueryableRdfSource {
+export interface Graph extends QueryableRdfSource, KvpSet {
   readonly name: GraphName;
   readonly lock: LockManager<'state'>;
+  readonly rdf: RdfFactory;
+
+  quad(subject: Quad_Subject, predicate: Quad_Predicate, object: Quad_Object): Quad;
 
   query(...args: Parameters<QuadSource['match']>): async.AsyncIterator<Quad>;
   query(query: Algebra.Construct): async.AsyncIterator<Quad>;
@@ -148,7 +154,7 @@ export function domainBase(domain: string) {
  * default and not for linked data applications.
  * @param base base IRI
  */
-export function baseVocab(base: Iri) {
+export function baseVocab(base?: Iri) {
   return new URL('/#', base).href;
 }
 
@@ -169,10 +175,10 @@ export class QuadStoreDataset implements Dataset {
   store: Quadstore;
   engine: Engine;
   prefixes: Prefixes;
+  rdf: RdfFactory;
   private readonly activeCtx: Promise<JsonldContext>;
   readonly lock = new LockManager;
   private isClosed: boolean = false;
-  readonly base: Iri | undefined;
 
   constructor(
     domain: string,
@@ -181,10 +187,10 @@ export class QuadStoreDataset implements Dataset {
   ) {
     // Internal of ClassicLevel and BrowserLevel
     this.location = (<any>backend).location ?? uuid();
-    this.base = domainBase(domain);
+    this.rdf = new RdfFactory(domainBase(domain));
     this.activeCtx = JsonldContext.active({
-      '@base': this.base,
-      '@vocab': baseVocab(this.base),
+      '@base': this.rdf.base,
+      '@vocab': baseVocab(this.rdf.base),
       ...STORAGE_CONTEXT
     });
   }
@@ -199,7 +205,7 @@ export class QuadStoreDataset implements Dataset {
     };
     this.store = new Quadstore({
       backend: this.backend,
-      dataFactory: new RdfDataFactory(),
+      dataFactory: this.rdf,
       indexes: [
         ['graph', 'subject', 'predicate', 'object'],
         ['graph', 'object', 'subject', 'predicate'],
@@ -212,10 +218,6 @@ export class QuadStoreDataset implements Dataset {
     return this;
   }
 
-  get rdf() {
-    return <Required<DataFactory>>this.store.dataFactory;
-  };
-
   graph(name?: GraphName): Graph {
     return new QuadStoreGraph(this, name || this.rdf.defaultGraph());
   }
@@ -225,6 +227,10 @@ export class QuadStoreDataset implements Dataset {
     const lockKey = txn.lock ?? 'txn';
     const id = txn.id ?? uuid();
     const sw = txn.sw ?? new Stopwatch(lockKey, id);
+    const txc = new class extends EventEmitter implements TxnContext {
+      sw: Stopwatch;
+      id = id;
+    }();
     // The transaction lock ensures that read operations that are part of a
     // transaction (e.g. evaluating the @where clause) are not affected by
     // concurrent transactions (fully serialisable consistency). This is
@@ -236,22 +242,26 @@ export class QuadStoreDataset implements Dataset {
     sw.next('lock-wait');
     return this.lock.exclusive(lockKey, 'transaction', async () => {
       sw.next('prepare');
-      const result = await txn.prepare({ id, sw: sw.lap });
+      txc.sw = sw.lap;
+      const result = await txn.prepare(txc);
       sw.next('apply');
-      if (result.patch != null)
+      if (result.patch != null) {
         await this.applyQuads(result.patch, {
           preWrite: batch => result.kvps?.(this.kvpBatch(batch))
         });
-      else if (result.kvps != null)
+      } else if (result.kvps != null) {
         await this.applyKvps(result.kvps);
+      }
       sw.next('after');
-      await result.after?.();
+      txc.removeAllListeners('rollback'); // Fail in commit != rollback
+      await Promise.all(txc.listeners('commit').map(fn => fn()));
       sw.stop();
       return <T>result.return;
     }).then(result => {
       this.events?.emit('commit', txn.id);
       return result;
-    }, err => {
+    }, async err => {
+      await Promise.all(txc.listeners('rollback').map(fn => fn(err)));
       this.events?.emit('error', err);
       throw err;
     });
@@ -329,24 +339,24 @@ export class QuadStoreDataset implements Dataset {
   @notClosed.rx
   read(range: AbstractIteratorOptions<string, Buffer>): Consumable<[string, Buffer]> {
     return new Observable(subs => {
-      const it = this.store.db.iterator({
-        ...range, keyEncoding: 'utf8', valueEncoding: 'buffer'
-      });
+      const options = { ...range, keyEncoding: 'utf8', valueEncoding: 'buffer' };
+      const values = range.values !== false;
+      const it = values ? this.store.db.iterator(options) : this.store.db.keys(options);
+      const errored = (err: any) => {
+        subs.error(err);
+        this.events?.emit('error', err);
+      };
       const pull = () => {
         if (!subs.closed) {
           // Calling next on an iterator that is already ended e.g. by closing the
-          // store, may cause a truly evil exception which summarily kills the
-          // process
+          // store, may cause a truly evil exception which kills the process
           if (this.closed) {
-            const err = new MeldError('Clone has closed');
-            subs.error(err);
-            this.events?.emit('error', err);
+            errored(new MeldError('Clone has closed'));
           } else {
-            it.next((err, key: string, value: Buffer) => {
+            it.next((err: any, key: string, value: Buffer) => {
               if (err) {
-                subs.error(err);
-                this.events?.emit('error', err);
-              } else if (key != null && value != null) {
+                errored(err);
+              } else if (key != null && (!values || value != null)) {
                 subs.next({ value: [key, value], next: pull });
               } else {
                 subs.complete();
@@ -388,7 +398,7 @@ export class QuadStoreDataset implements Dataset {
     return this.isClosed;
   }
 
-  private end(it: AbstractIterator<any, any, any>) {
+  private end(it: { close(): Promise<void> }) {
     it.close().catch(err => err && this.events?.emit('error', err));
   }
 }
@@ -397,11 +407,30 @@ class QuadStoreGraph implements Graph {
   constructor(
     readonly dataset: QuadStoreDataset,
     readonly name: GraphName
-  ) {
-  }
+  ) {}
 
   get lock() {
     return this.dataset.lock;
+  }
+
+  get prefixes() {
+    return this.dataset.prefixes;
+  }
+
+  get rdf() {
+    return this.dataset.rdf;
+  }
+
+  get(key: string): Promise<Buffer | undefined> {
+    return this.dataset.get(key);
+  }
+
+  has(key: string): Promise<boolean> {
+    return this.dataset.has(key);
+  }
+
+  read(range: AbstractIteratorOptions<string, Buffer>): Consumable<[string, Buffer]> {
+    return this.dataset.read(range);
   }
 
   match: Graph['match'] = (subject, predicate, object, graph) => {
@@ -457,16 +486,6 @@ class QuadStoreGraph implements Graph {
     return this.dataset.engine.queryBoolean(algebra);
   }
 
-  skolem = () => this.namedNode(
-    new URL(`/.well-known/genid/${uuid()}`, this.dataset.base).href);
-  namedNode = this.dataset.rdf.namedNode;
-  // noinspection JSUnusedGlobalSymbols
-  blankNode = this.dataset.rdf.blankNode;
-  literal = this.dataset.rdf.literal;
-
-  variable = this.dataset.rdf.variable;
-  // noinspection JSUnusedGlobalSymbols
-  defaultGraph = this.dataset.rdf.defaultGraph;
   quad = (subject: Quad_Subject, predicate: Quad_Predicate, object: Quad_Object) =>
-    this.dataset.rdf.quad(subject, predicate, object, this.name);
+    this.rdf.quad(subject, predicate, object, this.name);
 }

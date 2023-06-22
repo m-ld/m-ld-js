@@ -13,8 +13,15 @@ export abstract class MutableOperation<T> implements Operation<T> {
   constructor({ deletes = [], inserts = [] }: Partial<Operation<T>> = {}) {
     this.deletes = this.constructSet(deletes);
     this.inserts = this.constructSet(inserts);
+    this.minimise();
+  }
+
+  minimise(knownPrior = false) {
     // del(a), ins(a) == ins(a)
-    this.deletes.deleteAll(this.inserts);
+    const intersect = this.deletes.deleteAll(this.inserts);
+    if (knownPrior)
+      this.inserts.deleteAll(intersect);
+    return this;
   }
 
   protected abstract constructSet(items?: Iterable<T>): IndexSet<T>;
@@ -23,6 +30,21 @@ export abstract class MutableOperation<T> implements Operation<T> {
     return this.inserts.size === 0 && this.deletes.size === 0;
   }
 
+  /**
+   * Including a patch is like a parallel application of this patch and the
+   * included one.
+   */
+  include(patch: Partial<Operation<T>>) {
+    this.deletes.addAll(patch.deletes);
+    this.inserts.addAll(patch.inserts);
+    return this.minimise();
+  }
+
+  /**
+   * Appending a patch is like a sequential application of this patch and the
+   * appended one. This can be different to {@link include} if there are
+   * redundancies across the deletes and inserts.
+   */
   append(patch: Partial<Operation<T>>) {
     // Iterate the deletes only once
     const patchDeletes = [...patch.deletes ?? []];
@@ -31,9 +53,7 @@ export abstract class MutableOperation<T> implements Operation<T> {
 
     this.deletes.addAll(patchDeletes);
     this.inserts.addAll(patch.inserts);
-    // del(a), ins(a) == ins(a)
-    this.deletes.deleteAll(this.inserts);
-    return this;
+    return this.minimise();
   }
 
   remove(key: keyof Operation<any>, items: IndexMatch<T>): T[] {
@@ -123,6 +143,7 @@ export abstract class FusableCausalOperation<T, C extends CausalClock>
   readonly deletes: ItemTids<T>[];
   readonly inserts: ItemTids<T>[];
 
+  /** @protected, but for unit tests */
   constructor(
     { from, time, deletes, inserts }: CausalOperation<T, C>,
     readonly getIndex: (item: T) => string = item => `${item}`
@@ -181,6 +202,7 @@ export abstract class FusableCausalOperation<T, C extends CausalClock>
         }
       }
 
+      // noinspection JSUnusedGlobalSymbols - implements CausalOperator#footprint
       get footprint() {
         return (this.fused ?? original).footprint;
       }
@@ -238,6 +260,7 @@ export abstract class FusableCausalOperation<T, C extends CausalClock>
         }
       }
 
+      // noinspection JSUnusedGlobalSymbols - implements CausalOperator#footprint
       get footprint() {
         return (this.cut ?? original).footprint;
       }

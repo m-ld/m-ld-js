@@ -3,7 +3,7 @@ import { propertyValue } from '../index';
 import { MeldMessageType } from '../ns/m-ld';
 import * as MsgPack from '../engine/msgPack';
 import { Logger } from 'loglevel';
-import { M_LD, XS } from '../ns';
+import { M_LD } from '../ns';
 import { getRandomValues, subtle } from '../engine/local';
 import { MeldConfig } from '../config';
 import { Iri } from '@m-ld/jsonld';
@@ -73,10 +73,7 @@ export class MeldAclTransportSecurity implements MeldTransportSecurity {
    */
   static declareSecret = (domainName: string, aesKey: Buffer): Write => ({
     '@id': `http://${domainName}/`,
-    [M_LD.secret]: {
-      '@type': XS.base64Binary,
-      '@value': `${aesKey.toString('base64')}`
-    }
+    [M_LD.secret]: aesKey
   });
 
   /**
@@ -94,10 +91,7 @@ export class MeldAclTransportSecurity implements MeldTransportSecurity {
    */
   static registerPrincipal = (principalIri: Iri, rsaPublicKeySpki: Buffer): Write => ({
     '@id': principalIri,
-    [M_LD.publicKey]: {
-      '@type': XS.base64Binary,
-      '@value': `${rsaPublicKeySpki.toString('base64')}`
-    }
+    [M_LD.publicKey]: rsaPublicKeySpki
   });
 
   private readonly log: Logger;

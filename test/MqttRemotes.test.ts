@@ -15,6 +15,7 @@ import { JsonNotification } from '../src/engine/remotes';
 import { once } from 'events';
 import { MeldOperationMessage } from '../src/engine/MeldOperationMessage';
 import { Future } from '../src/engine/Future';
+import { MeldExtensions, noTransportSecurity } from '../src/index';
 
 /**
  * These tests also test the abstract base class, PubsubRemotes
@@ -30,7 +31,9 @@ describe('New MQTT remotes', () => {
       '@domain': 'test.m-ld.org',
       genesis: true, // Actually not used by MqttRemotes
       mqtt: { hostname: 'unused' }
-    }, () => Promise.resolve({}), () => mqtt);
+    }, () => Promise.resolve(mock<MeldExtensions>({
+      transportSecurity: noTransportSecurity
+    })), () => mqtt);
   });
 
   test('live starts unknown', async () => {

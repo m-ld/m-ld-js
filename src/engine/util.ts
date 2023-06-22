@@ -141,6 +141,16 @@ export class PauseableSource<T> extends Observable<T> implements Observer<T> {
   }
 }
 
+/**
+ * @param term the object to clone with its prototype chain
+ * @param ownProperties own properties to set/override. Note, using this with an
+ * incomplete set of properties for the semantics of the object subverts the
+ * type system.
+ */
+export function clone<T extends object>(term: T, ownProperties: object = {}) {
+  return Object.assign(Object.create(Object.getPrototypeOf(term)), ownProperties);
+}
+
 export function poisson(mean: number) {
   const threshold = Math.exp(-mean);
   let rtn = 0;
@@ -175,14 +185,41 @@ export function binaryFold<T, R>(
   }, null);
 }
 
-export function mapObject(
-  o: {}, fn: (k: string, v: any) => { [key: string]: any } | undefined): { [key: string]: any } {
+export function mapObject<V = any>(
+  o: Record<string, V>,
+  fn: (k: string, v: V) => { [key: string]: V } | undefined
+): { [key: string]: V } {
   return Object.assign({}, ...Object.entries(o).map(([k, v]) => fn(k, v)));
 }
 
 export function *mapIter<T, R>(it: Iterable<T>, fn: (v: T) => R): Iterable<R> {
   for (let v of it)
     yield(fn(v));
+}
+
+export function *concatIter<T>(...its: Iterable<T>[]) {
+  for (let it of its)
+    yield *it;
+}
+
+export function countIter(it: Iterable<unknown>) {
+  if (isArray(it))
+    return it.length;
+  let count = 0;
+  for (let item of it)
+    count++;
+  return count;
+}
+
+export function iterable<T, This>(
+  genIt: (this: This) => Iterator<T> | undefined,
+  callThis?: This
+): Iterable<T> {
+  return {
+    [Symbol.iterator]() {
+      return genIt.call(callThis) ?? [][Symbol.iterator]();
+    }
+  };
 }
 
 export function *deepValues(
@@ -220,3 +257,22 @@ export function trimTail<T>(arr: T[]): T[] {
 
 export const isNaturalNumber = (n: any) =>
   typeof n == 'number' && Number.isSafeInteger(n) && n >= 0;
+
+export class IndexKeyGenerator {
+  pad: string;
+
+  constructor(
+    public radix = 36,
+    public length = 8
+  ) {
+    this.pad = '0'.repeat(length);
+  }
+
+  key(index: number) {
+    return this.pad.concat(index.toString(this.radix)).slice(-this.length);
+  }
+
+  index(key: string) {
+    return Number.parseInt(key, this.radix);
+  }
+}

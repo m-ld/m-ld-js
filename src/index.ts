@@ -56,15 +56,15 @@ export async function clone(
   const sw = new Stopwatch('clone', config['@id']);
 
   sw.next('dependencies');
-  const context = new DomainContext(config['@domain'], config['@context']);
-  const extensions = await CloneExtensions.initial(config, app, context);
+  const extensions = await CloneExtensions.initial(config, app,
+    new DomainContext(config['@domain'], config['@context']));
   const remotes = new constructRemotes(config, extensions.ready);
 
   sw.next('dataset');
   const dataset = await new QuadStoreDataset(
     config['@domain'], backend, backendEvents).initialise(sw.lap);
   const suset = new SuSetDataset(
-    dataset, context ?? {}, extensions, app, config);
+    dataset, extensions.context, extensions, app, config);
   const engine = new DatasetEngine(suset, remotes, config);
 
   sw.next('engine');

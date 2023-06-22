@@ -1,5 +1,5 @@
-import { OrmSubject, OrmUpdating } from '../src/orm/index';
-import { GraphSubject, JsType, Optional, Subject } from '../src/index';
+import { OrmSubject, OrmUpdating } from '../src/orm';
+import { GraphSubject, JsType, Optional, Subject } from '../src';
 import { property } from '../src/orm/OrmSubject';
 
 ////////////////////////////////////////////////////////////////////////////////

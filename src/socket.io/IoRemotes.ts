@@ -7,7 +7,7 @@ import type { NotifyParams, PeerParams, ReplyParams, SendParams } from '../engin
 import { PubsubRemotes, SubPub } from '../engine/remotes';
 import { Observable } from 'rxjs';
 import { io, ManagerOptions, Socket, SocketOptions } from 'socket.io-client';
-import type { MeldExtensions } from '../api';
+import { MeldExtensions } from '../api';
 import { inflateFrom } from '../engine/util';
 import { MeldConfig } from '../config';
 

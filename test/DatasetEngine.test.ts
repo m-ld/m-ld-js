@@ -1,6 +1,6 @@
 import { DatasetEngine } from '../src/engine/dataset/DatasetEngine';
 import {
-  decodeOpUpdate, hotLive, memStore, MockProcess, mockRemotes, testConfig, testExtensions
+  decodeOpUpdate, hotLive, memStore, MockProcess, mockRemotes, testConfig
 } from './testClones';
 import {
   asapScheduler, BehaviorSubject, EMPTY, EmptyError, firstValueFrom, NEVER, of, Subject as Source,
@@ -10,7 +10,9 @@ import { comesAlive } from '../src/engine/AbstractMeld';
 import { count, map, observeOn, take, toArray } from 'rxjs/operators';
 import { TreeClock } from '../src/engine/clocks';
 import { MeldRemotes, Snapshot } from '../src/engine';
-import { Describe, GraphSubject, MeldError, MeldReadState, Read, Update, Write } from '../src';
+import {
+  combinePlugins, Describe, GraphSubject, MeldError, MeldReadState, Read, Update, Write
+} from '../src';
 import { AbstractLevel } from 'abstract-level';
 import { jsonify } from './testUtil';
 import { MemoryLevel } from 'memory-level';
@@ -19,6 +21,7 @@ import { inflateFrom } from '../src/engine/util';
 import { MeldOperationMessage } from '../src/engine/MeldOperationMessage';
 import { mockFn } from 'jest-mock-extended';
 import { SuSetDataset } from '../src/engine/dataset/SuSetDataset';
+import { JsonldContext } from '../src/engine/jsonld';
 
 const fred = {
   '@id': 'http://test.m-ld.org/fred',
@@ -42,7 +45,7 @@ class TestDatasetEngine extends DatasetEngine {
     const fullConfig = testConfig({ genesis: params?.genesis ?? true });
     const suset = new SuSetDataset(
       await memStore({ backend: params?.backend }),
-      {}, testExtensions(), {}, fullConfig
+      new JsonldContext(), combinePlugins([]), {}, fullConfig
     );
     const clone = new TestDatasetEngine(
       suset, params?.remotes ?? mockRemotes(), fullConfig

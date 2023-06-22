@@ -1,4 +1,4 @@
-import { OrmSubject } from '../orm/index';
+import { OrmSubject } from '../orm';
 import { property } from '../orm/OrmSubject';
 import { JsType } from '../js-support';
 import { Subject, VocabReference } from '../jrql-support';

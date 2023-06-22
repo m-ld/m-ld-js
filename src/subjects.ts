@@ -1,6 +1,13 @@
-import { isPropertyObject, isSet, Reference, Subject, Value } from './jrql-support';
+import {
+  isPropertyObject,
+  isSet,
+  isSubjectObject,
+  Reference,
+  Subject,
+  Value
+} from './jrql-support';
 import { isArray } from './engine/util';
-import { compareValues, getValues, hasProperty, hasValue, mapValue } from './engine/jsonld';
+import { compareValues, expandValue, getValues, hasProperty, hasValue } from './engine/jsonld';
 
 export { compareValues, getValues };
 
@@ -41,7 +48,8 @@ export class SubjectPropertyValues<S extends Subject = Subject> {
   }
 
   insert(...values: any[]) {
-    return this.update([], values);
+    // Favour a subject over an existing reference
+    return this.update(values.filter(isSubjectObject), values);
   }
 
   delete(...values: any[]) {
@@ -168,10 +176,13 @@ export function includesValue(
  */
 export function sortValues(property: string, values: Value[]) {
   return values.sort((v1, v2) => {
-    const [s1, t1] = mapValue(property, v1, (value, type) => [value, type]);
-    const [s2, t2] = mapValue(property, v2, (value, type) => [value, type]);
+    function rawCompare(r1: any, r2: any) {
+      return r1 < r2 ? -1 : r1 > r2 ? 1 : 0;
+    }
+    const { type: t1, raw: r1 } = expandValue(property, v1);
+    const { type: t2, raw: r2 } = expandValue(property, v2);
     return t1 === '@id' || t1 === '@vocab' ?
-      t2 === '@id' || t2 === '@vocab' ? s1.localeCompare(s2) : 1 :
-      t2 === '@id' || t2 === '@vocab' ? -1 : s1.localeCompare(s2);
+      t2 === '@id' || t2 === '@vocab' ? rawCompare(r1, r2) : 1 :
+      t2 === '@id' || t2 === '@vocab' ? -1 : rawCompare(r1, r2);
   });
 }

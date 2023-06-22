@@ -1,7 +1,7 @@
 import {
-  GraphSubject, InterimUpdate, MeldConstraint, MeldExtensions, MeldPreUpdate, MeldReadState
+  GraphSubject, InterimUpdate, MeldConstraint, MeldPlugin, MeldPreUpdate, MeldReadState
 } from '../api';
-import { ExtensionSubject, OrmUpdating } from '../orm/index';
+import { ExtensionSubject, OrmUpdating } from '../orm';
 import { Shape } from './Shape';
 import { isReference, Reference, Subject } from '../jrql-support';
 import { M_LD } from '../ns';
@@ -40,7 +40,7 @@ import { SubjectUpdater } from '../updates';
  * @experimental
  * @noInheritDoc
  */
-export class ShapeConstrained implements ExtensionSubjectInstance, MeldExtensions {
+export class ShapeConstrained implements ExtensionSubjectInstance, MeldPlugin {
   /**
    * Extension declaration. Insert into the domain data to install the
    * extension. For example (assuming a **m-ld** `clone` object):
@@ -114,13 +114,12 @@ export class ShapeConstrained implements ExtensionSubjectInstance, MeldExtension
   }];
 
   /** @internal */
-  initialise(src: GraphSubject, orm: OrmUpdating, ext: ExtensionSubject<this>): this {
+  initFromData(src: GraphSubject, orm: OrmUpdating, ext: ExtensionSubject<this>) {
     // We know we're a singleton; add our controlled shapes property
     ext.initSrcProperty(src,
       [this, 'shapes'],
       new JsProperty(M_LD.controlledShape, JsType.for(Array, Subject)),
       { orm, construct: Shape.from });
-    return this;
   }
 }
 

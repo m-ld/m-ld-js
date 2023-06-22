@@ -7,10 +7,8 @@ import { TreeClock } from '../clocks';
 import { completed, inflate } from '../util';
 import { array } from '../../util';
 import { JournalAdmin, JournalCheckPoint, MeldConfig } from '../../config';
-import { MeldOperation, MeldOperationSpec } from '../MeldOperation';
+import { EntryReversion, MeldOperation, MeldOperationSpec } from '../MeldOperation';
 import { TickTid } from './JournalEntry';
-import { TripleMap } from '../quads';
-import { UUID } from '../MeldEncoding';
 import { Attribution } from '../../api';
 import { getIdLogger } from '../logging';
 
@@ -152,7 +150,7 @@ class Fusion {
   private readonly operator: CausalOperator<MeldOperationSpec>;
   // Note: deletes in a fusion should never delete the same triple-TID
   // twice, so no need to use a Set per triple
-  private readonly deleted = new TripleMap<UUID[]>();
+  private readonly reversion: EntryReversion = {};
   private last: JournalEntry;
 
   constructor(
@@ -162,7 +160,7 @@ class Fusion {
     this.prev = first.prev;
     const operation = first.operation.asMeldOperation();
     this.operator = operation.fusion();
-    this.reset(first, operation);
+    this.reset(first);
   }
 
   /**
@@ -191,13 +189,13 @@ class Fusion {
       const operation = this.clerk.journal.toMeldOperation(this.operator.commit());
       const attr = await this.clerk.sign(operation);
       const fusedEntry = JournalEntry.fromOperation(
-        this.clerk.journal, this.last.key, this.prev, operation, this.deleted, attr);
+        this.clerk.journal, this.last.key, this.prev, operation, this.reversion, attr);
       await this.clerk.journal.withLockedHistory(() => ({
         kvps: this.clerk.journal.spliceEntries(
           this.removals, [fusedEntry], { appending: false })
       }));
       // Start again with the fused entry
-      this.reset(fusedEntry, operation);
+      this.reset(fusedEntry);
       return this.action('committed', fusedEntry);
     }
   }
@@ -209,7 +207,7 @@ class Fusion {
   private append(entry: JournalEntry) {
     const operation = entry.operation.asMeldOperation();
     this.operator.next(operation);
-    this.trackEntry(entry, operation);
+    this.trackEntry(entry);
     return this.action('appended', entry);
   }
 
@@ -217,15 +215,15 @@ class Fusion {
     return new FusionAction(action, entry.operation.time, this.operator.footprint);
   }
 
-  private trackEntry(entry: JournalEntry, op: MeldOperation) {
+  private trackEntry(entry: JournalEntry) {
     this.removals.push(entry.index);
     this.last = entry;
-    for (let [triple, tids] of op.byTriple('deletes', entry.deleted))
-      this.deleted.with(triple, () => []).push(...tids);
+    for (let [key, reverts] of Object.entries(entry.reversion))
+      (this.reversion[key] ??= []).push(...reverts);
   }
 
-  private reset(first: JournalEntry, operation: MeldOperation) {
+  private reset(first: JournalEntry) {
     this.removals.length = 0;
-    this.trackEntry(first, operation);
+    this.trackEntry(first);
   }
 }

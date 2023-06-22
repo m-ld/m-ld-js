@@ -11,15 +11,16 @@ import type { Iri } from '@m-ld/jsonld';
  */
 export interface ExtensionSubjectInstance {
   /**
+   * Initialise the instance from domain data
    * @param src the graph subject of the instance
    * @param orm an ORM domain updating state
    * @param ext the extension type subject
    */
-  initialise(
+  initFromData?(
     src: GraphSubject,
     orm: OrmUpdating,
     ext: ExtensionSubject<this>
-  ): this | Promise<this>;
+  ): void;
   /**
    * This instance is being discarded. Implement to dispose resources.
    */
@@ -138,7 +139,7 @@ export class ExtensionSubject<T extends ExtensionSubjectInstance> extends OrmSub
     className: string,
     properties?: Subject
   ) => ExtensionSubject.declare(
-    `${M_LD.EXT.$base}${extModule}/${className}`,
+    M_LD.EXT.extensionType(extModule, className),
     `@m-ld/m-ld/ext/${extModule}`,
     className,
     properties);
@@ -228,7 +229,19 @@ export class ExtensionSubject<T extends ExtensionSubjectInstance> extends OrmSub
   private instance(src: GraphSubject, orm: OrmUpdating): T | Promise<T> {
     if (this.factory.err != null)
       throw this.factory.err;
-    return new this.factory.construct!().initialise(src, orm, this);
+    return this.initialisedInstance(src, orm);
+  }
+
+  /** Override to provide custom post-initialisation behaviour */
+  protected initialisedInstance(src: GraphSubject, orm: OrmUpdating) {
+    const inst = this.newInstance(src, orm);
+    inst.initFromData?.(src, orm, this);
+    return inst;
+  }
+
+  /** Override to provide custom pre-initialisation behaviour */
+  protected newInstance(src: GraphSubject, orm: OrmUpdating) {
+    return new this.factory.construct!();
   }
 }
 
@@ -265,6 +278,6 @@ export class SingletonExtensionSubject<T extends ExtensionSubjectInstance>
     if (this.factory.err != null)
       throw this.factory.err;
     if (this._singleton == null)
-      this._singleton = new this.factory.construct!().initialise(src, orm, this);
+      this._singleton = this.initialisedInstance(src, orm);
   }
 }

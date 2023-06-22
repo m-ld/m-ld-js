@@ -1,5 +1,5 @@
 import { MeldAclTransportSecurity } from '../src/security';
-import { MockGraphState, testConfig, testContext } from './testClones';
+import { MockGraphState, testConfig } from './testClones';
 import { MeldMessageType } from '../src/ns/m-ld';
 import { subtle } from '../src/engine/local';
 
@@ -44,7 +44,7 @@ describe('m-ld access control list', () => {
     let state: MockGraphState;
 
     beforeEach(async () => {
-      state = await MockGraphState.create({ context: testContext });
+      state = await MockGraphState.create();
     });
 
     afterEach(() => state.close());

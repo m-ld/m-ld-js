@@ -3,33 +3,25 @@ import { MeldErrorStatus } from '@m-ld/m-ld-spec';
 import type {
   ExpandedTermDef, Query, Read, Reference, Subject, SubjectProperty, Update, Variable, Write
 } from './jrql-support';
-import { Value } from './jrql-support';
+import { Expression, Value } from './jrql-support';
 import { Subscription } from 'rxjs';
 import { shortId } from './util';
 import { Iri } from '@m-ld/jsonld';
 import { QueryableRdfSource } from './rdfjs-support';
 import { Consumable, Flowable } from 'rx-flowable';
 import { MeldMessageType } from './ns/m-ld';
-import { MeldApp } from './config';
-import { EncodedOperation } from './engine/index';
+import { MeldApp, MeldAppContext } from './config';
+import { EncodedOperation } from './engine';
 
 /**
- * A convenience type for a struct with a `@insert` and `@delete` property, like
- * a {@link MeldUpdate}.
+ * An update form that mirrors the structure of a {@link GraphUpdate}, having
+ * optional keys
  * @category API
  */
-export interface DeleteInsert<T> {
-  readonly '@delete': T;
-  readonly '@insert': T;
-}
+export type UpdateForm<T> = Partial<{ [verb in keyof GraphUpdate]: T }>
 
 /** @internal */
-export function isDeleteInsert(o: any): o is DeleteInsert<unknown> {
-  return '@insert' in o && '@delete' in o;
-}
-
-/** @internal */
-export type Assertions = Partial<DeleteInsert<GraphSubject[] | GraphSubject>>;
+export type Assertions = UpdateForm<GraphSubject[] | GraphSubject>;
 
 /**
  * A utility to generate a variable with a unique Id. Convenient to use when
@@ -252,7 +244,7 @@ export namespace GraphSubjects {
  * An update arising from a write operation to **m-ld** graph data.
  * @category API
  */
-export interface GraphUpdate extends DeleteInsert<GraphSubjects> {
+export interface GraphUpdate {
   /**
    * Partial subjects, containing properties that have been deleted from the
    * domain. Note that deletion of a property (even of all properties) does not
@@ -265,6 +257,12 @@ export interface GraphUpdate extends DeleteInsert<GraphSubjects> {
    * domain.
    */
   readonly '@insert': GraphSubjects;
+  /**
+   * Partial subjects, containing only properties with a {@link SharedDatatype}
+   * in the domain, which have been operated on.
+   * @todo more explanation
+   */
+  readonly '@update': GraphSubjects;
 }
 
 /**
@@ -330,8 +328,8 @@ export type StateProc<S extends MeldReadState = MeldReadState, T = unknown> =
  * rejects.
  * @category API
  */
-export type UpdateProc<U extends MeldPreUpdate = MeldUpdate, T = unknown> =
-  (update: U, state: MeldReadState) => PromiseLike<T> | void;
+export type UpdateProc<U extends MeldPreUpdate = MeldUpdate, T = void> =
+  (update: U, state: MeldReadState) => PromiseLike<T> | T;
 
 /**
  * A m-ld state machine extends the {@link MeldState} API for convenience, but
@@ -487,32 +485,6 @@ export interface MeldContext {
 }
 
 /**
- * Some component of type `T` that is loaded from domain state. The current
- * value may change as the domain evolves; and may also be temporarily
- * unavailable during an update.
- * @internal
- */
-export interface StateManaged<T> {
-  /**
-   * Get the current or next available value, ready for use (or a rejection,
-   * e.g. if the clone is shutting down).
-   */
-  ready(): Promise<T>;
-  /**
-   * Initialises the component against the given clone state. This method could
-   * be used to read significant state into memory for the efficient
-   * implementation of a component's function.
-   */
-  readonly initialise?: StateProc;
-  /**
-   * Called to inform the component of an update to the state, _after_ it has
-   * been applied. If available, this procedure will be called for every state
-   * after that passed to {@link initialise}.
-   */
-  readonly onUpdate?: UpdateProc<MeldPreUpdate>;
-}
-
-/**
  * [Extensions](/#extensions) applied to a **m-ld** clone.
  *
  * Extensions can then be installed in two ways:
@@ -570,19 +542,33 @@ export interface StateManaged<T> {
  * @experimental
  * @category Experimental
  */
+export interface MeldPlugin extends Partial<MeldExtensions> {
+  /**
+   * Give the extensions some context
+   */
+  setExtensionContext?(context: MeldAppContext): void;
+}
+
+/**
+ * Strict definitions of the extension types available
+ */
 export interface MeldExtensions {
   /**
    * Data invariant constraints applicable to the domain.
    *
    * @experimental
    */
-  readonly constraints?: Iterable<MeldConstraint>;
+  readonly constraints: Iterable<MeldConstraint>;
+  /**
+   * @todo
+   */
+  readonly indirectedData: IndirectedData;
   /**
    * Agreement preconditions applicable to the domain.
    *
    * @experimental
    */
-  readonly agreementConditions?: Iterable<AgreementCondition>;
+  readonly agreementConditions: Iterable<AgreementCondition>;
   /**
    * A transport security interceptor. If the initial transport security is not
    * compatible with the rest of the domain, this clone may not be able to join
@@ -590,7 +576,7 @@ export interface MeldExtensions {
    *
    * @experimental
    */
-  readonly transportSecurity?: MeldTransportSecurity;
+  readonly transportSecurity: MeldTransportSecurity;
 }
 
 /**
@@ -741,17 +727,25 @@ export interface InterimUpdate {
    */
   remove(assertions: Assertions): void;
   /**
-   * Substitutes the given alias for the given property subject, property, or
-   * subject and property, in updates provided to the application. This allows a
-   * constraint to hide a data implementation detail.
+   * Substitutes the given alias for the given property or subject and property,
+   * in updates provided to the application. This allows a constraint to hide a
+   * data implementation detail.
    *
    * @param subjectId the subject to which the alias applies
-   * @param property if `@id`, the subject IRI is aliased. Otherwise, the
-   * property is aliased.
-   * @param alias the alias for the given subject and/or property. It is an
-   * error if the property is `@id` and a `SubjectProperty` alias is provided.
+   * @param property the property to be aliased
+   * @param alias the alias for the given property
    */
-  alias(subjectId: Iri | null, property: '@id' | Iri, alias: Iri | SubjectProperty): void;
+  alias(subjectId: Iri | null, property: Iri, alias: SubjectProperty): void;
+  /**
+   * Substitutes the given alias for the given subject, in updates provided to
+   * the application. This allows a constraint to hide a data implementation
+   * detail.
+   *
+   * @param subjectId the subject to which the alias applies
+   * @param property `@id` to indicate that the subject IRI is aliased
+   * @param alias the alias for the given subject
+   */
+  alias(subjectId: Iri, property: '@id', alias: Iri): void;
   /**
    * Recovers hidden graph edges for the given subject and property; that is,
    * values that have been deleted from the graph by {@link entail entailment}.
@@ -768,6 +762,164 @@ export interface InterimUpdate {
    * they will have been applied.
    */
   readonly update: Promise<MeldPreUpdate>;
+}
+
+/**
+ * If `property` is provided, `datatype` is the datatype of a literal at the
+ * given property position in a Subject. Otherwise, it is the identity of the
+ * datatype itself (which may be the same).
+ * @see Datatype
+ */
+export type IndirectedData =
+  (datatype: Iri, property?: Iri) => Datatype | undefined;
+
+/**
+ * @todo doc
+ * @typeParam Data - data type
+ */
+export interface Datatype<Data = unknown> {
+  /**
+   * The identity of the datatype itself. Used in the internal representation,
+   * which is visible to query filters; but a canonical json-rql Value is
+   * substituted in retrieval and updates.
+   */
+  readonly '@id': string;
+  /**
+   * Obtains a (preferably short) identity for the given data, which is
+   * consistent with equality between data objects. The identity value is only
+   * visible to query filters; the data is {@link toValue indirected} in
+   * retrieval and updates.
+   */
+  getDataId(data: Data): string;
+  /**
+   * Parses a value provided by the app. This may give the application some
+   * leeway in type strictness; but note that the value provided back to the app
+   * will always be that returned by {@link Datatype#toValue}, if
+   * provided, or the `Data` itself if not.
+   *
+   * If the provided value is an expanded `ValueObject`, its datatype will be a
+   * fully pre-expanded IRI.
+   *
+   * @returns the valid data, or undefined if the data is not valid
+   * @throws {TypeError} if a validation message is indicated
+   */
+  validate(value: Value): Data | undefined;
+  /**
+   * Provides a value to appear when the data is retrieved. The datatype should
+   * always accept the returned value forms in its `validate` method. If the
+   * value's type should be anything other than this datatype's `@id`, a
+   * `ValueObject` should be returned including the desired `@type`, even if
+   * it's a built-in type like xs:string. The value object will be compacted as
+   * normal in the application API.
+   *
+   * If the returned value is an expanded `ValueObject`, its datatype MUST be a
+   * fully expanded IRI.
+   *
+   * If this method is not provided, the data itself MUST be a valid API value.
+   */
+  toValue?(data: Data): Value;
+  /**
+   * Returns the (approximate) size of the data in-memory (NOT as stringified).
+   */
+  sizeOf(data: Data): number;
+  /**
+   * Convert data to a representation that can be stringified to JSON. If this
+   * method is not provided, the data itself must be JSON serialisable. The
+   * implementation should include a version if the format is likely to change.
+   * @see fromSerial
+   */
+  toJSON?(data: Data): any;
+  /**
+   * Deserialises data. If this method is not provided, the data must be
+   * directly deserialisable from JSON.
+   * @see toJSON
+   */
+  fromJSON?(json: any): Data;
+}
+
+/**
+ * @typeParam Data - data type
+ * @typeParam Operation - operation type; must be JSON-serialisable
+ * @typeParam Revert - reversion metadata type; must be JSON-serialisable
+ */
+export interface SharedDatatype<Data, Operation, Revert = never> extends Datatype<Data> {
+  /**
+   * A shared data type MUST always generate a new unique identity as its
+   * lexical value, for which mutable state will exist. This will only be called
+   * once per logical instance.
+   */
+  getDataId(): UUID;
+  /**
+   * Intercepts update of data. The implementation may mutate the passed `data`;
+   * the backend may later revert the returned operation in case of rollback.
+   *
+   * @param state the existing state of the shared value
+   * @param update the json-rql expression used to perform the update
+   * @returns the new state of the data, an operation which can be
+   * {@link apply applied}, and any additional local metadata required to revert
+   * the operation (if applicable). If the revert is not supplied, it is assumed
+   * to be `null`.
+   */
+  update(state: Data, update: Expression): [Data, Operation, Revert?];
+  /**
+   * Applies an operation to some state. The implementation is welcome to mutate
+   * the passed `state` and return it as the new state.
+   *
+   * @param state the existing state of the shared value
+   * @param operation the operation being applied, created using {@link update}
+   * on another clone
+   * @returns the new state (can be the input), an update expression to notify
+   * the app, and local metadata required to revert the operation (if applicable).
+   */
+  apply(state: Data, operation: Operation): [Data, Expression | Expression[], Revert?];
+  /**
+   * Reverts an operation from the state. The implementation is welcome to
+   * mutate the passed `state` and return it as the new (old) state.
+   *
+   * @param state the existing state of the shared value
+   * @param operation the operation being reverted, created using {@link update}
+   * on another clone
+   * @param revert the additional local metadata provided by {@link update},
+   * or `null` if no reversion metadata was provided.
+   * @returns the new state (can be the input), and an update expression to
+   * notify the app.
+   */
+  revert(state: Data, operation: Operation, revert: Revert): [Data, Expression | Expression[]];
+  /**
+   * Fuses operations into a single operation. Operations are be provided in
+   * contiguous causal order: `op1` happened-before `op2` OR `op1` is concurrent
+   * with `op2`; AND there exists no `op'` where `op'` happened-before `op2` and
+   * `op1` happened-before `op'`.
+   */
+  fuse(operation: Operation, suffix: Operation): [Operation];
+  /**
+   * Fuses operations into a single operation, with reversion metadata. Note
+   * that if a fusion request has reversion information in the input it should
+   * be provided in the return.
+   * @see #fuse
+   */
+  fuse(
+    operation: Operation,
+    suffix: Operation,
+    opRevert: Revert,
+    suffixRevert: Revert
+  ): [Operation, Revert?];
+  /**
+   * Cuts the prefix from the given operation and returns an operation which can
+   * be safely applied to a state that has the prefix already applied, e.g.
+   * - If the operation type is a list of sequential operations, the result can
+   * be a slice of the given operation at the prefix length.
+   * - If this datatype's operations are idempotent, the operation can be
+   * returned as-is.
+   */
+  cut(prefix: Operation, operation: Operation): Operation | undefined;
+}
+
+/**
+ * @todo
+ */
+export function isSharedDatatype<T>(dt: Datatype<T>): dt is SharedDatatype<T, unknown> {
+  return 'update' in dt;
 }
 
 /**
@@ -940,7 +1092,7 @@ export const noTransportSecurity: MeldTransportSecurity = {
   wire: (data: Buffer) => data
 };
 
-// Errors are used unchanged form m-ld-spec
+// Errors are used unchanged from m-ld-spec
 export { MeldErrorStatus };
 
 /**
@@ -966,3 +1118,5 @@ export class MeldError extends Error {
       return new MeldError('Unknown error', err.message);
   }
 }
+
+export type UUID = string;

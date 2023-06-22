@@ -3,8 +3,8 @@ import {
   asSubjectUpdates, includesValue, includeValues, JsAtomType, JsContainerType, JsProperty, maxValue,
   noMerge, Optional, propertyValue, Reference, Subject, updateSubject, VocabReference
 } from '../src';
-import { SubjectGraph } from '../src/engine/SubjectGraph';
 import { XS } from '../src/ns';
+import { mockUpdate } from './testClones';
 
 describe('Update utilities', () => {
   describe('by-subject indexing', () => {
@@ -16,18 +16,6 @@ describe('Update utilities', () => {
         'foo': {
           '@delete': { '@id': 'foo', size: 10 },
           '@insert': { '@id': 'foo', size: 20 }
-        }
-      });
-    });
-
-    test('un-reifies references in subject updates', () => {
-      expect(asSubjectUpdates({
-        '@delete': [{ '@id': 'foo', friend: { '@id': 'bar', name: 'Bob' } }],
-        '@insert': []
-      })).toEqual({
-        'foo': {
-          '@delete': { '@id': 'foo', friend: { '@id': 'bar' } },
-          '@insert': undefined
         }
       });
     });
@@ -226,6 +214,13 @@ describe('Update utilities', () => {
     expect(box).toEqual({ '@id': 'foo', size: 10, contents: [{ '@id': 'baz' }] });
   });
 
+  test('cannot apply shared data type updates', () => {
+    const box: Box = { '@id': 'foo', size: 10 };
+    expect(() => updateSubject(box, {
+      foo: { '@update': { '@id': 'foo', size: { '@plus': 1 } } }
+    }, false)).toThrow();
+  });
+
   describe('with defined properties', () => {
     let changed: boolean;
     const box = Object.defineProperty({ '@id': 'foo' }, 'size', {
@@ -300,16 +295,16 @@ describe('Update utilities', () => {
           '@id': 'bar', size: 5
         }]
       };
-      updateSubject(box, {
-        '@delete': new SubjectGraph([
+      updateSubject(box, mockUpdate({
+        '@delete': [
           { '@id': 'foo', size: 10 },
           { '@id': 'bar', size: 5 }
-        ]),
-        '@insert': new SubjectGraph([
+        ],
+        '@insert': [
           { '@id': 'foo', size: 11 },
           { '@id': 'bar', size: 6 }
-        ])
-      });
+        ]
+      }));
       expect(box).toEqual({
         '@id': 'foo', size: 11, contents: [{
           '@id': 'bar', size: 6
@@ -599,6 +594,9 @@ describe('Update utilities', () => {
       const avatar = Buffer.of(0, 1);
       expect(avatar.equals(propertyValue({
         avatar: { '@type': XS.base64Binary, '@value': avatar.toString('base64') }
+      }, 'avatar', Uint8Array))).toBe(true);
+      expect(avatar.equals(propertyValue({
+        avatar // Plain Uint8Array works too
       }, 'avatar', Uint8Array))).toBe(true);
       expect(() => propertyValue({
         avatar: avatar.toString('base64')
