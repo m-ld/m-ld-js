@@ -123,6 +123,9 @@ export class ShapeConstrained implements ExtensionSubjectInstance, MeldPlugin {
   }
 }
 
+/**
+ * @todo docs
+ */
 class DeleteDetector extends SubjectUpdater {
   private readonly fullyDeletedIds = new Set<Iri>();
 

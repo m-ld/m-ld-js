@@ -13,6 +13,7 @@ import { Iri } from '@m-ld/jsonld';
 
 /**
  * JSON datatype for atomic JSON values.
+ * @internal
  */
 export const jsonDatatype = new class implements Datatype, MeldPlugin {
   '@id' = RDF.JSON;
@@ -63,6 +64,7 @@ export const jsonDatatype = new class implements Datatype, MeldPlugin {
 
 /**
  * Datatype for Uint8Array/Buffer values.
+ * @internal
  */
 export const byteArrayDatatype: Datatype<Buffer> & MeldPlugin = {
   indirectedData: type => {
@@ -79,6 +81,7 @@ export const byteArrayDatatype: Datatype<Buffer> & MeldPlugin = {
   sizeOf: data => data.length
 };
 
+/** @internal */
 function binaryId(data: BinaryLike) {
   return sha1().update(data).digest().toString('base64');
 }

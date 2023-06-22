@@ -90,7 +90,7 @@
   "dependencies": {
     "@ably/msgpack-js": "^0.4.0",
     "@m-ld/jsonld": "^6.0.1-m-ld.0",
-    "@m-ld/m-ld-spec": "^0.6.7",
+    "@m-ld/m-ld-spec": "^0.7.0-edge.0",
     "@types/detect-node": "^2.0.0",
     "@types/lru-cache": "^5.1.1",
     "@types/requestidlecallback": "^0.3.1",

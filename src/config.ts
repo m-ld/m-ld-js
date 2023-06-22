@@ -207,11 +207,13 @@ export interface MeldAppContext {
  * Combines plugins. The extensions are dynamically iterated, so the passed
  * `Iterable` can change content after this function is called.
  * @param extensions the extensions to combine
+ * @param properties an object containing any additional properties to include
  */
-export function combinePlugins<T>(
-  extensions: Iterable<MeldPlugin>
+export function combinePlugins(
+  extensions: Iterable<MeldPlugin>,
+  properties?: object
 ): MeldExtensions & MeldPlugin {
-  return {
+  return Object.assign({
     setExtensionContext(context: MeldAppContext) {
       for (let ext of extensions)
         ext.setExtensionContext?.(context);
@@ -237,5 +239,5 @@ export function combinePlugins<T>(
       }
       return noTransportSecurity;
     }
-  };
+  }, properties);
 }
