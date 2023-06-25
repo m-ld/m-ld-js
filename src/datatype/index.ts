@@ -31,15 +31,23 @@ export const jsonDatatype = new class implements Datatype, MeldPlugin {
   }
 
   validate(value: Value) {
-    if (isValueObject(value) && value['@type'] === RDF.JSON)
-      return JSON.parse(this.stringify(value['@value']));
+    if (isValueObject(value) && value['@type'] === RDF.JSON) {
+      const json = JSON.parse(value['@value']);
+      this.cacheLength(json, value['@value']);
+      return json;
+    }
+    return JSON.parse(this.lexical(value));
   }
 
-  stringify(data: unknown) {
+  lexical(data: unknown) {
     const asString = JSON.stringify(data);
+    this.cacheLength(data, asString);
+    return asString;
+  }
+
+  cacheLength(data: unknown, asString: string) {
     if (data != null && typeof data == 'object')
       this._sizeCache.set(data, asString.length * 2); // UTF-16
-    return asString;
   }
 
   toValue(json: unknown) {
@@ -52,13 +60,13 @@ export const jsonDatatype = new class implements Datatype, MeldPlugin {
    * comparing. We accept this over expensive canonicalisation.
    */
   getDataId(data: unknown) {
-    return binaryId(this.stringify(data));
+    return binaryId(this.lexical(data));
   }
 
   sizeOf(data: unknown): number {
-   // No sizeof operator in Javascript
+    // No sizeof operator in Javascript
     return (data != null && typeof data == 'object' && this._sizeCache.get(data))
-      || this.stringify(data).length * 2; // UTF-16
+      || this.lexical(data).length * 2; // UTF-16
   }
 }();
 
@@ -74,8 +82,16 @@ export const byteArrayDatatype: Datatype<Buffer> & MeldPlugin = {
   '@id': XS.base64Binary,
   validate(value) {
     if (isValueObject(value) && value['@type'] === XS.base64Binary)
-      value = value['@value'];
+      return Buffer.from(value['@value'], 'base64');
     return Buffer.from(<any>value); // Will throw if unacceptable
+  },
+  toValue(data: Buffer): Value {
+    // TODO: This is a hack for JSON APIs, e.g. in compliance tests
+    data.toJSON = () => (<any>{
+      '@type': XS.base64Binary,
+      '@value': data.toString('base64')
+    });
+    return data;
   },
   getDataId: binaryId,
   sizeOf: data => data.length

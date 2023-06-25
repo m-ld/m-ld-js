@@ -787,7 +787,7 @@ export interface Datatype<Data = unknown> {
   /**
    * Obtains a (preferably short) identity for the given data, which is
    * consistent with equality between data objects. The identity value is only
-   * visible to query filters; the data is {@link toValue indirected} in
+   * visible to query filters; the data is {@link #toValue indirected} in
    * retrieval and updates.
    */
   getDataId(data: Data): string;

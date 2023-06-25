@@ -259,7 +259,7 @@ export class SubjectQuads extends EventEmitter {
         if (datatype != null && (!serialising || !isSharedDatatype(datatype) || ex.id)) {
           const data = serialising ?
             datatype.fromJSON?.(ex.raw) ?? ex.raw : // coming from protocol
-            datatype.validate(ex.raw); // coming from the app
+            datatype.validate(value); // coming from the app
           return this.rdf.literal(ex.id || datatype.getDataId(data), datatype, data);
         }
       }

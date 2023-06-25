@@ -12,7 +12,7 @@ import { EMPTY, merge, mergeMap, Observable, of, Subject as Source } from 'rxjs'
 import { expand, filter, map, takeWhile } from 'rxjs/operators';
 import { completed, inflate, mapIter } from '../util';
 import { Logger } from 'loglevel';
-import { Quad, Triple, tripleIndexKey, TripleMap } from '../quads';
+import { isLiteralTriple, LiteralTriple, Quad, Triple, tripleIndexKey, TripleMap } from '../quads';
 import { InterimUpdatePatch } from './InterimUpdatePatch';
 import { EntryBuilder, Journal, JournalEntry, JournalState } from '../journal';
 import { JournalClerk } from '../journal/JournalClerk';
@@ -838,10 +838,12 @@ export class SuSetDataset extends MeldEncoder {
 
     private toSharedDataOpMeta = async (
       [triple, operation]: [RefTriple, unknown]
-    ): Promise<[Quad, UpdateMeta] | undefined> => {
+    ): Promise<[Quad & LiteralTriple, UpdateMeta] | undefined> => {
       const quad = this.ssd.toUserQuad(triple);
+      if (!isLiteralTriple(quad))
+        throw new MeldError('Bad update');
       const upMeta = await this.ssd.userGraph.jrql
-        .applyTripleOperation(quad, operation, this.txc);
+        .applyTripleOperation(quad.object, operation, this.txc);
       if (upMeta != null)
         return [quad, upMeta];
     };
@@ -903,7 +905,7 @@ export class SuSetDataset extends MeldEncoder {
         const tidQuads = await this.tidsStore
           .findTriplesTids(quads, 'includeEmpty');
         await Promise.all(mapIter(tidQuads, ([triple]) =>
-          this.userGraph.jrql.loadData(triple)));
+          this.userGraph.jrql.loadData(triple.object)));
         const reified = this.reifyTriplesTids(this.identifyTriplesData(tidQuads));
         const [inserts, encoding] = this.bufferFromTriples(reified);
         return { value: { inserts, encoding }, next };

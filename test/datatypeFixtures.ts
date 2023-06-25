@@ -1,10 +1,10 @@
 import { Datatype, Expression, MeldPlugin, SharedDatatype } from '../src';
 import { XS } from '../src/ns';
-import { Iri } from '@m-ld/jsonld';
+import { Iri, ValueObject } from '@m-ld/jsonld';
 
 export const dateDatatype: Datatype<Date> = {
   '@id': 'http://ex.org/date',
-  validate: (value: string) => new Date(value),
+  validate: (value: ValueObject) => new Date(<string>value['@value']),
   getDataId: date => date.toDateString(),
   toValue: date => date.toISOString(),
   sizeOf: date => JSON.stringify(date).length,

@@ -7,8 +7,7 @@ import { inPosition, isTypedLiteral, Literal, RdfFactory, Triple } from './quads
 import { M_LD, RDF, XS } from '../ns';
 import { SubjectGraph } from './SubjectGraph';
 import { SubjectQuads } from './SubjectQuads';
-// TODO: Switch to fflate. Node.js zlib uses Pako in the browser
-import { gunzipSync, gzipSync } from 'zlib';
+import { gunzipSync, gzipSync } from 'fflate';
 import { baseVocab, domainBase } from './dataset';
 import { IndirectedData, MeldError, UUID } from '../api';
 import { JrqlMode, RefTriple } from './jrql-util';
@@ -116,12 +115,13 @@ export class MeldEncoder {
   private unreifyTriplesData<E>(
     reifications: Triple[],
     dataPredicate: Iri,
-    accData: (object: Quad_Object, data?: E) => E
+    accData: (object: Quad_Object, data: E) => E,
+    defaultValue: E
   ): [RefTriple, E][] {
     return Object.values(reifications.reduce((rids, reification) => {
       const rid = reification.subject.value; // Blank node value
       // Add the blank node IRI prefix to a new triple
-      let [triple, data] = rids[rid] || [{ '@id': `_:${rid}` }, undefined];
+      let [triple, data] = rids[rid] || [{ '@id': `_:${rid}` }, defaultValue];
       switch (reification.predicate.value) {
         case RDF.subject:
           triple.subject = inPosition('subject', reification.object);
@@ -149,13 +149,21 @@ export class MeldEncoder {
   }
 
   unreifyTriplesTids(reifications: Triple[]): RefTriplesTids {
-    return this.unreifyTriplesData(
-      reifications, M_LD.tid, (object, tids) => (tids ?? []).concat(object.value));
+    return this.unreifyTriplesData<string[]>(
+      reifications,
+      M_LD.tid,
+      (object, tids) => tids.concat(object.value),
+      []
+    );
   }
 
   unreifyTriplesOp(reifications: Triple[]): RefTriplesOp {
     return this.unreifyTriplesData(
-      reifications, M_LD.op, object => isTypedLiteral(object) && object.typed.data);
+      reifications,
+      M_LD.op,
+      object => isTypedLiteral(object) && object.typed.data,
+      undefined
+    );
   }
 
   jsonFromTriples = (triples: Triple[]): object => {
@@ -176,7 +184,7 @@ export class MeldEncoder {
   static bufferFromJson(json: object): [Buffer, BufferEncoding[]] {
     const packed = MsgPack.encode(json);
     return packed.length > COMPRESS_THRESHOLD_BYTES ?
-      [gzipSync(packed), [BufferEncoding.MSGPACK, BufferEncoding.GZIP]] :
+      [Buffer.from(gzipSync(packed)), [BufferEncoding.MSGPACK, BufferEncoding.GZIP]] :
       [packed, [BufferEncoding.MSGPACK]];
   }
 

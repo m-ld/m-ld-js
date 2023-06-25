@@ -100,6 +100,7 @@
     "abstract-level": "^1.0.3",
     "asynciterator": "^3.2.0",
     "cuid": "^2.1.8",
+    "fflate": "^0.8.0",
     "json-rql": "^0.6.2",
     "loglevel": "^1.7.1",
     "lru-cache": "^6.0.0",

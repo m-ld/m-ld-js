@@ -4,8 +4,8 @@ import { GlobalClock, TreeClock } from '../src/engine/clocks';
 import { take, toArray } from 'rxjs/operators';
 import { EmptyError, firstValueFrom, lastValueFrom, Subject } from 'rxjs';
 import {
-  AgreementCondition, combinePlugins, Describe, JournalCheckPoint, MeldConstraint, MeldError,
-  MeldPlugin, MeldTransportSecurity, MeldUpdate, Select
+  AgreementCondition, combinePlugins, Construct, Describe, JournalCheckPoint, MeldConstraint,
+  MeldError, MeldPlugin, MeldTransportSecurity, MeldUpdate, Select
 } from '../src';
 import { jsonify } from './testUtil';
 import { MeldEncoder } from '../src/engine/MeldEncoding';
@@ -16,6 +16,7 @@ import { MeldOperationMessage } from '../src/engine/MeldOperationMessage';
 import { byteArrayDatatype, jsonDatatype } from '../src/datatype';
 import { CounterType } from './datatypeFixtures';
 import { JsonldContext } from '../src/engine/jsonld';
+import { expect } from '@jest/globals';
 
 const fred = {
   '@id': 'http://test.m-ld.org/fred',
@@ -27,6 +28,15 @@ const fred = {
   '@id': 'http://test.m-ld.org/barney',
   'http://test.m-ld.org/#name': 'Barney'
 };
+
+expect.addEqualityTesters([function (a: unknown, b: unknown) {
+  const isABuffer = a instanceof Buffer;
+  const isBBuffer = b instanceof Buffer;
+  if (isABuffer && isBBuffer)
+    return a.equals(b);
+  else if (isABuffer !== isBBuffer)
+    return false;
+}]);
 
 describe('SU-Set Dataset', () => {
   let state: MockState;
@@ -303,7 +313,7 @@ describe('SU-Set Dataset', () => {
           }, {}]);
           // Check audit trace
           const trace = update.trace();
-          expect(trace.trigger.operation).toMatchObject(msg!.data);
+          expect(trace.trigger.operation).toEqual(msg!.data);
           // Expecting no new buffers: same buffer object used
           expect(trace.trigger.data).toBe(MeldOperationMessage.enc(msg!));
           expect(trace.trigger.attribution).toBeNull();
@@ -552,7 +562,7 @@ describe('SU-Set Dataset', () => {
           // Check audit trace
           const trace = (await willUpdate).trace();
           let [, from, time, upd, enc] = trace.trigger.operation;
-          expect(MeldEncoder.jsonFromBuffer(upd, enc)).toMatchObject([{}, [
+          expect(MeldEncoder.jsonFromBuffer(upd, enc)).toEqual([{}, [
             { 'tid': oneTid, 'o': 'Wilma', 'p': '#name', 's': 'wilma' },
             { 'tid': remote.time.hash, 'o': 'Barney', 'p': '#name', 's': 'barney' }
           ]]);
@@ -938,11 +948,55 @@ describe('SU-Set Dataset', () => {
       }))).resolves.toMatchObject([{ '?f': { '@id': 'http://test.m-ld.org/fred' } }]);
     });
 
+    test('insert indirected datatype with explicit value object', async () => {
+      extensions.push(byteArrayDatatype);
+      const willUpdate = firstValueFrom(ssd.updates);
+      const photo = new Buffer('abc');
+      await ssd.transact(local.tick().time, {
+        '@id': 'http://test.m-ld.org/fred',
+        'http://test.m-ld.org/#photo': {
+          '@type': 'http://www.w3.org/2001/XMLSchema#base64Binary',
+          '@value': photo.toString('base64')
+        }
+      });
+      // Update has canonical value
+      await expect(willUpdate).resolves.toMatchObject({
+        '@insert': [{
+          '@id': 'http://test.m-ld.org/fred',
+          'http://test.m-ld.org/#photo': photo
+        }]
+      });
+      await expect(drain(ssd.read<Describe>({
+        '@describe': 'http://test.m-ld.org/fred'
+      }))).resolves.toEqual([{
+        '@id': 'http://test.m-ld.org/fred',
+        'http://test.m-ld.org/#photo': photo
+      }]);
+    });
+
+    test('constructs with indirected datatype', async () => {
+      extensions.push(byteArrayDatatype);
+      const photo = new Buffer('abc');
+      await ssd.transact(local.tick().time, {
+        '@id': 'http://test.m-ld.org/fred',
+        'http://test.m-ld.org/#photo': photo
+      });
+      await expect(drain(ssd.read<Construct>({
+        '@construct': {
+          '@id': 'http://test.m-ld.org/fred',
+          'http://test.m-ld.org/#photo': '?'
+        }
+      }))).resolves.toEqual([{
+        '@id': 'http://test.m-ld.org/fred',
+        'http://test.m-ld.org/#photo': photo
+      }]);
+    });
+
     test('apply operation with indirected data', async () => {
       const validate = jest.spyOn(byteArrayDatatype, 'validate').mockReset();
       const getDataId = jest.spyOn(byteArrayDatatype, 'getDataId').mockReset();
       extensions.push(byteArrayDatatype);
-      const photo = new Buffer('abc');
+      const photo = Buffer.from('abc');
       await expect(ssd.apply(
         remote.sentOperation({}, { '@id': 'fred', photo }),
         local.join(remote.time)
@@ -996,14 +1050,13 @@ describe('SU-Set Dataset', () => {
           'http://test.m-ld.org/#likes': '?'
         }
       });
+      await expect(willUpdates).resolves.toMatchObject([
+        { '@insert': [fred] },
+        { '@delete': [fred] }
+      ]);
       await expect(drain(ssd.read<Describe>({
         '@describe': 'http://test.m-ld.org/fred'
       }))).resolves.toEqual([]);
-      await expect(willUpdates).resolves.toMatchObject([{
-        '@insert': [fred]
-      }, {
-        '@delete': [fred]
-      }]);
     });
 
     test('operates on shared datatype', async () => {

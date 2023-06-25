@@ -196,17 +196,13 @@ export function expandValue(
     type = ctx.getTermDetail(property, '@type') ?? undefined;
   if (type === '@json') {
     return {
-      raw: value,
-      get canonical() { return JSON.stringify(value); },
-      type: RDF.JSON,
-      id
+      id, raw: value, type: RDF.JSON,
+      get canonical() { return JSON.stringify(value); }
     };
   } else if (value instanceof Uint8Array) {
     return {
-      raw: value,
-      get canonical() { return Buffer.from(value).toString('base64'); },
-      type: XS.base64Binary,
-      id
+      id, raw: value, type: XS.base64Binary,
+      get canonical() { return Buffer.from(value).toString('base64'); }
     };
   } else if (typeof value == 'string') {
     if (property === '@type' || type === '@id' || type === '@vocab') {
