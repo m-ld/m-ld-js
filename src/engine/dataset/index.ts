@@ -15,7 +15,7 @@ import { MutableOperation } from '../ops';
 import { BaseStream, Binding, CountableRdf, QueryableRdfSource } from '../../rdfjs-support';
 import { uuid } from '../../util';
 import { Stopwatch } from '../Stopwatch';
-import { check } from '../check';
+import { checkNotClosed } from '../check';
 import { Consumable } from 'rx-flowable';
 import { MeldError } from '../../api';
 import type { AbstractChainedBatch, AbstractIteratorOptions, AbstractLevel } from 'abstract-level';
@@ -114,10 +114,6 @@ export interface TxnContext {
   on(state: 'commit', handler: () => unknown | Promise<unknown>): this;
   on(state: 'rollback', handler: (err: any) => unknown | Promise<unknown>): this;
 }
-
-const notClosed = check((d: Dataset) => !d.closed,
-  // m-ld-specific error used here to simplify exception handling
-  () => new MeldError('Clone has closed'));
 
 /**
  * Read-only utility interface for reading Quads from a Dataset.
@@ -222,7 +218,7 @@ export class QuadStoreDataset implements Dataset {
     return new QuadStoreGraph(this, name || this.rdf.defaultGraph());
   }
 
-  @notClosed.async
+  @checkNotClosed.async
   transact<T, O extends PatchResult>(txn: TxnOptions<O>): Promise<T> {
     const lockKey = txn.lock ?? 'txn';
     const id = txn.id ?? uuid();
@@ -299,7 +295,7 @@ export class QuadStoreDataset implements Dataset {
     }
   }
 
-  @notClosed.async
+  @checkNotClosed.async
   get(key: string): Promise<Buffer | undefined> {
     return new Promise<Buffer | undefined>((resolve, reject) =>
       this.store.db.get(key, { valueEncoding: 'buffer' }, (err, buf) => {
@@ -316,7 +312,7 @@ export class QuadStoreDataset implements Dataset {
       }));
   }
 
-  @notClosed.async
+  @checkNotClosed.async
   has(key: string): Promise<boolean> {
     return new Promise<boolean>((resolve, reject) => {
       const it = this.store.db.iterator({
@@ -336,7 +332,7 @@ export class QuadStoreDataset implements Dataset {
     });
   }
 
-  @notClosed.rx
+  @checkNotClosed.rx
   read(range: AbstractIteratorOptions<string, Buffer>): Consumable<[string, Buffer]> {
     return new Observable(subs => {
       const options = { ...range, keyEncoding: 'utf8', valueEncoding: 'buffer' };
@@ -371,7 +367,7 @@ export class QuadStoreDataset implements Dataset {
     });
   }
 
-  @notClosed.async
+  @checkNotClosed.async
   clear(): Promise<void> {
     return new Promise<void>((resolve, reject) =>
       this.store.db.clear(err => {
@@ -385,7 +381,7 @@ export class QuadStoreDataset implements Dataset {
       }));
   }
 
-  @notClosed.async
+  @checkNotClosed.async
   close(): Promise<void> {
     // Make efforts to ensure no transactions are running
     return this.lock.exclusive('txn', 'closing', () => {

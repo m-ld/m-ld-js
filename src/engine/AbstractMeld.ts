@@ -11,14 +11,11 @@ import { MeldOperationMessage } from './MeldOperationMessage';
 import { check } from './check';
 import { getIdLogger } from './logging';
 
-export abstract class AbstractMeld implements Meld {
-  protected static checkLive =
-    check((m: AbstractMeld) => m.live.value === true,
-      () => new MeldError('Meld is offline'));
-  protected static checkNotClosed =
-    check((m: AbstractMeld) => !m.closed,
-      () => new MeldError('Clone has closed'));
+export const checkLive =
+  check((m: Meld) => m.live.value === true,
+    () => new MeldError('Meld is offline'));
 
+export abstract class AbstractMeld implements Meld {
   readonly operations: Observable<OperationMessage>;
   readonly live: LiveValue<boolean | null>;
 
