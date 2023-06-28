@@ -3,7 +3,6 @@ import {
   QuadSet, QuadSource, RdfFactory, toBinding
 } from '../quads';
 import { BatchOpts, Quadstore } from 'quadstore';
-import { AbstractChainedBatch, AbstractIteratorOptions, AbstractLevel } from 'abstract-level';
 import { Observable } from 'rxjs';
 import { LockManager } from '../locks';
 import { Context, Iri } from '@m-ld/jsonld';
@@ -19,6 +18,7 @@ import { Stopwatch } from '../Stopwatch';
 import { check } from '../check';
 import { Consumable } from 'rx-flowable';
 import { MeldError } from '../../api';
+import type { AbstractChainedBatch, AbstractIteratorOptions, AbstractLevel } from 'abstract-level';
 import EventEmitter = require('events');
 
 /**
