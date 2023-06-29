@@ -1,4 +1,4 @@
-import * as LRUCache from 'lru-cache';
+import LRUCache from 'lru-cache';
 
 type FactoryOptions = Omit<LRUCache.Options<unknown, unknown>, 'length' | 'dispose'>;
 

@@ -22,6 +22,7 @@ import { MeldConfig } from '../../config';
 import { MeldOperationMessage } from '../MeldOperationMessage';
 import { Stopwatch } from '../Stopwatch';
 import { Future } from '../Future';
+import { checkNotClosed } from '../check';
 
 /**
  * A sub-publisher, used to temporarily address unicast messages to one peer clone. Sub-publishers
@@ -476,7 +477,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
   };
 
   // Note this method is recursive and can be long-running, waiting for timeout
-  @PubsubRemotes.checkNotClosed.async
+  @checkNotClosed.async
   private async send<T extends Response>(
     wireRequest: Buffer,
     params: {

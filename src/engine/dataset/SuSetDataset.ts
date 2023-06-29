@@ -28,7 +28,7 @@ import { ClockHolder } from '../messages';
 import { Iri } from '@m-ld/jsonld';
 import { M_LD } from '../../ns';
 import { MeldOperationMessage } from '../MeldOperationMessage';
-import { check } from '../check';
+import { check, checkNotClosed } from '../check';
 import { getIdLogger } from '../logging';
 import { Future } from '../Future';
 import { JrqlPatchQuads, JrqlQuadOperation, JrqlQuads, UpdateMeta } from './JrqlQuads';
@@ -36,6 +36,7 @@ import { RefTriple } from '../jrql-util';
 import { JsonldContext } from '../jsonld';
 import { CacheFactory } from '../cache';
 import { array } from '../../util';
+import { checkLocked } from '../locks';
 
 export type DatasetSnapshot = Omit<Snapshot, 'updates'>;
 
@@ -46,19 +47,14 @@ type SuSetDataPatch = { quads: JrqlPatchQuads, tids: PatchTids };
 
 const OpKey = EncodedOperation.Key;
 
+const checkReadyForTxn = check((d: SuSetDataset) =>
+  d.readyForTxn, () => new MeldError('Unknown error', 'Dataset not ready'));
+
 /**
  * Writeable Graph, similar to a Dataset, but with a slightly different transaction API.
  * Journals every transaction and creates m-ld compliant operations.
  */
 export class SuSetDataset extends MeldEncoder {
-  private static checkNotClosed = check((d: SuSetDataset) =>
-    !d.dataset.closed, () => new MeldError('Clone has closed'));
-  private static checkStateLocked =
-    check((ssd: SuSetDataset) => ssd.dataset.lock.state('state') !== null,
-      () => new MeldError('Unknown error', 'Clone state not locked'));
-  private static checkReadyForTxn = check((d: SuSetDataset) =>
-    d.readyForTxn, () => new MeldError('Unknown error', 'Dataset not ready'));
-
   private static getCacheFactory(config: DatasetConfig) {
     return new CacheFactory({
       max: config.maxDataCacheSize ?? 10_000_000 // ~10MB
@@ -71,7 +67,7 @@ export class SuSetDataset extends MeldEncoder {
   private readonly journalClerk: JournalClerk;
   private readonly updateSource: Source<MeldUpdate> = new Source;
   private readonly log: Logger;
-  private readyForTxn = false;
+  public readyForTxn = false; // For decorators
 
   /**
    * `userCtx` is external context used for reads, writes and updates, but not
@@ -95,7 +91,7 @@ export class SuSetDataset extends MeldEncoder {
     this.journalClerk = new JournalClerk(this.journal, this.sign, config, app.journalAdmin);
   }
 
-  @SuSetDataset.checkNotClosed.async
+  @checkNotClosed.async
   async initialise() {
     await super.initialise();
     const graph = this.dataset.graph();
@@ -119,28 +115,28 @@ export class SuSetDataset extends MeldEncoder {
     return this.updateSource;
   }
 
-  @SuSetDataset.checkStateLocked.async
+  @checkLocked('state').async
   async allowTransact() {
     await this.extensions.onInitial?.(this.readState);
     this.readyForTxn = true;
   }
 
-  @SuSetDataset.checkStateLocked.rx
+  @checkLocked('state').rx
   read<R extends Read>(request: R): Consumable<GraphSubject> {
     return this.userGraph.read(request, this.userCtx);
   }
 
-  @SuSetDataset.checkStateLocked.async
+  @checkLocked('state').async
   write(request: Write, txc: TxnContext) {
     return this.userGraph.write(request, this.userCtx, txc);
   }
 
-  @SuSetDataset.checkStateLocked.async
+  @checkLocked('state').async
   ask(pattern: Query): Promise<boolean> {
     return this.userGraph.ask(pattern, this.userCtx);
   }
 
-  @SuSetDataset.checkNotClosed.async
+  @checkNotClosed.async
   async close(err?: any) {
     if (err) {
       this.log.warn('Shutting down due to', err);
@@ -154,13 +150,13 @@ export class SuSetDataset extends MeldEncoder {
     return this.dataset.close().catch(err => this.log.warn(err));
   }
 
-  @SuSetDataset.checkNotClosed.async
+  @checkNotClosed.async
   async loadClock(): Promise<TreeClock | undefined> {
     if (await this.journal.initialised())
       return (await this.journal.state()).time;
   }
 
-  @SuSetDataset.checkNotClosed.async
+  @checkNotClosed.async
   async resetClock(localTime: TreeClock): Promise<unknown> {
     return this.dataset.transact({
       id: 'suset-reset-clock',
@@ -174,7 +170,7 @@ export class SuSetDataset extends MeldEncoder {
     });
   }
 
-  @SuSetDataset.checkNotClosed.async
+  @checkNotClosed.async
   async saveClock(
     prepare: (gwc: GlobalClock) => Promise<TreeClock> | TreeClock
   ): Promise<TreeClock> {
@@ -201,7 +197,7 @@ export class SuSetDataset extends MeldEncoder {
    * @returns entries from the journal since the given time (exclusive), or
    * `undefined` if the given time is not found in the journal
    */
-  @SuSetDataset.checkNotClosed.async
+  @checkNotClosed.async
   async operationsSince(
     time: TickTree,
     gwc?: Future<GlobalClock>
@@ -230,9 +226,9 @@ export class SuSetDataset extends MeldEncoder {
     });
   }
 
-  @SuSetDataset.checkNotClosed.async
-  @SuSetDataset.checkStateLocked.async
-  @SuSetDataset.checkReadyForTxn.async
+  @checkNotClosed.async
+  @checkLocked('state').async
+  @checkReadyForTxn.async
   async transact(time: TreeClock, request: Write): Promise<OperationMessage | null> {
     return this.dataset.transact<OperationMessage | null>({
       prepare: async txc => {
@@ -470,8 +466,8 @@ export class SuSetDataset extends MeldEncoder {
    * @param msg the remote message to apply to this dataset
    * @param clockHolder a holder carrying a clock which can be manipulated
    */
-  @SuSetDataset.checkNotClosed.async
-  @SuSetDataset.checkStateLocked.async
+  @checkNotClosed.async
+  @checkLocked('state').async
   async apply(
     msg: MeldOperationMessage,
     clockHolder: ClockHolder<TreeClock>
@@ -855,7 +851,7 @@ export class SuSetDataset extends MeldEncoder {
    * @param snapshot snapshot with batches of quads and tids
    * @param localTime the time of the local process, to be saved
    */
-  @SuSetDataset.checkNotClosed.async
+  @checkNotClosed.async
   async applySnapshot(snapshot: DatasetSnapshot, localTime: TreeClock) {
     // Check that the provided snapshot is not concurrent with the last agreement
     if (await this.journal.initialised()) {
@@ -895,7 +891,7 @@ export class SuSetDataset extends MeldEncoder {
    * Takes a snapshot of data, including transaction IDs and latest operations.
    * The data will be loaded from the same consistent snapshot per abstract-level.
    */
-  @SuSetDataset.checkNotClosed.async
+  @checkNotClosed.async
   async takeSnapshot(): Promise<DatasetSnapshot> {
     const journal = await this.journal.state();
     const allQuads = this.userGraph.quads.query();

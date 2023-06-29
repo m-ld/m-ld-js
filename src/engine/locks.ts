@@ -1,5 +1,7 @@
 import { settled } from './util';
 import { Future } from './Future';
+import { check } from './check';
+import { MeldError } from '../api';
 
 interface Task {
   name: string;
@@ -87,6 +89,11 @@ export class SharedPromise<R> extends Future {
       return Promise.reject(e);
     }
   }
+}
+
+export function checkLocked<Key extends string>(key: Key) {
+  return check((m: { lock: LockManager<Key> }) => m.lock.state(key) !== null,
+    () => new MeldError('Unknown error', 'Clone state not locked'));
 }
 
 export class LockManager<K extends string = string> {

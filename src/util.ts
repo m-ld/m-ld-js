@@ -1,4 +1,4 @@
-import * as cuid from 'cuid';
+import cuid from 'cuid';
 
 /**
  * Utility to normalise a property value according to **m-ld**
