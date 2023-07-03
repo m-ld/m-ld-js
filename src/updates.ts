@@ -1,8 +1,6 @@
-import { isList, List, Reference, Slot, Subject } from './jrql-support';
+import { Reference, Subject } from './jrql-support';
 import { GraphSubject, GraphUpdate, UpdateForm } from './api';
-import { clone, getValues } from './engine/jsonld';
-import { isNaturalNumber } from './engine/util';
-import { array } from './util';
+import { clone } from './engine/jsonld';
 import { isReference } from 'json-rql';
 import { SubjectPropertyValues } from './subjects';
 
@@ -160,17 +158,9 @@ export class SubjectUpdater {
       const deletes = this.verbForSubject(subject, '@delete');
       const inserts = this.verbForSubject(subject, '@insert');
       for (let property of new Set(Object.keys(subject).concat(Object.keys(inserts ?? {})))) {
-        switch (property) {
-          case '@id':
-            break;
-          case '@list':
-            this.updateList(subject, deletes, inserts);
-            break;
-          default:
-            const subjectProperty = new SubjectPropertyValues(subject, property, this.updateValues);
-            subjectProperty.update(
-              getValues(deletes ?? {}, property),
-              getValues(inserts ?? {}, property));
+        if (property !== '@id') {
+          SubjectPropertyValues.for(subject, property, this.updateValues)
+            .update(deletes ?? {}, inserts ?? {});
         }
       }
     }
@@ -178,54 +168,9 @@ export class SubjectUpdater {
   }
 
   /** @internal */
-  updateValues = (values: Iterable<any>) => {
+  updateValues = (values: Iterable<any>, unref = false) => {
     for (let value of values)
-      if (typeof value == 'object' && '@id' in value && !isReference(value))
+      if (typeof value == 'object' && '@id' in value && (unref || !isReference(value)))
         this.update(value);
   }
-
-  private updateList(subject: GraphSubject, deletes?: GraphSubject, inserts?: GraphSubject) {
-    if (isList(subject)) {
-      if (isListUpdate(deletes) || isListUpdate(inserts)) {
-        this.updateListIndexes(subject['@list'],
-          isListUpdate(deletes) ? deletes['@list'] : {},
-          isListUpdate(inserts) ? inserts['@list'] : {});
-      }
-      this.updateValues(array(subject['@list']));
-    }
-  }
-
-  private updateListIndexes(list: List['@list'], deletes: List['@list'], inserts: List['@list']) {
-    const splice = typeof list.splice == 'function' ? list.splice : (() => {
-      // Array splice operation must have a length field to behave
-      if (!('length' in list)) {
-        const maxIndex = Math.max(...Object.keys(list).map(Number).filter(isNaturalNumber));
-        list.length = isFinite(maxIndex) ? maxIndex + 1 : 0;
-      }
-      return [].splice;
-    })();
-    const splices: { deleteCount: number, items?: any[] }[] = []; // Sparse
-    for (let i in deletes)
-      splices[i] = { deleteCount: 1 };
-    for (let i in inserts)
-      (splices[i] ??= { deleteCount: 0 }).items =
-        // List updates are always expressed with identified slots, but the list
-        // is assumed to contain direct items, not slots
-        array(inserts[i]).map((slot: Slot) => this.update(slot)['@item']);
-    let deleteCount = 0, items: any[] = [];
-    for (let i of Object.keys(splices).reverse().map(Number)) {
-      deleteCount += splices[i].deleteCount;
-      items.unshift(...splices[i].items ?? []);
-      if (!(i - 1 in splices)) {
-        splice.call(list, i, deleteCount, ...items);
-        deleteCount = 0;
-        items = [];
-      }
-    }
-  }
-}
-
-/** @internal */
-function isListUpdate(updatePart?: Subject): updatePart is List {
-  return updatePart != null && isList(updatePart);
 }

@@ -1,12 +1,12 @@
 import {
-  isPropertyObject, List, Reference, Subject, SubjectProperty, SubjectPropertyObject, Update
+  isPropertyObject, List, Reference, Subject, SubjectProperty, Update
 } from '../jrql-support';
 import { GraphSubject } from '../api';
 import {
   AtomType, castPropertyValue, JsProperty, JsType, normaliseValue, ValueConstructed
 } from '../js-support';
 import { isNaturalNumber } from '../engine/util';
-import { asValues, compareValues, minimiseValue } from '../engine/jsonld';
+import { asValues } from '../engine/jsonld';
 import { SubjectPropertyValues } from '../subjects';
 import async from '../engine/async';
 import { ConstructOrmSubject, OrmScope, OrmUpdating } from './OrmDomain';
@@ -80,7 +80,7 @@ type ObjKey<O> = [obj: O, key: string & keyof O];
  * The constructor of an ORM subject should accept a {@link GraphSubject} from
  * which derive its initial state. In the case of a new subject, which does not
  * yet exist in the domain, this will only contain an `@id` (i.e. it's a {@link
- * Reference}), so the constructor may also accept other values for initialising
+  * Reference}), so the constructor may also accept other values for initialising
  * properties.
  *
  * Local properties properties are then mapped to graph properties (edges) by
@@ -236,7 +236,7 @@ export abstract class OrmSubject {
     // @ts-ignore
     // Source list is an ArrayLike proxy
     this.src['@list'] = new Proxy(list, {
-      ownKeys: list => Object.keys(list).filter(k => withArrayLikeKey(k,
+      ownKeys: list => Object.getOwnPropertyNames(list).filter(k => withArrayLikeKey(k,
         () => true, () => true, false)),
       has: (list, p: string | symbol) => withArrayLikeKey(p,
         () => true, () => true, false),
@@ -269,32 +269,26 @@ export abstract class OrmSubject {
    */
   commit(): Update {
     const update: { '@delete'?: Subject, '@insert'?: Subject } = {};
-    const mod = (s: '@insert' | '@delete') => update[s] ??= { '@id': this.src['@id'] };
     // TODO: deleted
     for (let property of new Set([
       ...Object.keys(this.src).filter(p => isPropertyObject(p, this.src[p])),
       ...this.propertiesInState.keys()
     ])) {
       const olds = this.propertiesInState.get(property) ?? [];
-      if (property !== '@list') {
-        const { deletes, inserts } =
-          new SubjectPropertyValues(this.src, property).diff(olds);
-        if (deletes.length > 0)
-          mod('@delete')[property] = deletes.map(minimiseValue);
-        if (inserts.length > 0)
-          mod('@insert')[property] = inserts.map(minimiseValue);
-        if (deletes.length > 0 || inserts.length > 0)
+      const { deletes, inserts } = SubjectPropertyValues.for(this.src, property).diff(olds);
+      if (deletes != null)
+        Object.assign(update['@delete'] ??= {}, deletes);
+      if (inserts != null)
+        Object.assign(update['@insert'] ??= {}, inserts);
+      // Undo the local changes in anticipation of an update from the API
+      if (deletes != null || inserts != null) {
+        if (property !== '@list') {
           this.src[property] = olds;
-      } else {
-        // TODO: Distinguish a move from a delete/insert, requires a List class
-        const news = this.src['@list'] as ArrayLike<any>;
-        const listMod = (s: '@insert' | '@delete') =>
-          (((mod(s) as List)['@list'] ??= {}) as { [key: number]: SubjectPropertyObject });
-        diffArrays(olds, news,
-          i => listMod('@delete')[i] = minimiseValue(olds[i]),
-          (i, items) => listMod('@insert')[i] = items.map(minimiseValue));
-        if (update['@delete']?.['@list'] != null || update['@insert']?.['@list'] != null)
-          [].splice.call(news, 0, news.length, ...olds);
+        } else {
+          // TODO: Distinguish a move from a delete/insert, requires a List class
+          const list = (<List>this.src)['@list'];
+          [].splice.call(list, 0, list.length, ...olds);
+        }
       }
     }
     return update;
@@ -370,43 +364,4 @@ function withArrayLikeKey<T>(
       return withIndex(i);
   }
   return def;
-}
-
-/**
- * Tries to construct the minimal operation to convert the olds to the news.
- * Note, something like fast-array-diff generates ordered patches, which don't
- * fit the m-ld requirement that deletes and inserts are unordered.
- * TODO: awful complexity for a prepend
- * @internal
- */
-function diffArrays(
-  olds: any[],
-  news: ArrayLike<any>,
-  deleted: (i: number) => void,
-  inserted: (i: number, items: any[]) => void
-) {
-  for (let oldI = 0, newI = 0; ;) {
-    if (newI < news.length && oldI < olds.length) {
-      // remove anything that differs at this old position
-      do {
-        if (compareValues(olds[oldI], news[newI])) {
-          oldI++;
-          newI++; // new item accounted for in old list
-          break;
-        } else {
-          deleted(oldI++);
-        }
-      } while (oldI < olds.length);
-    } else {
-      if (newI < news.length && oldI >= olds.length) {
-        // Insert remaining news at the end
-        inserted(oldI, [].slice.call(news, newI));
-      } else if (newI >= news.length) {
-        // Delete remaining olds
-        for (; oldI < olds.length; oldI++)
-          deleted(oldI);
-      }
-      break;
-    }
-  }
 }

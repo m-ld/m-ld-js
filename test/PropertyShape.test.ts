@@ -148,7 +148,7 @@ describe('SHACL Property Shape', () => {
         expect(interim.entail).toBeCalledWith(expect.objectContaining({
           '@delete': {
             '@id': 'http://test.m-ld.org/fred',
-            'http://test.m-ld.org/#name': ['Flintstone']
+            'http://test.m-ld.org/#name': 'Flintstone'
           }
         }));
       });
@@ -165,7 +165,7 @@ describe('SHACL Property Shape', () => {
         expect(interim.entail).toBeCalledWith(expect.objectContaining({
           '@delete': {
             '@id': 'http://test.m-ld.org/fred',
-            'http://test.m-ld.org/#name': ['Flintstone']
+            'http://test.m-ld.org/#name': 'Flintstone'
           }
         }));
       });
@@ -180,7 +180,7 @@ describe('SHACL Property Shape', () => {
         expect(interim.assert).toBeCalledWith(expect.objectContaining({
           '@insert': {
             '@id': 'http://test.m-ld.org/fred',
-            'http://test.m-ld.org/#name': ['Fred']
+            'http://test.m-ld.org/#name': 'Fred'
           }
         }));
       });
@@ -198,7 +198,7 @@ describe('SHACL Property Shape', () => {
         expect(interim.entail).toBeCalledWith(expect.objectContaining({
           '@insert': {
             '@id': 'http://test.m-ld.org/fred',
-            'http://test.m-ld.org/#name': ['Flintstone']
+            'http://test.m-ld.org/#name': 'Flintstone'
           }
         }));
       });

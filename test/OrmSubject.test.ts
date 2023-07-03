@@ -48,8 +48,8 @@ describe('Object-RDF Mapping Subjects', () => {
     const fred = new Flintstone({ '@id': 'fred', name: 'Fred' });
     fred.name = 'Fred Flintstone';
     expect(fred.commit()).toEqual({
-      '@delete': { '@id': 'fred', name: ['Fred'] },
-      '@insert': { '@id': 'fred', name: ['Fred Flintstone'] }
+      '@delete': { '@id': 'fred', name: 'Fred' },
+      '@insert': { '@id': 'fred', name: 'Fred Flintstone' }
     });
     expect(fred.name).toBe('Fred');
   });
@@ -58,7 +58,7 @@ describe('Object-RDF Mapping Subjects', () => {
     const fred = new Flintstone({ '@id': 'fred', name: 'Fred' });
     fred.height = 6;
     expect(fred.commit()).toEqual({
-      '@insert': { '@id': 'fred', height: [6] }
+      '@insert': { '@id': 'fred', height: 6 }
     });
     expect(fred.height).toBeUndefined();
   });
@@ -67,7 +67,7 @@ describe('Object-RDF Mapping Subjects', () => {
     const fred = new Flintstone({ '@id': 'fred', name: 'Fred', height: 6 });
     delete fred.height;
     expect(fred.commit()).toEqual({
-      '@delete': { '@id': 'fred', height: [6] }
+      '@delete': { '@id': 'fred', height: 6 }
     });
     expect(fred.height).toBe(6);
   });
@@ -76,7 +76,7 @@ describe('Object-RDF Mapping Subjects', () => {
     const fred = new Flintstone({ '@id': 'fred', name: 'Fred', height: 6 });
     fred.height = undefined;
     expect(fred.commit()).toEqual({
-      '@delete': { '@id': 'fred', height: [6] }
+      '@delete': { '@id': 'fred', height: 6 }
     });
     expect(fred.height).toBe(6);
   });
@@ -159,7 +159,7 @@ describe('Object-RDF Mapping Subjects', () => {
     await series.updated;
     series.episodes.push(new Episode(hlh, orm));
     expect(series.commit()).toEqual({
-      '@insert': { '@id': 'episodes', '@list': { 1: [{ '@id': 'hlh' }] } }
+      '@insert': { '@id': 'episodes', '@list': { 1: { '@id': 'hlh' } } }
     });
     expect(series.episodes.length).toBe(1);
   });
@@ -186,7 +186,7 @@ describe('Object-RDF Mapping Subjects', () => {
     series.episodes = [new Episode(hlh, orm)];
     expect(series.commit()).toEqual({
       '@delete': { '@id': 'episodes', '@list': { 0: { '@id': 'tff' } } },
-      '@insert': { '@id': 'episodes', '@list': { 1: [{ '@id': 'hlh' }] } }
+      '@insert': { '@id': 'episodes', '@list': { 1: { '@id': 'hlh' } } }
     });
     expect(series.episodes.length).toBe(1);
   });

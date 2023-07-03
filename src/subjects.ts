@@ -1,34 +1,97 @@
 import {
-  isPropertyObject,
-  isSet,
-  isSubjectObject,
-  Reference,
-  Subject,
-  Value
+  isList, isPropertyObject, isSet, isSubjectObject, List, Reference, Slot, Subject,
+  SubjectPropertyObject, Value
 } from './jrql-support';
-import { isArray } from './engine/util';
-import { compareValues, expandValue, getValues, hasProperty, hasValue } from './engine/jsonld';
+import { isArray, isNaturalNumber } from './engine/util';
+import {
+  clone, compareValues, expandValue, getValues, hasProperty, hasValue, minimiseValue, minimiseValues
+} from './engine/jsonld';
+import { array } from './util';
+import { getPatch } from 'fast-array-diff';
 
 export { compareValues, getValues };
 
-/**
- * @internal
- * @todo A `@list` property is a property according to `isPropertyObject` but
- * should have very different behaviour
- */
-export class SubjectPropertyValues<S extends Subject = Subject> {
+/** @internal */
+export abstract class SubjectPropertyValues<S extends Subject = Subject> {
+  static for<S extends Subject>(
+    subject: S,
+    property: string & keyof S,
+    deepUpdater?: (values: Iterable<any>) => void
+  ): SubjectPropertyValues<S> {
+    if (isList(subject) && property === '@list')
+      return new SubjectPropertyList(subject, deepUpdater);
+    else
+      return new SubjectPropertySet(subject, property, deepUpdater);
+  }
+
+  protected constructor(
+    readonly subject: S,
+    readonly property: string & keyof S,
+    readonly deepUpdater?: (values: any[], unref?: boolean) => void
+  ) {
+    if (subject[property] != null && !isPropertyObject(this.property, subject[property]))
+      throw new RangeError('Invalid property');
+  }
+
+  get object(): SubjectPropertyObject {
+    return <SubjectPropertyObject>this.subject[this.property];
+  }
+
+  abstract get values(): any[];
+
+  minimalSubject(values = this.values): Subject | undefined {
+    if (values.length) {
+      const rtn = { [this.property]: minimiseValues(values) };
+      if (this.subject['@id'] != null)
+        rtn['@id'] = this.subject['@id'];
+      return rtn;
+    }
+  }
+
+  /**
+   * Clones only the relevant property from our subject; intended for use in
+   * {@link clone}. The return is cheeky, since the type may be restricted.
+   */
+  protected cloneSubject(): S {
+    const rtn: Subject = {};
+    if (this.subject['@id'] != null)
+      rtn['@id'] = this.subject['@id'];
+    if (this.subject[this.property] != null)
+      rtn[this.property] = clone(this.subject[this.property]);
+    return <S>rtn;
+  }
+
+  abstract clone(): SubjectPropertyValues<S>;
+
+  abstract delete(...values: any[]): this;
+
+  abstract insert(...values: any[]): this;
+
+  abstract update(deletes: Subject | undefined, inserts: Subject | undefined): this;
+
+  abstract exists(value?: any): boolean;
+
+  abstract diff(oldValues: any[]): { deletes?: Subject; inserts?: Subject };
+
+  toString() {
+    return `${this.subject['@id']} ${this.property}: ${this.values}`;
+  }
+}
+
+/** @internal */
+export class SubjectPropertySet<S extends Subject = Subject> extends SubjectPropertyValues<S> {
   private readonly prior: 'atom' | 'array' | 'set';
   private readonly configurable: boolean;
 
   constructor(
-    readonly subject: S,
-    readonly property: string & keyof S,
-    readonly deepUpdater?: (values: Iterable<any>) => void
+    subject: S,
+    property: string & keyof S,
+    deepUpdater?: (values: Iterable<any>) => void
   ) {
-    const object = this.subject[this.property];
-    if (isArray(object))
+    super(subject, property, deepUpdater);
+    if (isArray(this.object))
       this.prior = 'array';
-    else if (isPropertyObject(this.property, object) && isSet(object))
+    else if (isSet(this.object))
       this.prior = 'set';
     else
       this.prior = 'atom';
@@ -39,27 +102,30 @@ export class SubjectPropertyValues<S extends Subject = Subject> {
     return getValues(this.subject, this.property);
   }
 
-  minimalSubject(values = this.values) {
-    return <S>{ '@id': this.subject['@id'], [this.property]: values };
-  }
-
   clone() {
-    return new SubjectPropertyValues(<S>this.minimalSubject(), this.property, this.deepUpdater);
+    return new SubjectPropertySet(this.cloneSubject(), this.property, this.deepUpdater);
   }
 
   insert(...values: any[]) {
     // Favour a subject over an existing reference
-    return this.update(values.filter(isSubjectObject), values);
+    return this._update(values.filter(isSubjectObject), values);
   }
 
   delete(...values: any[]) {
-    return this.update(values, []);
+    return this._update(values, []);
   }
 
-  update(deletes: any[], inserts: any[]) {
+  update(deletes: Subject | undefined, inserts: Subject | undefined) {
+    return this._update(
+      getValues(deletes ?? {}, this.property),
+      getValues(inserts ?? {}, this.property)
+    );
+  }
+
+  private _update(deletes: any[], inserts: any[]) {
     const oldValues = this.values;
-    let values = SubjectPropertyValues.minus(oldValues, deletes);
-    values = SubjectPropertyValues.union(values, inserts);
+    let values = SubjectPropertySet.minus(oldValues, deletes);
+    values = SubjectPropertySet.union(values, inserts);
     // Apply deep updates to the final values
     this.deepUpdater?.(values);
     // Do not call setter if nothing has changed
@@ -96,28 +162,24 @@ export class SubjectPropertyValues<S extends Subject = Subject> {
     }
   }
 
-  diff(oldValues: any[]) {
-    return {
-      deletes: this.deletes(oldValues),
-      inserts: this.inserts(oldValues)
-    };
-  }
-
   deletes(oldValues: any[]) {
-    return SubjectPropertyValues.minus(oldValues, this.values);
+    return SubjectPropertySet.minus(oldValues, this.values);
   }
 
   inserts(oldValues: any[]) {
-    return SubjectPropertyValues.minus(this.values, oldValues);
+    return SubjectPropertySet.minus(this.values, oldValues);
   }
 
-  toString() {
-    return `${this.subject['@id']} ${this.property}: ${this.values}`;
+  diff(oldValues: any[]) {
+    return {
+      deletes: this.minimalSubject(this.deletes(oldValues)),
+      inserts: this.minimalSubject(this.inserts(oldValues))
+    };
   }
 
   /** @returns `values` if nothing has changed */
   private static union(values: any[], unionValues: any[]): any[] {
-    const newValues = SubjectPropertyValues.minus(unionValues, values);
+    const newValues = SubjectPropertySet.minus(unionValues, values);
     return newValues.length > 0 ? values.concat(newValues) : values;
   }
 
@@ -129,6 +191,110 @@ export class SubjectPropertyValues<S extends Subject = Subject> {
       minusValue => compareValues(value, minusValue)));
     return filtered.length === values.length ? values : filtered;
   }
+}
+
+/** @internal */
+export class SubjectPropertyList<S extends List> extends SubjectPropertyValues<S> {
+  constructor(subject: S, deepUpdater?: (values: Iterable<any>) => void) {
+    super(subject, '@list', deepUpdater);
+  }
+
+  clone() {
+    return new SubjectPropertyList(this.cloneSubject(), this.deepUpdater);
+  }
+
+  get values(): any[] {
+    return Object.assign([], this.subject['@list']);
+  }
+
+  exists(value: any): boolean {
+    return this.values.findIndex(v => compareValues(v, value)) > -1;
+  }
+
+  delete(...values: any): this {
+    const myValues = this.values;
+    const entries: { [key: number]: any } = {};
+    for (let value of values) {
+      for (let i = 0; i < myValues.length; i++)
+        if (compareValues(value, myValues[i]))
+          entries[i] = value;
+    }
+    return this.update({ '@list': entries }, {});
+  }
+
+  insert(index: number, ...values: any): this {
+    return this.update({}, { '@list': { [index]: values } });
+  }
+
+  update(deletes: Subject | undefined, inserts: Subject | undefined): this {
+    if (isListUpdate(deletes) || isListUpdate(inserts)) {
+      this.updateListIndexes(
+        isListUpdate(deletes) ? deletes['@list'] : {},
+        isListUpdate(inserts) ? inserts['@list'] : {}
+      );
+    }
+    this.deepUpdater?.(this.values);
+    return this;
+  }
+
+  diff(oldValues: any[]): { deletes?: List; inserts?: List } {
+    const deletes: List['@list'] = {}, inserts: List['@list'] = {};
+    for (let { type, oldPos, items } of getPatch(oldValues, this.values, compareValues)) {
+      if (type === 'remove') {
+        for (let value of items)
+          deletes[oldPos++] = minimiseValue(value);
+      } else {
+        inserts[oldPos] = minimiseValues(items);
+      }
+    }
+    return {
+      deletes: this.minimalUpdate(deletes),
+      inserts: this.minimalUpdate(inserts)
+    };
+  }
+
+  private minimalUpdate(update: List['@list']) {
+    if (Object.keys(update).length)
+      return { '@id': this.subject['@id'], '@list': update };
+  }
+
+  private updateListIndexes(deletes: List['@list'], inserts: List['@list']) {
+    const list = this.subject['@list'];
+    const splice = typeof list.splice == 'function' ? list.splice : (() => {
+      // Array splice operation must have a length field to behave
+      if (!('length' in list)) {
+        const maxIndex = Math.max(...Object.keys(list).map(Number).filter(isNaturalNumber));
+        list.length = isFinite(maxIndex) ? maxIndex + 1 : 0;
+      }
+      return [].splice;
+    })();
+    const splices: { deleteCount: number, items?: any[] }[] = []; // Sparse
+    for (let i in deletes)
+      splices[i] = { deleteCount: 1 };
+    for (let i in inserts) {
+      // List updates are always expressed with identified slots, but our list
+      // is assumed to contain direct items, not slots
+      const slots = array(inserts[i]);
+      this.deepUpdater?.(slots, true);
+      (splices[i] ??= { deleteCount: 0 }).items =
+        slots.map((slot: Slot) => slot['@item']);
+    }
+    let deleteCount = 0, items: any[] = [];
+    for (let i of Object.keys(splices).reverse().map(Number)) {
+      deleteCount += splices[i].deleteCount;
+      items.unshift(...splices[i].items ?? []);
+      if (!(i - 1 in splices) || !splices[i - 1].deleteCount) {
+        splice.call(list, i, deleteCount, ...items);
+        deleteCount = 0;
+        items = [];
+      }
+    }
+  }
+}
+
+/** @internal */
+function isListUpdate(updatePart?: Subject): updatePart is List {
+  return updatePart != null && isList(updatePart);
 }
 
 /**
@@ -145,7 +311,7 @@ export function includeValues(
   property: string,
   ...values: Value[]
 ) {
-  new SubjectPropertyValues(subject, property).insert(...values);
+  SubjectPropertyValues.for(subject, property).insert(...values);
 }
 
 /**
@@ -164,7 +330,7 @@ export function includesValue(
   property: string,
   value?: Value | Value[]
 ): boolean {
-  return new SubjectPropertyValues(subject, property).exists(value);
+  return SubjectPropertyValues.for(subject, property).exists(value);
 }
 
 /**

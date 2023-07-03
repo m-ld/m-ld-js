@@ -705,7 +705,7 @@ export interface InterimUpdate {
    * presence in the clone metadata, commonly known as a 'tombstone'. Since this
    * can give rise to unbounded storage use, constraints should endeavour to
    * remove these hidden graph edges when the opportunity arises. They can be
-   * obtained using the {@link hidden} method.
+   * obtained using the {@link #hidden} method.
    *
    * @param update the update to entail into the domain
    * @see {@link update}

@@ -1,12 +1,6 @@
 import { Url } from '@m-ld/jsonld';
 import {
-  Construct,
-  Describe,
-  Reference,
-  Subject,
-  SubjectProperty,
-  SubjectPropertyObject,
-  Value
+  Construct, Describe, Reference, Subject, SubjectProperty, SubjectPropertyObject, Value
 } from '../jrql-support';
 import { JRQL } from '../ns';
 import { isArray, isNaturalNumber, setAtPath, trimTail } from './util';
@@ -110,7 +104,7 @@ export function addPropertyObject(
   createList = () => ({})
 ): Subject {
   if (typeof property == 'string') {
-    const spv = new SubjectPropertyValues(subject, property);
+    const spv = SubjectPropertyValues.for(subject, property);
     if (isArray(object))
       spv.insert(...object);
     else

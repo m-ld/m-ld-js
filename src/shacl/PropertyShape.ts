@@ -4,15 +4,9 @@ import { Subject, VocabReference } from '../jrql-support';
 import { Iri } from '@m-ld/jsonld';
 import { array, uuid } from '../util';
 import {
-  Assertions,
-  GraphSubject,
-  GraphSubjects,
-  GraphUpdate,
-  InterimUpdate,
-  MeldPreUpdate,
-  MeldReadState
+  Assertions, GraphSubject, GraphSubjects, GraphUpdate, InterimUpdate, MeldPreUpdate, MeldReadState
 } from '../api';
-import { sortValues, SubjectPropertyValues } from '../subjects';
+import { sortValues, SubjectPropertySet } from '../subjects';
 import { drain } from 'rx-flowable';
 import { SubjectGraph } from '../engine/SubjectGraph';
 import { Shape, ShapeSpec, ValidationResult } from './Shape';
@@ -115,7 +109,7 @@ export class PropertyShape extends Shape {
 
     async loadFinalValues(update: MeldPreUpdate) {
       const updated: {
-        [id: Iri]: Record<'final' | 'old', SubjectPropertyValues<GraphSubject>>
+        [id: Iri]: Record<'final' | 'old', SubjectPropertySet<GraphSubject>>
       } = {};
       const loadUpdated = async (id: Iri) => {
         if (id in updated)
@@ -132,7 +126,7 @@ export class PropertyShape extends Shape {
 
     async loadSubjectValues(id: Iri) {
       const existing = (await this.state.get(id, this.shape.path)) ?? { '@id': id };
-      return new SubjectPropertyValues(existing, this.shape.path);
+      return new SubjectPropertySet(existing, this.shape.path);
     }
 
     sort(values: any[]) {
@@ -140,7 +134,7 @@ export class PropertyShape extends Shape {
     }
 
     nonConformance(
-      spv: SubjectPropertyValues<GraphSubject>,
+      spv: SubjectPropertySet<GraphSubject>,
       sourceConstraintComponent: ConstraintComponent,
       correction?: Assertions
     ): ValidationResult {
@@ -173,7 +167,7 @@ export class PropertyShape extends Shape {
     }
 
     private async checkValues(
-      spv: SubjectPropertyValues<GraphSubject>
+      spv: SubjectPropertySet<GraphSubject>
     ): Promise<ValidationResult | undefined> {
       const result = this.checkMinCount(spv) ?? this.checkMaxCount(spv);
       // Delete all hidden values for this subject & property
@@ -183,12 +177,12 @@ export class PropertyShape extends Shape {
       return result;
     }
 
-    private checkMinCount(spv: SubjectPropertyValues<GraphSubject>) {
+    private checkMinCount(spv: SubjectPropertySet<GraphSubject>) {
       if (this.shape.minCount != null && spv.values.length < this.shape.minCount)
         return this.nonConformance(spv, ConstraintComponent.MinCount);
     }
 
-    private checkMaxCount(spv: SubjectPropertyValues<GraphSubject>) {
+    private checkMaxCount(spv: SubjectPropertySet<GraphSubject>) {
       if (this.shape.maxCount != null && spv.values.length > this.shape.maxCount)
         return this.nonConformance(spv, ConstraintComponent.MaxCount);
     }
@@ -206,7 +200,7 @@ export class PropertyShape extends Shape {
           // We need the values that were actually deleted
           const reinstate = this.sort(final.deletes(old.values))
             .slice(0, minCount - values.length);
-          const correction = { '@insert': final.minimalSubject(reinstate) };
+          const correction = { '@insert': final.minimalSubject(reinstate) as GraphSubject };
           this.interim.assert(correction);
           return this.nonConformance(final, ConstraintComponent.MinCount, correction);
         } else {
@@ -249,7 +243,7 @@ export class PropertyShape extends Shape {
   private *genSubjectValues(subjects: SubjectGraph) {
     for (let subject of subjects) {
       if (this.path in subject)
-        yield new SubjectPropertyValues(subject, this.path);
+        yield new SubjectPropertySet(subject, this.path);
     }
   }
 
