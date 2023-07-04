@@ -1,5 +1,5 @@
 import fc from 'fast-check';
-import { List, SubjectPropertyValues } from '../src';
+import { List, SubjectPropertyValues, textDiff } from '../src';
 
 describe('list diffs & updates', () => {
   test('diff from nothing is minimal', () => {
@@ -74,6 +74,36 @@ describe('list diffs & updates', () => {
       ),
       { ignoreEqualValues: true }
     );
+  });
+});
+
+describe('text diffs', () => {
+  test('diff empty to empty', () => {
+    expect([...textDiff('', '')]).toEqual([]);
+  });
+
+  test('diff empty to chars', () => {
+    expect([...textDiff('', 'foo')]).toEqual([[0, 0, 'foo']]);
+  });
+
+  test('diff chars to empty', () => {
+    expect([...textDiff('foo', '')]).toEqual([[0, 3]]);
+  });
+
+  test('diff chars to same chars', () => {
+    expect([...textDiff('foo', 'foo')]).toEqual([]);
+  });
+
+  test('diff update one char', () => {
+    expect([...textDiff('f', 'b')]).toEqual([[0, 1, 'b']]);
+  });
+
+  test('diff update char in middle', () => {
+    expect([...textDiff('foo', 'fuo')]).toEqual([[1, 1, 'u']]);
+  });
+
+  test('diff update separate chars', () => {
+    expect([...textDiff('foo', 'bor')]).toEqual([[0, 1, 'b'], [2, 1, 'r']]);
   });
 });
 

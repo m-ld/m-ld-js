@@ -18,7 +18,7 @@ describe('Shape constrained extension', () => {
       api = await clone(
         new MemoryLevel, MockRemotes, testConfig(),
         new ShapeConstrained(new PropertyShape({
-          path: 'http://test.m-ld.org/#name', count: 1
+          path: 'name', count: 1
         })));
       await expect(api.write({
         '@id': 'fred', 'name': ['Fred', 'Flintstone']

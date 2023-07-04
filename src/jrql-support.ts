@@ -175,7 +175,7 @@ export type Container = List | Set;
  * @see [json-rql expression](https://json-rql.org/globals.html#expression)
  * @category json-rql
  */
-export type Expression = jrql.Atom | Constraint;
+export type Expression = Atom | Constraint;
 /** @internal */
 export const operators: { [jrql: string]: { sparql: string | undefined } } = {
   ...jrql.operators,
@@ -184,6 +184,11 @@ export const operators: { [jrql: string]: { sparql: string | undefined } } = {
 };
 /** @internal */
 export type Operator = keyof typeof jrql.operators | '@concat' | '@splice';
+/**
+ * The expected type of the parameters to the `@splice` operator.
+ * @see operators
+ */
+export type TextSplice = [number, number, string?];
 /**
  * Used to express an ordered set of data. A List object is reified to a Subject
  * (unlike in JSON-LD) and so it has an @id, which can be set by the user.
@@ -1100,7 +1105,8 @@ export interface Update extends Query {
    * > 🧪 Agreements are an experimental feature. Please contact us to discuss
    * your use-case.
    *
-   * @see {@link https://github.com/m-ld/m-ld-security-spec/blob/main/design/suac.md the white paper}
+   * @see {@link https://github.com/m-ld/m-ld-security-spec/blob/main/design/suac.md the white
+   *   paper}
    * @experimental
    */
   '@agree'?: any;

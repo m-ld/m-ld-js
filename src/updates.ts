@@ -1,4 +1,4 @@
-import { Reference, Subject } from './jrql-support';
+import { isPropertyObject, Reference, Subject } from './jrql-support';
 import { GraphSubject, GraphUpdate, UpdateForm } from './api';
 import { clone } from './engine/jsonld';
 import { isReference } from 'json-rql';
@@ -99,9 +99,9 @@ export function asSubjectUpdates(update: SubjectsUpdate, copy?: true): SubjectUp
  *
  * @param subject the resource to apply the update to
  * @param update the update, as a {@link MeldUpdate} or obtained from
- * @param ignoreSharedData if `false`, any shared data expressions in the update
- * will cause a `RangeError` – useful in development to catch problems early
- * {@link asSubjectUpdates}
+ * @param ignoreUnsupported if `false`, any unsupported data expressions in the
+ * update will cause a `RangeError` – useful in development to catch problems
+ * early {@link asSubjectUpdates}
  * @typeParam T the app-specific subject type of interest
  * @see [m-ld data semantics](http://spec.m-ld.org/#data-semantics)
  * @category Utility
@@ -109,9 +109,9 @@ export function asSubjectUpdates(update: SubjectsUpdate, copy?: true): SubjectUp
 export function updateSubject<T extends Subject & Reference>(
   subject: T,
   update: SubjectUpdates | GraphUpdate,
-  ignoreSharedData = true
+  ignoreUnsupported = true
 ): T {
-  return new SubjectUpdater(update, ignoreSharedData).update(subject);
+  return new SubjectUpdater(update, ignoreUnsupported).update(subject);
 }
 
 /** @internal */
@@ -133,7 +133,7 @@ export class SubjectUpdater {
 
   constructor(
     update: SubjectUpdates | GraphUpdate,
-    readonly ignoreSharedData = true
+    readonly ignoreUnsupported = true
   ) {
     if (isGraphUpdate(update)) {
       this.verbForSubject = (subject, key) =>
@@ -153,14 +153,14 @@ export class SubjectUpdater {
   update<T extends Subject & Reference>(subject: T): T {
     if (!this.done.has(subject)) {
       this.done.add(subject);
-      if (!this.ignoreSharedData && this.verbForSubject(subject, '@update') != null)
-        throw new RangeError('Subject updater cannot apply shared data type updates');
       const deletes = this.verbForSubject(subject, '@delete');
       const inserts = this.verbForSubject(subject, '@insert');
+      const updates = this.verbForSubject(subject, '@update');
       for (let property of new Set(Object.keys(subject).concat(Object.keys(inserts ?? {})))) {
-        if (property !== '@id') {
-          SubjectPropertyValues.for(subject, property, this.updateValues)
-            .update(deletes ?? {}, inserts ?? {});
+        if (isPropertyObject(property, 'any')) {
+          SubjectPropertyValues
+            .for(subject, property, this.updateValues, this.ignoreUnsupported)
+            .update(deletes, inserts, updates);
         }
       }
     }

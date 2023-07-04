@@ -1,6 +1,6 @@
 import {
-  isList, isPropertyObject, isSet, isSubjectObject, List, Reference, Slot, Subject,
-  SubjectPropertyObject, Value
+  Constraint, Expression, isList, isPropertyObject, isSet, isSubjectObject, List, Reference, Slot,
+  Subject, SubjectPropertyObject, TextSplice, Value
 } from './jrql-support';
 import { isArray, isNaturalNumber } from './engine/util';
 import {
@@ -16,18 +16,20 @@ export abstract class SubjectPropertyValues<S extends Subject = Subject> {
   static for<S extends Subject>(
     subject: S,
     property: string & keyof S,
-    deepUpdater?: (values: Iterable<any>) => void
+    deepUpdater?: (values: Iterable<any>) => void,
+    ignoreUnsupported = true
   ): SubjectPropertyValues<S> {
     if (isList(subject) && property === '@list')
-      return new SubjectPropertyList(subject, deepUpdater);
+      return new SubjectPropertyList(subject, deepUpdater, ignoreUnsupported);
     else
-      return new SubjectPropertySet(subject, property, deepUpdater);
+      return new SubjectPropertySet(subject, property, deepUpdater, ignoreUnsupported);
   }
 
   protected constructor(
     readonly subject: S,
     readonly property: string & keyof S,
-    readonly deepUpdater?: (values: any[], unref?: boolean) => void
+    readonly deepUpdater?: (values: any[], unref?: boolean) => void,
+    readonly ignoreUnsupported = true
   ) {
     if (subject[property] != null && !isPropertyObject(this.property, subject[property]))
       throw new RangeError('Invalid property');
@@ -67,7 +69,11 @@ export abstract class SubjectPropertyValues<S extends Subject = Subject> {
 
   abstract insert(...values: any[]): this;
 
-  abstract update(deletes: Subject | undefined, inserts: Subject | undefined): this;
+  abstract update(
+    deletes: Subject | undefined,
+    inserts: Subject | undefined,
+    updates?: Subject
+  ): this;
 
   abstract exists(value?: any): boolean;
 
@@ -86,9 +92,10 @@ export class SubjectPropertySet<S extends Subject = Subject> extends SubjectProp
   constructor(
     subject: S,
     property: string & keyof S,
-    deepUpdater?: (values: Iterable<any>) => void
+    deepUpdater?: (values: Iterable<any>) => void,
+    ignoreUnsupported = true
   ) {
-    super(subject, property, deepUpdater);
+    super(subject, property, deepUpdater, ignoreUnsupported);
     if (isArray(this.object))
       this.prior = 'array';
     else if (isSet(this.object))
@@ -115,17 +122,30 @@ export class SubjectPropertySet<S extends Subject = Subject> extends SubjectProp
     return this._update(values, []);
   }
 
-  update(deletes: Subject | undefined, inserts: Subject | undefined) {
+  update(
+    deletes: Subject | undefined,
+    inserts: Subject | undefined,
+    updates: Subject | undefined
+  ) {
     return this._update(
       getValues(deletes ?? {}, this.property),
-      getValues(inserts ?? {}, this.property)
+      getValues(inserts ?? {}, this.property),
+      getValues(updates ?? {}, this.property)
     );
   }
 
-  private _update(deletes: any[], inserts: any[]) {
+  private _update(
+    deletes: Value[],
+    inserts: Value[],
+    updates?: Constraint[]
+  ) {
     const oldValues = this.values;
+    // Apply delete/inserts
     let values = SubjectPropertySet.minus(oldValues, deletes);
     values = SubjectPropertySet.union(values, inserts);
+    // Apply supported updates
+    if (updates != null)
+      values = this.applyUpdates(values, updates);
     // Apply deep updates to the final values
     this.deepUpdater?.(values);
     // Do not call setter if nothing has changed
@@ -144,6 +164,25 @@ export class SubjectPropertySet<S extends Subject = Subject> extends SubjectProp
       }
     }
     return this;
+  }
+
+  private applyUpdates(values: Value[], updates: Constraint[]): Value[] {
+    // Partition the updates by operator
+    const operations: { [operator: string]: Operation } = {};
+    for (let update of updates) {
+      for (let [operator, expression] of Object.entries(update)) {
+        try {
+          operations[operator] ??= getOperation(operator);
+        } catch (e) {
+          if (!this.ignoreUnsupported)
+            throw e;
+        }
+        operations[operator].addArguments(expression);
+      }
+    }
+    for (let operation of Object.values(operations))
+      values = values.map(value => operation.apply(value));
+    return values;
   }
 
   exists(value?: any): boolean {
@@ -195,8 +234,8 @@ export class SubjectPropertySet<S extends Subject = Subject> extends SubjectProp
 
 /** @internal */
 export class SubjectPropertyList<S extends List> extends SubjectPropertyValues<S> {
-  constructor(subject: S, deepUpdater?: (values: Iterable<any>) => void) {
-    super(subject, '@list', deepUpdater);
+  constructor(subject: S, deepUpdater?: (values: Iterable<any>) => void, ignoreUnsupported = true) {
+    super(subject, '@list', deepUpdater, ignoreUnsupported);
   }
 
   clone() {
@@ -226,7 +265,13 @@ export class SubjectPropertyList<S extends List> extends SubjectPropertyValues<S
     return this.update({}, { '@list': { [index]: values } });
   }
 
-  update(deletes: Subject | undefined, inserts: Subject | undefined): this {
+  update(
+    deletes: Subject | undefined,
+    inserts: Subject | undefined,
+    updates?: Subject
+  ): this {
+    if (updates != null && !this.ignoreUnsupported)
+      throw new RangeError('Unexpected shared data update for a list');
     if (isListUpdate(deletes) || isListUpdate(inserts)) {
       this.updateListIndexes(
         isListUpdate(deletes) ? deletes['@list'] : {},
@@ -268,7 +313,7 @@ export class SubjectPropertyList<S extends List> extends SubjectPropertyValues<S
       }
       return [].splice;
     })();
-    const splices: { deleteCount: number, items?: any[] }[] = []; // Sparse
+    const splices: { deleteCount: number, items?: Iterable<any> }[] = []; // Sparse
     for (let i in deletes)
       splices[i] = { deleteCount: 1 };
     for (let i in inserts) {
@@ -279,17 +324,33 @@ export class SubjectPropertyList<S extends List> extends SubjectPropertyValues<S
       (splices[i] ??= { deleteCount: 0 }).items =
         slots.map((slot: Slot) => slot['@item']);
     }
-    let deleteCount = 0, items: any[] = [];
-    for (let i of Object.keys(splices).reverse().map(Number)) {
-      deleteCount += splices[i].deleteCount;
-      items.unshift(...splices[i].items ?? []);
-      if (!(i - 1 in splices) || !splices[i - 1].deleteCount) {
-        splice.call(list, i, deleteCount, ...items);
-        deleteCount = 0;
-        items = [];
-      }
+    applySplices(list, splices, splice);
+  }
+}
+
+/**
+ * @param list the list to operate on
+ * @param splices a (sparse) array of concurrent splice operations for every
+ * position in `list`
+ * @param splice the splice method to be called on the list
+ * @internal
+ */
+function applySplices<List, Item>(
+  list: List,
+  splices: { deleteCount: number; items?: Iterable<Item> }[],
+  splice: Item[]['splice'] = [].splice
+) {
+  let deleteCount = 0, items: any[] = [];
+  for (let i of Object.keys(splices).reverse().map(Number)) {
+    deleteCount += splices[i].deleteCount;
+    items.unshift(...splices[i].items ?? []);
+    if (!(i - 1 in splices) || !splices[i - 1].deleteCount) {
+      splice.call(list, i, deleteCount, ...items);
+      deleteCount = 0;
+      items = [];
     }
   }
+  return list;
 }
 
 /** @internal */
@@ -351,4 +412,79 @@ export function sortValues(property: string, values: Value[]) {
       t2 === '@id' || t2 === '@vocab' ? rawCompare(r1, r2) : 1 :
       t2 === '@id' || t2 === '@vocab' ? -1 : rawCompare(r1, r2);
   });
+}
+
+/**
+ * Generates the difference between the texts in the form of splices suitable
+ * for use with the `@splice` operator.
+ */
+export function *textDiff(text1: string, text2: string): Generator<TextSplice> {
+  let currentSplice: TextSplice | null = null;
+  for (let { type, oldPos: index, items } of getPatch([...text1], [...text2])) {
+    if (currentSplice != null && index !== (currentSplice[0] + currentSplice[1])) {
+      yield currentSplice;
+      currentSplice = null;
+    }
+    currentSplice ??= [index, 0];
+    if (type === 'add')
+      currentSplice[2] = items.join('');
+    else if (type === 'remove')
+      currentSplice[1] += items.length;
+  }
+  if (currentSplice != null)
+    yield currentSplice;
+}
+
+interface Operation {
+  addArguments(args: Expression | Expression[]): void;
+  apply(value: Value): Value;
+}
+
+function getOperation(operator: string): Operation {
+  switch (operator) {
+    case '@plus':
+      return new Plus();
+    case '@splice':
+      return new Splice();
+    default:
+      throw new RangeError(`Unsupported operator ${operator}`);
+  }
+}
+
+class Plus implements Operation {
+  argArray: number[] = [];
+  addArguments(args: Expression | Expression[]) {
+    if (Array.isArray(args) && args.length > 1)
+      throw new RangeError('@plus operator requires numeric argument');
+    const [rhs] = array(args);
+    if (typeof rhs != 'number')
+      throw new RangeError('@plus operator requires numeric argument');
+    this.argArray.push(rhs);
+  }
+  apply(value: Value): Value {
+    if (typeof value != 'number')
+      throw new TypeError('Applying splice to a non-numeric');
+    for (let arg of this.argArray)
+      value += arg;
+    return value;
+  }
+}
+
+class Splice implements Operation {
+  splices: { deleteCount: number; items?: string }[] = [];
+  addArguments(args: Expression | Expression[]) {
+    if (!Array.isArray(args))
+      throw new RangeError('@splice operator requires index, deleteCount and content');
+    const [index, deleteCount, items] = args;
+    if (typeof index != 'number' ||
+      typeof deleteCount != 'number' ||
+      (typeof items != 'string' && typeof items != 'undefined'))
+      throw new RangeError('@splice operator requires index, deleteCount and content');
+    this.splices[index] = { deleteCount, items };
+  }
+  apply(value: Value): Value {
+    if (typeof value != 'string')
+      throw new TypeError('Applying splice to a non-string');
+    return applySplices([...value], this.splices).join('');
+  }
 }

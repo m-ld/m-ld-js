@@ -13,6 +13,7 @@ import { Shape, ShapeSpec, ValidationResult } from './Shape';
 import { SH } from '../ns';
 import { mapIter } from '../engine/util';
 import { ConstraintComponent } from '../ns/sh';
+import { MeldAppContext } from '../config';
 
 /** Property cardinality specification */
 export type PropertyCardinality = {
@@ -82,6 +83,12 @@ export class PropertyShape extends Shape {
       minCount: { init: spec != null && 'count' in spec ? spec.count : spec?.minCount },
       maxCount: { init: spec != null && 'count' in spec ? spec.count : spec?.maxCount }
     });
+  }
+
+  /** @internal */
+  setExtensionContext(appContext: MeldAppContext) {
+    super.setExtensionContext(appContext);
+    this.path = appContext.context.expandTerm(this.path, { vocab: true });
   }
 
   /**
