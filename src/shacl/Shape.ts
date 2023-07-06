@@ -120,6 +120,8 @@ export abstract class Shape extends OrmSubject implements MeldConstraint {
 /**
  * SHACL defines ValidationResult to report individual SHACL validation results.
  * @see https://www.w3.org/TR/shacl/#result
+ * @category Experimental
+ * @experimental
  */
 export interface ValidationResult {
   /**

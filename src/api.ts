@@ -259,8 +259,15 @@ export interface GraphUpdate {
   readonly '@insert': GraphSubjects;
   /**
    * Partial subjects, containing only properties with a {@link SharedDatatype}
-   * in the domain, which have been operated on.
-   * @todo more explanation
+   * in the domain, which have been operated on. Subject property values under
+   * this key will typically be inline constraint expressions using mutation
+   * operators like `@plus`, which must be interpreted by the receiving code.
+   *
+   * Note that most data changes appear as combinations of `@delete` and
+   * `@insert`, even if the original user update used the `@update` keyword,
+   * because most data in the domain comprises atomic immutable values which are
+   * updated by replacement. Shared data types, in contrast, are mutable and
+   * their updates can only be provided using expressions.
    */
   readonly '@update': GraphSubjects;
 }
@@ -461,6 +468,7 @@ export interface MeldClone extends MeldStateMachine {
  * creating constraints.
  *
  * @see https://www.w3.org/TR/json-ld/#the-context
+ * @category API
  */
 export interface MeldContext {
   /**
@@ -539,8 +547,7 @@ export interface MeldContext {
  * JSON, which can be called in the genesis clone
  * ([example](/classes/writepermitted.html#declare)).
  *
- * @experimental
- * @category Experimental
+ * @category API
  */
 export interface MeldPlugin extends Partial<MeldExtensions> {
   /**
@@ -551,6 +558,8 @@ export interface MeldPlugin extends Partial<MeldExtensions> {
 
 /**
  * Strict definitions of the extension types available
+ *
+ * @category API
  */
 export interface MeldExtensions {
   /**
@@ -560,7 +569,8 @@ export interface MeldExtensions {
    */
   readonly constraints: Iterable<MeldConstraint>;
   /**
-   * @todo
+   * Indirected {@link Datatype data types} applicable to the domain, accessed
+   * by an injective function.
    */
   readonly indirectedData: IndirectedData;
   /**
@@ -765,17 +775,32 @@ export interface InterimUpdate {
 }
 
 /**
+ * A function type to find the correct {@link Datatype} for an identifier and
+ * optionally a property in the domain.
+ *
  * If `property` is provided, `datatype` is the datatype of a literal at the
  * given property position in a Subject. Otherwise, it is the identity of the
  * datatype itself (which may be the same).
  * @see Datatype
+ * @experimental
+ * @category Experimental
  */
 export type IndirectedData =
   (datatype: Iri, property?: Iri) => Datatype | undefined;
 
 /**
- * @todo doc
+ * A Datatype is a handler for data in the domain that is 'indirected'. This
+ * means that its validation and storage is separate to the internal graph
+ * representation that is used for all other Subject properties.
+ *
+ * A plain indirected data type is primarily used as an optimisation, to improve
+ * the cost of internal data indexing. However, a {@link SharedDatatype Shared}
+ * data type adds the capability to present specialist mutable data with its own
+ * algorithms for reconciling concurrent mutations.
+ *
  * @typeParam Data - data type
+ * @experimental
+ * @category Experimental
  */
 export interface Datatype<Data = unknown> {
   /**
@@ -826,7 +851,7 @@ export interface Datatype<Data = unknown> {
    * Convert data to a representation that can be stringified to JSON. If this
    * method is not provided, the data itself must be JSON serialisable. The
    * implementation should include a version if the format is likely to change.
-   * @see fromSerial
+   * @see fromJSON
    */
   toJSON?(data: Data): any;
   /**
@@ -838,9 +863,35 @@ export interface Datatype<Data = unknown> {
 }
 
 /**
+ * A shared data type provides a custom algorithmic abstract data type for
+ * atomic, mutable subject property values in the domain. The implementation
+ * must be able to guarantee convergence of values in remote clones after local
+ * updates and remote operations.
+ *
+ * Within the supporting framework of **m-ld**, a shared data type defines a
+ * [Conflict-free Shared Data Type (CRDT)](https://crdt.tech/). That support
+ * comprises the following features which may simplify the requirements on the
+ * implementation:
+ *
+ * 1. Operations will only be {@link apply applied} _once_. The implementation
+ * therefore does not need to ensure that operations are _idempotent_ (though it
+ * still needs to ensure they are _commutative_).
+ *
+ * 2. Operations will be {@link apply applied} in [causal
+ * order](https://link.springer.com/chapter/10.1007/3-540-44520-X_4). The
+ * implementation does not need to maintain clock information for processes,
+ * unless this is needed for some aspect of the merge algorithm beyond causal
+ * ordering _per se_.
+ *
+ * 3. Data state is maintained in memory for 'active' shared data which is being
+ * operated on, for example a user typing into a document. The methods of this
+ * class allow state to be mutated without copying.
+ *
  * @typeParam Data - data type
  * @typeParam Operation - operation type; must be JSON-serialisable
  * @typeParam Revert - reversion metadata type; must be JSON-serialisable
+ * @experimental
+ * @category Experimental
  */
 export interface SharedDatatype<Data, Operation, Revert = never> extends Datatype<Data> {
   /**
@@ -850,10 +901,13 @@ export interface SharedDatatype<Data, Operation, Revert = never> extends Datatyp
    */
   getDataId(): UUID;
   /**
-   * Intercepts update of data. The implementation may mutate the passed `data`;
-   * the backend may later revert the returned operation in case of rollback.
+   * Intercepts update of data. The implementation is welcome to mutate the
+   * passed `state` and return it as the new state. Doing so is encouraged if
+   * the state is memory-intensive, as only a single copy will be maintained in
+   * memory across multiple {@link apply operations} and updates. The backend
+   * may later revert the returned operation in case of rollback.
    *
-   * @param state the existing state of the shared value
+   * @param state the new state of the shared value
    * @param update the json-rql expression used to perform the update
    * @returns the new state of the data, an operation which can be
    * {@link apply applied}, and any additional local metadata required to revert
@@ -863,7 +917,9 @@ export interface SharedDatatype<Data, Operation, Revert = never> extends Datatyp
   update(state: Data, update: Expression): [Data, Operation, Revert?];
   /**
    * Applies an operation to some state. The implementation is welcome to mutate
-   * the passed `state` and return it as the new state.
+   * the passed `state` and return it as the new state. Doing so is encouraged
+   * if the state is memory-intensive, as only a single copy will be maintained
+   * in memory across multiple operations and {@link update updates}.
    *
    * @param state the existing state of the shared value
    * @param operation the operation being applied, created using {@link update}
@@ -915,9 +971,7 @@ export interface SharedDatatype<Data, Operation, Revert = never> extends Datatyp
   cut(prefix: Operation, operation: Operation): Operation | undefined;
 }
 
-/**
- * @todo
- */
+/** @internal */
 export function isSharedDatatype<T>(dt: Datatype<T>): dt is SharedDatatype<T, unknown> {
   return 'update' in dt;
 }
@@ -1097,6 +1151,7 @@ export { MeldErrorStatus };
 
 /**
  * Utility wrapper for exceptions thrown by an engine or its extensions.
+ * @category API
  */
 export class MeldError extends Error {
   readonly status: MeldErrorStatus;
@@ -1119,4 +1174,7 @@ export class MeldError extends Error {
   }
 }
 
+/**
+ * @category API
+ */
 export type UUID = string;

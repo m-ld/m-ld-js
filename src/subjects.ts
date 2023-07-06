@@ -400,6 +400,7 @@ export function includesValue(
  * literal is typed).
  *
  * @see https://www.w3.org/TR/sparql11-query/#modOrderBy
+ * @category Utility
  */
 export function sortValues(property: string, values: Value[]) {
   return values.sort((v1, v2) => {
@@ -417,6 +418,7 @@ export function sortValues(property: string, values: Value[]) {
 /**
  * Generates the difference between the texts in the form of splices suitable
  * for use with the `@splice` operator.
+ * @category Utility
  */
 export function *textDiff(text1: string, text2: string): Generator<TextSplice> {
   let currentSplice: TextSplice | null = null;
@@ -435,11 +437,13 @@ export function *textDiff(text1: string, text2: string): Generator<TextSplice> {
     yield currentSplice;
 }
 
+/** @internal */
 interface Operation {
   addArguments(args: Expression | Expression[]): void;
   apply(value: Value): Value;
 }
 
+/** @internal */
 function getOperation(operator: string): Operation {
   switch (operator) {
     case '@plus':
@@ -451,6 +455,7 @@ function getOperation(operator: string): Operation {
   }
 }
 
+/** @internal */
 class Plus implements Operation {
   argArray: number[] = [];
   addArguments(args: Expression | Expression[]) {
@@ -470,6 +475,7 @@ class Plus implements Operation {
   }
 }
 
+/** @internal */
 class Splice implements Operation {
   splices: { deleteCount: number; items?: string }[] = [];
   addArguments(args: Expression | Expression[]) {

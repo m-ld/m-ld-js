@@ -8,6 +8,8 @@ import type { Iri } from '@m-ld/jsonld';
 
 /**
  * An extension, created via an {@link ExtensionSubject}
+ * @category Experimental
+ * @experimental
  */
 export interface ExtensionSubjectInstance {
   /**
@@ -33,6 +35,7 @@ export interface ExtensionSubjectInstance {
  * allow for a global `require` on the window object.
  *
  * @param cjsModule
+ * @internal
  */
 function dynamicRequire(cjsModule: string) {
   try {
@@ -248,6 +251,8 @@ export class ExtensionSubject<T extends ExtensionSubjectInstance> extends OrmSub
 /**
  * Directly-instantiable extension subject for singleton extensions.
  * @see ExtensionSubject
+ * @category Experimental
+ * @experimental
  */
 export class SingletonExtensionSubject<T extends ExtensionSubjectInstance>
   extends ExtensionSubject<T> {

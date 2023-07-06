@@ -217,7 +217,7 @@ export function testOp(
   if (opts.updates)
     update.push(opts.updates);
   return [
-    4,
+    5,
     opts.from ?? time.ticks,
     time.toJSON(),
     MsgPack.encode(update),

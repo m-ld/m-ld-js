@@ -98,10 +98,10 @@ export function asSubjectUpdates(update: SubjectsUpdate, copy?: true): SubjectUp
  * To avoid this, use a {@link SubjectUpdater} to process the whole update.
  *
  * @param subject the resource to apply the update to
- * @param update the update, as a {@link MeldUpdate} or obtained from
+ * @param update the update, as a {@link MeldUpdate} or obtained from {@link asSubjectUpdates}
  * @param ignoreUnsupported if `false`, any unsupported data expressions in the
  * update will cause a `RangeError` – useful in development to catch problems
- * early {@link asSubjectUpdates}
+ * early
  * @typeParam T the app-specific subject type of interest
  * @see [m-ld data semantics](http://spec.m-ld.org/#data-semantics)
  * @category Utility

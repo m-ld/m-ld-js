@@ -55,6 +55,8 @@ const propertiesMetadataKey = Symbol('__properties');
  * JSON-LD graph property (an edge).
  * @param type the JSON-LD type of the graph subject property
  * @param name the JSON-LD property. If undefined, the field name will be used
+ * @category Experimental
+ * @experimental
  */
 export function property(type: JsType<any>, name?: Iri): PropertyDecorator {
   return (target, property) => {

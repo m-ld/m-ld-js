@@ -9,11 +9,8 @@ import { compact } from '@m-ld/jsonld';
  *   property can be given in unexpanded form, as it appears in JSON subjects
  *   when using the API, or as its full IRI reference.
  *
- * > 🚧 *Please [contact&nbsp;us](https://m-ld.org/hello/) to discuss data
- * > constraints required for your use-case.*
- *
  * @category Configuration
- * @deprecated
+ * @deprecated See {@link Shape}
  */
 export type ConstraintConfig = SingleValuedConfig;
 

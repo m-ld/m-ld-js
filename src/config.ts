@@ -196,6 +196,7 @@ export type InitialApp = MeldApp & MeldPlugin;
 
 /**
  * Context typically required for extensions
+ * @category Configuration
  */
 export interface MeldAppContext {
   readonly config: MeldConfig;
@@ -208,6 +209,7 @@ export interface MeldAppContext {
  * `Iterable` can change content after this function is called.
  * @param extensions the extensions to combine
  * @param properties an object containing any additional properties to include
+ * @category Configuration
  */
 export function combinePlugins(
   extensions: Iterable<MeldPlugin>,

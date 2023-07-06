@@ -12,7 +12,6 @@ module.exports = {
     './src/types/**',
     './src/ns/**',
     './src/lseq/**',
-    './src/tseq/**',
     './src/ably/**',
     './src/mqtt/**',
     './src/wrtc/**',

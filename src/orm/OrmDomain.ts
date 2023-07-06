@@ -26,6 +26,7 @@ export type ConstructOrmSubject<T extends OrmSubject> =
  * Event handler for all new ORM subjects, in case they are of interest to the
  * domain – use {@link get} to translate the raw graph subject to an ORM
  * subject.
+ * @internal
  */
 export type CacheMissListener =
   (ref: GraphSubject, orm: OrmUpdating) => void | Promise<unknown>;
@@ -89,6 +90,7 @@ export interface OrmUpdating extends ReadLatchable {
   updated(update?: GraphUpdate): Promise<void>;
 }
 
+/** @internal */
 export interface OrmScope extends EventEmitter {
   /** The domain to which this scope belongs */
   readonly domain: OrmDomain;

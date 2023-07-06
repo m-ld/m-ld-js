@@ -105,7 +105,7 @@ export class MeldOperation
       updates: refUpdates,
       principalId,
       agreed
-    }, [4,
+    }, [5,
       from,
       time.toJSON(),
       update,

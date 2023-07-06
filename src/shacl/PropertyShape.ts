@@ -15,14 +15,22 @@ import { mapIter } from '../engine/util';
 import { ConstraintComponent } from '../ns/sh';
 import { MeldAppContext } from '../config';
 
-/** Property cardinality specification */
+/**
+ * Property cardinality specification
+ * @category Experimental
+ * @experimental
+ */
 export type PropertyCardinality = {
   count: number;
 } | {
   minCount?: number;
   maxCount?: number;
 }
-/** Convenience specification for a property shape */
+/**
+ * Convenience specification for a {@link PropertyShape}
+ * @category Experimental
+ * @experimental
+ */
 export type PropertyShapeSpec = ShapeSpec & {
   path: Iri;
   name?: string | string[];

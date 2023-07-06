@@ -112,6 +112,7 @@ export type Variable = jrql.Variable;
  * A basic atomic value used as a concrete value or in a filter. Note that the
  * m-ld Javascript engine natively supports `Uint8Array` for binary data.
  * @see [json-rql atom](https://json-rql.org/#atom) @category json-rql
+ * @category json-rql
  */
 export type Atom =
   number | string | boolean | Uint8Array |
@@ -187,6 +188,7 @@ export type Operator = keyof typeof jrql.operators | '@concat' | '@splice';
 /**
  * The expected type of the parameters to the `@splice` operator.
  * @see operators
+ * @category json-rql
  */
 export type TextSplice = [number, number, string?];
 /**
@@ -1077,9 +1079,9 @@ export interface Update extends Query {
    * }
    * ```
    *
-   * Constraints operating on the data may change the default behaviour to make
-   * an `@update` logically different to a `@delete` and an `@insert`,
-   * particularly when using an in-line operation.
+   * {@link SharedDatatype Shared data types} operating on the data may change
+   * the default behaviour to make an `@update` logically different to a
+   * `@delete` and an `@insert`, particularly when using an in-line operation.
    */
   '@update'?: Subject | Subject[];
   /**
