@@ -10,6 +10,7 @@ import { ConstraintComponent } from '../ns/sh';
 import { Iri } from '@m-ld/jsonld';
 import { mapIter } from '../engine/util';
 import { array } from '../util';
+import { MeldAppContext } from '../config';
 
 /** Convenience specification for a shape */
 export interface ShapeSpec {
@@ -61,6 +62,16 @@ export abstract class Shape extends OrmSubject implements MeldConstraint {
   }
 
   /**
+   * Called prior to use; override to perform shape-specific init.
+   * @internal
+   */
+  setExtensionContext({ context }: MeldAppContext) {
+    // Expand any class terms given in the constructor
+    this.targetClass = new Set([...this.targetClass].map(
+      term => context.expandTerm(term, { vocab: true })));
+  }
+
+  /**
    * Convenience for declaration of target class access in `initSrcProperty`
    * @internal
    */
@@ -109,6 +120,8 @@ export abstract class Shape extends OrmSubject implements MeldConstraint {
 /**
  * SHACL defines ValidationResult to report individual SHACL validation results.
  * @see https://www.w3.org/TR/shacl/#result
+ * @category Experimental
+ * @experimental
  */
 export interface ValidationResult {
   /**

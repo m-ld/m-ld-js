@@ -3,32 +3,53 @@ import { TSeqCharNode, TSeqNode } from './TSeqNode';
 import { TSeqOperable } from './TSeqOperable';
 import { TSeqCharTick, TSeqOperation, TSeqRevertOperation, TSeqSplice } from './types';
 
+/**
+ * Result of a pre-apply step during {@link TSeq#apply}.
+ * @internal
+ */
 export interface TSeqPreApply {
   node: TSeqCharNode;
   charTick: TSeqCharTick;
   charIndex: number;
 }
 
+/**
+ * A CRDT for plain text. Characters are positioned into an n-ary tree, in which
+ * each node is a sparse array, extensible in either positive or negative index
+ * direction, 'belonging' to a process identity. The tree is read in depth-first
+ * order. The use of owned-arrays reflects an optimisation for the typical text
+ * document pattern of editing – a user extends some selected text with new
+ * text.
+ *
+ * A TSeq requires the framework guarantees of a 'shared data type' in **m-ld**:
+ * operations must be {@link apply applied} only once, and in causal order.
+ *
+ * @category Experimental
+ * @experimental
+ */
 export class TSeq extends TSeqNode {
   private tick = 0;
 
   constructor(
+    /** The local process ID */
     readonly pid: string
   ) {
     super([]);
   }
 
-  /** Possibly expensive invariant checking, intended to be called in testing */
+  /** @inheritDoc */
   checkInvariants() {
     super.checkInvariants();
     if (this.charLength !== this.toString().length)
       throw 'incorrect character length';
   }
 
+  /** @inheritDoc */
   toJSON(): any {
     return { tick: this.tick, rest: super.toJSON() };
   }
 
+  /** Create a new TSeq from a representation created with {@link toJSON}. */
   static fromJSON(pid: string, json: any): TSeq {
     const { tick, rest } = json;
     const rtn = new TSeq(pid);
@@ -37,6 +58,7 @@ export class TSeq extends TSeqNode {
     return rtn;
   }
 
+  /** @inheritDoc */
   get parent() {
     return undefined;
   }
@@ -48,6 +70,11 @@ export class TSeq extends TSeqNode {
     return rtn;
   }
 
+  /**
+   * Applies remote operations to this local clone of the TSeq
+   * @param operations the operations to apply
+   * @param cb a callback to recover reversion information if required
+   */
   apply(operations: TSeqOperation, cb?: (revert: TSeqRevertOperation) => void) {
     const nodePreApply: TSeqPreApply[] = [];
     // Pre-apply to get the character indexes
@@ -82,6 +109,13 @@ export class TSeq extends TSeqNode {
     last[TSeqSplice.$content] += char;
   }
 
+  /**
+   * Changes the text content of this TSeq by removing or replacing existing
+   * characters and/or adding new characters in place.
+   * @param index zero-based index at which to start changing the text
+   * @param deleteCount the number of characters in the text to remove from `index`
+   * @param content the characters to add to the text, beginning from `index`
+   */
   splice(index: number, deleteCount: number, content = ''): TSeqOperation {
     if (index < 0)
       throw new RangeError();

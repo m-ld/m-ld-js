@@ -112,6 +112,7 @@ export type Variable = jrql.Variable;
  * A basic atomic value used as a concrete value or in a filter. Note that the
  * m-ld Javascript engine natively supports `Uint8Array` for binary data.
  * @see [json-rql atom](https://json-rql.org/#atom) @category json-rql
+ * @category json-rql
  */
 export type Atom =
   number | string | boolean | Uint8Array |
@@ -175,7 +176,7 @@ export type Container = List | Set;
  * @see [json-rql expression](https://json-rql.org/globals.html#expression)
  * @category json-rql
  */
-export type Expression = jrql.Atom | Constraint;
+export type Expression = Atom | Constraint;
 /** @internal */
 export const operators: { [jrql: string]: { sparql: string | undefined } } = {
   ...jrql.operators,
@@ -184,6 +185,12 @@ export const operators: { [jrql: string]: { sparql: string | undefined } } = {
 };
 /** @internal */
 export type Operator = keyof typeof jrql.operators | '@concat' | '@splice';
+/**
+ * The expected type of the parameters to the `@splice` operator.
+ * @see operators
+ * @category json-rql
+ */
+export type TextSplice = [number, number, string?];
 /**
  * Used to express an ordered set of data. A List object is reified to a Subject
  * (unlike in JSON-LD) and so it has an @id, which can be set by the user.
@@ -1072,9 +1079,9 @@ export interface Update extends Query {
    * }
    * ```
    *
-   * Constraints operating on the data may change the default behaviour to make
-   * an `@update` logically different to a `@delete` and an `@insert`,
-   * particularly when using an in-line operation.
+   * {@link SharedDatatype Shared data types} operating on the data may change
+   * the default behaviour to make an `@update` logically different to a
+   * `@delete` and an `@insert`, particularly when using an in-line operation.
    */
   '@update'?: Subject | Subject[];
   /**
@@ -1100,7 +1107,8 @@ export interface Update extends Query {
    * > 🧪 Agreements are an experimental feature. Please contact us to discuss
    * your use-case.
    *
-   * @see {@link https://github.com/m-ld/m-ld-security-spec/blob/main/design/suac.md the white paper}
+   * @see {@link https://github.com/m-ld/m-ld-security-spec/blob/main/design/suac.md the white
+   *   paper}
    * @experimental
    */
   '@agree'?: any;

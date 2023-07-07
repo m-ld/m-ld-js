@@ -1,3 +1,10 @@
+/**
+ * Utility superclass for both TSeq nodes and process arrays, whose primary
+ * purpose is to track character length. This allows for skipping tree traversal
+ * when determining overall size, and when targeting a specific node by
+ * character index.
+ * @internal
+ */
 export abstract class TSeqContainer<CharNode> {
   /** Characters contributed to TSeq string */
   private _charLength = 0;

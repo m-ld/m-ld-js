@@ -1,8 +1,6 @@
-import { isList, List, Reference, Slot, Subject } from './jrql-support';
+import { isPropertyObject, Reference, Subject } from './jrql-support';
 import { GraphSubject, GraphUpdate, UpdateForm } from './api';
-import { clone, getValues } from './engine/jsonld';
-import { isNaturalNumber } from './engine/util';
-import { array } from './util';
+import { clone } from './engine/jsonld';
 import { isReference } from 'json-rql';
 import { SubjectPropertyValues } from './subjects';
 
@@ -100,10 +98,10 @@ export function asSubjectUpdates(update: SubjectsUpdate, copy?: true): SubjectUp
  * To avoid this, use a {@link SubjectUpdater} to process the whole update.
  *
  * @param subject the resource to apply the update to
- * @param update the update, as a {@link MeldUpdate} or obtained from
- * @param ignoreSharedData if `false`, any shared data expressions in the update
- * will cause a `RangeError` – useful in development to catch problems early
- * {@link asSubjectUpdates}
+ * @param update the update, as a {@link MeldUpdate} or obtained from {@link asSubjectUpdates}
+ * @param ignoreUnsupported if `false`, any unsupported data expressions in the
+ * update will cause a `RangeError` – useful in development to catch problems
+ * early
  * @typeParam T the app-specific subject type of interest
  * @see [m-ld data semantics](http://spec.m-ld.org/#data-semantics)
  * @category Utility
@@ -111,9 +109,9 @@ export function asSubjectUpdates(update: SubjectsUpdate, copy?: true): SubjectUp
 export function updateSubject<T extends Subject & Reference>(
   subject: T,
   update: SubjectUpdates | GraphUpdate,
-  ignoreSharedData = true
+  ignoreUnsupported = true
 ): T {
-  return new SubjectUpdater(update, ignoreSharedData).update(subject);
+  return new SubjectUpdater(update, ignoreUnsupported).update(subject);
 }
 
 /** @internal */
@@ -135,7 +133,7 @@ export class SubjectUpdater {
 
   constructor(
     update: SubjectUpdates | GraphUpdate,
-    readonly ignoreSharedData = true
+    readonly ignoreUnsupported = true
   ) {
     if (isGraphUpdate(update)) {
       this.verbForSubject = (subject, key) =>
@@ -155,22 +153,14 @@ export class SubjectUpdater {
   update<T extends Subject & Reference>(subject: T): T {
     if (!this.done.has(subject)) {
       this.done.add(subject);
-      if (!this.ignoreSharedData && this.verbForSubject(subject, '@update') != null)
-        throw new RangeError('Subject updater cannot apply shared data type updates');
       const deletes = this.verbForSubject(subject, '@delete');
       const inserts = this.verbForSubject(subject, '@insert');
+      const updates = this.verbForSubject(subject, '@update');
       for (let property of new Set(Object.keys(subject).concat(Object.keys(inserts ?? {})))) {
-        switch (property) {
-          case '@id':
-            break;
-          case '@list':
-            this.updateList(subject, deletes, inserts);
-            break;
-          default:
-            const subjectProperty = new SubjectPropertyValues(subject, property, this.updateValues);
-            subjectProperty.update(
-              getValues(deletes ?? {}, property),
-              getValues(inserts ?? {}, property));
+        if (isPropertyObject(property, 'any')) {
+          SubjectPropertyValues
+            .for(subject, property, this.updateValues, this.ignoreUnsupported)
+            .update(deletes, inserts, updates);
         }
       }
     }
@@ -178,54 +168,9 @@ export class SubjectUpdater {
   }
 
   /** @internal */
-  updateValues = (values: Iterable<any>) => {
+  updateValues = (values: Iterable<any>, unref = false) => {
     for (let value of values)
-      if (typeof value == 'object' && '@id' in value && !isReference(value))
+      if (typeof value == 'object' && '@id' in value && (unref || !isReference(value)))
         this.update(value);
   }
-
-  private updateList(subject: GraphSubject, deletes?: GraphSubject, inserts?: GraphSubject) {
-    if (isList(subject)) {
-      if (isListUpdate(deletes) || isListUpdate(inserts)) {
-        this.updateListIndexes(subject['@list'],
-          isListUpdate(deletes) ? deletes['@list'] : {},
-          isListUpdate(inserts) ? inserts['@list'] : {});
-      }
-      this.updateValues(array(subject['@list']));
-    }
-  }
-
-  private updateListIndexes(list: List['@list'], deletes: List['@list'], inserts: List['@list']) {
-    const splice = typeof list.splice == 'function' ? list.splice : (() => {
-      // Array splice operation must have a length field to behave
-      if (!('length' in list)) {
-        const maxIndex = Math.max(...Object.keys(list).map(Number).filter(isNaturalNumber));
-        list.length = isFinite(maxIndex) ? maxIndex + 1 : 0;
-      }
-      return [].splice;
-    })();
-    const splices: { deleteCount: number, items?: any[] }[] = []; // Sparse
-    for (let i in deletes)
-      splices[i] = { deleteCount: 1 };
-    for (let i in inserts)
-      (splices[i] ??= { deleteCount: 0 }).items =
-        // List updates are always expressed with identified slots, but the list
-        // is assumed to contain direct items, not slots
-        array(inserts[i]).map((slot: Slot) => this.update(slot)['@item']);
-    let deleteCount = 0, items: any[] = [];
-    for (let i of Object.keys(splices).reverse().map(Number)) {
-      deleteCount += splices[i].deleteCount;
-      items.unshift(...splices[i].items ?? []);
-      if (!(i - 1 in splices)) {
-        splice.call(list, i, deleteCount, ...items);
-        deleteCount = 0;
-        items = [];
-      }
-    }
-  }
-}
-
-/** @internal */
-function isListUpdate(updatePart?: Subject): updatePart is List {
-  return updatePart != null && isList(updatePart);
 }

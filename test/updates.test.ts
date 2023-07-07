@@ -214,11 +214,42 @@ describe('Update utilities', () => {
     expect(box).toEqual({ '@id': 'foo', size: 10, contents: [{ '@id': 'baz' }] });
   });
 
-  test('cannot apply shared data type updates', () => {
+  test('cannot apply unsupported shared data type updates', () => {
     const box: Box = { '@id': 'foo', size: 10 };
     expect(() => updateSubject(box, {
-      foo: { '@update': { '@id': 'foo', size: { '@plus': 1 } } }
+      foo: { '@update': { '@id': 'foo', size: { '@minus': 1 } } }
     }, false)).toThrow();
+  });
+
+  test('applies plus update', () => {
+    const box: Box = { '@id': 'foo', size: 10 };
+    updateSubject(box, {
+      foo: { '@update': { '@id': 'foo', size: { '@plus': 1 } } }
+    });
+    expect(box).toEqual({ '@id': 'foo', size: 11 });
+  });
+
+  test('applies splice update', () => {
+    const box: Box = { '@id': 'foo', label: 'danger', size: 1 };
+    updateSubject(box, {
+      foo: { '@update': { '@id': 'foo', label: { '@splice': [0, 1, 'w'] } } }
+    });
+    expect(box).toEqual({ '@id': 'foo', label: 'wanger', size: 1 });
+  });
+
+  test('applies multiple splice updates', () => {
+    const box: Box = { '@id': 'foo', label: 'danger', size: 1 };
+    updateSubject(box, {
+      foo: {
+        '@update': {
+          '@id': 'foo', label: [
+            { '@splice': [0, 1] },
+            { '@splice': [4, 2, 'ry'] }
+          ]
+        }
+      }
+    });
+    expect(box).toEqual({ '@id': 'foo', label: 'angry', size: 1 });
   });
 
   describe('with defined properties', () => {
@@ -675,7 +706,7 @@ describe('Update utilities', () => {
     // Note, Some merge examples are included in 'property value casting' above
 
     test('strings', () => {
-      expect(maxValue(String,'a', 'b')).toBe('b');
+      expect(maxValue(String, 'a', 'b')).toBe('b');
     });
 
     test('numbers', () => {
@@ -683,7 +714,7 @@ describe('Update utilities', () => {
     });
 
     test('references', () => {
-      expect(maxValue(Reference,{ '@id': '1' }, { '@id': '2' }))
+      expect(maxValue(Reference, { '@id': '1' }, { '@id': '2' }))
         .toEqual({ '@id': '2' });
     });
   });

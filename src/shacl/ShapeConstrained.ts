@@ -9,6 +9,7 @@ import { ExtensionSubjectInstance } from '../orm/ExtensionSubject';
 import { JsProperty, JsType } from '../js-support';
 import { Iri } from '@m-ld/jsonld';
 import { SubjectUpdater } from '../updates';
+import { MeldAppContext } from '../config';
 
 /**
  * This extension allows an app to declare that the domain data must conform to
@@ -23,17 +24,9 @@ import { SubjectUpdater } from '../updates';
  * api = await clone(
  *   new MemoryLevel, MqttRemotes, config,
  *   new ShapeConstrained(new PropertyShape({
- *     path: 'http://ex.org/#name', count: 1
+ *     path: 'name', count: 1
  *   })));
  * ```
- *
- * > Note that properties and types provided as initialisation parameters to
- * shapes (e.g. `path` above) must be fully-qualified IRIs according to the
- * vocabulary of the domain. See {@link MeldContext} for more information.
- *
- * If combining shape constraints with other extensions, it may be necessary
- * (and is safe) to use the {@link constraints} member of this class directly as
- * a sublist in a list of constraints.
  *
  * @see https://www.w3.org/TR/shacl/
  * @category Experimental
@@ -84,6 +77,12 @@ export class ShapeConstrained implements ExtensionSubjectInstance, MeldPlugin {
     this.shapes = shapes;
   }
 
+  /** @internal */
+  setExtensionContext(context: MeldAppContext) {
+    for (let shape of this.shapes)
+      shape.setExtensionContext(context);
+  }
+
   /**
    * Note special case constraint handling for subject deletion.
    * @internal
@@ -123,9 +122,7 @@ export class ShapeConstrained implements ExtensionSubjectInstance, MeldPlugin {
   }
 }
 
-/**
- * @todo docs
- */
+/** @internal */
 class DeleteDetector extends SubjectUpdater {
   private readonly fullyDeletedIds = new Set<Iri>();
 

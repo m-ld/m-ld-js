@@ -3,16 +3,26 @@ import { TSeqCharTick, TSeqName, TSeqRun } from './types';
 import { TSeqPreApply } from './TSeq';
 import { TSeqOperable } from './TSeqOperable';
 
+/**
+ * Node in a {@link TSeq} tree. Only the root node, the TSeq itself, does not
+ * hold a character.
+ * @internal
+ */
 export abstract class TSeqNode extends TSeqContainer<TSeqCharNode> {
   /** Arrays per-process, sorted by process ID */
   private readonly rest: TSeqProcessArray[] = [];
 
   protected constructor(
+    /** The location of this node in the TSeq tree */
     readonly path: TSeqName[]
   ) {
     super();
   }
 
+  /**
+   * Possibly expensive invariant checking, intended to be called in testing
+   * @internal
+   */
   checkInvariants() {
     super.checkInvariants();
     const sorted = [...this.rest].sort(TSeqProcessArray.compare);
@@ -20,6 +30,7 @@ export abstract class TSeqNode extends TSeqContainer<TSeqCharNode> {
       throw 'arrays are not in order';
   }
 
+  /** @inheritDoc */
   children() {
     return this.rest;
   }
@@ -86,6 +97,7 @@ export abstract class TSeqNode extends TSeqContainer<TSeqCharNode> {
   }
 }
 
+/** @internal */
 export class TSeqCharNode extends TSeqNode implements TSeqOperable {
   private _char = '';
   private _tick = 0;
@@ -180,6 +192,7 @@ export class TSeqCharNode extends TSeqNode implements TSeqOperable {
   }
 }
 
+/** @internal */
 export class TSeqProcessArray extends TSeqContainer<TSeqCharNode> {
   /**
    * An empty position is equivalent to an empty node

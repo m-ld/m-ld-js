@@ -2,6 +2,12 @@ import { concatIter, mapIter } from '../engine/util';
 import { TSeqCharTick, TSeqName, TSeqOperation, TSeqRun } from './types';
 import { TSeqCharNode } from './TSeqNode';
 
+/**
+ * Utility interface for manipulating {@link TSeqOperation TSeqOperations}. This
+ * takes advantage of the observation that some functions over character nodes
+ * in a TSeq can also be applied to {@link TSeqRun runs in an operation}.
+ * @internal
+ */
 export interface TSeqOperable {
   path: TSeqName[],
   charTick: TSeqCharTick,
@@ -9,6 +15,10 @@ export interface TSeqOperable {
   next?: TSeqOperable
 }
 
+/**
+ * Static functions applicable to {@link TSeqOperable} objects.
+ * @internal
+ */
 export namespace TSeqOperable {
   /**
    * Processes the given operables into a set of "runs", which comprise an

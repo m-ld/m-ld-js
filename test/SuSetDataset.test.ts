@@ -113,7 +113,7 @@ describe('SU-Set Dataset', () => {
 
         expect(msg!.time.equals(local.time)).toBe(true);
         const [ver, from, time, upd, enc] = msg!.data;
-        expect(ver).toBe(4);
+        expect(ver).toBe(5);
 
         expect(from).toBe(local.time.ticks);
         expect(local.time.equals(TreeClock.fromJson(time) as TreeClock)).toBe(true);
@@ -166,7 +166,7 @@ describe('SU-Set Dataset', () => {
           expect(data.every(v => {
             if ('operation' in v) {
               const [ver, from, time, upd, enc] = v.operation;
-              expect(ver).toBe(4);
+              expect(ver).toBe(5);
               expect(from).toBe(local.time.ticks);
               expect(TreeClock.fromJson(time).equals(local.time)).toBe(true);
               expect(MeldEncoder.jsonFromBuffer(upd, enc))
@@ -194,7 +194,7 @@ describe('SU-Set Dataset', () => {
           expect(data.every(v => {
             if ('operation' in v) {
               const [ver, from, time, upd, enc] = v.operation;
-              expect(ver).toBe(4);
+              expect(ver).toBe(5);
               expect(from).toBe(firstTick);
               expect(TreeClock.fromJson(time).equals(local.time)).toBe(true);
               const [del, ins]: [{}, []] = MeldEncoder.jsonFromBuffer(upd, enc);
@@ -231,7 +231,7 @@ describe('SU-Set Dataset', () => {
           expect(data.every(v => {
             if ('operation' in v) {
               const [ver, from, time, upd, enc] = v.operation;
-              expect(ver).toBe(4);
+              expect(ver).toBe(5);
               expect(from).toBe(firstTick);
               expect(TreeClock.fromJson(time).equals(local.time)).toBe(true);
               const [del, ins]: [{}, []] = MeldEncoder.jsonFromBuffer(upd, enc);
@@ -265,7 +265,7 @@ describe('SU-Set Dataset', () => {
           expect(data.every(v => {
             if ('operation' in v) {
               const [ver, from, time, upd, enc] = v.operation;
-              expect(ver).toBe(4);
+              expect(ver).toBe(5);
               expect(from).toBe(local.time.ticks);
               expect(TreeClock.fromJson(time).equals(local.time)).toBe(true);
               expect(MeldEncoder.jsonFromBuffer(upd, enc))

@@ -151,6 +151,11 @@ export function minimiseValue(v: any) {
   return v;
 }
 
+export function minimiseValues(v: any[]) {
+  const minimised = v.map(minimiseValue);
+  return minimised.length === 1 ? minimised[0] : minimised;
+}
+
 /**
  * Maps the canonical JSON-LD property value to some target type.
  *

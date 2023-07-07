@@ -18,7 +18,7 @@ describe('Shape constrained extension', () => {
       api = await clone(
         new MemoryLevel, MockRemotes, testConfig(),
         new ShapeConstrained(new PropertyShape({
-          path: 'http://test.m-ld.org/#name', count: 1
+          path: 'name', count: 1
         })));
       await expect(api.write({
         '@id': 'fred', 'name': ['Fred', 'Flintstone']
@@ -90,7 +90,7 @@ describe('Shape constrained extension', () => {
     test('does not contradict subject deletion', async () => {
       const ext = await installShapeConstrained({ path: 'name', count: 1 });
       const fredName = {
-        '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': ['Fred']
+        '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Fred'
       };
       await state.write(fredName);
       const interim = mockInterim({ '@delete': [fredName] });
@@ -105,7 +105,7 @@ describe('Shape constrained extension', () => {
     test('does not contradict correction if subject not deleted', async () => {
       const ext = await installShapeConstrained({ path: 'name', count: 1 });
       const fredName = {
-        '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': ['Fred']
+        '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Fred'
       };
       await state.write({ ...fredName, 'http://test.m-ld.org/#height': 1 });
       const interim = mockInterim({ '@delete': [fredName] });

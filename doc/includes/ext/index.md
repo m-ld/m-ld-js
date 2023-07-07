@@ -9,7 +9,8 @@ The Javascript engine package bundles the following extensions – follow the li
 - [Remotes](#remotes) are pre-selected in the call to [clone](#clone), as described above.
 - [Lists](https://spec.m-ld.org/#lists) have a default implementation, which is replaceable.
 - [Shapes](/classes/shapeconstrained.html) are used to enforce a 'schema' or 'object model' on the domain's data.
-- [ACL Transport Security](/classes/meldacltransportsecurity.html) allows an app to encrypt and apply digital signatures to m-ld protocol network traffic.
+- Subject properties in the domain can be declared as [collaborative text](/classes/tseqtext.html).
+- [Transport Security](/classes/meldacltransportsecurity.html) allows an app to encrypt and apply digital signatures to **m-ld** protocol network traffic.
 - [Statutes](/classes/statutory.html) allow an app to require that certain changes, such as changes to access controls, are _agreed_ before they are shared in the domain.
 - [Write Permissions](/classes/writepermitted.html) allow an app to add fine-grained access controls based on data [shapes](/classes/shape.html).
 
@@ -21,6 +22,6 @@ The extension's code module must be available to a global CommonJS-style `requir
 
 ### Writing Extensions
 
-Extension code is executed as required by the core engine or by another extension. Besides remotes, there are currently three types of custom extension called by the core engine, defined in the [MeldExtensions](/interfaces/meldextensions.html) API interface. To write an extension to the core, you must implement one or more of these types.
+Extension code is executed as required by the core engine or by another extension. Besides remotes, there are currently four types of custom extension called by the core engine, defined in the [MeldExtensions](/interfaces/meldextensions.html) API interface. To write an extension to the core, you must implement one or more of these types.
 
 > 🚧 Please do [contact us](https://m-ld.org/hello/) if you would like to understand more about extensions.

@@ -1,6 +1,8 @@
+## TSeq CRDT Design Notes
+
 SparseArray
 - all infinite positions exist
-- no splicing
+- no splicing (index positions are immutable identities)
 - (sparse array with base index)
 
 TSeq
@@ -8,33 +10,12 @@ TSeq
 - has process metadata (current & vector)
 
 TSeqNode
-- is a char (call be null, ☐)
+- is a char (call be null, `""`)
 - is a map of process ID to SparseArray<TSeqNode>
 - interpreted as: char concat each process ID's TSeqNode array
 - a process can edit the char of its own TSeqNodes, and nested arrays
 - can be represented as a char
 - SparseArray<TSeqNode> can be represented as a string if base is 0
-
-Example JSON
-```json
-{
-  "char": "☐",
-  "a": {
-    "base": 0,
-    "0": {
-      "char": "h",
-      "a": "☐",
-      "b": [
-        {
-          "char": "i",
-          "a": " world"
-        }
-      ]
-    }
-  },
-  "b": "☐☐"
-}
-```
 
 InsertAfter(ts) := 
 1. IF owner of array, and no sub-nodes, and next slot available, set it

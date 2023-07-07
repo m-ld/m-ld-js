@@ -103,9 +103,8 @@ export enum BufferEncoding {
 export type EncodedOperation = [
   /**
    * @since 1
-   * @todo bump
    */
-  version: 4,
+  version: 5,
   /**
    * First tick of causal time range. If this is less than `time.ticks`, this
    * operation is a fusion of multiple operations.
@@ -119,7 +118,9 @@ export type EncodedOperation = [
    */
   time: TreeClockJson,
   /**
-   * A tuple `[delete: object, insert: object, operations?: object]` encoded as per `encoding`
+   * A tuple `[delete: object, insert: object, update?: object]` encoded as per
+   * `encoding` (`update` key {@since 5}).
+   *
    * @since 3
    */
   update: Buffer,
