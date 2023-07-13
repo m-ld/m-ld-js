@@ -413,9 +413,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
     };
     try {
       if (!this.newClone && reason !== OperationOutcome.UNBASED) {
-console.log('revup')
         recovery = await this.remotes.revupFrom(this.localTime, this.suset.readState);
-console.log('revup done')
         await processRecovery(this.processRevup);
       }
       if (recovery == null) {

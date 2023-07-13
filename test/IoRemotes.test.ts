@@ -55,8 +55,13 @@ describe('Socket.io Remotes', () => {
       '@id': 'local-remotes', '@domain': domain, genesis: false,
       io: { uri: `http://localhost:${port}`, opts: { auth: { bork: true } } }
     }, extensions);
-    await expect(lastValueFrom(localRemotes.operations))
-      .rejects.toThrowError('bork');
+    await Promise.all([
+      expect(lastValueFrom(localRemotes.operations))
+        .rejects.toThrowError('bork'),
+      // Also check outstanding new clock requests waiting for connection
+      expect(localRemotes.newClock())
+        .rejects.toThrowError('Clone has closed')
+    ]);
   });
 
   test('closes on explicit disconnect', async () => {

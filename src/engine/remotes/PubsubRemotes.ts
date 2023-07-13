@@ -8,9 +8,9 @@ import {
   ControlMessage, NewClockRequest, NewClockResponse, RejectedResponse, Request, Response,
   RevupRequest, RevupResponse, SnapshotRequest, SnapshotResponse
 } from './ControlMessage';
-import { throwOnComplete, toJSON } from '../util';
+import { inflate, throwOnComplete, toJSON } from '../util';
 import * as MsgPack from '../msgPack';
-import { delay, first, map, reduce, tap, timeout, toArray } from 'rxjs/operators';
+import { delay, first, map, reduce, timeout, toArray } from 'rxjs/operators';
 import { AbstractMeld } from '../AbstractMeld';
 import {
   MeldError, MeldErrorStatus, MeldExtensions, MeldReadState, shortId, uuid
@@ -217,6 +217,9 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
       this.log.info('Shutting down normally');
     // This finalises the #updates, thereby notifying the clone (if present)
     super.close(err);
+    // Ensure that anything waiting for connection is rejected
+    if (this.connected.observed)
+      this.connected.error(new MeldError('Clone has closed', this.id));
     // Wait until all activities have finalised
     try { // TODO unit test this
       this.active.complete();
@@ -326,12 +329,12 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
    */
   protected onPresenceChange() {
     // Don't process a presence change until connected emits true
-    this.connected.pipe(first(identity), tap(() => {
+    this.connected.pipe(first(identity)).subscribe(() => {
       // If there is more than just me present, we are live
       this.present()
         .pipe(reduce((live, id) => live || id !== this.id, false))
         .subscribe(live => this.setLive(live));
-    })).subscribe();
+    });
   }
 
   /**
@@ -722,7 +725,10 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
   }
 
   private async nextSender(messageId: string): Promise<SubPub | null> {
-    const present = await firstValueFrom(this.present().pipe(toArray()));
+    const present = await firstValueFrom(inflate(
+      this.connected.pipe(first(identity)), // First wait to be connected
+      () => this.present().pipe(toArray())
+    ));
     if (present.every(id => this.recentlySentTo.has(id)))
       this.recentlySentTo.clear();
 
