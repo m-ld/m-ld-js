@@ -512,25 +512,24 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     // With some remotes, the response can overtake the sent receipt, so we need
     // to attach the response listeners immediately; hence the two promises here
     const sent = sender.publish(wireRequest).finally(() => sender.close?.());
-    const responded = this.getResponse<T>({
+    tried[sender.id] = this.getResponse<T>({
       sent, messageId, readyToAck, state
     }).then(res => ({ res, fromId: sender.id }));
-    tried[sender.id] = responded;
-    // Note, promise must have a handler attached synchronously; not just logging
-    responded.catch(err => this.log.trace(err));
-    const done = sent.then(
-      () => responded.then(
-        // If the caller doesn't like this response, try again
-        rtn => check == null || check(rtn.res) ? rtn : retry(),
-        retry // Also retry if the tried collaborator rejects or times out
-      ),
-      // If the send fails, don't retry
-      // This also handles the inevitable responded rejection
-      () => responded
-    );
+    const done = Promise.allSettled([sent, tried[sender.id]]);
     // Ensure this potentially long-running promise is accounted for in closing
     this.setActive(done);
-    return done;
+    const [sentResult, respondedResult] = await done;
+    if (sentResult.status === 'rejected') {
+      // If the send fails, don't retry – network unavailable etc.
+      return Promise.reject(sentResult.reason);
+    } else if (respondedResult.status === 'rejected') {
+      // Retry if the tried collaborator rejects or times out
+      return retry();
+    } else {
+      // If the caller doesn't like this response, try again
+      return check == null || check(respondedResult.value.res) ?
+        respondedResult.value : retry()
+    }
   }
 
   private setActive<T>(done: PromiseLike<T>) {
