@@ -7,8 +7,7 @@ import { liveRollup } from '../api-support';
 import { Pattern, Query, Read, Write } from '../../jrql-support';
 import {
   BehaviorSubject, concat, concatMap, debounce, defaultIfEmpty, EMPTY, firstValueFrom, from,
-  interval, merge, Observable, of, OperatorFunction, partition, race, Subscriber, Subscription,
-  throwError
+  interval, merge, Observable, of, OperatorFunction, partition, race, Subscriber, Subscription
 } from 'rxjs';
 import { GlobalClock, TreeClock } from '../clocks';
 import { SuSetDataset } from './SuSetDataset';
@@ -17,7 +16,7 @@ import {
   delayWhen, distinctUntilChanged, expand, filter, finalize, ignoreElements, map, share, skipWhile,
   takeUntil, tap, toArray
 } from 'rxjs/operators';
-import { delayUntil, inflateFrom, poisson, settled } from '../util';
+import { delayUntil, inflateFrom, poisson, settled, throwOnComplete } from '../util';
 import { checkLocked, LockManager } from '../locks';
 import { levels } from 'loglevel';
 import { AbstractMeld, checkLive, comesAlive } from '../AbstractMeld';
@@ -594,10 +593,8 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
   }
 
   private errorIfClosed() {
-    return concat(
-      this.live.pipe(ignoreElements()),
-      throwError(() => new MeldError('Clone has closed'))
-    );
+    return throwOnComplete(this.live,
+      () => new MeldError('Clone has closed'));
   }
 
   @checkNotClosed.async

@@ -1,16 +1,16 @@
 import { MeldLocal, MeldRemotes, Revup, Snapshot } from '../index';
 import {
-  BehaviorSubject, concatWith, defer, EMPTY, firstValueFrom, from, identity, NEVER, Observable,
-  Observer, of, onErrorResumeNext, race, Subject as Source, Subscription, switchMap, throwError
+  BehaviorSubject, defer, EMPTY, firstValueFrom, from, identity, NEVER, Observable, Observer,
+  onErrorResumeNext, race, Subject as Source, Subscription, switchMap
 } from 'rxjs';
 import { TreeClock } from '../clocks';
 import {
   ControlMessage, NewClockRequest, NewClockResponse, RejectedResponse, Request, Response,
   RevupRequest, RevupResponse, SnapshotRequest, SnapshotResponse
 } from './ControlMessage';
-import { toJSON } from '../util';
+import { inflate, throwOnComplete, toJSON } from '../util';
 import * as MsgPack from '../msgPack';
-import { delay, first, ignoreElements, map, reduce, tap, timeout, toArray } from 'rxjs/operators';
+import { delay, first, map, reduce, timeout, toArray } from 'rxjs/operators';
 import { AbstractMeld } from '../AbstractMeld';
 import {
   MeldError, MeldErrorStatus, MeldExtensions, MeldReadState, shortId, uuid
@@ -217,12 +217,16 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
       this.log.info('Shutting down normally');
     // This finalises the #updates, thereby notifying the clone (if present)
     super.close(err);
+    // Ensure that anything waiting for connection is rejected
+    if (this.connected.observed)
+      this.connected.error(new MeldError('Clone has closed', this.id));
     // Wait until all activities have finalised
     try { // TODO unit test this
       this.active.complete();
       await this.active.value;
     } catch (e) {
-      this.log.warn('Error while closing', e);
+      if (!(e instanceof MeldError) || e.status !== MeldErrorStatus['Clone has closed'])
+        this.log.warn('Error while closing', e);
     }
   }
 
@@ -325,12 +329,12 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
    */
   protected onPresenceChange() {
     // Don't process a presence change until connected emits true
-    this.connected.pipe(first(identity), tap(() => {
+    this.connected.pipe(first(identity)).subscribe(() => {
       // If there is more than just me present, we are live
       this.present()
         .pipe(reduce((live, id) => live || id !== this.id, false))
         .subscribe(live => this.setLive(live));
-    })).subscribe();
+    });
   }
 
   /**
@@ -358,7 +362,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     if (this.clone) {
       // Keep track of long-running activity so that we can shut down cleanly
       const done = new Future, clone = this.clone;
-      this.active.next(Promise.all([this.active.value, done]));
+      this.setActive(done);
       const sw = new Stopwatch('reply', shortId());
       try {
         // The local state is required to prepare the response and to send it
@@ -496,29 +500,47 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     if (sender == null) {
       throw new MeldError('No visible clones',
         `No-one present on ${this.domain} to send message to`);
-    } else if (sender.id in tried) {
+    } else if (tried[sender.id] != null) {
       // If we have already tried this address, we've tried everyone; return
       // whatever the last response was.
+      sender.close?.();
       return tried[sender.id];
     }
     this.log.debug('Sending request', messageId, logRequest, sender.id);
     sw.next('send');
+    const retry = () => this.send(wireRequest, params, tried, messageId);
+    // With some remotes, the response can overtake the sent receipt, so we need
+    // to attach the response listeners immediately; hence the two promises here
     const sent = sender.publish(wireRequest).finally(() => sender.close?.());
-    tried[sender.id] = this.getResponse<T>(
-      sent,
-      messageId,
-      { readyToAck, state }
-    ).then(res => ({ res, fromId: sender.id }));
-    // If the publish fails, don't keep trying other addresses
-    await sent;
-    // If the caller doesn't like this response, try again
-    return tried[sender.id].then(rtn => check == null || check(rtn.res) ? rtn :
-        this.send(wireRequest, params, tried, messageId),
-      () => this.send(wireRequest, params, tried, messageId));
+    tried[sender.id] = this.getResponse<T>({
+      sent, messageId, readyToAck, state
+    }).then(res => ({ res, fromId: sender.id }));
+    const done = Promise.allSettled([sent, tried[sender.id]]);
+    // Ensure this potentially long-running promise is accounted for in closing
+    this.setActive(done);
+    const [sentResult, respondedResult] = await done;
+    if (sentResult.status === 'rejected') {
+      // If the send fails, don't retry – network unavailable etc.
+      return Promise.reject(sentResult.reason);
+    } else if (respondedResult.status === 'rejected') {
+      // Retry if the tried collaborator rejects or times out
+      return retry();
+    } else {
+      // If the caller doesn't like this response, try again
+      return check == null || check(respondedResult.value.res) ?
+        respondedResult.value : retry()
+    }
   }
 
-  private getResponse<T extends Response | ACK>(sent: Promise<unknown>, messageId: string,
-    { readyToAck, state, allowTimeFor }: {
+  private setActive<T>(done: PromiseLike<T>) {
+    this.active.next(Promise.all([this.active.value, done]));
+  }
+
+  @checkNotClosed.async
+  private getResponse<T extends Response | ACK>(
+    { sent, messageId, readyToAck, state, allowTimeFor }: {
+      sent: Promise<unknown>,
+      messageId: string,
       readyToAck?: PromiseLike<void>,
       state: MeldReadState | null,
       allowTimeFor?: Promise<unknown>
@@ -527,16 +549,18 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     return firstValueFrom(race(
       // Four possible outcomes:
       // 1. Response times out after allowing time for prior work
-      from(allowTimeFor ?? of(0)).pipe(delay(this.sendTimeout),
-        switchMap(() => throwError(() => {
+      throwOnComplete(
+        from(allowTimeFor ?? Promise.resolve()).pipe(delay(this.sendTimeout)),
+        () => {
           this.log.debug(`Message ${messageId} timed out.`);
           return new Error('Send timeout exceeded.');
-        }))),
+        }
+      ),
       // 2. Send fails - abandon the response if it rejects
       from(sent).pipe(switchMap(() => NEVER)),
       // 3. Remotes have closed
-      this.active.pipe(ignoreElements(),
-        concatWith(throwError(() => new MeldError('Clone has closed')))),
+      throwOnComplete(this.active,
+        () => new MeldError('Clone has closed', this.id)),
       // 4. Response received
       new Observable<T>(subs => {
         const received = new Future<Response | ACK>();
@@ -547,8 +571,10 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
             subs.next(res as T);
         }, err => subs.error(err));
         this.replyResolvers[messageId] = { received, state, readyToAck };
+        // This teardown will apply for any outcome
         return () => { delete this.replyResolvers[messageId]; };
-      })));
+      })
+    ));
   }
 
   private async replyClock(sentParams: SendParams, state: MeldReadState, clock: TreeClock) {
@@ -692,13 +718,16 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     state: MeldReadState | null,
     allowTimeFor: Promise<T>
   ): Promise<T> {
-    return this.getResponse<ACK>(
-      replied, messageId, { allowTimeFor, state })
-      .then(() => allowTimeFor); // This just gets the return value
+    return this.getResponse<ACK>({
+      sent: replied, messageId, allowTimeFor, state
+    }).then(() => allowTimeFor); // This just gets the return value
   }
 
   private async nextSender(messageId: string): Promise<SubPub | null> {
-    const present = await firstValueFrom(this.present().pipe(toArray()));
+    const present = await firstValueFrom(inflate(
+      this.connected.pipe(first(identity)), // First wait to be connected
+      () => this.present().pipe(toArray())
+    ));
     if (present.every(id => this.recentlySentTo.has(id)))
       this.recentlySentTo.clear();
 

@@ -1,9 +1,9 @@
 import {
   BehaviorSubject, concat, connect, defaultIfEmpty, EMPTY, firstValueFrom, from, NEVER, Observable,
   ObservableInput, ObservedValueOf, Observer, onErrorResumeNext, OperatorFunction, Subject,
-  Subscription
+  Subscription, throwError
 } from 'rxjs';
-import { mergeMap, switchAll } from 'rxjs/operators';
+import { ignoreElements, mergeMap, switchAll } from 'rxjs/operators';
 
 export const isArray = Array.isArray;
 
@@ -46,6 +46,13 @@ export function settled(result: PromiseLike<unknown>): Promise<unknown> {
 export function completed(observable: Observable<unknown>): Promise<void> {
   return new Promise((resolve, reject) =>
     observable.subscribe({ complete: resolve, error: reject }));
+}
+
+export function throwOnComplete(
+  observable: Observable<unknown>,
+  errorFactory: () => any
+): Observable<never> {
+  return concat(observable.pipe(ignoreElements()), throwError(errorFactory));
 }
 
 /**
