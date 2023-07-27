@@ -11,12 +11,12 @@ import { count, map, observeOn, take, toArray } from 'rxjs/operators';
 import { TreeClock } from '../src/engine/clocks';
 import { MeldRemotes, Snapshot } from '../src/engine';
 import {
-  combinePlugins, Describe, GraphSubject, MeldError, MeldReadState, Read, Update, Write
+  combinePlugins, Describe, GraphSubject, MeldError, MeldReadState, Read, Select, Update, Write
 } from '../src';
 import { AbstractLevel } from 'abstract-level';
 import { jsonify } from './testUtil';
 import { MemoryLevel } from 'memory-level';
-import { Consumable } from 'rx-flowable';
+import { Consumable, drain, each } from 'rx-flowable';
 import { inflateFrom } from '../src/engine/util';
 import { MeldOperationMessage } from '../src/engine/MeldOperationMessage';
 import { mockFn } from 'jest-mock-extended';
@@ -502,6 +502,25 @@ describe('Dataset engine', () => {
       await expect(clone.status.becomes({ outdated: false })).resolves.not.toThrow();
       expect(tooOldSnapshot.cancel).toHaveBeenCalled();
       expect(remotes.snapshot).toHaveBeenCalledTimes(2);
+    });
+
+    test('nested read is not deadlocked by connect', async () => {
+      // Start with offline remotes
+      const remotesLive = hotLive([null]);
+      const remotes = mockRemotes(NEVER, remotesLive);
+      const clone = await TestDatasetEngine.instance({ backend, remotes });
+      await clone.write({ '@graph': [fred, wilma, barney] });
+      let count = 0;
+      await each(clone.read({ // Shares 'live' lock until all results consumed
+        '@select': '?id', '@where': { '@id': '?id' }
+      } as Select), async () => {
+        // Connect wants exclusive 'live'
+        if (count++ === 0) remotesLive.next(true);
+        // Nested read wants shared 'live'
+        await drain(clone.read({ '@describe': fred['@id'] } as Describe));
+      });
+      expect(count).toBe(3);
+      await clone.close(); // Otherwise it continues trying to connect
     });
   });
 });

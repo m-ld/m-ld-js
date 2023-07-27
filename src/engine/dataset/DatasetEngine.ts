@@ -17,7 +17,7 @@ import {
   takeUntil, tap, toArray
 } from 'rxjs/operators';
 import { delayUntil, inflateFrom, poisson, settled, throwOnComplete } from '../util';
-import { checkLocked, LockManager } from '../locks';
+import { checkLocked, LockManager, SHARED, SHARED_REENTRANT } from '../locks';
 import { levels } from 'loglevel';
 import { AbstractMeld, checkLive, comesAlive } from '../AbstractMeld';
 import { RemoteOperations } from './RemoteOperations';
@@ -202,21 +202,17 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
     this.context = this.suset.userCtx;
     const rdfSrc = this.suset.readState;
     // Raw RDF methods just pass through to the dataset when its initialised
-    this.match = this.wrapStreamFn(rdfSrc.match.bind(rdfSrc));
+    this.match = this.wrapReadStreamFn(rdfSrc.match.bind(rdfSrc));
     // @ts-ignore - TS can't cope with overloaded query method
-    this.query = this.wrapStreamFn(rdfSrc.query.bind(rdfSrc));
+    this.query = this.wrapReadStreamFn(rdfSrc.query.bind(rdfSrc));
   }
 
-  private reconnectDelayer = (style: Reconnect): Observable<number> => {
-    switch (style) {
-      case Reconnect.HARD:
-        // Hard retry is immediate
-        return of(0);
-      case Reconnect.SOFT:
-        // Soft retry is delayed
-        return interval(this.getRetryDelay());
-    }
-  };
+  private reconnectDelayer = (style: Reconnect) =>
+    style === Reconnect.HARD ?
+      // Hard retry is immediate
+      of(0) :
+      // Soft retry is delayed
+      interval(this.getRetryDelay());
 
   /** @returns millis from distribution ~(>=0 mean 2) * network timeout */
   private getRetryDelay(): number {
@@ -350,7 +346,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
       // operations to mitigate against breaking fifo with emitOpsSince().
       this.pauseOperations(
         // Also block transactions, recovery requests and other connect attempts.
-        this.lock.acquire('state', 'decide live', 'share').then(release =>
+        this.lock.acquire('state', 'decide live', SHARED).then(release =>
           this.lock.exclusive('live', 'decide live', async () => {
             const remotesLive = this.remotes.live.value;
             if (remotesLive === true) {
@@ -602,13 +598,16 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
     return this.suset.readState.countQuads(...args);
   }
 
-  private wrapStreamFn<P extends any[], T>(
-    fn: (...args: P) => BaseStream<T>): ((...args: P) => async.AsyncIterator<T>) {
-    return (...args) => {
-      return new async.TransformIterator<T>(this.closed ?
+  private wrapReadStreamFn<F extends ((...args: unknown[]) => BaseStream<T>), T>(
+    fn: F
+  ): ((...args: Parameters<F>) => async.AsyncIterator<T>) {
+    return (...args) =>
+      new async.TransformIterator<T>(this.closed ?
         Promise.reject(new MeldError('Clone has closed')) :
-        this.lock.share('live', 'sparql', async () => async.wrap(fn(...args))));
-    };
+        // Note reads can be re-entrant during streaming.
+        this.lock.acquire('live', 'sparql', SHARED_REENTRANT)
+          .then(releaseLive => async.wrap(fn(...args)).on('end', releaseLive))
+      );
   }
 
   @checkNotClosed.rx
@@ -618,14 +617,12 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
     // Extend the 'state' lock until the read actually happens, which is when
     // the 'live' lock is acquired. The read may also choose to extend the
     // 'state' lock while results are streaming.
-    const results = new Future<Consumable<GraphSubject>>();
-    this.lock.share('live', 'read', () => new Promise<void>(exitLiveLock => {
-      // Only exit the live-lock when the results have been fully streamed
-      results.resolve(this.suset.read(request).pipe(finalize(exitLiveLock)));
-    })).then(
-      () => this.log.debug('read complete'),
-      err => results.reject(err)); // Only if lock fails
-    return inflateFrom(this.lock.extend('state', 'read', results));
+    // Note reads can be reentrant during streaming. The flag prevents a
+    // deadlock if the live lock is concurrently acquired exclusively, as by a
+    // connect.
+    return inflateFrom(this.lock.extend('state', 'read',
+      this.lock.acquire('live', 'read', SHARED_REENTRANT)
+        .then(releaseLive => this.suset.read(request).pipe(finalize(releaseLive)))));
   }
 
   @checkNotClosed.async

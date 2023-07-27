@@ -29,6 +29,7 @@ import { JsonldContext } from '../src/engine/jsonld';
 import { JrqlQuads } from '../src/engine/dataset/JrqlQuads';
 import { Stopwatch } from '../src/engine/Stopwatch';
 import { CacheFactory } from '../src/engine/cache';
+import { SHARED } from '../src/engine/locks';
 
 export const testDomain = 'test.m-ld.org';
 export const testDomainContext = new DomainContext(testDomain);
@@ -90,8 +91,10 @@ export async function memStore(opts?: {
 export class MockState {
   static async create({ dataset, domain }: { dataset?: Dataset, domain?: string } = {}) {
     dataset ??= await memStore({ domain });
-    return new MockState(dataset,
-      await dataset.lock.acquire('state', 'test', 'share'));
+    return new MockState(
+      dataset,
+      await dataset.lock.acquire('state', 'test', SHARED)
+    );
   }
 
   txnId = 0;
