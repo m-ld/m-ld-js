@@ -1,6 +1,6 @@
 // noinspection ES6MissingAwait
 
-import { LockManager, SharedPromise } from '../src/engine/locks';
+import { EXCLUSIVE, LockManager, SHARED, SharedPromise } from '../src/engine/locks';
 
 let ops: number[]; // Used to assert concurrent operation ordering
 const pushOp = async (n: number) => ops.push(n);
@@ -27,14 +27,14 @@ describe('Sharable lock', () => {
   test('exclusive ops execute immediately', async () => {
     const lock = new LockManager<'it'>();
     await lock.exclusive('it', 'test', async () => {
-      expect(lock.state('it')!.exclusive).toBe(true);
+      expect(lock.state('it')!.head.mode).toBe(EXCLUSIVE);
       await pushOp(1);
       await pushOp(2);
-      expect(lock.state('it')!.exclusive).toBe(true);
+      expect(lock.state('it')!.head.mode).toBe(EXCLUSIVE);
     });
     expect(ops).toEqual([1, 2]);
     await lock.open('it');
-    expect(lock.state('it')).toBe(null);
+    expect(lock.state('it')).toBeUndefined();
     await lock.exclusive('it', 'test', async () => {
       await pushOp(3);
       await pushOp(4);
@@ -116,15 +116,15 @@ describe('Sharable lock', () => {
   test('shared ops execute immediately', async () => {
     const lock = new LockManager<'it'>();
     await lock.share('it', 'test', async () => {
-      expect(lock.state('it')!.exclusive).toBe(false);
+      expect(lock.state('it')!.head.mode).toBe(SHARED);
       await pushOp(1);
       await pushOp(2);
     });
     expect(ops).toEqual([1, 2]);
     await lock.open('it');
-    expect(lock.state('it')).toBe(null);
+    expect(lock.state('it')).toBeUndefined();
     await lock.share('it', 'test', async () => {
-      expect(lock.state('it')!.exclusive).toBe(false);
+      expect(lock.state('it')!.head.mode).toBe(SHARED);
       await pushOp(3);
       await pushOp(4);
     });
@@ -134,12 +134,12 @@ describe('Sharable lock', () => {
   test('shared ops do share', async () => {
     const lock = new LockManager<'it'>();
     lock.share('it', 'test', async () => {
-      expect(lock.state('it')!.exclusive).toBe(false);
+      expect(lock.state('it')!.head.mode).toBe(SHARED);
       await pushOp(1);
       await pushOp(2);
     });
     await lock.share('it', 'test', async () => {
-      expect(lock.state('it')!.exclusive).toBe(false);
+      expect(lock.state('it')!.head.mode).toBe(SHARED);
       await pushOp(3);
       await pushOp(4);
     });
@@ -184,7 +184,7 @@ describe('Sharable lock', () => {
     await lock.share('it', 'test', async () => {
       await pushOp(2);
       await pushOp(3);
-      expect(lock.state('it')!.exclusive).toBe(false);
+      expect(lock.state('it')!.head.mode).toBe(SHARED);
     });
     expect(ops).toEqual([1, 2, 3]);
   });

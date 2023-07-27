@@ -71,15 +71,23 @@ export class StateEngine extends QueryableRdfSourceProxy {
   }
 
   write(procedure: EngineStateProc): Promise<unknown> {
-    return this.clone.lock.exclusive('state', 'write', () => procedure(this.state));
+    return this.clone.lock.exclusive(
+      'state',
+      'write',
+      () => procedure(this.state)
+    );
   }
 
   private nextState = (update: MeldUpdate) => {
     const state = this.newState();
     // Run all the handlers for the new state, ensuring lock coverage
     // noinspection JSIgnoredPromiseFromCall
-    this.clone.lock.extend('state', 'next', this.handling = Promise.all(Object.values(this.handlers)
-      .map(handler => handler(update, state))));
+    this.clone.lock.extend(
+      'state',
+      'next',
+      this.handling = Promise.all(Object.values(this.handlers)
+        .map(handler => handler(update, state)))
+    );
   };
 
   private newState() {

@@ -1,16 +1,13 @@
 import { Query, Read, Subject, SubjectProperty, Update, Write } from '../jrql-support';
 import { Subscription } from 'rxjs';
-import {
-  any, GraphSubject, MeldState, MeldStateMachine, ReadResult, StateProc, UpdateProc
-} from '../api';
+import { any, MeldState, MeldStateMachine, ReadResult, StateProc, UpdateProc } from '../api';
 import { CloneEngine, EngineState, EngineUpdateProc, StateEngine } from './StateEngine';
 import { QueryableRdfSourceProxy } from './quads';
-import { Consumable } from 'rx-flowable';
 import { first, inflateFrom } from './util';
 import { QueryableRdfSource } from '../rdfjs-support';
 import { constructProperties, describeId } from './jrql-util';
 import { readResult } from './api-support';
-import { Future } from './Future';
+import async from './async';
 
 abstract class ApiState extends QueryableRdfSourceProxy implements MeldState {
   constructor(
@@ -62,28 +59,43 @@ export class ApiStateMachine extends ApiState implements MeldStateMachine {
 
   constructor(engine: CloneEngine) {
     const stateEngine = new StateEngine(engine);
+    function _read<Rtn>(
+      proc: (state: EngineState) => Rtn,
+      toRtn: (willRtn: Promise<Rtn>) => Rtn
+    ): Rtn {
+      // Any direct read must be in a state procedure, so indirect
+      return toRtn(new Promise((resolve, reject) => {
+        stateEngine.read(state => {
+          // possibly an over-abundance of caution, because the proc should
+          // signal error through its return type (promise, observable, or stream)
+          try { resolve(proc(state)); } catch (e) { reject(e); }
+        });
+      }));
+    }
     // The API state machine also pretends to be a state
-    const asEngineState = new (class extends QueryableRdfSourceProxy implements EngineState {
-      get src(): QueryableRdfSource {
-        return stateEngine;
-      }
-      read(request: Read): Consumable<GraphSubject> {
-        // The read itself must be in a state procedure, so indirect
-        const result = new Future<Consumable<GraphSubject>>();
-        stateEngine.read(state => result.resolve(state.read(request)));
-        return inflateFrom(result);
-      }
-      async write(request: Write): Promise<this> {
+    super({
+      async write(request: Write) {
         await stateEngine.write(state => state.write(request));
         return this;
-      }
-      ask(pattern: Query): Promise<boolean> {
-        // The read itself must be in a state procedure, so indirect
-        return new Promise((resolve, reject) =>
-          stateEngine.read(state => state.ask(pattern).then(resolve, reject)));
+      },
+      read(request: Read) {
+        return _read(state => state.read(request), inflateFrom);
+      },
+      ask(pattern: Query) {
+        return _read(state => state.ask(pattern), async rtn => rtn);
+      },
+      countQuads(...args) {
+        return _read(state => state.countQuads(...args), async rtn => rtn);
+      },
+      match(...args) {
+        return _read(state => state.match(...args), async.wrap);
+      },
+      // @ts-ignore TS can't cope with the overloads
+      query(query) {
+        // @ts-ignore TS can't cope with the overloads
+        return _read(state => state.query(query), async.wrap);
       }
     });
-    super(asEngineState);
     this.engine = stateEngine;
   }
 
