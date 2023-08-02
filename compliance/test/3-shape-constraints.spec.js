@@ -1,4 +1,4 @@
-const Clone = require('@m-ld/m-ld-spec/compliance/clone');
+const { Clone } = require('@m-ld/m-ld-test/lib');
 
 describe('SHACL shape constraints', () => {
   let clones;

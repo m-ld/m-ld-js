@@ -1,5 +1,5 @@
 const { generateKeyPairSync, randomBytes } = require('crypto');
-const Clone = require('@m-ld/m-ld-spec/compliance/clone');
+const { Clone } = require('@m-ld/m-ld-test/lib');
 
 /**
  * Generates a public/private key pair suitable for request signing and

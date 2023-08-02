@@ -1,74 +1,38 @@
 const { ClassicLevel } = require('classic-level');
-const { clone, isRead } = require('@m-ld/m-ld');
+const { clone } = require('@m-ld/m-ld');
 const { MqttRemotes } = require('@m-ld/m-ld/ext/mqtt');
 const { createSign } = require('crypto');
 const LOG = require('loglevel');
 const { EventEmitter } = require('events');
 const { createWriteStream, mkdirSync, existsSync } = require('fs');
 const { join } = require('path');
+const { CloneProcess } = require('@m-ld/m-ld-test/lib');
+const { Observable } = require('rxjs');
 
 Error.stackTraceLimit = Infinity;
 
-process.send({ '@type': 'active' });
-
-process.on('message', startMsg => {
-  if (startMsg['@type'] !== 'start')
-    return;
-
-  const { config, tmpDirName, requestId } = startMsg;
-  LOG.setLevel(config.logLevel);
-  LOG.debug(logTs(), config['@id'], 'config is', JSON.stringify(config));
-  clone(new ClassicLevel(tmpDirName), MqttRemotes, config, createApp(config)).then(meld => {
-    send(requestId, 'started', { cloneId: config['@id'] });
-
-    const handler = message => {
-      function settle(work, resMsgType, terminal) {
-        work.then(() => send(message.id, resMsgType))
-          .catch(errorHandler(message))
-          .then(() => !terminal || process.off('message', handler));
-      }
-      switch (message['@type']) {
-        case 'transact':
-          if (isRead(message.request))
-            meld.read(message.request).subscribe({
-              next: subject => send(message.id, 'next', { body: subject }),
-              complete: () => send(message.id, 'complete'),
-              error: errorHandler(message)
-            });
-          else
-            settle(meld.write(message.request), 'complete');
-          break;
-        case 'stop':
-          settle(meld.close(), 'stopped', true);
-          break;
-        case 'destroy':
-          settle(meld.close(), 'destroyed', true);
-          break;
-        default:
-          sendError(message.id, `No handler for ${message['@type']}`);
-      }
-    };
-    process.on('message', handler);
-
-    meld.follow(update => send(requestId, 'updated', { body: update }));
-
-    meld.status.subscribe({
-      next: status => send(requestId, 'status', { body: status }),
-      complete: () => send(requestId, 'closed'),
-      error: err => sendError(requestId, err)
-    });
-  }).catch(err => {
-    LOG.error(logTs(), config['@id'], err);
-    send(requestId, 'unstarted', { err: `${err}` });
-  });
+new CloneProcess(process, async (config, tmpDirName) => {
+  const meld = await clone(new ClassicLevel(tmpDirName), MqttRemotes, config, createApp(config));
+  // A m-ld-js clone does not quite conform to a spec MeldClone
+  return /**@type {import('@m-ld/m-ld-spec').MeldClone}*/{
+    read: meld.read.bind(meld),
+    write: meld.write.bind(meld),
+    follow: () =>
+      new Observable(subs =>
+        meld.follow(update => subs.next(update))),
+    status: meld.status,
+    close: meld.close.bind(meld)
+  }
 });
 
+/** @returns {InitialApp} */
 function createApp(config) {
   const app = {};
   const { principal, transportSecurity } = config;
   // 1. Create an app principal
   if (principal) {
     delete config.principal;
+    // noinspection JSUnusedGlobalSymbols
     app.principal = {
       '@id': principal['@id'],
       // Assuming privateKeyEncoding: { type: 'pkcs1', format: 'pem' }
@@ -97,22 +61,4 @@ function createApp(config) {
     app.backendEvents.on('error', err => LOG.warn('Backend error', err));
   }
   return app;
-}
-
-function send(requestId, type, params) {
-  process.send({ requestId, '@type': type, ...params },
-    err => err && LOG.warn(logTs(), 'Clone orphaned from orchestrator', err));
-}
-
-function errorHandler(message) {
-  return err => sendError(message.id, err);
-}
-
-function sendError(requestId, err) {
-  LOG.error(logTs(), err);
-  return send(requestId, 'error', { err: `${err}` });
-}
-
-function logTs() {
-  return new Date().toISOString();
 }
