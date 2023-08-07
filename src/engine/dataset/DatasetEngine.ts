@@ -16,7 +16,7 @@ import {
   delayWhen, distinctUntilChanged, expand, filter, finalize, ignoreElements, map, share, skipWhile,
   takeUntil, tap, toArray
 } from 'rxjs/operators';
-import { delayUntil, inflateFrom, poisson, settled, throwOnComplete } from '../util';
+import { delayUntil, inflateFrom, poisson, settled } from '../util';
 import { checkLocked, LockManager, SHARED, SHARED_REENTRANT } from '../locks';
 import { levels } from 'loglevel';
 import { AbstractMeld, checkLive, comesAlive } from '../AbstractMeld';
@@ -353,8 +353,10 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
               if (this.isGenesis)
                 throw new Error('Genesis clone trying to join a live domain.');
               // Connect in the live lock
-              await this.connect(reason, retry, release);
-              this.setLive(true);
+              const connected = await this.connect(reason, retry, release);
+              // New clones cannot provide recovery (are 'live') until first connected
+              if (!this.newClone || connected)
+                this.setLive(true);
             } else {
               // Stop receiving operations until re-connect, do not change outdated
               this.remoteOps.detach();
@@ -381,14 +383,15 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
    * @param reason the reason for the connection attempt
    * @param retry to be notified of collaboration completion
    * @param releaseState to be called when the locked state is no longer needed
-   * @see decideLive return value
+   * @returns `true` if connected
+   * @see {@link decideLive} return value
    */
   @checkLocked('state').async
   private async connect(
     reason: ConnectReason,
     retry: Subscriber<Reconnect>,
     releaseState: () => void
-  ) {
+  ): Promise<boolean> {
     this.log.info(
       this.newClone ? 'new clone' :
         this.live.value === true && this.remotes.live.value === false ? 'silo' : 'clone',
@@ -416,6 +419,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
         recovery = await this.remotes.snapshot(this.suset.readState);
         await processRecovery(this.processSnapshot);
       }
+      return true;
     } catch (err) {
       this.log.info('Cannot connect to remotes due to', err);
       updates.reject(err); // Ensure we release the remoteOps
@@ -432,6 +436,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
       */
       retry.next(Reconnect.SOFT);
       retry.complete();
+      return false;
     }
   }
 
@@ -584,13 +589,8 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
       tap((msg: OperationMessage) => {
         this.log.debug('Forwarding update', this.msgString(msg));
       }),
-      takeUntil(this.errorIfClosed())
+      takeUntil(this.errorIfClosed)
     );
-  }
-
-  private errorIfClosed() {
-    return throwOnComplete(this.live,
-      () => new MeldError('Clone has closed'));
   }
 
   @checkNotClosed.async

@@ -73,14 +73,7 @@ export class IoRemotes extends PubsubRemotes {
   }
 
   protected present(): Observable<string> {
-    return inflateFrom(new Promise<string[]>((resolve, reject) => {
-      this.socket.emit('presence', (err: string | null, present: string[]) => {
-        if (err)
-          reject(err);
-        else
-          resolve(present);
-      });
-    }));
+    return inflateFrom(this.emitWithAck('presence'));
   }
 
   protected async setPresent(present: boolean): Promise<void> {
@@ -108,10 +101,20 @@ export class IoRemotes extends PubsubRemotes {
   private subPub(id: string, params: PeerParams, ev: string): SubPub {
     return {
       id,
-      publish: msg => new Promise<void>((resolve, reject) => {
-        // See ./server/index.ts#SubPubHandler
-        this.socket.emit(ev, params, msg, (err: string | null) => err ? reject(err) : resolve());
-      })
+      // See ./server/index.ts#SubPubHandler
+      publish: msg => this.emitWithAck(ev, params, msg)
     };
+  }
+
+  private emitWithAck<T>(ev: string, ...args: unknown[]): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      this.socket.timeout(this.sendTimeout).emit(ev, ...args,
+        (timedOut: string | null, err: string | null, rtn: T) => {
+          if (timedOut || err)
+            reject(timedOut || err);
+          else
+            resolve(rtn);
+        });
+    });
   }
 }

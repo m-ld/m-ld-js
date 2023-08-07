@@ -10,7 +10,7 @@ import {
 } from './ControlMessage';
 import { inflate, throwOnComplete, toJSON } from '../util';
 import * as MsgPack from '../msgPack';
-import { delay, first, map, reduce, timeout, toArray } from 'rxjs/operators';
+import { delay, first, map, reduce, takeUntil, timeout, toArray } from 'rxjs/operators';
 import { AbstractMeld } from '../AbstractMeld';
 import {
   MeldError, MeldErrorStatus, MeldExtensions, MeldReadState, shortId, uuid
@@ -23,6 +23,7 @@ import { MeldOperationMessage } from '../MeldOperationMessage';
 import { Stopwatch } from '../Stopwatch';
 import { Future } from '../Future';
 import { checkNotClosed } from '../check';
+import { each } from 'rx-flowable';
 
 /**
  * A sub-publisher, used to temporarily address unicast messages to one peer clone. Sub-publishers
@@ -82,8 +83,8 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
   } = {};
   private readonly recentlySentTo: Set<string> = new Set;
   private readonly consuming: { [subPubId: string]: Observer<Buffer> } = {};
-  private readonly sendTimeout: number;
   private readonly active = new BehaviorSubject<Promise<unknown> | undefined>(undefined);
+  protected readonly sendTimeout: number;
   /**
    * This is separate to liveness because decided liveness requires presence,
    * which is discovered after connection. Connectedness is not equivalent to
@@ -528,7 +529,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     } else {
       // If the caller doesn't like this response, try again
       return check == null || check(respondedResult.value.res) ?
-        respondedResult.value : retry()
+        respondedResult.value : retry();
     }
   }
 
@@ -559,8 +560,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
       // 2. Send fails - abandon the response if it rejects
       from(sent).pipe(switchMap(() => NEVER)),
       // 3. Remotes have closed
-      throwOnComplete(this.active,
-        () => new MeldError('Clone has closed', this.id)),
+      this.errorIfClosed,
       // 4. Response received
       new Observable<T>(subs => {
         const received = new Future<Response | ACK>();
@@ -665,6 +665,8 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     datumToPayload: (datum: T) => Buffer,
     type: string
   ) {
+    const notify = (notification: JsonNotification) =>
+      notifier.publish(MsgPack.encode(notification));
     const notifyError = (error: any) => {
       this.log.warn('Notifying error on', notifier.id, error);
       return notify({ error: toJSON(error) });
@@ -673,22 +675,11 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
       this.log.debug(`Completed production of ${type} on ${notifier.id}`);
       return notify({ complete: true });
     };
-    const notify: (notification: JsonNotification) => Promise<unknown> = notification =>
-      notifier.publish(MsgPack.encode(notification))
-        // If notifications fail due to channel death, the recipient will find
-        // out from the network so here we make best efforts to notify an error
-        // and then give up.
-        .catch(err => notifyError(err));
-    return new Promise<void>((resolve, reject) => {
-      this.log.debug(`Starting production of ${type} on ${notifier.id}`);
-      // Convert the input into a consumable to get backpressure, if available
-      consume(data).subscribe({
-        next: ({ value, next }) =>
-          notify({ next: datumToPayload(value) }).then(next),
-        error: err => notifyError(err).then(() => reject(err)),
-        complete: () => notifyComplete().then(resolve)
-      });
-    }).finally(() => notifier.close?.());
+    this.log.debug(`Starting production of ${type} on ${notifier.id}`);
+    return each(
+      consume(data).pipe(takeUntil(this.errorIfClosed)),
+      datum => notify({ next: datumToPayload(datum) })
+    ).then(notifyComplete, notifyError);
   }
 
   private async reply(
