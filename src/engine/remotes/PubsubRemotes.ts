@@ -8,10 +8,10 @@ import {
   ControlMessage, NewClockRequest, NewClockResponse, RejectedResponse, Request, Response,
   RevupRequest, RevupResponse, SnapshotRequest, SnapshotResponse
 } from './ControlMessage';
-import { inflate, throwOnComplete, toJSON } from '../util';
+import { throwOnComplete, toJSON } from '../util';
 import * as MsgPack from '../msgPack';
-import { delay, first, map, reduce, takeUntil, timeout, toArray } from 'rxjs/operators';
-import { AbstractMeld } from '../AbstractMeld';
+import { delay, first, map, takeUntil, timeout } from 'rxjs/operators';
+import { AbstractMeld, comesAlive } from '../AbstractMeld';
 import {
   MeldError, MeldErrorStatus, MeldExtensions, MeldReadState, shortId, uuid
 } from '../../index';
@@ -91,6 +91,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
    * decided-liveness.
    */
   private connected = new BehaviorSubject<boolean>(false);
+  private present: string[] = [];
 
   protected constructor(
     config: MeldConfig,
@@ -153,31 +154,13 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
   protected abstract publishOperation(msg: Buffer): Promise<unknown>;
 
   /**
-   * Retrieve a set of peer clone identities which are 'live' for recovery collaboration. A
-   * returned identity may be used to establish a unicast channel via {@link sender} or
-   * {@link notifier}.
-   *
-   * The subclass can choose whether to return the identities of _all_ other 'present' clones (who
-   * have called {@link setPresent} locally), or some subset. To not include the identity of some
-   * clone can prevent unwanted load, for example if the clone has restricted compute resources;
-   * but this symmetrically increases the potential for load on clones that _are_ included. It may
-   * also be most efficient to route all sent messages to some central clones, in a hub-and-spoke
-   * architecture.
-   *
-   * Note that while the return is an observable, the full set should be available quickly,
-   * comfortably with a single network timeout.
-   * @see MeldConfig
-   * @see Meld.live
-   */
-  protected abstract present(): Observable<string>;
-
-  /**
    * Called to indicate whether the local clone is 'live' for recovery collaboration.
    *
    * The implementation can choose whether to actually make this clone available in other peers'
-   * {@link present} sets.
+   * present sets.
    * @param present whether the local clone is available for recovery collaboration
    * @see Meld.live
+   * @see {@link onPresenceChange}
    */
   protected abstract setPresent(present: boolean): Promise<unknown>;
 
@@ -320,21 +303,36 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
   protected onDisconnect() {
     if (this.connected.value)
       this.connected.next(false);
+    this.present = [];
     this.setLive(null);
   }
 
   /**
-   * Call from the subclass when the set of present peer clone identities has changed, for example
-   * because a peer has become present. This **must** also be called after connection, when the
-   * presence set becomes available and {@link present} is callable without error.
+   * Call from the subclass when the set of present peer clone identities has
+   * changed, for example because a peer has become present. This **must** also
+   * be called after connection, when the presence set becomes available.
+   *
+   * 'Present' means peer clone identities which are available for recovery
+   * collaboration. An identity may be used to establish a unicast channel via
+   * {@link sender} or {@link notifier}.
+   *
+   * The subclass can choose whether to indicate the identities of _all_ other
+   * 'present' clones (who have called {@link setPresent} locally), or some
+   * subset. To not include the identity of some clone can prevent unwanted
+   * load, for example if the clone has restricted compute resources; but this
+   * symmetrically increases the potential for load on clones that _are_
+   * included. It may also be most efficient to route all sent messages to some
+   * central clones, in a hub-and-spoke architecture.
+   *
+   * @see MeldConfig
+   * @see Meld.live
    */
-  protected onPresenceChange() {
+  protected onPresenceChange(present: string[]) {
+    this.present = present;
     // Don't process a presence change until connected emits true
     this.connected.pipe(first(identity)).subscribe(() => {
       // If there is more than just me present, we are live
-      this.present()
-        .pipe(reduce((live, id) => live || id !== this.id, false))
-        .subscribe(live => this.setLive(live));
+      this.setLive(present.some(id => id !== this.id));
     });
   }
 
@@ -715,15 +713,14 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
   }
 
   private async nextSender(messageId: string): Promise<SubPub | null> {
-    const present = await firstValueFrom(inflate(
-      this.connected.pipe(first(identity)), // First wait to be connected
-      () => this.present().pipe(toArray())
-    ));
-    if (present.every(id => this.recentlySentTo.has(id)))
+    // Wait for decided liveness
+    await comesAlive(this, 'notNull');
+
+    if (this.present.every(id => this.recentlySentTo.has(id)))
       this.recentlySentTo.clear();
 
     this.recentlySentTo.add(this.id);
-    const toId = present.filter(id => !this.recentlySentTo.has(id))[0];
+    const toId = this.present.filter(id => !this.recentlySentTo.has(id))[0];
     if (toId != null) {
       this.recentlySentTo.add(toId);
       return this.sender({ fromId: this.id, toId, messageId });

@@ -5,7 +5,6 @@ import type { PeerParams } from '../../engine/remotes/PubsubParams';
 
 type Callback = (err: string | null, ...args: any[]) => void;
 type SubPubHandler = (params: PeerParams, payload: Buffer, cb: Callback) => void;
-type PresenceCallback = (err: string | null, present: string[]) => void;
 
 export class IoRemotesService extends EventEmitter {
   constructor(
@@ -18,19 +17,23 @@ export class IoRemotesService extends EventEmitter {
       // A clone's socket joins the domain and its own private room so we can find it later
       socket.join([domain, `${domain}/${id}`]);
       socket
-        .on('presence', this.presenceHandler(domain))
         .on('present', this.presentHandler(socket, domain))
         .on('operation', this.operationHandler(socket, domain))
         .on('send', this.subPubHandler('send', domain))
         .on('reply', this.subPubHandler('reply', domain))
         .on('notify', this.subPubHandler('notify', domain));
       // Pub-sub remotes requires an immediate notification of presence
-      socket.emit('presence');
+      this.getPresent(domain)
+        .then(present => socket.emit('presence', present))
+        .catch(err => this.emit('error', err));
     });
     const roomChanged = (room: string) => {
       const [domain, path] = room.split('/', 2);
-      if (path === 'present')
-        ns.in(domain).emit('presence');
+      if (path === 'present') {
+        this.getPresent(domain)
+          .then(present => ns.in(domain).emit('presence', present))
+          .catch(err => this.emit('error', err));
+      }
     };
     ns.adapter.on('join-room', roomChanged);
     ns.adapter.on('leave-room', roomChanged);
@@ -44,13 +47,10 @@ export class IoRemotesService extends EventEmitter {
     return (payload: Buffer) => socket.broadcast.in(domain).emit('operation', payload);
   }
 
-  private presenceHandler(domain: string) {
-    return (cb: PresenceCallback) => {
-      // Presence is managed as a room called 'present' (see 'present' handler)
-      this.ns.in(`${domain}/present`).fetchSockets()
-        .then(sockets => cb(null, sockets.map(socket => queryValue(socket, '@id'))))
-        .catch(err => this.error(err, cb));
-    };
+  private async getPresent(domain: string) {
+    // Presence is managed as a room called 'present' (see 'present' handler)
+    const sockets = await this.ns.in(`${domain}/present`).fetchSockets();
+    return sockets.map(socket => queryValue(socket, '@id'));
   }
 
   private subPubHandler(ev: string, domain: string): SubPubHandler {
@@ -60,11 +60,6 @@ export class IoRemotesService extends EventEmitter {
       cb(null);
     };
   }
-
-  private error = (err: any, cb: Callback) => {
-    this.emit('error', err);
-    cb(`${err}`);
-  };
 }
 
 function queryValue(socket: RemoteSocket<any, any> | Socket, param: string): string {

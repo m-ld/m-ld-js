@@ -8,10 +8,7 @@ import { MeldExtensions } from '../api';
 import {
   NotifyParams, PeerParams, PubsubRemotes, ReplyParams, SendParams, SubPub
 } from '../engine/remotes';
-import { Observable } from 'rxjs';
-import { filter, map } from 'rxjs/operators';
 import { AblyTraffic, AblyTrafficConfig } from './AblyTraffic';
-import { inflateFrom } from '../engine/util';
 import { MeldConfig } from '../config';
 
 export interface AblyMeldConfig extends
@@ -53,13 +50,16 @@ export class AblyRemotes extends PubsubRemotes {
     // requests and receiving notifications
     this.directChannel = this.channel(config['@id']);
     // Ensure we are fully subscribed before we make any presence claims
+    const presenceHandler = () => this.getPresent()
+      .then(present => this.onPresenceChange(present))
+      .catch(err => this.log.warn('Presence check failed', err));
     this.subscribed = Promise.all([
       this.traffic.subscribe(this.opsChannel, data => this.onOperation(data)),
-      this.opsChannel.presence.subscribe(() => this.onPresenceChange()),
+      this.opsChannel.presence.subscribe(presenceHandler),
       this.traffic.subscribe(this.directChannel, this.onDirectMessage)
     ]).catch(err => this.close(err));
     // Ably does not notify if no-one around, so check presence once subscribed
-    this.subscribed.then(() => this.onPresenceChange());
+    this.subscribed.then(presenceHandler);
     // Note that we wait for subscription before claiming to be connected.
     // This is so we don't miss messages that are immediately sent to us.
     // https://support.ably.com/support/solutions/articles/3000067435
@@ -141,10 +141,11 @@ export class AblyRemotes extends PubsubRemotes {
     return this.traffic.publish(this.opsChannel, '__op', msg);
   }
 
-  protected present(): Observable<string> {
-    return inflateFrom(this.opsChannel.presence.get()).pipe(
-      filter(present => present.data === '__live'),
-      map(present => present.clientId));
+  protected async getPresent(): Promise<string[]> {
+    const presenceMessages = await this.opsChannel.presence.get();
+    return presenceMessages
+      .filter(present => present.data === '__live')
+      .map(present => present.clientId);
   }
 
   protected async notifier(params: NotifyParams): Promise<SubPub> {

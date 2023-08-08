@@ -1,7 +1,9 @@
 import { Meld, OperationMessage, Revup, Snapshot } from '.';
 import { LiveValue } from './api-support';
 import { TreeClock } from './clocks';
-import { asapScheduler, BehaviorSubject, firstValueFrom, Observable, of } from 'rxjs';
+import {
+  asapScheduler, BehaviorSubject, concat, firstValueFrom, Observable, of, throwError
+} from 'rxjs';
 import { catchError, distinctUntilChanged, filter, observeOn, skip } from 'rxjs/operators';
 import { Logger } from 'loglevel';
 import { PauseableSource, throwOnComplete } from './util';
@@ -89,6 +91,10 @@ export function comesAlive(
   meld: Pick<Meld, 'live'>,
   expected: boolean | null | 'notNull' = true
 ): Promise<boolean | null> {
-  return firstValueFrom(meld.live.pipe(filter(
-    expected === 'notNull' ? (live => live != null) : (live => live === expected))));
+  return firstValueFrom(concat(
+    meld.live.pipe(
+      filter(expected === 'notNull' ? (live => live != null) : (live => live === expected))
+    ),
+    throwError(() => new MeldError('Clone has closed'))
+  ));
 }
