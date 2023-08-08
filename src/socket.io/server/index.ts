@@ -39,18 +39,18 @@ export class IoRemotesService extends EventEmitter {
     ns.adapter.on('leave-room', roomChanged);
   }
 
-  private presentHandler(socket: Socket, domain: string) {
+  protected async getPresent(domain: string) {
+    // Presence is managed as a room called 'present' (see 'present' handler)
+    const sockets = await this.ns.in(`${domain}/present`).fetchSockets();
+    return sockets.map(socket => queryValue(socket, '@id'));
+  }
+
+  protected presentHandler(socket: Socket, domain: string) {
     return (present: boolean) => socket[present ? 'join' : 'leave'](`${domain}/present`);
   }
 
   private operationHandler(socket: Socket, domain: string) {
     return (payload: Buffer) => socket.broadcast.in(domain).emit('operation', payload);
-  }
-
-  private async getPresent(domain: string) {
-    // Presence is managed as a room called 'present' (see 'present' handler)
-    const sockets = await this.ns.in(`${domain}/present`).fetchSockets();
-    return sockets.map(socket => queryValue(socket, '@id'));
   }
 
   private subPubHandler(ev: string, domain: string): SubPubHandler {

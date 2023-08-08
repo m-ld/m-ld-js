@@ -6,7 +6,7 @@ const LOG = require('loglevel');
 const { EventEmitter } = require('events');
 const { createWriteStream, mkdirSync, existsSync } = require('fs');
 const { join } = require('path');
-const { CloneProcess } = require('@m-ld/m-ld-test/lib');
+const { CloneProcess } = require('@m-ld/m-ld-test');
 const { Observable } = require('rxjs');
 
 Error.stackTraceLimit = Infinity;
