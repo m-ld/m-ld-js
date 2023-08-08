@@ -8,10 +8,10 @@ import {
   ControlMessage, NewClockRequest, NewClockResponse, RejectedResponse, Request, Response,
   RevupRequest, RevupResponse, SnapshotRequest, SnapshotResponse
 } from './ControlMessage';
-import { inflate, throwOnComplete, toJSON } from '../util';
+import { throwOnComplete, toJSON } from '../util';
 import * as MsgPack from '../msgPack';
-import { delay, first, map, reduce, timeout, toArray } from 'rxjs/operators';
-import { AbstractMeld } from '../AbstractMeld';
+import { delay, first, map, takeUntil, timeout } from 'rxjs/operators';
+import { AbstractMeld, comesAlive } from '../AbstractMeld';
 import {
   MeldError, MeldErrorStatus, MeldExtensions, MeldReadState, shortId, uuid
 } from '../../index';
@@ -23,6 +23,7 @@ import { MeldOperationMessage } from '../MeldOperationMessage';
 import { Stopwatch } from '../Stopwatch';
 import { Future } from '../Future';
 import { checkNotClosed } from '../check';
+import { each } from 'rx-flowable';
 
 /**
  * A sub-publisher, used to temporarily address unicast messages to one peer clone. Sub-publishers
@@ -82,14 +83,15 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
   } = {};
   private readonly recentlySentTo: Set<string> = new Set;
   private readonly consuming: { [subPubId: string]: Observer<Buffer> } = {};
-  private readonly sendTimeout: number;
   private readonly active = new BehaviorSubject<Promise<unknown> | undefined>(undefined);
+  protected readonly sendTimeout: number;
   /**
    * This is separate to liveness because decided liveness requires presence,
    * which is discovered after connection. Connectedness is not equivalent to
    * decided-liveness.
    */
   private connected = new BehaviorSubject<boolean>(false);
+  private present: string[] = [];
 
   protected constructor(
     config: MeldConfig,
@@ -152,31 +154,13 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
   protected abstract publishOperation(msg: Buffer): Promise<unknown>;
 
   /**
-   * Retrieve a set of peer clone identities which are 'live' for recovery collaboration. A
-   * returned identity may be used to establish a unicast channel via {@link sender} or
-   * {@link notifier}.
-   *
-   * The subclass can choose whether to return the identities of _all_ other 'present' clones (who
-   * have called {@link setPresent} locally), or some subset. To not include the identity of some
-   * clone can prevent unwanted load, for example if the clone has restricted compute resources;
-   * but this symmetrically increases the potential for load on clones that _are_ included. It may
-   * also be most efficient to route all sent messages to some central clones, in a hub-and-spoke
-   * architecture.
-   *
-   * Note that while the return is an observable, the full set should be available quickly,
-   * comfortably with a single network timeout.
-   * @see MeldConfig
-   * @see Meld.live
-   */
-  protected abstract present(): Observable<string>;
-
-  /**
    * Called to indicate whether the local clone is 'live' for recovery collaboration.
    *
    * The implementation can choose whether to actually make this clone available in other peers'
-   * {@link present} sets.
+   * present sets.
    * @param present whether the local clone is available for recovery collaboration
    * @see Meld.live
+   * @see {@link onPresenceChange}
    */
   protected abstract setPresent(present: boolean): Promise<unknown>;
 
@@ -319,21 +303,36 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
   protected onDisconnect() {
     if (this.connected.value)
       this.connected.next(false);
+    this.present = [];
     this.setLive(null);
   }
 
   /**
-   * Call from the subclass when the set of present peer clone identities has changed, for example
-   * because a peer has become present. This **must** also be called after connection, when the
-   * presence set becomes available and {@link present} is callable without error.
+   * Call from the subclass when the set of present peer clone identities has
+   * changed, for example because a peer has become present. This **must** also
+   * be called after connection, when the presence set becomes available.
+   *
+   * 'Present' means peer clone identities which are available for recovery
+   * collaboration. An identity may be used to establish a unicast channel via
+   * {@link sender} or {@link notifier}.
+   *
+   * The subclass can choose whether to indicate the identities of _all_ other
+   * 'present' clones (who have called {@link setPresent} locally), or some
+   * subset. To not include the identity of some clone can prevent unwanted
+   * load, for example if the clone has restricted compute resources; but this
+   * symmetrically increases the potential for load on clones that _are_
+   * included. It may also be most efficient to route all sent messages to some
+   * central clones, in a hub-and-spoke architecture.
+   *
+   * @see MeldConfig
+   * @see Meld.live
    */
-  protected onPresenceChange() {
+  protected onPresenceChange(present: string[]) {
+    this.present = present;
     // Don't process a presence change until connected emits true
     this.connected.pipe(first(identity)).subscribe(() => {
       // If there is more than just me present, we are live
-      this.present()
-        .pipe(reduce((live, id) => live || id !== this.id, false))
-        .subscribe(live => this.setLive(live));
+      this.setLive(present.some(id => id !== this.id));
     });
   }
 
@@ -528,7 +527,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     } else {
       // If the caller doesn't like this response, try again
       return check == null || check(respondedResult.value.res) ?
-        respondedResult.value : retry()
+        respondedResult.value : retry();
     }
   }
 
@@ -559,8 +558,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
       // 2. Send fails - abandon the response if it rejects
       from(sent).pipe(switchMap(() => NEVER)),
       // 3. Remotes have closed
-      throwOnComplete(this.active,
-        () => new MeldError('Clone has closed', this.id)),
+      this.errorIfClosed,
       // 4. Response received
       new Observable<T>(subs => {
         const received = new Future<Response | ACK>();
@@ -665,6 +663,8 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     datumToPayload: (datum: T) => Buffer,
     type: string
   ) {
+    const notify = (notification: JsonNotification) =>
+      notifier.publish(MsgPack.encode(notification));
     const notifyError = (error: any) => {
       this.log.warn('Notifying error on', notifier.id, error);
       return notify({ error: toJSON(error) });
@@ -673,22 +673,11 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
       this.log.debug(`Completed production of ${type} on ${notifier.id}`);
       return notify({ complete: true });
     };
-    const notify: (notification: JsonNotification) => Promise<unknown> = notification =>
-      notifier.publish(MsgPack.encode(notification))
-        // If notifications fail due to channel death, the recipient will find
-        // out from the network so here we make best efforts to notify an error
-        // and then give up.
-        .catch(err => notifyError(err));
-    return new Promise<void>((resolve, reject) => {
-      this.log.debug(`Starting production of ${type} on ${notifier.id}`);
-      // Convert the input into a consumable to get backpressure, if available
-      consume(data).subscribe({
-        next: ({ value, next }) =>
-          notify({ next: datumToPayload(value) }).then(next),
-        error: err => notifyError(err).then(() => reject(err)),
-        complete: () => notifyComplete().then(resolve)
-      });
-    }).finally(() => notifier.close?.());
+    this.log.debug(`Starting production of ${type} on ${notifier.id}`);
+    return each(
+      consume(data).pipe(takeUntil(this.errorIfClosed)),
+      datum => notify({ next: datumToPayload(datum) })
+    ).then(notifyComplete, notifyError);
   }
 
   private async reply(
@@ -724,15 +713,14 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
   }
 
   private async nextSender(messageId: string): Promise<SubPub | null> {
-    const present = await firstValueFrom(inflate(
-      this.connected.pipe(first(identity)), // First wait to be connected
-      () => this.present().pipe(toArray())
-    ));
-    if (present.every(id => this.recentlySentTo.has(id)))
+    // Wait for decided liveness
+    await comesAlive(this, 'notNull');
+
+    if (this.present.every(id => this.recentlySentTo.has(id)))
       this.recentlySentTo.clear();
 
     this.recentlySentTo.add(this.id);
-    const toId = present.filter(id => !this.recentlySentTo.has(id))[0];
+    const toId = this.present.filter(id => !this.recentlySentTo.has(id))[0];
     if (toId != null) {
       this.recentlySentTo.add(toId);
       return this.sender({ fromId: this.id, toId, messageId });

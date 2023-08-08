@@ -1,10 +1,12 @@
 import { Meld, OperationMessage, Revup, Snapshot } from '.';
 import { LiveValue } from './api-support';
 import { TreeClock } from './clocks';
-import { asapScheduler, BehaviorSubject, firstValueFrom, Observable, of } from 'rxjs';
+import {
+  asapScheduler, BehaviorSubject, concat, firstValueFrom, Observable, of, throwError
+} from 'rxjs';
 import { catchError, distinctUntilChanged, filter, observeOn, skip } from 'rxjs/operators';
 import { Logger } from 'loglevel';
-import { PauseableSource } from './util';
+import { PauseableSource, throwOnComplete } from './util';
 import { MeldError, MeldReadState } from '../api';
 import { MeldConfig } from '../config';
 import { MeldOperationMessage } from './MeldOperationMessage';
@@ -24,6 +26,7 @@ export abstract class AbstractMeld implements Meld {
 
   private _closed = false;
   protected readonly log: Logger;
+  protected errorIfClosed: Observable<never>;
 
   readonly id: string;
   readonly domain: string;
@@ -45,6 +48,9 @@ export abstract class AbstractMeld implements Meld {
     // Log liveness
     this.live.pipe(skip(1)).subscribe(
       live => this.log.debug('is', live == null ? 'gone' : live ? 'live' : 'dead'));
+
+    this.errorIfClosed = throwOnComplete(this.live,
+      () => new MeldError('Clone has closed'));
   }
 
   protected nextOperation = (op: OperationMessage, reason: string) => {
@@ -85,6 +91,10 @@ export function comesAlive(
   meld: Pick<Meld, 'live'>,
   expected: boolean | null | 'notNull' = true
 ): Promise<boolean | null> {
-  return firstValueFrom(meld.live.pipe(filter(
-    expected === 'notNull' ? (live => live != null) : (live => live === expected))));
+  return firstValueFrom(concat(
+    meld.live.pipe(
+      filter(expected === 'notNull' ? (live => live != null) : (live => live === expected))
+    ),
+    throwError(() => new MeldError('Clone has closed'))
+  ));
 }

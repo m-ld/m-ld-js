@@ -258,10 +258,8 @@ describe('Dataset engine', () => {
       remoteUpdates = new Source<MeldOperationMessage>();
       remotesLive = hotLive([true]);
       remotes = mockRemotes(remoteUpdates, remotesLive, left);
-      snapshot = jest.fn().mockImplementation(async (): Promise<Snapshot> => ({
-        ...collaborator.snapshot(),  // Cheating, should really contain Wilma (see op above)
-        updates: EMPTY
-      }));
+      // Cheating, snapshot should really contain Wilma (see op above)
+      snapshot = jest.fn().mockImplementation(async () => collaborator.snapshot());
       remotes.snapshot = snapshot;
     });
 
@@ -269,6 +267,25 @@ describe('Dataset engine', () => {
       const clone = await TestDatasetEngine.instance({ remotes, genesis: false });
       await expect(clone.status.becomes({ outdated: false })).resolves.toBeDefined();
       expect(snapshot.mock.calls.length).toBe(1);
+    });
+
+    test('does not come live if snapshot fails', async () => {
+      snapshot.mockImplementation(async () => {
+        const snapshot = collaborator.snapshot(throwError(() =>
+          new MeldError('Clone has closed')));
+        // When the collaborator has closed, there are no more clones
+        setImmediate(() => remotesLive.next(false));
+        return snapshot;
+      });
+      await expect(TestDatasetEngine.instance({ remotes, genesis: false })).rejects.toThrow();
+    });
+
+    test('retries if snapshot fails', async () => {
+      snapshot.mockImplementationOnce(async () =>
+        collaborator.snapshot(throwError(() => new MeldError('Unknown error'))));
+      const clone = await TestDatasetEngine.instance({ remotes, genesis: false });
+      await expect(clone.status.becomes({ outdated: false })).resolves.toBeDefined();
+      expect(snapshot.mock.calls.length).toBe(2);
     });
 
     test('can become a silo', async () => {

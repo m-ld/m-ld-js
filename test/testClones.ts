@@ -2,7 +2,9 @@ import {
   BufferEncoding, EncodedOperation, MeldLocal, MeldRemotes, OperationMessage, Revup, Snapshot
 } from '../src/engine';
 import { mock, mockFn, MockProxy } from 'jest-mock-extended';
-import { asapScheduler, BehaviorSubject, EMPTY, from, NEVER, Observable, Observer } from 'rxjs';
+import {
+  asapScheduler, BehaviorSubject, EMPTY, from, NEVER, Observable, ObservableInput, Observer
+} from 'rxjs';
 import { Dataset, Patch, PatchQuads, QuadStoreDataset, TxnContext } from '../src/engine/dataset';
 import { GlobalClock, TreeClock } from '../src/engine/clocks';
 import { AsyncMqttClient, IPublishPacket } from 'async-mqtt';
@@ -16,7 +18,6 @@ import { AbstractLevel } from 'abstract-level';
 import { LiveValue } from '../src/engine/api-support';
 import { MemoryLevel } from 'memory-level';
 import * as MsgPack from '../src/engine/msgPack';
-import { DatasetSnapshot } from '../src/engine/dataset/SuSetDataset';
 import { ClockHolder } from '../src/engine/messages';
 import { DomainContext, MeldEncoder } from '../src/engine/MeldEncoding';
 import { JrqlGraph } from '../src/engine/dataset/JrqlGraph';
@@ -319,12 +320,16 @@ export class MockProcess implements ClockHolder<TreeClock> {
     };
   }
 
-  snapshot(data: Snapshot.Datum[] = []): DatasetSnapshot {
+  snapshot(
+    data: ObservableInput<Snapshot.Datum> = [],
+    updates: Observable<OperationMessage> = EMPTY
+  ): Snapshot {
     return {
       gwc: this.gwc,
       agreed: this.agreed,
       data: from(data),
-      cancel: mockFn()
+      cancel: mockFn(),
+      updates
     };
   }
 }
