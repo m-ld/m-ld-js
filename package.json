@@ -46,7 +46,7 @@
   "homepage": "https://js.m-ld.org/",
   "devDependencies": {
     "@m-ld/io-js-build": "^0.1.0",
-    "@m-ld/m-ld-test": "^0.1.1-edge.1",
+    "@m-ld/m-ld-test": "^0.1.1-edge.3",
     "@m-ld/typedoc-theme": "^0.1.4",
     "@peculiar/webcrypto": "^1.2.3",
     "@types/jest": "^29.0.1",

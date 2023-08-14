@@ -1,6 +1,7 @@
 const { join } = require('path');
 const LOG = require('loglevel');
-const { Forkestrator, MqttRemoting } = require('@m-ld/m-ld-test');
+const { Forkestrator } = require('@m-ld/m-ld-test');
+const { MqttRemoting } = require('@m-ld/m-ld-test/ext/mqtt');
 
 // Global arguments handling
 const [, , logLevel] = process.argv;
