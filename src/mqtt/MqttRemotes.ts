@@ -1,5 +1,5 @@
 /**
- * [[include:mqtt-remotes.md]]
+ * [[include:ext/mqtt-remotes.md]]
  * @module MqttRemotes
  * @internal
  */

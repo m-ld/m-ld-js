@@ -1,0 +1,31 @@
+<script src="https://next.flems.io/flems.html" type="text/javascript" charset="utf-8"></script>
+<script>
+  window.liveCode = function (el) {
+    const files = [];
+    let height = 0;
+    let pre = el.previousElementSibling;
+    while (pre != null) {
+      const code = pre.querySelector('code');
+      if (code == null) break;
+      const lang = (/language-(\w+)/.exec(code.className) ?? [])[1];
+      if (lang == null) break;
+      const content = code.textContent
+        .replaceAll('https://js.m-ld.org', window.location.origin);
+      height = Math.max(height, (content.match(/\n/g) ?? []).length * 1.5 + 3);
+      const ext = `.${lang.replace('javascript', 'js')}`;
+      files.unshift({
+        name: `${files.filter(({ name }) => name.endsWith(ext)).length || ''}${ext}`,
+        content
+      });
+      const next = pre.previousElementSibling;
+      pre.remove();
+      pre = next;
+    }
+    if (files.length > 0) {
+      const flemDiv = document.createElement('div');
+      flemDiv.setAttribute('style', `height: ${height}em;`);
+      el.insertAdjacentElement('beforebegin', flemDiv);
+      window.Flems(flemDiv, { files, console: 'min', autoReload: false });
+    }
+  };
+</script>

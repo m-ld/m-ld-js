@@ -1,5 +1,5 @@
 /**
- * [[include:ably-remotes.md]]
+ * [[include:ext/ably-remotes.md]]
  * @module AblyRemotes
  * @internal
  */

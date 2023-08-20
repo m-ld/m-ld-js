@@ -30,9 +30,11 @@
     "dev+log": "jest --watch --runInBand",
     "compliance": "tsc --incremental && node compliance/test.js",
     "ver": "echo $npm_package_version",
-    "doc-watch": "onchange -d 1000 'src/**/*.ts' 'doc/**/*.*' 'typedoc.js' -- typedoc",
-    "doc-serve": "browser-sync start --server _site --files _site --cors",
-    "doc-dev": "typedoc && concurrently \"npm run doc-watch\" \"tsup --watch\" \"npm run doc-serve\""
+    "doc-dev": "concurrently \"tsup --watch\" \"npm run doc-start\"",
+    "doc-start": "typedoc && concurrently \"npm run doc-serve\"  \"npm run doc-watch\"",
+    "doc-serve": "browser-sync start --server _site --cors --port 3000",
+    "doc-watch": "onchange -d 1000 -k 'src/**/*.ts' 'doc/**/*.*' 'typedoc.js' -- npm run doc-reserve",
+    "doc-reserve": "typedoc && browser-sync reload --port 3000"
   },
   "repository": {
     "type": "git",
