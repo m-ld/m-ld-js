@@ -33,7 +33,7 @@ meld.follow(update => {
 ```
 <script>liveCode(document.currentScript);</script>
 
-The new domain's information is stored in memory here (and only here). It's using Socket.io on a [public Gateway](https://gw.m-ld.org) (gw.m-ld.org) to connect to other clones. But there aren't any yet. Let's make one.
+The new domain's information is stored in memory here (and only here). It's . But there aren't any yet. Let's make one.
 
 ```js
 import { clone, uuid } from 'https://js.m-ld.org/ext/index.mjs';
@@ -47,6 +47,7 @@ cloneButton.addEventListener('click', async () => {
     io: { uri: 'https://gw.m-ld.org' }
   });
   
+  playgroundAnchor.setAttribute('href', `https://edge.m-ld.org/playground/#domain=${domainInput.value}&txn=%7B%22name%22%3A%22George%22%7D`);
   clonedDiv.removeAttribute('hidden');
   
   nameInput.addEventListener('keydown', e => {
@@ -64,10 +65,11 @@ cloneButton.addEventListener('click', async () => {
 <div id="clonedDiv" hidden>
   <p>🎉 You have cloned the domain!</p>
   <p>Please enter your name: <input id="nameInput" type="text"/></p>
+  <p>You can also interact with this domain in the <a id="playgroundAnchor" target="_blank"><b>m-ld</b> playground</a>!</p>
 </div>
 ```
 <script>liveCode(document.currentScript);</script>
 
-You can use the **m-ld** playground to inspect public domains on the Gateway (like yours). <a href="https://edge.m-ld.org/playground/#txn=%7B%22name%22%3A%22George%22%7D" target="_blank">Try it out!</a>
+These two code blocks are sandboxed – they are only sharing the domain, using **m-ld**. Because the domain is using a [public Gateway](https://gw.m-ld.org) (gw.m-ld.org) to connect to other clones, the **m-ld** playground can also see it.
 
 > 💡 **m-ld** domain names look like IETF internet domains, and have the same rules. The internet doesn't know how to look them up yet though, so you can't just paste one into a browser.
