@@ -13,6 +13,7 @@
     "./ext/socket.io-server": "./ext/socket.io/server/index.js",
     "./ext/socket.io/server": "./ext/socket.io/server/index.js",
     "./ext/ably": "./ext/ably/index.js",
+    "./ext/html": "./ext/html/index.js",
     "./ext/wrtc": "./ext/wrtc/index.js",
     "./ext/security": "./ext/security/index.js",
     "./ext/shacl": "./ext/shacl/index.js",

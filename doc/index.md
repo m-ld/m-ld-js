@@ -21,6 +21,8 @@ The Javascript engine can be used in a modern **browser** or a server engine lik
 
 [[include:quick-start.md]]
 
+There are more live code examples for you to try in the [How-To](#how-to) section below.
+
 ## Introduction
 
 ### Packages
@@ -84,6 +86,11 @@ The `clone` function returns control as soon as it is safe to start making data 
 ```typescript
 await meld.status.becomes({ online: true, outdated: false });
 ```
+
+## How-To
+
+[[include:how-to/domain-setup.md]]
+[[include:how-to/lists.md]]
 
 ## Remotes
 

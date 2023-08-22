@@ -1,7 +1,7 @@
 import { OrmSubject, property } from './OrmSubject';
 import { GraphSubject } from '../api';
 import { M_LD } from '../ns';
-import { JsAtomType, JsType, noMerge, Optional } from '../js-support';
+import { JsAtomType, JsProperty, JsType, noMerge, Optional } from '../js-support';
 import { OrmUpdating } from './OrmDomain';
 import { Subject, SubjectProperty } from '../jrql-support';
 import type { Iri } from '@m-ld/jsonld';
@@ -37,7 +37,7 @@ export interface ExtensionSubjectInstance {
  * @param cjsModule
  * @internal
  */
-function dynamicRequire(cjsModule: string) {
+async function dynamicRequire(cjsModule: string): Promise<unknown> {
   try {
     return require(cjsModule);
   } catch (e) {
@@ -57,7 +57,7 @@ function dynamicRequire(cjsModule: string) {
  * 1. To load a singleton from a graph subject having type
  * `http://js.m-ld.org/CommonJSExport`. In this case a SingletonExtensionSubject
  * (or a subclass) should be instantiated directly using {@link
-  * OrmUpdating#get}, and the singleton object obtained with {@link singleton},
+ * OrmUpdating#get}, and the singleton object obtained with {@link singleton},
  * e.g. with data:
  *   ```JSON
  *   {
@@ -116,19 +116,21 @@ export class ExtensionSubject<T extends ExtensionSubjectInstance> extends OrmSub
    * ```
    *
    * @param [id] the new extension subject's identity. Omit to auto-generate.
-   * @param moduleId the CommonJS module (must be accessible using `require`)
+   * @param requireId the CommonJS module, must be accessible using `require`
+   * @param importId the ECMAScript module, must be accessible using `import`
    * @param className the constructor name exported by the module
    * @param properties additional properties
    */
   static declare = (
     id: Iri | undefined,
-    moduleId: string,
+    requireId: string | undefined,
+    importId: string | undefined,
     className: string,
     properties?: Subject
   ): Subject => ({
     '@id': id,
-    '@type': M_LD.JS.commonJsExport,
-    [M_LD.JS.require]: moduleId,
+    [M_LD.JS.require]: requireId,
+    [M_LD.JS.module]: importId,
     [M_LD.JS.className]: className,
     ...properties
   });
@@ -144,6 +146,7 @@ export class ExtensionSubject<T extends ExtensionSubjectInstance> extends OrmSub
   ) => ExtensionSubject.declare(
     M_LD.EXT.extensionType(extModule, className),
     `@m-ld/m-ld/ext/${extModule}`,
+    `@m-ld/m-ld/ext/${extModule}.js`,
     className,
     properties);
 
@@ -156,11 +159,11 @@ export class ExtensionSubject<T extends ExtensionSubjectInstance> extends OrmSub
     src: GraphSubject,
     orm: OrmUpdating
   ): Promise<T> {
-    // Look for a type that is a module
+    // Look for a type that we can load
     const allTypes = await orm.latch(state => Promise.all(
       OrmSubject['@type'].value(src).map(t => state.get(t))));
-    const moduleTypes = allTypes.filter((src): src is GraphSubject => src != null &&
-      OrmSubject['@type'].value(src).includes(M_LD.JS.commonJsExport));
+    const moduleTypes = allTypes.filter((src): src is GraphSubject =>
+      src != null && (M_LD.JS.require in src || M_LD.JS.module in src));
     if (moduleTypes.length === 1) {
       return (await orm.get(moduleTypes[0], src =>
         new ExtensionSubject<T & ExtensionSubjectInstance>(src))).instance(src, orm);
@@ -168,29 +171,27 @@ export class ExtensionSubject<T extends ExtensionSubjectInstance> extends OrmSub
     throw new TypeError(`Cannot resolve extension type for ${src['@id']}`);
   }
 
-  /** @internal */
-  @property(JsType.for(Array, String), '@type')
-  moduleType: string[];
+  /** Utility property definition for CommonJs `require` key */
+  static '@type' = new JsProperty('@type', JsType.for(Array, String));
+
   /** @internal */
   @property(JsType.for(Optional, String), M_LD.JS.require)
   cjsModule: string | undefined;
+  /** @internal */
+  @property(JsType.for(Optional, String), M_LD.JS.module)
+  esmModule: string | undefined;
   /** @internal */
   @property(new JsAtomType(String, noMerge), M_LD.JS.className)
   className: string;
 
   protected static factoryProps: SubjectProperty[] =
-    ['moduleType', 'cjsModule', 'className'];
+    ['moduleType', 'cjsModule', 'esmModule', 'className'];
 
-  private _factory?: {
-    construct?: new () => T,
-    /** ERR_MODULE_NOT_FOUND or any constructor errors */
-    err?: any,
-  };
+  /** May reject with ERR_MODULE_NOT_FOUND or any constructor errors */
+  private _factory?: Promise<new () => T>;
 
   protected constructor(src: GraphSubject) {
     super(src);
-    // Caution: no async properties are allowed here, so that .singleton and
-    // .instance() can be called synchronously
     this.initSrcProperties(src);
   }
 
@@ -207,60 +208,60 @@ export class ExtensionSubject<T extends ExtensionSubjectInstance> extends OrmSub
 
   protected get factory() {
     if (this._factory == null) {
-      this._factory = {};
-      if (!this.moduleType.includes(M_LD.JS.commonJsExport)) {
-        this._factory.err =
-          `${this.src['@id']}: Extension type ${this.moduleType} not supported.`;
-      } else if (this.cjsModule == null) {
-        this._factory.err =
-          `${this.src['@id']}: CommonJS module declared with no id.`;
-      } else {
-        try {
-          this._factory.construct = dynamicRequire(this.cjsModule)[this.className];
-        } catch (e) {
-          this._factory.err = e;
-        }
-      }
+      const tryEsm = (e: any = `${this.src['@id']}: Extension declared with no module.`) => {
+        if (this.esmModule != null)
+          return import(this.esmModule);
+        else
+          throw e;
+      };
+      this._factory = (this.cjsModule != null ?
+        dynamicRequire(this.cjsModule).catch(tryEsm) : tryEsm())
+        .then(module => (<any>module)[this.className] as new () => T);
+      this._factory.catch(); // Ensure no unhandled exceptions
     }
     return this._factory;
   }
 
   /**
+   * Override to provide custom post-initialisation behaviour
    * @returns an instance of the loaded Javascript class
    * @see OrmSubject.updated
    */
-  private instance(src: GraphSubject, orm: OrmUpdating): T | Promise<T> {
-    if (this.factory.err != null)
-      throw this.factory.err;
-    return this.initialisedInstance(src, orm);
-  }
-
-  /** Override to provide custom post-initialisation behaviour */
-  protected initialisedInstance(src: GraphSubject, orm: OrmUpdating) {
-    const inst = this.newInstance(src, orm);
+  protected async instance(src: GraphSubject, orm: OrmUpdating): Promise<T> {
+    const inst = await this.newInstance(src, orm);
     inst.initFromData?.(src, orm, this);
     return inst;
   }
 
   /** Override to provide custom pre-initialisation behaviour */
-  protected newInstance(src: GraphSubject, orm: OrmUpdating) {
-    return new this.factory.construct!();
+  protected async newInstance(_src: GraphSubject, _orm: OrmUpdating) {
+    return new (await this.factory)();
   }
 }
 
 /**
- * Directly-instantiable extension subject for singleton extensions.
+ * Extension subject for singleton extensions.
+ *
+ * Note care must be taken not to expose this subject to updates before the
+ * delegate instance (the singleton) has had a chance to attach its source
+ * properties. Thus, constructing an instance of this class should always await
+ * {@link ready}, even if the delegate instance is not immediately required.
+ *
  * @see ExtensionSubject
  * @category Experimental
  * @experimental
  */
-export class SingletonExtensionSubject<T extends ExtensionSubjectInstance>
+export abstract class SingletonExtensionSubject<T extends ExtensionSubjectInstance>
   extends ExtensionSubject<T> {
-  private _singleton?: T | Promise<T>;
+  private _singleton?: Promise<T>;
 
-  constructor(src: GraphSubject, orm: OrmUpdating) {
+  protected constructor(src: GraphSubject, orm: OrmUpdating) {
     super(src);
     this.reload(src, orm);
+  }
+
+  get ready(): Promise<this> {
+    return this.singleton.then(() => this);
   }
 
   get singleton() {
@@ -280,9 +281,7 @@ export class SingletonExtensionSubject<T extends ExtensionSubjectInstance>
   }
 
   private reload(src: GraphSubject, orm: OrmUpdating) {
-    if (this.factory.err != null)
-      throw this.factory.err;
     if (this._singleton == null)
-      this._singleton = this.initialisedInstance(src, orm);
+      this._singleton = this.instance(src, orm);
   }
 }

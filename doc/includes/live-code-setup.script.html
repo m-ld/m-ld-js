@@ -1,31 +1,96 @@
-<script src="https://next.flems.io/flems.html" type="text/javascript" charset="utf-8"></script>
+<script src="https://flems.io/flems.html" type="text/javascript" charset="utf-8"></script>
 <script>
-  window.liveCode = function (el) {
-    const files = [];
-    let height = 0;
-    let pre = el.previousElementSibling;
-    while (pre != null) {
-      const code = pre.querySelector('code');
-      if (code == null) break;
-      const lang = (/language-(\w+)/.exec(code.className) ?? [])[1];
-      if (lang == null) break;
-      const content = code.textContent
-        .replaceAll('https://js.m-ld.org', window.location.origin);
-      height = Math.max(height, (content.match(/\n/g) ?? []).length * 1.5 + 3);
-      const ext = `.${lang.replace('javascript', 'js')}`;
-      files.unshift({
-        name: `${files.filter(({ name }) => name.endsWith(ext)).length || ''}${ext}`,
-        content
-      });
-      const next = pre.previousElementSibling;
-      pre.remove();
-      pre = next;
+  if (!window.LiveCode) {
+    function *priorPreCodeBlocks(el) {
+      let pre = el.previousElementSibling;
+      while (pre != null) {
+        const code = pre.querySelector('code');
+        if (code == null) break; // No code in pre (which could be anything)
+        const lang = (/language-(\w+)/.exec(code.className) ?? [])[1];
+        if (lang == null) break; // No language, can't interpret
+        const codeBlock = { pre, content: code.textContent, lang };
+        pre = pre.previousElementSibling; // Before yield, pre is removed
+        yield codeBlock;
+      }
     }
-    if (files.length > 0) {
-      const flemDiv = document.createElement('div');
-      flemDiv.setAttribute('style', `height: ${height}em;`);
-      el.insertAdjacentElement('beforebegin', flemDiv);
-      window.Flems(flemDiv, { files, console: 'min', autoReload: false });
+
+    const declarations = {};
+
+    class LiveCode {
+      /** @param {string | HTMLElement} includes */
+      constructor(...includes) {
+        this.files = [];
+        for (let include of includes) {
+          if (include instanceof HTMLElement) {
+            this.el = include;
+            for (let { pre, content, lang } of priorPreCodeBlocks(this.el)) {
+              this.#add(content, lang);
+              pre.remove();
+            }
+          } else {
+            this.files.push(...declarations[include]);
+          }
+        }
+        if (this.el == null)
+          throw new RangeError('Live code must be tied to an element');
+      }
+
+      get name() {
+        return this.el.title ?? '';
+      }
+
+      include(name) {
+        this.files.unshift(...declarations[name]);
+        return this;
+      }
+
+      inline() {
+        let height = 0;
+        for (let file of this.files)
+          height = Math.max(height, (file.content.match(/\n/g) ?? []).length * 1.5 + 3);
+        const flemDiv = document.createElement('div');
+        flemDiv.setAttribute('style', `height: ${height}em;`);
+        flemDiv.id = this.name;
+        this.el.replaceWith(flemDiv);
+        // noinspection JSUnresolvedReference
+        window.Flems(flemDiv, this.#state);
+      }
+
+      link(html, title = '') {
+        const a = document.createElement('a');
+        a.id = this.name;
+        // noinspection JSUnresolvedReference
+        a.href = window.Flems.createFlemsIoLink(this.#state);
+        a.title = title;
+        a.target = '_blank';
+        a.innerHTML = html;
+        this.el.replaceWith(a);
+      }
+
+      declare() {
+        if (!this.name)
+          throw new RangeError('Declared script must have title');
+        declarations[this.name] = this.files;
+        this.el.remove();
+      }
+
+      get #state() {
+        return { files: this.files, console: 'min', autoReload: false };
+      }
+
+      #add(content, lang) {
+        const existingHtmlFile = lang === 'html' && this.files.find(file => file.name === '.html');
+        if (existingHtmlFile) {
+          existingHtmlFile.content += content;
+        } else {
+          this.files.unshift({
+            name: lang === 'html' ? '.html' : `${this.name}.${lang.replace('javascript', 'js')}`,
+            content: content.replaceAll('https://js.m-ld.org', window.location.origin)
+          });
+        }
+      }
     }
-  };
+
+    window.LiveCode = LiveCode;
+  }
 </script>

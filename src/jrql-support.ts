@@ -192,6 +192,8 @@ export type Operator = keyof typeof jrql.operators | '@concat' | '@splice';
  */
 export type TextSplice = [number, number, string?];
 /**
+ * [[include:live-code-setup.script.html]]
+ *
  * Used to express an ordered set of data. A List object is reified to a Subject
  * (unlike in JSON-LD) and so it has an @id, which can be set by the user.
  *

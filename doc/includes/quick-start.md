@@ -9,7 +9,7 @@ import { IoRemotes } from 'https://js.m-ld.org/ext/socket.io.mjs';
 
 const domainName = `${uuid()}.public.gw.m-ld.org`;
 
-const meld = await clone(new MemoryLevel(), IoRemotes, {
+const state = await clone(new MemoryLevel(), IoRemotes, {
   '@id': uuid(),
   '@domain': domainName,
   genesis: true,
@@ -19,7 +19,7 @@ const meld = await clone(new MemoryLevel(), IoRemotes, {
 successDiv.removeAttribute('hidden');
 domainInput.value = domainName;
 
-meld.follow(update => {
+state.follow(update => {
   for (let { name } of update['@insert'])
     successDiv.insertAdjacentHTML('beforeend',
       `<p>Welcome ${name}!</p>`);
@@ -31,9 +31,9 @@ meld.follow(update => {
   <input id="domainInput" type="text" onfocus="this.select()" style="width:100%;"/>
 </div>
 ```
-<script>liveCode(document.currentScript);</script>
+<script>new LiveCode(document.currentScript).inline();</script>
 
-The new domain's information is stored in memory here (and only here). It's . But there aren't any yet. Let's make one.
+The new domain's information is stored in memory here (and only here). Let's make a clone.
 
 ```js
 import { clone, uuid } from 'https://js.m-ld.org/ext/index.mjs';
@@ -41,7 +41,7 @@ import { MemoryLevel } from 'https://js.m-ld.org/ext/memory-level.mjs';
 import { IoRemotes } from 'https://js.m-ld.org/ext/socket.io.mjs';
 
 cloneButton.addEventListener('click', async () => {
-  const meld = await clone(new MemoryLevel(), IoRemotes, {
+  const state = await clone(new MemoryLevel(), IoRemotes, {
     '@id': uuid(),
     '@domain': domainInput.value,
     io: { uri: 'https://gw.m-ld.org' }
@@ -52,7 +52,7 @@ cloneButton.addEventListener('click', async () => {
   
   nameInput.addEventListener('keydown', e => {
     if (e.key === 'Enter')
-      meld.write({ name: nameInput.value });
+      state.write({ name: nameInput.value });
   });
 });
 ```
@@ -68,8 +68,8 @@ cloneButton.addEventListener('click', async () => {
   <p>You can also interact with this domain in the <a id="playgroundAnchor" target="_blank"><b>m-ld</b> playground</a>!</p>
 </div>
 ```
-<script>liveCode(document.currentScript);</script>
+<script>new LiveCode(document.currentScript).inline();</script>
 
-These two code blocks are sandboxed – they are only sharing the domain, using **m-ld**. Because the domain is using a [public Gateway](https://gw.m-ld.org) (gw.m-ld.org) to connect to other clones, the **m-ld** playground can also see it.
+These two code blocks are sandboxed – they are only sharing the domain, using **m-ld**. Because the domain is using a [public Gateway](https://gw.m-ld.org) (gw.m-ld.org) to connect clones together, the **m-ld** playground can also see it.
 
 > 💡 **m-ld** domain names look like IETF internet domains, and have the same rules. The internet doesn't know how to look them up yet though, so you can't just paste one into a browser.

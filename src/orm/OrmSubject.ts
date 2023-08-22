@@ -72,6 +72,13 @@ export function property(type: JsType<any>, name?: Iri): PropertyDecorator {
   };
 }
 
+export function getProperty<S extends OrmSubject>(
+  subject: S,
+  name: string & keyof S
+): JsProperty<unknown> {
+  return Reflect.getMetadata(propertyMetadataKey, subject, name);
+}
+
 /** @internal NOTE do not inline: breaks typedoc */
 type ObjKey<O> = [obj: O, key: string & keyof O];
 
@@ -149,8 +156,7 @@ export abstract class OrmSubject {
     access: { [local: string]: PropertyAccess.Any } = {}
   ) {
     for (let local of Reflect.getMetadata(propertiesMetadataKey, this)) {
-      const property: JsProperty<any> =
-        Reflect.getMetadata(propertyMetadataKey, this, local);
+      const property = getProperty(this, local);
       if (property != null && !this.propertyInitialised(property))
         this.initSrcProperty(src, local, property, access[local]);
     }

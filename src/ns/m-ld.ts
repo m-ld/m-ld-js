@@ -68,11 +68,11 @@ export namespace JS {
   export const $base = 'http://js.m-ld.org/';
   export const $vocab = `${$base}#`;
 
-  /** CommonJS module class */
-  export const commonJsExport = `${$vocab}CommonJSExport`;
-
   /** Property for CommonJS module require id */
   export const require = `${$vocab}require`;
+
+  /** Property for ECMAScript module URL */
+  export const module = `${$vocab}module`;
 
   /** Property for Javascript class name (in module scope) */
   export const className = `${$vocab}class`;
