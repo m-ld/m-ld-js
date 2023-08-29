@@ -8,10 +8,6 @@
     "title": "Introduction"
   },
   {
-    "url": "#how-to",
-    "title": "How-To..."
-  },
-  {
     "title": "Remotes",
     "url": "#remotes",
     "children": [
@@ -42,16 +38,16 @@
     "title": "Concurrency"
   },
   {
+    "url": "#how-to",
+    "title": "How-To..."
+  },
+  {
     "url": "#security",
     "title": "Security"
   },
   {
     "url": "#extensions",
     "title": "Extensions"
-  },
-  {
-    "url": "/classes/tseqtext.html",
-    "title": "Text"
   },
   {
     "url": "/classes/ormdomain.html",

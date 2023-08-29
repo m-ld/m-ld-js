@@ -87,11 +87,6 @@ The `clone` function returns control as soon as it is safe to start making data 
 await meld.status.becomes({ online: true, outdated: false });
 ```
 
-## How-To
-
-[[include:how-to/domain-setup.md]]
-[[include:how-to/lists.md]]
-
 ## Remotes
 
 [[include:ext/mqtt-remotes.md]]
@@ -105,6 +100,20 @@ await meld.status.becomes({ online: true, outdated: false });
 [[include:subjects.md]]
 
 [[include:concurrency.md]]
+
+## How-To
+
+Here are usage docs and live coding examples to help get started with common patterns.
+
+[[include:how-to/domain-setup.md]]
+
+### [Using Lists](interfaces/List.html)
+
+[[include:how-to/lists.md]]
+
+### [Using Collaborative Text](classes/tseqtext.html)
+
+[[include:how-to/text.md]]
 
 [[include:security.md]]
 

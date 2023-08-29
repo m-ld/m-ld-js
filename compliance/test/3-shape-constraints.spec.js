@@ -11,7 +11,6 @@ describe('SHACL shape constraints', () => {
     },
     '@id': 'http://m-ld.org/extensions',
     '@list': [{
-      '@type': 'js:CommonJSExport',
       'js:require': '@m-ld/m-ld/ext/shacl',
       'js:class': 'ShapeConstrained',
       'mld:controlled-shape': {

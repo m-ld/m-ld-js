@@ -68,7 +68,7 @@ describe('list diffs & updates', () => {
           slotify(<List>inserts);
           const regen = SubjectPropertyValues
             .for({ '@list': [...olds] }, '@list')
-            .update(deletes, inserts).values;
+            .update(deletes, inserts).values();
           expect(regen).toEqual(news);
         }
       ),
@@ -79,31 +79,35 @@ describe('list diffs & updates', () => {
 
 describe('text diffs', () => {
   test('diff empty to empty', () => {
-    expect([...textDiff('', '')]).toEqual([]);
+    expect(textDiff('', '')).toBeUndefined();
   });
 
   test('diff empty to chars', () => {
-    expect([...textDiff('', 'foo')]).toEqual([[0, 0, 'foo']]);
+    expect(textDiff('', 'foo')).toEqual([0, 0, 'foo']);
   });
 
   test('diff chars to empty', () => {
-    expect([...textDiff('foo', '')]).toEqual([[0, 3]]);
+    expect(textDiff('foo', '')).toEqual([0, 3]);
   });
 
   test('diff chars to same chars', () => {
-    expect([...textDiff('foo', 'foo')]).toEqual([]);
+    expect(textDiff('foo', 'foo')).toBeUndefined();
   });
 
   test('diff update one char', () => {
-    expect([...textDiff('f', 'b')]).toEqual([[0, 1, 'b']]);
+    expect(textDiff('f', 'b')).toEqual([0, 1, 'b']);
   });
 
   test('diff update char in middle', () => {
-    expect([...textDiff('foo', 'fuo')]).toEqual([[1, 1, 'u']]);
+    expect(textDiff('foo', 'fuo')).toEqual([1, 1, 'u']);
+  });
+
+  test('diff update ambiguous char', () => {
+    expect(textDiff('foo', 'fou')).toEqual([1, 2, 'ou']);
   });
 
   test('diff update separate chars', () => {
-    expect([...textDiff('foo', 'bor')]).toEqual([[0, 1, 'b'], [2, 1, 'r']]);
+    expect(textDiff('foo', 'bor')).toEqual([0, 3, 'bor']);
   });
 });
 

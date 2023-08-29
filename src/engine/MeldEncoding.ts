@@ -109,7 +109,7 @@ export class MeldEncoder {
   reifyTriplesOp(triplesOp: RefTriplesOp): Triple[] {
     return this.reifyTriplesData(triplesOp, M_LD.op, operation =>
       // Insist on the default JSON datatype, because this is protocol-level
-      this.rdf.literal('', jsonDatatype, operation));
+      this.rdf.literal('\x00', jsonDatatype, operation));
   }
 
   private unreifyTriplesData<E>(

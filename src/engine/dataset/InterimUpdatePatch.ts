@@ -242,7 +242,7 @@ export class InterimUpdatePatch implements InterimUpdate {
     return state;
   }
 
-  private async loadQuadState<T>(s: Quad['subject'], p: Quad['predicate']) {
+  private async loadQuadState(s: Quad['subject'], p: Quad['predicate']) {
     // Get quads from the graph
     const quadState = new QuadSet(await async.wrap(this.graph.quads.match(s, p)).toArray());
     // Add quads from the SU-Set with the hidden flag
@@ -256,7 +256,8 @@ export class InterimUpdatePatch implements InterimUpdate {
   private isShared(quad: JrqlDataQuad): quad is LiteralTriple & MaybeHiddenQuad {
     return isLiteralTriple(quad) && (
       (!!quad.hasData && quad.hasData.shared) || // if loaded from state
-      (quad.object.typed != null && isSharedDatatype(quad.object.typed.type)) // if in patch
+      (quad.object.typed?.type != null &&
+        isSharedDatatype(quad.object.typed.type)) // if in patch
     );
   }
 }

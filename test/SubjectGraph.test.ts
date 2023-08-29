@@ -81,6 +81,7 @@ describe('json-rql typed values', () => {
       JsonldContext.NONE,
       true
     )).toEqual({
+      '@id': 'Sat Jan 01 2000',
       '@type': dateDatatype['@id'],
       '@value': { year: 2000, month: 1, date: 1 }
     });

@@ -117,6 +117,7 @@ export type Variable = jrql.Variable;
 export type Atom =
   number | string | boolean | Uint8Array |
   Variable | ValueObject | Reference | VocabReference;
+
 /**
  * @category json-rql
  * @see [json-rql value object](https://json-rql.org/interfaces/valueobject.html)
@@ -190,10 +191,22 @@ export type Operator = keyof typeof jrql.operators | '@concat' | '@splice';
  * @see operators
  * @category json-rql
  */
-export type TextSplice = [number, number, string?];
+export type TextSplice = [number, number] | [number, number, string];
+/** @internal */
+export function isTextSplice(args: Expression | Expression[]): args is TextSplice {
+  if (isArray(args)) {
+    const [index, deleteCount, content] = args;
+    // noinspection SuspiciousTypeOfGuard
+    if (typeof index == 'number' &&
+      typeof deleteCount == 'number' &&
+      (content == null || typeof content == 'string')) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /**
- * [[include:live-code-setup.script.html]]
- *
  * Used to express an ordered set of data. A List object is reified to a Subject
  * (unlike in JSON-LD) and so it has an @id, which can be set by the user.
  *
@@ -231,6 +244,10 @@ export type TextSplice = [number, number, string?];
  * > 🚧 This engine does not support use of the `@list` keyword in a JSON-LD
  * > Context term definition.
  *
+ * [[include:live-code-setup.script.html]]
+ * [[include:how-to/domain-setup.md]]
+ * [[include:how-to/lists.md]]
+ *
  * @see [m-ld Lists specification](https://spec.m-ld.org/#lists)
  * @see [json-rql list](https://json-rql.org/interfaces/list.html)
  * @category json-rql
@@ -250,7 +267,7 @@ export interface List extends Subject {
 
 /** @internal */
 export function isList(object: SubjectPropertyObject): object is List {
-  return typeof object === 'object' && '@list' in object;
+  return typeof object === 'object' && object != null && '@list' in object;
 }
 
 /**
@@ -265,7 +282,7 @@ export interface Set {
 
 /** @internal */
 export function isSet(object: SubjectPropertyObject): object is Set {
-  return typeof object === 'object' && '@set' in object;
+  return typeof object === 'object' && object != null && '@set' in object;
 }
 
 // Utility functions
@@ -411,7 +428,7 @@ export type SubjectProperty =
  */
 export function isPropertyObject(
   property: string,
-  object: Subject['any']
+  object: unknown
 ): object is SubjectPropertyObject {
   return property !== '@context' && property !== '@id' && object != null;
 }
@@ -424,11 +441,11 @@ export function isSubject(p: Pattern): p is Subject {
 /** @internal */
 export function isSubjectObject(o: SubjectPropertyObject): o is Subject {
   return typeof o == 'object' &&
-      !(o instanceof Uint8Array) &&
-      !isValueObject(o) &&
-      !isReference(o) &&
-      !isVocabReference(o) &&
-      !isInlineConstraint(o);
+    !(o instanceof Uint8Array) &&
+    !isValueObject(o) &&
+    !isReference(o) &&
+    !isVocabReference(o) &&
+    !isInlineConstraint(o);
 }
 /**
  * An operator-based constraint of the form `{ <operator> : [<expression>...]

@@ -39,11 +39,6 @@
         return this.el.title ?? '';
       }
 
-      include(name) {
-        this.files.unshift(...declarations[name]);
-        return this;
-      }
-
       inline() {
         let height = 0;
         for (let file of this.files)
@@ -69,7 +64,7 @@
 
       declare() {
         if (!this.name)
-          throw new RangeError('Declared script must have title');
+          throw new RangeError('Declared script must have a title');
         declarations[this.name] = this.files;
         this.el.remove();
       }
@@ -79,15 +74,19 @@
       }
 
       #add(content, lang) {
-        const existingHtmlFile = lang === 'html' && this.files.find(file => file.name === '.html');
-        if (existingHtmlFile) {
-          existingHtmlFile.content += content;
-        } else {
-          this.files.unshift({
-            name: lang === 'html' ? '.html' : `${this.name}.${lang.replace('javascript', 'js')}`,
-            content: content.replaceAll('https://js.m-ld.org', window.location.origin)
-          });
+        const existingHtmlIndex = lang === 'html' ?
+          this.files.findIndex(file => file.name === '.html') : -1;
+        if (existingHtmlIndex > -1) {
+          content = this.files[existingHtmlIndex].content + content;
+          this.files.splice(existingHtmlIndex, 1);
         }
+        this.files.unshift({
+          name: lang === 'html' ? '.html' : `${this.name}.${lang.replace('javascript', 'js')}`,
+          content: content
+            .replaceAll('https://js.m-ld.org', window.location.origin)
+            .replaceAll('https://m-ld.org', window.location.origin.includes('localhost') ?
+              'https://edge.m-ld.org' : window.location.origin.replaceAll('.js', ''))
+        });
       }
     }
 

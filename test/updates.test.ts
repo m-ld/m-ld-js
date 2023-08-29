@@ -108,6 +108,18 @@ describe('Update utilities', () => {
     expect(box).toEqual({ '@id': 'foo', size: 10, label: 'My box' });
   });
 
+  test('adds a missing value using subject', () => {
+    const box: Box = { '@id': 'foo', size: 10 };
+    updateSubject(box, { '@id': 'foo' });
+    expect(box).toEqual({ '@id': 'foo', size: 10 });
+  });
+
+  test('adds a missing value using graph', () => {
+    const box: Box = { '@id': 'foo', size: 10 };
+    updateSubject(box, [{ '@id': 'foo' }]);
+    expect(box).toEqual({ '@id': 'foo', size: 10 });
+  });
+
   test('adds an array value', () => {
     const box: Box = { '@id': 'foo', size: 10 };
     updateSubject(box, {
@@ -229,7 +241,7 @@ describe('Update utilities', () => {
     expect(box).toEqual({ '@id': 'foo', size: 11 });
   });
 
-  test('applies splice update', () => {
+  test('applies string splice update', () => {
     const box: Box = { '@id': 'foo', label: 'danger', size: 1 };
     updateSubject(box, {
       foo: { '@update': { '@id': 'foo', label: { '@splice': [0, 1, 'w'] } } }
@@ -250,6 +262,47 @@ describe('Update utilities', () => {
       }
     });
     expect(box).toEqual({ '@id': 'foo', label: 'angry', size: 1 });
+  });
+
+  test('applies proxied splice update', () => {
+    // noinspection JSUnusedGlobalSymbols
+    const label = {
+      value: 'danger',
+      splice(index: number, deleteCount: number, content?: string) {
+        this.value = `${index} ${deleteCount} ${content}`;
+      }
+    };
+    const box = {
+      '@id': 'foo',
+      get label() { return label; },
+      set label(_value: string | typeof label) { throw 'should not be calling setter'; },
+      size: 1
+    };
+    updateSubject(box, {
+      foo: { '@update': { '@id': 'foo', label: { '@splice': [0, 1, 'w'] } } }
+    });
+    expect(box).toMatchObject({ '@id': 'foo', label: { value: '0 1 w' }, size: 1 });
+  });
+
+  test('retains a proxied value if unchanged', () => {
+    // noinspection JSUnusedGlobalSymbols
+    const label = {
+      value: 'danger',
+      splice(index: number, deleteCount: number, content?: string) {
+        this.value = `${index} ${deleteCount} ${content}`;
+      },
+      toJSON() { return this.value; }
+    };
+    const box = {
+      '@id': 'foo',
+      get label() { return label; },
+      set label(_value: string | typeof label) { throw 'should not be calling setter'; },
+      size: 1
+    };
+    updateSubject(box, {
+      foo: { '@insert': { '@id': 'foo', label: 'danger' } }
+    });
+    expect(box).toEqual({ '@id': 'foo', label, size: 1 });
   });
 
   describe('with defined properties', () => {
@@ -343,6 +396,19 @@ describe('Update utilities', () => {
       });
     });
 
+    test('hydrates nested subject from graph', () => {
+      const box = {
+        '@id': 'foo'
+      };
+      updateSubject(box, [
+        { '@id': 'foo', size: 11, contents: { '@id': 'bar' } },
+        { '@id': 'bar', size: 6 }
+      ]);
+      expect(box).toEqual({
+        '@id': 'foo', size: 11, contents: { '@id': 'bar', size: 6 }
+      });
+    });
+
     test('updates nested subject with subject updates', () => {
       const box: Box = {
         '@id': 'foo', size: 10, contents: [{
@@ -399,6 +465,33 @@ describe('Update utilities', () => {
           '@delete': undefined,
           '@insert': { '@id': 'slot1', '@item': 'made' }
         }
+      });
+      expect(box).toEqual({
+        '@id': 'foo', size: 10, history: { '@id': 'foo-history', '@list': ['made'] }
+      });
+    });
+
+    // BUT plain list subjects have a plain array
+    test('specifies one item in a list', () => {
+      const box: Box = {
+        '@id': 'foo', size: 10, history: { '@id': 'foo-history', '@list': [] }
+      };
+      updateSubject(box, {
+        '@id': 'foo-history',
+        '@list': ['made']
+      });
+      expect(box).toEqual({
+        '@id': 'foo', size: 10, history: { '@id': 'foo-history', '@list': ['made'] }
+      });
+    });
+
+    test('overrides list content', () => {
+      const box: Box = {
+        '@id': 'foo', size: 10, history: { '@id': 'foo-history', '@list': ['afu'] }
+      };
+      updateSubject(box, {
+        '@id': 'foo-history',
+        '@list': ['made']
       });
       expect(box).toEqual({
         '@id': 'foo', size: 10, history: { '@id': 'foo-history', '@list': ['made'] }

@@ -120,9 +120,9 @@ export interface ReadResult extends Flowable<GraphSubject>, PromiseLike<GraphSub
  * Read methods for a {@link MeldState}.
  *
  * Methods are typed to ensure that app code is aware of **m-ld**
- * [data&nbsp;semantics](http://spec.m-ld.org/#data-semantics). See the
- * [Resource](/#resource) type for more details.
+ * [data&nbsp;semantics](http://spec.m-ld.org/#data-semantics).
  * @category API
+ * @see {@link MeldState}
  */
 export interface MeldReadState extends QueryableRdfSource {
   /**
@@ -238,6 +238,11 @@ export interface GraphSubjects extends Array<GraphSubject> {
 export namespace GraphSubjects {
   export const EMPTY: GraphSubjects =
     Object.assign([], { graph: new Map() });
+}
+
+/** @internal */
+export function isGraphSubjects(subjects: GraphSubject[]): subjects is GraphSubjects {
+  return 'graph' in subjects;
 }
 
 /**
@@ -517,7 +522,6 @@ export interface MeldContext {
  *   "@list": {
  *     "≪priority≫": {
  *       "@id": "≪your-extension-iri≫",
- *       "@type": "http://js.m-ld.org/#CommonJSExport",
  *       "http://js.m-ld.org/#require": "≪your-extension-module≫",
  *       "http://js.m-ld.org/#class": "≪your-extension-class-name≫"
  *     }

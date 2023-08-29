@@ -1,52 +1,59 @@
 ```js
 import { updateSubject } from 'https://js.m-ld.org/ext/index.mjs';
 
-document.addEventListener('clone', () => {
+document.addEventListener('domainChanged', () => {
   shoppingList.innerHTML = '';
   const { state, genesis } = window.model;
   if (genesis) {
+    // Write some initial shopping items to the state
     state.write({
       '@id': 'shopping',
       '@list': ['bread', 'milk']
     });
   }
-  state.follow(update => {
-    updateSubject({
-      '@id': 'shopping',
-      '@list': {
-        // The updateSubject utility can apply the `update` for a List to
-        // anything with a `length` and a `splice` method. So we use a proxy-
-        // like object that modifies the shopping list element's children.
-        get length() {
-          return shoppingList.childElementCount;
-        },
-        splice(index, deleteCount, ...items) {
-          for (let i = 0; i < deleteCount; i++)
-            shoppingList.children[index]?.remove();
-          const { el, position } = index < this.length ?
-            { el: shoppingList.children[index], position: 'beforebegin' } :
-            { el: shoppingList, position: 'beforeend' };
-          for (let item of items)
-            el.insertAdjacentHTML(position, `<li>${item}</li>`);
-        }
+  // To use updateSubject for updating the DOM, we use a Javascript object-like
+  // proxy pattern over the relevant Elements.
+  const shopping = {
+    '@id': 'shopping',
+    '@list': {
+      // For a List, updateSubject can apply the update to anything with a
+      // `length` and an Array-like `splice` method.
+      get length() {
+        return shoppingList.childElementCount;
+      },
+      splice(index, deleteCount, ...items) {
+        for (let i = 0; i < deleteCount; i++)
+          shoppingList.children[index]?.remove();
+        const { el, position } = index < this.length ?
+          { el: shoppingList.children[index], position: 'beforebegin' } :
+          { el: shoppingList, position: 'beforeend' };
+        for (let item of items)
+          el.insertAdjacentHTML(position, `<li>${item}</li>`);
       }
-    }, update);
+    }
+  };
+  state.read(async state => {
+    updateSubject(shopping, await state.get('shopping'));
+  }, update => {
+    updateSubject(shopping, update);
   });
 });
 
 addItem.addEventListener('click', () => {
-  const { state } = window.model;
-  state.write({
+  window.model.state.write({
     '@id': 'shopping',
+    // When writing list items, we can use an object with integer keys instead
+    // of an array. Here we're inserting at the end of the list.
     '@list': { [shoppingList.childElementCount]: itemToAdd.value }
   });
 });
 
 removeItem.addEventListener('click', () => {
-  const { state } = window.model;
-  state.write({
+  window.model.state.write({
     '@delete': {
       '@id': 'shopping',
+      // When deleting list items, we can pattern-match using variables. Here,
+      // we want to delete the removed item wherever it appears in the list.
       '@list': { '?': itemToRemove.value }
     }
   });
@@ -64,6 +71,7 @@ removeItem.addEventListener('click', () => {
     <input id="itemToRemove" type="text"/>
     <button id="removeItem">- Remove</button>
   </p>
+  <hr/>
 </div>
 ```
-<script>new LiveCode('domain-setup', document.currentScript).link('Work With Lists ↗');</script>
+<script>new LiveCode('domain-setup', document.currentScript).link('live code ↗');</script>

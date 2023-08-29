@@ -822,7 +822,7 @@ export class SuSetDataset extends MeldEncoder {
             cxnAssertions,
             deletedTriplesTids
           ),
-          tidPatch: await this.ssd.txnTidPatch(
+          tidPatch: this.ssd.txnTidPatch(
             cxnId,
             cxnAssertions.inserts,
             deletedExistingTids

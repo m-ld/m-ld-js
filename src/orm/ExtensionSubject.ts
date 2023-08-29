@@ -54,15 +54,14 @@ async function dynamicRequire(cjsModule: string): Promise<unknown> {
  * Extension subjects can be declared using {@link declare}, and are used in one
  * of two modes:
  *
- * 1. To load a singleton from a graph subject having type
- * `http://js.m-ld.org/CommonJSExport`. In this case a SingletonExtensionSubject
+ * 1. To load a singleton from a graph subject having a property
+ * `http://js.m-ld.org/#require`. In this case a SingletonExtensionSubject
  * (or a subclass) should be instantiated directly using {@link
  * OrmUpdating#get}, and the singleton object obtained with {@link singleton},
  * e.g. with data:
  *   ```JSON
  *   {
  *     "@id": "myCustomSingleton",
- *     "@type": "http://js.m-ld.org/CommonJSExport",
  *     "http://js.m-ld.org/#require": "my-custom-module",
  *     "http://js.m-ld.org/#class": "MyExtClass"
  *   }
@@ -74,8 +73,8 @@ async function dynamicRequire(cjsModule: string): Promise<unknown> {
  *   const ext: MyExtType = extType.singleton;
  *   ```
  *
- * 2. To load an instance from a graph subject having a type that is itself of
- * type `http://js.m-ld.org/CommonJSExport`. This indirection allows for many
+ * 2. To load an instance from a graph subject that itself has the property
+ * type `http://js.m-ld.org/#require`. This indirection allows for many
  * graph subjects to have custom type without re-declaring the module & export.
  * The {@link instance} method is provided to load the instance, e.g. with data:
  *   ```JSON
@@ -83,7 +82,6 @@ async function dynamicRequire(cjsModule: string): Promise<unknown> {
  *     "@id": "myCustomInstance",
  *     "@type": {
  *       "@id": "myCustomClass",
- *       "@type": "http://js.m-ld.org/CommonJSExport",
  *       "http://js.m-ld.org/#require": "my-custom-module",
  *       "http://js.m-ld.org/#class": "MyExtClass"
  *     }

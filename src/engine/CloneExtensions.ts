@@ -52,7 +52,7 @@ export class CloneExtensions extends OrmDomain implements StateManaged, MeldExte
   /** Represents the `@list` of the global `M_LD.extensions` list subject  */
   private readonly extensionSubjects: ManagedExtensionSubject[];
   private readonly combinedPlugins: MeldExtensions;
-  private _extensions: MeldPlugin[];
+  private readonly _extensions: MeldPlugin[];
   private _defaultList: DefaultList;
 
   private constructor(
@@ -178,7 +178,7 @@ function *withDefaults<T>(
   const foundDefault = Array<boolean>(defaults.length);
   for (let ext of extensions ?? []) {
     yield ext;
-    defaults.forEach((d, i) => foundDefault[i] ||= defaults[i].is(ext));
+    defaults.forEach((d, i) => foundDefault[i] ||= d.is(ext));
   }
   // Ensure the defaults exist
   for (let i = 0; i < defaults.length; i++)

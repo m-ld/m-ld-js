@@ -19,10 +19,17 @@ export type {
 /** Utility interfaces shared with quadstore */
 export { Prefixes };
 
-export interface TypedData<T = unknown> {
+export type TypedData<T = unknown> = {
   readonly type: Datatype<T>,
   readonly data: T
-}
+};
+
+export type JsonData = {
+  readonly type: undefined,
+  readonly data: unknown
+};
+
+export type QuadData<T = unknown> = TypedData<T> | JsonData
 
 declare module './quads' {
   export interface Quad {
@@ -30,7 +37,7 @@ declare module './quads' {
   }
 
   export interface Literal {
-    typed?: TypedData;
+    typed?: QuadData;
   }
 }
 
@@ -44,7 +51,7 @@ export function isLiteralTriple(triple: Triple): triple is LiteralTriple {
 
 /** Note `datatype.value === typed.type['@id']` */
 export interface TypedLiteral extends Literal {
-  typed: TypedData;
+  typed: QuadData;
 }
 
 export function isTypedLiteral(term: Term): term is TypedLiteral {
@@ -192,25 +199,33 @@ export class RdfFactory extends RdfDataFactory {
   /** @inheritDoc */
   literal(value: string, languageOrDatatype?: string | NamedNode): Literal;
   /**
-   * Creates a typed literal with a specific custom datatype
+   * Creates a typed literal with a specific custom datatype. If the datatype is
+   * of class `Datatype`, then the data is the Datatype's native Data type.
+   * Otherwise, the data is the relevant (but unknown) Datatype's JSON
+   * representation.
    */
-  literal(value: string, datatype: Datatype, data: any): TypedLiteral;
+  literal(
+    value: string,
+    datatype: NamedNode | Datatype,
+    data: unknown
+  ): TypedLiteral;
   /** @internal */
   literal(
     value: string,
     languageOrDatatype?: string | NamedNode | Datatype,
-    data?: any
+    data?: unknown
   ): Literal {
-    if (languageOrDatatype == null ||
-      typeof languageOrDatatype == 'string' ||
-      'termType' in languageOrDatatype) {
-      return super.literal(value, languageOrDatatype);
-    } else {
-      return Object.assign(
-        super.literal(value, this.namedNode(languageOrDatatype['@id'])),
-        { typed: { type: languageOrDatatype, data } }
-      );
+    let typed: QuadData | undefined;
+    if (typeof languageOrDatatype == 'object' && '@id' in languageOrDatatype) {
+      typed = { data, type: languageOrDatatype };
+      languageOrDatatype = this.namedNode(languageOrDatatype['@id']);
+    } else if (data != null) {
+      typed = { data, type: undefined };
     }
+    const literal = super.literal(value, languageOrDatatype);
+    if (typed != null)
+      Object.assign(literal, { typed });
+    return literal;
   }
 }
 

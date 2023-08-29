@@ -25,7 +25,8 @@ import { MeldAppContext } from '../config';
  *   new MemoryLevel, MqttRemotes, config,
  *   new ShapeConstrained(new PropertyShape({
  *     path: 'name', count: 1
- *   })));
+ *   }))
+ * );
  * ```
  *
  * @see https://www.w3.org/TR/shacl/

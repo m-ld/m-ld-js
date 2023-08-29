@@ -256,13 +256,21 @@ export class JrqlQuads {
   saveData(txc: TxnContext, patch: JrqlQuadOperation, batch: KvpBatch, tick?: number) {
     for (let quad of patch.inserts) {
       if (isTypedTriple(quad)) {
-        const { type: datatype, data } = quad.object.typed;
-        const json = datatype.toJSON ? datatype.toJSON(data) : data;
-        const dataKey = this.dataKeyFor(quad.object);
-        batch.put(dataKey, MsgPack.encode(json));
-        this.dataCache.set(quad.object, {
-          id: dataKey, ...quad.object.typed, ...this.getDataMeta(datatype)
-        }, txc);
+        if (quad.object.typed.type != null) {
+          const { type: datatype, data } = quad.object.typed;
+          const json = datatype.toJSON ? datatype.toJSON(data) : data;
+          const dataKey = this.dataKeyFor(quad.object);
+          batch.put(dataKey, MsgPack.encode(json));
+          this.dataCache.set(quad.object, {
+            id: dataKey, ...quad.object.typed, ...this.getDataMeta(datatype)
+          }, txc);
+        } else {
+          // Data is already JSON; not caching
+          batch.put(
+            this.dataKeyFor(quad.object),
+            MsgPack.encode(quad.object.typed.data)
+          );
+        }
       }
     }
     for (let [quad, { operation }] of patch.updates) {
