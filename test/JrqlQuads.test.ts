@@ -145,6 +145,26 @@ describe('json-rql Quads translation', () => {
     expect(quads[0].predicate.value).toBe('http://test.m-ld.org/#birthday');
     expect(quads[0].object.termType).toBe('Literal');
     expect(quads[0].object.value).toBe('Sat Jan 01 2000');
+    expect((<Literal>quads[0].object).typed!).toEqual({
+      data: new Date('01-01-2000'), type: dateDatatype
+    });
+  });
+
+  test('serialises json-able without datatype', () => {
+    indirectedData = () => undefined
+    const quads = jrql.in(JrqlMode.serial, ctx).toQuads({
+      '@id': 'fred',
+      birthday: {
+        '@id': 'Sat Jan 01 2000',
+        '@type': 'http://ex.org/date',
+        '@value': { year: 0, month: 1, date: 1 }
+      }
+    });
+    expect(quads.length).toBe(1);
+    expect(quads[0].subject.value).toBe('http://test.m-ld.org/fred');
+    expect(quads[0].predicate.value).toBe('http://test.m-ld.org/#birthday');
+    expect(quads[0].object.termType).toBe('Literal');
+    expect(quads[0].object.value).toBe('Sat Jan 01 2000');
     expect((<Literal>quads[0].object).typed).toEqual({
       data: { year: 0, month: 1, date: 1 }
     });

@@ -172,6 +172,12 @@ describe('Update utilities', () => {
     expect(box).toEqual({ '@id': 'foo', label: 'My box' });
   });
 
+  test('removes a deleted @type', () => {
+    const box = { '@id': 'foo', '@type': 'Box', size: 10 };
+    updateSubject(box, { foo: { '@delete': { '@id': 'foo', '@type': 'Box' }, '@insert': undefined } });
+    expect(box).toEqual({ '@id': 'foo', size: 10 });
+  });
+
   test('updates a value', () => {
     const box: Box = { '@id': 'foo', size: 10, label: 'My box' };
     updateSubject(box, {

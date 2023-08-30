@@ -5,6 +5,7 @@ import {
 import { isArray } from './engine/util';
 import { XS } from './ns';
 import { asValues, isAbsolute, minimiseValue } from './engine/jsonld';
+import { SubjectLike } from './subjects';
 
 /**
  * Javascript atom constructors for types that can be obtained from graph
@@ -322,7 +323,7 @@ export class JsProperty<T, S = unknown> {
    * @param subject the subject to inspect
    * @throws TypeError if the given property does not have the correct type
    */
-  value(subject: Subject): ValueConstructed<T, S> {
+  value(subject: SubjectLike): ValueConstructed<T, S> {
     const value = subject[this.name];
     if (value == null) {
       if (this.type instanceof JsContainerType) {
@@ -347,7 +348,7 @@ export class JsProperty<T, S = unknown> {
  * @category Utility
  */
 export function propertyValue<T, S>(
-  subject: Subject,
+  subject: SubjectLike,
   property: string,
   type: PropertyType<T>,
   subType?: AtomType<S>

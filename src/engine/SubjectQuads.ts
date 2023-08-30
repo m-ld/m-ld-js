@@ -254,18 +254,24 @@ export class SubjectQuads extends EventEmitter {
     } else if (ex.type !== '@none') {
       if (this.mode === JrqlMode.serial) {
         // When serialising, data with an ID is an indirected datatype:
-        // just emit the raw value JSON (we might not have the datatype)
-        if (ex.id)
-          return this.rdf.literal(ex.id, this.rdf.namedNode(ex.type), ex.raw);
+        if (ex.id) {
+          const datatype = context && this.indirectedData?.(ex.type, context.predicate);
+          if (datatype != null)
+            return this.rdf.literal(ex.id,
+              datatype, datatype.fromJSON?.(ex.raw) ?? ex.raw);
+          else // If no datatype, just emit the raw value JSON
+            return this.rdf.literal(ex.id,
+              this.rdf.namedNode(ex.type), ex.raw);
+        }
         // Otherwise, fall through to normal literal
       } else if (context != null) {
         const datatype = this.indirectedData?.(ex.type, context.predicate);
-        if (datatype != null) {
+        if (datatype) {
           const data = datatype.validate(value);
           return this.rdf.literal(datatype.getDataId(data), datatype, data);
         }
-        // Otherwise unknown datatype, fall through to normal literal
       }
+      // Normal literal (also if datatype not available)
       return this.rdf.literal(ex.canonical, this.rdf.namedNode(ex.type));
     } else {
       throw new RangeError('Cannot construct a literal with no type');

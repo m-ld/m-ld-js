@@ -256,7 +256,8 @@ class ValueSet extends IndexSet<Value> {
     readonly property: string,
     ts?: Iterable<Value>
   ) {
-    super(ts);
+    super();
+    this.addAll(ts); // Must be after super so property member exists
   }
 
   construct(ts: Iterable<Value> | undefined): IndexSet<Value> {
@@ -424,7 +425,7 @@ function isListUpdate(updatePart?: Subject): updatePart is List {
  * @category Utility
  */
 export function includeValues(
-  subject: Subject,
+  subject: SubjectLike,
   property: string,
   ...values: Value[]
 ) {
@@ -443,7 +444,7 @@ export function includeValues(
  * @category Utility
  */
 export function includesValue(
-  subject: Subject,
+  subject: SubjectLike,
   property: string,
   value?: Value | Value[]
 ): boolean {

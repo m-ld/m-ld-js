@@ -1142,6 +1142,30 @@ describe('SU-Set Dataset', () => {
       }]);
     });
 
+    test('applies a shared datatype insert', async () => {
+      extensions.push(new CounterType('http://test.m-ld.org/#likes'));
+      const willUpdate = firstValueFrom(ssd.updates);
+      await expect(ssd.apply(
+        remote.sentOperation({}, {
+          '@id': 'fred',
+          likes: { '@id': 'counterX', '@type': 'http://ex.org/#Counter', '@value': 0 }
+        }),
+        local.join(remote.time)
+      )).resolves.toBe(null);
+      await expect(willUpdate).resolves.toMatchObject({
+        '@insert': [{
+          '@id': 'http://test.m-ld.org/fred',
+          'http://test.m-ld.org/#likes': 0
+        }]
+      });
+      await expect(drain(ssd.read<Describe>({
+        '@describe': 'http://test.m-ld.org/fred'
+      }))).resolves.toMatchObject([{
+        '@id': 'http://test.m-ld.org/fred',
+        'http://test.m-ld.org/#likes': 0
+      }]);
+    });
+
     test('applies shared datatype operation', async () => {
       extensions.push(new CounterType('http://test.m-ld.org/#likes'));
       await expect(ssd.apply(
