@@ -151,7 +151,7 @@ describe('json-rql Quads translation', () => {
   });
 
   test('serialises json-able without datatype', () => {
-    indirectedData = () => undefined
+    indirectedData = () => undefined;
     const quads = jrql.in(JrqlMode.serial, ctx).toQuads({
       '@id': 'fred',
       birthday: {
