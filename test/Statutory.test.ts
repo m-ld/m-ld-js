@@ -34,8 +34,8 @@ describe('Statutory', () => {
       await expect(state.graph.asReadState.get('http://ext.m-ld.org/statutes/Statutory'))
         .resolves.toMatchObject({
           '@id': 'http://ext.m-ld.org/statutes/Statutory',
-          '@type': 'http://js.m-ld.org/#CommonJSExport',
           'http://js.m-ld.org/#require': '@m-ld/m-ld/ext/statutes',
+          'http://js.m-ld.org/#module': '@m-ld/m-ld/ext/statutes.js',
           'http://js.m-ld.org/#class': 'Statutory'
         });
     });
@@ -277,7 +277,11 @@ describe('Statutory', () => {
           [M_LD.sufficientCondition]: {
             '@id': 'http://test.m-ld.org/extCondition',
             '@type': ExtensionSubject.declare(
-              undefined, require.resolve('./Statutory.test'), 'TestExtProver')
+              undefined,
+              require.resolve('./Statutory.test'),
+              undefined,
+              'TestExtProver'
+            )
           }
         }]
       });

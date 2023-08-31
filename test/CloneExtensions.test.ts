@@ -106,7 +106,6 @@ describe('Top-level extensions loading', () => {
       await state.write({
         '@id': M_LD.extensions,
         '@list': [{
-          '@type': M_LD.JS.commonJsExport,
           [M_LD.JS.require]: thisModuleId,
           [M_LD.JS.className]: 'MockExtensions'
         }]
@@ -128,7 +127,6 @@ describe('Top-level extensions loading', () => {
       const update = await state.write({
         '@id': M_LD.extensions,
         '@list': [{
-          '@type': M_LD.JS.commonJsExport,
           [M_LD.JS.require]: thisModuleId,
           [M_LD.JS.className]: 'MockExtensions'
         }]

@@ -1,8 +1,10 @@
 import { isPropertyObject, Reference, Subject } from './jrql-support';
-import { GraphSubject, GraphUpdate, UpdateForm } from './api';
+import { GraphSubject, GraphUpdate, isGraphSubjects, UpdateForm } from './api';
 import { clone } from './engine/jsonld';
 import { isReference } from 'json-rql';
-import { SubjectPropertyValues } from './subjects';
+import { SubjectLike, SubjectPropertyValues } from './subjects';
+import { isArray } from './engine/util';
+import { SubjectGraph } from './engine/SubjectGraph';
 
 /**
  * Simplified form of {@link GraphUpdate}, with plain Subject arrays
@@ -71,6 +73,10 @@ export function asSubjectUpdates(update: SubjectsUpdate, copy?: true): SubjectUp
   return su;
 }
 
+/** Things that can be interpreted as an update to graph subjects */
+export type SubjectUpdateLike =
+  SubjectUpdates | GraphUpdate | GraphSubject | GraphSubject[] | undefined;
+
 /**
  * Applies an update to the given subject in-place. This method will correctly
  * apply the deleted and inserted properties from the update, accounting for
@@ -106,17 +112,20 @@ export function asSubjectUpdates(update: SubjectsUpdate, copy?: true): SubjectUp
  * @see [m-ld data semantics](http://spec.m-ld.org/#data-semantics)
  * @category Utility
  */
-export function updateSubject<T extends Subject & Reference>(
+export function updateSubject<T extends SubjectLike & Reference>(
   subject: T,
-  update: SubjectUpdates | GraphUpdate,
+  update: SubjectUpdateLike,
   ignoreUnsupported = true
 ): T {
   return new SubjectUpdater(update, ignoreUnsupported).update(subject);
 }
 
 /** @internal */
-function isGraphUpdate(update: SubjectUpdates | GraphUpdate): update is GraphUpdate {
-  return Object.keys(update).some(key => graphUpdateKeys.includes(key));
+function isGraphUpdate(
+  update: SubjectUpdateLike
+): update is GraphUpdate {
+  return update != null &&
+    Object.keys(update).some(key => graphUpdateKeys.includes(key));
 }
 
 /**
@@ -128,16 +137,25 @@ function isGraphUpdate(update: SubjectUpdates | GraphUpdate): update is GraphUpd
  */
 export class SubjectUpdater {
   private readonly verbForSubject:
-    (subject: GraphSubject, key: keyof GraphUpdate) => GraphSubject | undefined;
+    (subject: SubjectLike & Reference, key: keyof GraphUpdate) => Subject | undefined;
   private readonly done = new Set<object>();
 
   constructor(
-    update: SubjectUpdates | GraphUpdate,
+    update: SubjectUpdateLike,
     readonly ignoreUnsupported = true
   ) {
-    if (isGraphUpdate(update)) {
+    if (update == null) {
+      this.verbForSubject = () => undefined;
+    } else if (isGraphUpdate(update)) {
       this.verbForSubject = (subject, key) =>
         update[key].graph.get(subject['@id']);
+    } else if (isArray(update)) {
+      const graph = isGraphSubjects(update) ? update.graph : new SubjectGraph(update).graph;
+      this.verbForSubject = (subject, key) =>
+        key === '@insert' ? graph.get(subject['@id']) : undefined;
+    } else if ('@id' in update) {
+      this.verbForSubject = (subject, key) =>
+        key === '@insert' && update['@id'] === subject['@id'] ? update : undefined;
     } else {
       this.verbForSubject = (subject, key) =>
         subject['@id'] in update ? update[subject['@id']][key] : undefined;
@@ -150,7 +168,7 @@ export class SubjectUpdater {
    * @returns the given subject, for convenience
    * @see {@link updateSubject}
    */
-  update<T extends Subject & Reference>(subject: T): T {
+  update<T extends SubjectLike & Reference>(subject: T): T {
     if (!this.done.has(subject)) {
       this.done.add(subject);
       const deletes = this.verbForSubject(subject, '@delete');

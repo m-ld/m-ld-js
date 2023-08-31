@@ -52,7 +52,7 @@ export class CloneExtensions extends OrmDomain implements StateManaged, MeldExte
   /** Represents the `@list` of the global `M_LD.extensions` list subject  */
   private readonly extensionSubjects: ManagedExtensionSubject[];
   private readonly combinedPlugins: MeldExtensions;
-  private _extensions: MeldPlugin[];
+  private readonly _extensions: MeldPlugin[];
   private _defaultList: DefaultList;
 
   private constructor(
@@ -140,7 +140,7 @@ export class CloneExtensions extends OrmDomain implements StateManaged, MeldExte
           this.initSrcList(src, Subject, extensionSubjects, {
             get: i => extensionSubjects[i].src,
             set: async (i, v: GraphSubject) => extensionSubjects[i] = await orm.get(v,
-              src => new ManagedExtensionSubject(src, orm))
+              src => ManagedExtensionSubject.create(src, orm))
           });
         }
       }(src);
@@ -150,7 +150,7 @@ export class CloneExtensions extends OrmDomain implements StateManaged, MeldExte
 
   private *iterateExtensions() {
     for (let extSubject of this.extensionSubjects) {
-      yield Promise.resolve(extSubject.singleton).catch(e => {
+      yield extSubject.singleton.catch(e => {
         this.log.warn('Failed to load extension', extSubject.className, e);
         return {}; // Empty extensions
       });
@@ -160,8 +160,12 @@ export class CloneExtensions extends OrmDomain implements StateManaged, MeldExte
 
 class ManagedExtensionSubject
   extends SingletonExtensionSubject<MeldPlugin & ExtensionSubjectInstance> {
-  protected newInstance(src: GraphSubject, orm: OrmUpdating) {
-    const extensions = super.newInstance(src, orm);
+  static async create(src: GraphSubject, orm: OrmUpdating) {
+    return new ManagedExtensionSubject(src, orm).ready;
+  }
+
+  protected async newInstance(src: GraphSubject, orm: OrmUpdating) {
+    const extensions = await super.newInstance(src, orm);
     extensions.setExtensionContext?.(orm.domain);
     return extensions;
   }
@@ -174,7 +178,7 @@ function *withDefaults<T>(
   const foundDefault = Array<boolean>(defaults.length);
   for (let ext of extensions ?? []) {
     yield ext;
-    defaults.forEach((d, i) => foundDefault[i] ||= defaults[i].is(ext));
+    defaults.forEach((d, i) => foundDefault[i] ||= d.is(ext));
   }
   // Ensure the defaults exist
   for (let i = 0; i < defaults.length; i++)

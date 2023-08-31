@@ -1,5 +1,5 @@
 /**
- * [[include:socketio-remotes.md]]
+ * [[include:ext/socketio-remotes.md]]
  * @module IoRemotes
  * @internal
  */

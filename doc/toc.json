@@ -1,7 +1,11 @@
 [
   {
-    "url": "#getting-started",
-    "title": "Getting Started"
+    "url": "#quick-start",
+    "title": "Quick Start"
+  },
+  {
+    "url": "#introduction",
+    "title": "Introduction"
   },
   {
     "title": "Remotes",
@@ -34,6 +38,10 @@
     "title": "Concurrency"
   },
   {
+    "url": "#how-to",
+    "title": "How-To..."
+  },
+  {
     "url": "#security",
     "title": "Security"
   },
@@ -42,15 +50,11 @@
     "title": "Extensions"
   },
   {
-    "url": "/classes/tseqtext.html",
-    "title": "Text"
-  },
-  {
     "url": "/classes/ormdomain.html",
     "title": "ORM"
   },
   {
     "url": "https://github.com/m-ld/m-ld-js",
-    "title": "Source"
+    "title": "Source ↗"
   }
 ]

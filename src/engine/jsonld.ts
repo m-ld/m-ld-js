@@ -12,7 +12,7 @@ import {
   ActiveContext, expandIri, getContextValue, getInitialContext
 } from '@m-ld/jsonld/lib/context';
 import { isAbsolute } from '@m-ld/jsonld/lib/url';
-import { isBoolean, isDouble, isNumber, isString } from '@m-ld/jsonld/lib/types';
+import { isBoolean, isDouble, isNumber } from '@m-ld/jsonld/lib/types';
 import {
   ExpandedTermDef, isReference, isSet, isSubjectObject, isValueObject, isVocabReference
 } from '../jrql-support';
@@ -66,7 +66,7 @@ export class JsonldContext implements JsonldCompacter, JsonldExpander {
 
   static NONE: JsonldCompacter = {
     compactIri: iri => iri,
-    compactValue: (property, value) => value,
+    compactValue: (_property, value) => value,
     getTermDetail: () => null
   };
 
@@ -120,7 +120,7 @@ export class JsonldContext implements JsonldCompacter, JsonldExpander {
  * @param property the property.
  * @return all of the values for a subject's property as an array.
  */
-export function getValues(subject: { [key: string]: any }, property: string): Array<any> {
+export function getValues(subject: { [key: string]: unknown }, property: string): Array<any> {
   return asValues(subject[property]);
 }
 
@@ -170,7 +170,7 @@ export function expandValue(
   value: any,
   ctx?: JsonldExpander
 ): {
-  raw: any,
+  raw: any, // Raw JSON value (value, @value, @id or @vocab)
   canonical: string, // Canonical expanded or lexical value
   type: '@id' | '@vocab' | Iri | '@none',
   language?: string,

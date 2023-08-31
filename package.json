@@ -13,6 +13,7 @@
     "./ext/socket.io-server": "./ext/socket.io/server/index.js",
     "./ext/socket.io/server": "./ext/socket.io/server/index.js",
     "./ext/ably": "./ext/ably/index.js",
+    "./ext/html": "./ext/html/index.js",
     "./ext/wrtc": "./ext/wrtc/index.js",
     "./ext/security": "./ext/security/index.js",
     "./ext/shacl": "./ext/shacl/index.js",
@@ -30,9 +31,11 @@
     "dev+log": "jest --watch --runInBand",
     "compliance": "tsc --incremental && node compliance/test.js",
     "ver": "echo $npm_package_version",
-    "doc-watch": "onchange -d 1000 'src/**/*.ts' 'doc/**/*.*' 'typedoc.js' -- typedoc",
-    "doc-serve": "browser-sync start --server _site --files _site --cors",
-    "doc-dev": "typedoc && concurrently \"npm run doc-watch\" \"tsup --watch\" \"npm run doc-serve\""
+    "doc-dev": "concurrently \"tsup --watch\" \"npm run doc-start\"",
+    "doc-start": "typedoc && concurrently \"npm run doc-serve\"  \"npm run doc-watch\"",
+    "doc-serve": "browser-sync start --server _site --cors --port 3000",
+    "doc-watch": "onchange -d 1000 -k 'src/**/*.ts' 'doc/**/*.*' 'typedoc.js' -- npm run doc-reserve",
+    "doc-reserve": "typedoc && browser-sync reload --port 3000"
   },
   "repository": {
     "type": "git",
@@ -46,7 +49,7 @@
   "homepage": "https://js.m-ld.org/",
   "devDependencies": {
     "@m-ld/io-js-build": "^0.1.0",
-    "@m-ld/m-ld-test": "^0.1.1-edge.1",
+    "@m-ld/m-ld-test": "^0.1.1-edge.3",
     "@m-ld/typedoc-theme": "^0.1.4",
     "@peculiar/webcrypto": "^1.2.3",
     "@types/jest": "^29.0.1",
@@ -120,7 +123,7 @@
     "lru-cache": "^6.0.0",
     "marky": "^1.2.1",
     "mqtt-pattern": "^1.2.0",
-    "quadstore": "^12.0.1",
+    "quadstore": "^12.1.0",
     "quadstore-comunica": "^3.1.0",
     "queue-microtask": "^1.2.3",
     "rdf-data-factory": "^1.0.4",

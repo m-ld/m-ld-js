@@ -4,7 +4,7 @@ import {
 } from '../jrql-support';
 import { Quad_Subject, Term, Triple } from './quads';
 import { JRQL, RDF, XS } from '../ns';
-import { GraphSubject, GraphSubjects, isSharedDatatype } from '../api';
+import { GraphSubject, GraphSubjects } from '../api';
 import { deepValues, isArray, setAtPath } from './util';
 import { addPropertyObject, getContextType, toIndexNumber } from './jrql-util';
 import { JsonldContext } from './jsonld';
@@ -154,16 +154,18 @@ export function jrqlValue(
     let value: any = object.value, id: string | null = null;
     // If the literal has attached data, use that instead of the value
     if (object.typed != null) {
-      const { data, type: datatype } = object.typed;
-      const isShared = isSharedDatatype(datatype);
-      value = serial ?
-        datatype.toJSON?.(data) ?? data :
-        datatype.toValue?.(data) ?? data;
-      if (serial && isShared)
+      value = object.typed.data;
+      if (serial) {
+        if (object.typed.type?.toJSON)
+          value = object.typed.type.toJSON(value);
         id = object.value;
-      if (isValueObject(value)) {
-        type = value['@type'] ?? type;
-        value = value['@value'];
+      } else {
+        if (object.typed.type?.toValue)
+          value = object.typed.type.toValue(value);
+        if (isValueObject(value)) {
+          type = value['@type'] ?? type;
+          value = value['@value'];
+        }
       }
     }
     // Always inline m-ld API compatible types
@@ -180,10 +182,10 @@ export function jrqlValue(
         return Buffer.isBuffer(value) ? value :
           Buffer.from(value, 'base64');
     }
-    // Construct a value object
-    const jrqlType = type === RDF.JSON ? '@json' :
-      ctx.compactIri(type, { vocab: true });
-    const valueObject: ValueObject = { '@value': value, '@type': jrqlType };
+    // Construct a value object; JSON is a special case
+    const valueObject: ValueObject = type === RDF.JSON ?
+      { '@value': id == null ? JSON.parse(value) : value, '@type': '@json' } :
+      { '@value': value, '@type': ctx.compactIri(type, { vocab: true }) };
     if (id != null)
       valueObject['@id'] = id;
     return !serial && typeof property == 'string' ?

@@ -1,4 +1,4 @@
-import { any, anyName, blank, IndirectedData, isSharedDatatype } from '../api';
+import { any, anyName, blank, IndirectedData } from '../api';
 import {
   Atom, Constraint, Expression, InlineConstraint, isInlineConstraint, isPropertyObject, isReference,
   isSet, isSubjectObject, Reference, Subject, SubjectPropertyObject, Variable
@@ -252,17 +252,26 @@ export class SubjectQuads extends EventEmitter {
     } else if (ex.language) {
       return this.rdf.literal(ex.canonical, ex.language);
     } else if (ex.type !== '@none') {
-      if (context != null) {
+      if (this.mode === JrqlMode.serial) {
+        // When serialising, data with an ID is an indirected datatype:
+        if (ex.id) {
+          const datatype = context && this.indirectedData?.(ex.type, context.predicate);
+          if (datatype != null)
+            return this.rdf.literal(ex.id,
+              datatype, datatype.fromJSON?.(ex.raw) ?? ex.raw);
+          else // If no datatype, just emit the raw value JSON
+            return this.rdf.literal(ex.id,
+              this.rdf.namedNode(ex.type), ex.raw);
+        }
+        // Otherwise, fall through to normal literal
+      } else if (context != null) {
         const datatype = this.indirectedData?.(ex.type, context.predicate);
-        const serialising = this.mode === JrqlMode.serial;
-        // When serialising, shared datatype without an @id is id-only
-        if (datatype != null && (!serialising || !isSharedDatatype(datatype) || ex.id)) {
-          const data = serialising ?
-            datatype.fromJSON?.(ex.raw) ?? ex.raw : // coming from protocol
-            datatype.validate(value); // coming from the app
-          return this.rdf.literal(ex.id || datatype.getDataId(data), datatype, data);
+        if (datatype) {
+          const data = datatype.validate(value);
+          return this.rdf.literal(datatype.getDataId(data), datatype, data);
         }
       }
+      // Normal literal (also if datatype not available)
       return this.rdf.literal(ex.canonical, this.rdf.namedNode(ex.type));
     } else {
       throw new RangeError('Cannot construct a literal with no type');

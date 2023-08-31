@@ -1,9 +1,9 @@
 import { MockGraphState, mockInterim, MockRemotes, testConfig, testContext } from './testClones';
-import { OrmDomain } from '../src/orm';
+import { OrmDomain, OrmUpdating } from '../src/orm';
 import { PropertyShape, ShapeConstrained } from '../src/shacl';
 import { SingletonExtensionSubject } from '../src/orm/ExtensionSubject';
 import { PropertyShapeSpec } from '../src/shacl/PropertyShape';
-import { clone, MeldClone } from '../src/index';
+import { clone, GraphSubject, MeldClone } from '../src/index';
 import { MemoryLevel } from 'memory-level';
 
 describe('Shape constrained extension', () => {
@@ -39,11 +39,17 @@ describe('Shape constrained extension', () => {
 
     afterEach(() => state.close());
 
+    class MockShapeControlledExtensionSubject extends SingletonExtensionSubject<ShapeConstrained> {
+      static async create(src: GraphSubject, orm: OrmUpdating) {
+        return new MockShapeControlledExtensionSubject(src, orm).ready;
+      }
+    }
+
     async function installShapeConstrained(spec: PropertyShapeSpec) {
       await state.write(ShapeConstrained.declare(0, PropertyShape.declare(spec)));
       return domain.updating(state.graph.asReadState, async orm => (await orm.get({
         '@id': 'http://ext.m-ld.org/shacl/ShapeConstrained'
-      }, src => new SingletonExtensionSubject<ShapeConstrained>(src, orm))).singleton);
+      }, src => MockShapeControlledExtensionSubject.create(src, orm))).singleton);
     }
 
     test('initialises with property shape', async () => {

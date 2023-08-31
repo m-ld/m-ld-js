@@ -11,7 +11,7 @@ Supported pattern types for this engine are (follow the links for examples):
 - [Group](/interfaces/group.html) or [Subject](/interfaces/subject.html) (the shorthand way to insert data)
 - [Update](/interfaces/update.html) (the longhand way to insert or delete data)
 
-> 🚧 *If you have a requirement for an unsupported pattern, please
+> 💡 *If you have a requirement for an unsupported pattern, please
 > [contact&nbsp;us](https://m-ld.org/hello/) to discuss your use-case.* You can
 > browse the full **json-rql** syntax at
 > [json-rql.org](http://json-rql.org/).

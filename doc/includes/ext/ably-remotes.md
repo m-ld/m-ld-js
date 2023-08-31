@@ -6,8 +6,9 @@ for global deployments without the need to self-manage a broker.
 
 The `AblyRemotes` class and its companion configuration class `MeldAblyConfig`
 can be imported or required from `'@m-ld/m-ld/ext/ably'`. You must also 
-install the [ably](https://www.npmjs.com/package/ably) package
-as a peer of `@m-ld/m-ld`.
+install the [ably](https://www.npmjs.com/package/ably) package as a peer of `@m-ld/m-ld`.
+
+A bundle is also available at `http://js.m-ld.org/ext/ably.mjs`.
 
 The configuration interface adds an `ably` key to the base
 [`MeldConfig`](interfaces/meldconfig.html). The content of this key is an Ably

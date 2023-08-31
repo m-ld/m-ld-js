@@ -107,7 +107,7 @@ export class PropertyShape extends Shape {
    * @todo inverse properties: which subject is returned?
    * @todo respect targetClass
    */
-  async affected(state: MeldReadState, update: GraphUpdate): Promise<GraphUpdate> {
+  async affected(_state: MeldReadState, update: GraphUpdate): Promise<GraphUpdate> {
     return {
       '@delete': this.filterGraph(update['@delete']),
       '@insert': this.filterGraph(update['@insert']),
@@ -133,9 +133,9 @@ export class PropertyShape extends Shape {
         return updated[id] = { old, final: old.clone() };
       };
       await Promise.all(mapIter(this.shape.genSubjectValues(update['@delete']), async del =>
-        (await loadUpdated(del.subject['@id'])).final.delete(...del.values)));
+        (await loadUpdated(del.subject['@id'])).final.delete(...del.values())));
       await Promise.all(mapIter(this.shape.genSubjectValues(update['@insert']), async ins =>
-        (await loadUpdated(ins.subject['@id'])).final.insert(...ins.values)));
+        (await loadUpdated(ins.subject['@id'])).final.insert(...ins.values())));
       return Object.values(updated);
     }
 
@@ -193,12 +193,12 @@ export class PropertyShape extends Shape {
     }
 
     private checkMinCount(spv: SubjectPropertySet<GraphSubject>) {
-      if (this.shape.minCount != null && spv.values.length < this.shape.minCount)
+      if (this.shape.minCount != null && spv.values().length < this.shape.minCount)
         return this.nonConformance(spv, ConstraintComponent.MinCount);
     }
 
     private checkMaxCount(spv: SubjectPropertySet<GraphSubject>) {
-      if (this.shape.maxCount != null && spv.values.length > this.shape.maxCount)
+      if (this.shape.maxCount != null && spv.values().length > this.shape.maxCount)
         return this.nonConformance(spv, ConstraintComponent.MaxCount);
     }
   };
@@ -209,11 +209,11 @@ export class PropertyShape extends Shape {
       const finalValues = await this.loadFinalValues(await this.interim.update);
       return array(await Promise.all(finalValues.map(async ({ old, final }) => {
         // Final values is (prior + hidden) - deleted + inserted
-        const values = this.sort(final.values), { minCount, maxCount } = this.shape;
+        const values = this.sort(final.values()), { minCount, maxCount } = this.shape;
         // If not enough, re-assert prior maximal values that were deleted
         if (minCount != null && values.length < minCount) {
           // We need the values that were actually deleted
-          const reinstate = this.sort(final.deletes(old.values))
+          const reinstate = this.sort(final.deletes(old.values()))
             .slice(0, minCount - values.length);
           const correction = { '@insert': final.minimalSubject(reinstate) as GraphSubject };
           this.interim.assert(correction);

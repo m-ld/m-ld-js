@@ -1,6 +1,8 @@
 import { ExtensionSubject, OrmUpdating } from '../orm';
 import { GraphSubject, MeldPlugin, SharedDatatype, UUID } from '../api';
-import { Constraint, Expression, isConstraint, Subject, VocabReference } from '../jrql-support';
+import {
+  Constraint, Expression, isConstraint, isTextSplice, Subject, VocabReference
+} from '../jrql-support';
 import { M_LD, SH, XS } from '../ns';
 import { Iri } from '@m-ld/jsonld';
 import { TSeq, TSeqOperation } from '.';
@@ -11,13 +13,15 @@ import { JsProperty } from '../js-support';
 import { TSeqOperable } from './TSeqOperable';
 
 /**
- * This extension allows an app to embed collaborative text in a domain. When
- * declared for a certain property with a string value, the string should be
- * updated using the `@splice` operator; and updates coming from the domain will
- * also provide precise changes using `@splice`, as follows. The overall effect
- * is that the string property can be manipulated concurrently by multiple users
- * with the result being a merge of their edits (rather than an array of
- * conflicting string values, as would otherwise be the case).
+ * This extension allows an app to embed collaborative text in a domain.
+ *
+ * When the extension is declared for a certain property with a string value,
+ * the string should be updated using the `@splice` operator; and updates coming
+ * from the domain will also provide precise changes using `@splice`, as
+ * follows. The overall effect is that the string property can be manipulated
+ * concurrently by multiple users with the result being a merge of their edits
+ * (rather than an array of conflicting string values, as would otherwise be the
+ * case).
  *
  * The extension should be declared at runtime in the data using {@link declare},
  * or provided (combined with other plugins) during clone initialisation, e.g.
@@ -51,6 +55,10 @@ import { TSeqOperable } from './TSeqOperable';
  * To generate splices, applications may consider the utility function {@link textDiff}.
  *
  * To apply splices, applications may consider using {@link updateSubject}.
+ *
+ * [[include:live-code-setup.script.html]]
+ * [[include:how-to/domain-setup.md]]
+ * [[include:how-to/text.md]]
  *
  * @see TSeq
  * @category Experimental
@@ -180,14 +188,9 @@ export class TSeqText
               return [state, state.splice(Infinity, 0, args)];
             break;
           case '@splice':
-            if (Array.isArray(args)) {
+            if (isTextSplice(args)) {
               const [index, deleteCount, content] = args;
-              // noinspection SuspiciousTypeOfGuard
-              if (typeof index == 'number' &&
-                typeof deleteCount == 'number' &&
-                (content == null || typeof content == 'string')) {
-                return [state, state.splice(index, deleteCount, content)];
-              }
+              return [state, state.splice(index, deleteCount, content)];
             }
         }
       }
@@ -204,7 +207,7 @@ export class TSeqText
 
   /** @internal */
   revert(state: TSeq, operation: TSeqOperation, revert: null): [TSeq, Expression] {
-    // @ts-ignore
+    // @ts-ignore - TODO
     return [undefined, undefined];
   }
 

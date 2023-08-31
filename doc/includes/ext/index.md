@@ -18,10 +18,10 @@ The extension's code module must be available to a global CommonJS-style `requir
 - In Node.js, the module is packaged in `@m-ld/m-ld`; no additional configuration is required.
 - In the browser, `require` is typically provided by the bundler. Since the module will be loaded dynamically, the bundler may need to be configured to guarantee the module is bundled, since it _may_ not be referenced statically by any code.
 
-> ⚠️ Note that while it's possible to change extensions at runtime (by changing their declarations in the data), this may require coordination between clones, to prevent outdated clones from acting incorrectly in ways that could cause data corruption or compromise security. Consult the extension's documentation for safe operation.
+> 💡 While it's possible to change extensions at runtime (by changing their declarations in the data), this may require coordination between clones, to prevent outdated clones from acting incorrectly in ways that could cause data corruption or compromise security. Consult the extension's documentation for safe operation.
 
 ### Writing Extensions
 
 Extension code is executed as required by the core engine or by another extension. Besides remotes, there are currently four types of custom extension called by the core engine, defined in the [MeldExtensions](/interfaces/meldextensions.html) API interface. To write an extension to the core, you must implement one or more of these types.
 
-> 🚧 Please do [contact us](https://m-ld.org/hello/) if you would like to understand more about extensions.
+> 💡 Please do [contact us](https://m-ld.org/hello/) if you would like to understand more about extensions.

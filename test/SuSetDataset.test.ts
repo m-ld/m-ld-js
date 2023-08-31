@@ -892,7 +892,7 @@ describe('SU-Set Dataset', () => {
 
   describe.each(
     [Infinity, 0] // Testing with unbounded data cache and none
-  )('indirected datatypes', (maxDataCacheSize) => {
+  )('datatypes', (maxDataCacheSize) => {
     let local: MockProcess, remote: MockProcess;
     let extensions: MeldPlugin[];
     let checkpoints: Subject<JournalCheckPoint>;
@@ -931,7 +931,14 @@ describe('SU-Set Dataset', () => {
       expect(getDataId).toBeCalled();
       // Operation has buffer value
       const [, , , upd, enc] = msg!.data;
-      expect(MeldEncoder.jsonFromBuffer(upd, enc)).toEqual([{}, { '@id': 'fred', photo }]);
+      expect(MeldEncoder.jsonFromBuffer(upd, enc)).toEqual([{}, {
+        '@id': 'fred',
+        photo: {
+          '@id': getDataId.mock.results[0].value,
+          '@type': 'xs:base64Binary',
+          '@value': photo
+        }
+      }]);
       // Update has value as given
       await expect(willUpdate).resolves.toMatchObject({ '@insert': [fredProfile] });
       // Retrieved state has value as given
@@ -1002,7 +1009,7 @@ describe('SU-Set Dataset', () => {
         local.join(remote.time)
       )).resolves.toBe(null);
       expect(validate).not.toBeCalled(); // coming from protocol, not app
-      expect(getDataId).toBeCalled();
+      expect(getDataId).not.toBeCalled(); // provided in update
       await expect(drain(ssd.read<Describe>({
         '@describe': 'http://test.m-ld.org/fred'
       }))).resolves.toEqual([{
@@ -1025,7 +1032,11 @@ describe('SU-Set Dataset', () => {
       expect(data.length).toBe(2);
       const datum = data.find((v): v is Snapshot.Inserts => 'inserts' in v)!;
       expect(datum).toBeDefined();
-      expect(MeldEncoder.jsonFromBuffer<any>(datum.inserts, datum.encoding).o).toEqual(photo);
+      expect(MeldEncoder.jsonFromBuffer<any>(datum.inserts, datum.encoding).o).toEqual({
+        '@id': byteArrayDatatype.getDataId(photo),
+        '@type': 'xs:base64Binary',
+        '@value': photo
+      });
       // Re-applying the snapshot recovers binary data
       await ssd.applySnapshot(local.snapshot(data), local.tick().time);
       await expect(drain(ssd.read<Describe>({
@@ -1082,7 +1093,7 @@ describe('SU-Set Dataset', () => {
         s: 'fred',
         p: '#likes',
         o: { '@type': 'http://ex.org/#Counter', '@value': 'counter1' },
-        op: { '@type': '@json', '@value': 1 }
+        op: { '@id': '\x00', '@type': '@json', '@value': 1 }
       }]);
       // Update has custom operation
       await expect(willUpdate).resolves.toMatchObject({
@@ -1131,6 +1142,30 @@ describe('SU-Set Dataset', () => {
       }]);
     });
 
+    test('applies a shared datatype insert', async () => {
+      extensions.push(new CounterType('http://test.m-ld.org/#likes'));
+      const willUpdate = firstValueFrom(ssd.updates);
+      await expect(ssd.apply(
+        remote.sentOperation({}, {
+          '@id': 'fred',
+          likes: { '@id': 'counterX', '@type': 'http://ex.org/#Counter', '@value': 0 }
+        }),
+        local.join(remote.time)
+      )).resolves.toBe(null);
+      await expect(willUpdate).resolves.toMatchObject({
+        '@insert': [{
+          '@id': 'http://test.m-ld.org/fred',
+          'http://test.m-ld.org/#likes': 0
+        }]
+      });
+      await expect(drain(ssd.read<Describe>({
+        '@describe': 'http://test.m-ld.org/fred'
+      }))).resolves.toMatchObject([{
+        '@id': 'http://test.m-ld.org/fred',
+        'http://test.m-ld.org/#likes': 0
+      }]);
+    });
+
     test('applies shared datatype operation', async () => {
       extensions.push(new CounterType('http://test.m-ld.org/#likes'));
       await expect(ssd.apply(
@@ -1148,7 +1183,7 @@ describe('SU-Set Dataset', () => {
             s: 'fred',
             p: '#likes',
             o: { '@type': 'http://ex.org/#Counter', '@value': 'counterX' },
-            op: { '@type': '@json', '@value': 1 }
+            op: { '@id': '\x00', '@type': '@json', '@value': 1 }
           }
         }),
         local.join(remote.time)
@@ -1269,7 +1304,7 @@ describe('SU-Set Dataset', () => {
           s: 'fred',
           p: '#likes',
           o: { '@type': 'http://ex.org/#Counter', '@value': 'counter1' },
-          op: { '@type': '@json', '@value': 3 }
+          op: { '@id': '\x00', '@type': '@json', '@value': 3 }
         }
       ]);
     });
@@ -1290,7 +1325,7 @@ describe('SU-Set Dataset', () => {
           updates: {
             '@id': 'ab2', s: 'fred', p: '#likes',
             o: { '@type': 'http://ex.org/#Counter', '@value': 'counter1' },
-            op: { '@type': '@json', '@value': 1 }
+            op: { '@id': '\x00', '@type': '@json', '@value': 1 }
           }
         }),
         local.join(remote.time)
@@ -1302,7 +1337,7 @@ describe('SU-Set Dataset', () => {
         updates: {
           '@id': 'ab2', s: 'fred', p: '#likes',
           o: { '@type': 'http://ex.org/#Counter', '@value': 'counter1' },
-          op: { '@type': '@json', '@value': 3 } // Total increment in fusion
+          op: { '@id': '\x00', '@type': '@json', '@value': 3 } // Total increment in fusion
         }
       });
       await expect(ssd.apply(
