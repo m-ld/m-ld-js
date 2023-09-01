@@ -7,7 +7,7 @@ import { Expression, Value } from './jrql-support';
 import { Subscription } from 'rxjs';
 import { shortId } from './util';
 import { Iri } from '@m-ld/jsonld';
-import { QueryableRdfSource } from './rdfjs-support';
+import { BaseDeleteInsert, QueryableRdfSource, UpdatableRdf } from './rdfjs-support';
 import { Consumable, Flowable } from 'rx-flowable';
 import { MeldMessageType } from './ns/m-ld';
 import { MeldApp, MeldAppContext } from './config';
@@ -188,7 +188,7 @@ export interface MeldReadState extends QueryableRdfSource {
  * @see m-ld [specification](http://spec.m-ld.org/interfaces/meldupdate.html)
  * @category API
  */
-export interface MeldState extends MeldReadState {
+export interface MeldState extends MeldReadState, UpdatableRdf<MeldState> {
   /**
    * Actively writes data to the domain.
    *
@@ -1182,3 +1182,9 @@ export class MeldError extends Error {
  * @category API
  */
 export type UUID = string;
+
+/**
+ *
+ * @category API
+ */
+export type MeldQuadDeleteInsert = BaseDeleteInsert & { agree?: unknown };

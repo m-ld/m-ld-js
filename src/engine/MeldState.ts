@@ -1,10 +1,12 @@
 import { Query, Read, Subject, SubjectProperty, Update, Write } from '../jrql-support';
 import { Subscription } from 'rxjs';
 import { any, MeldState, MeldStateMachine, ReadResult, StateProc, UpdateProc } from '../api';
-import { CloneEngine, EngineState, EngineUpdateProc, StateEngine } from './StateEngine';
+import {
+  CloneEngine, EngineState, EngineUpdateProc, EngineWrite, StateEngine
+} from './StateEngine';
 import { QueryableRdfSourceProxy } from './quads';
 import { first, inflateFrom } from './util';
-import { QueryableRdfSource } from '../rdfjs-support';
+import { BaseDeleteInsert, QueryableRdfSource } from '../rdfjs-support';
 import { constructProperties, describeId } from './jrql-util';
 import { readResult } from './api-support';
 import async from './async';
@@ -24,7 +26,11 @@ abstract class ApiState extends QueryableRdfSourceProxy implements MeldState {
   }
 
   async write<W extends Write = Write>(request: W): Promise<MeldState> {
-    return this.construct(await this.state.write(request));
+    return this.construct(await this.state.write({ jrql: request }));
+  }
+
+  async updateQuads(update: BaseDeleteInsert): Promise<MeldState> {
+    return this.construct(await this.state.write({ rdf: update }));
   }
 
   delete(id: string): Promise<MeldState> {
@@ -74,7 +80,7 @@ export class ApiStateMachine extends ApiState implements MeldStateMachine {
     }
     // The API state machine also pretends to be a state
     super({
-      async write(request: Write) {
+      async write(request: EngineWrite) {
         await stateEngine.write(state => state.write(request));
         return this;
       },

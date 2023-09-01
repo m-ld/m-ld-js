@@ -11,7 +11,7 @@ import { count, map, observeOn, take, toArray } from 'rxjs/operators';
 import { TreeClock } from '../src/engine/clocks';
 import { MeldRemotes, Snapshot } from '../src/engine';
 import {
-  combinePlugins, Describe, GraphSubject, MeldError, MeldReadState, Read, Select, Update, Write
+  combinePlugins, Describe, GraphSubject, MeldError, MeldReadState, Read, Select, Update
 } from '../src';
 import { AbstractLevel } from 'abstract-level';
 import { jsonify } from './testUtil';
@@ -22,6 +22,7 @@ import { MeldOperationMessage } from '../src/engine/MeldOperationMessage';
 import { mockFn } from 'jest-mock-extended';
 import { SuSetDataset } from '../src/engine/dataset/SuSetDataset';
 import { JsonldContext } from '../src/engine/jsonld';
+import { EngineWrite } from '../src/engine/StateEngine';
 
 const fred = {
   '@id': 'http://test.m-ld.org/fred',
@@ -60,7 +61,7 @@ class TestDatasetEngine extends DatasetEngine {
   read(request: Read): Consumable<GraphSubject> {
     return inflateFrom(this.lock.share('state', 'test', () => super.read(request)));
   }
-  async write(request: Write): Promise<this> {
+  async write(request: EngineWrite): Promise<this> {
     return this.lock.exclusive('state', 'test', () => super.write(request));
   }
 }
@@ -113,12 +114,12 @@ describe('Dataset engine', () => {
     });
 
     test('stores a JSON-LD object', async () => {
-      await expect(silo.write(fred)).resolves.toBe(silo);
+      await expect(silo.write({ jrql: fred })).resolves.toBe(silo);
       expect(silo.status.value.ticks).toBe(1);
     });
 
     test('retrieves a JSON-LD object', async () => {
-      await silo.write(fred);
+      await silo.write({ jrql: fred });
       const subject = (await firstValueFrom(silo.read({
         '@describe': 'http://test.m-ld.org/fred'
       } as Describe))).value;
@@ -132,7 +133,7 @@ describe('Dataset engine', () => {
 
     test('has ticks after update', async () => {
       // noinspection ES6MissingAwait
-      silo.write(fred);
+      silo.write({ jrql: fred });
       await firstValueFrom(silo.dataUpdates);
       expect(silo.status.value).toEqual({ online: true, outdated: false, silo: true, ticks: 1 });
     });
@@ -140,15 +141,15 @@ describe('Dataset engine', () => {
     test('follow after initial ticks', async () => {
       const firstUpdate = firstValueFrom(silo.dataUpdates);
       // noinspection ES6MissingAwait
-      silo.write(fred);
+      silo.write({ jrql: fred });
       await expect(firstUpdate).resolves.toHaveProperty('@ticks', 1);
     });
 
     test('follow after current tick', async () => {
-      await silo.write(fred);
+      await silo.write({ jrql: fred });
       expect(silo.status.value.ticks).toBe(1);
       const firstUpdate = firstValueFrom(silo.dataUpdates);
-      await silo.write(wilma);
+      await silo.write({ jrql: wilma });
       await expect(firstUpdate).resolves.toHaveProperty('@ticks', 2);
     });
   });
@@ -191,7 +192,7 @@ describe('Dataset engine', () => {
       const updates = firstValueFrom(clone.dataUpdates.pipe(map(next => next['@ticks']),
         take(2), toArray()));
       // noinspection ES6MissingAwait
-      clone.write(fred);
+      clone.write({ jrql: fred });
       remoteUpdates.next(remote.sentOperation({}, wilma));
       // Note extra tick for constraint application in remote update
       const received = await updates;
@@ -212,7 +213,7 @@ describe('Dataset engine', () => {
     // 2. a failed transaction
     test('answers rev-up from next new clone after failure', async () => {
       // Insert with union is not valid
-      await clone.write(<Update>{ '@union': [] })
+      await clone.write({ jrql: <Update>{ '@union': [] } })
         .then(() => { throw 'Expecting error'; }, () => {});
       const thirdTime = await clone.newClock();
       await expect(clone.latch(() => clone.revupFrom(thirdTime))).resolves.toBeDefined();
@@ -228,7 +229,7 @@ describe('Dataset engine', () => {
       const third = new MockProcess(await clone.newClock());
       // Create a local operation the third party has seen but the remote has not
       const operated = firstValueFrom(clone.operations);
-      await clone.write(fred);
+      await clone.write({ jrql: fred });
       third.join((await operated).time);
       // Inject an operation from the third party
       remoteUpdates.next(third.sentOperation({}, wilma));
@@ -299,7 +300,7 @@ describe('Dataset engine', () => {
       const updates = firstValueFrom(clone.dataUpdates.pipe(count()));
       remoteUpdates.next(collabPrevOp);
       // Also enqueue a no-op write, which we can wait for - relying on queue ordering
-      await clone.write({ '@insert': [] } as Update);
+      await clone.write({ jrql: { '@insert': [] } as Update });
       await clone.close(); // Will complete the updates
       await expect(updates).resolves.toBe(0);
     });
@@ -405,7 +406,7 @@ describe('Dataset engine', () => {
     test('maintains fifo during rev-up', async () => {
       // We need local siloed update
       let clone = await TestDatasetEngine.instance({ backend });
-      await clone.write(fred);
+      await clone.write({ jrql: fred });
       await clone.close();
       // Need a remote with rev-ups to share
       const remotes = mockRemotes(NEVER, [true]);
@@ -430,8 +431,10 @@ describe('Dataset engine', () => {
       await revupCalled;
       // Do a new update during the rev-up, this should be delayed
       await clone.write({
-        '@id': 'http://test.m-ld.org/fred',
-        'http://test.m-ld.org/#name': 'Flintstone'
+        jrql: {
+          '@id': 'http://test.m-ld.org/fred',
+          'http://test.m-ld.org/#name': 'Flintstone'
+        }
       });
       // Provide a rev-up that pre-dates the local siloed update
       revUps.next(remote.sentOperation({}, wilma));
@@ -476,7 +479,7 @@ describe('Dataset engine', () => {
       // Delivered OK, but need additional check below to see ignored
       await expect(op.delivered).resolves.toBeUndefined();
       // Also enqueue a no-op write, which we can wait for - relying on queue ordering
-      await clone.write({ '@insert': [] } as Update);
+      await clone.write({ jrql: { '@insert': [] } as Update });
       await clone.close(); // Will complete the updates
       const arrived = jsonify(await updates);
       expect(arrived.length).toBe(1);
@@ -501,7 +504,7 @@ describe('Dataset engine', () => {
       const clone = await TestDatasetEngine.instance({ backend, remotes });
       // Create a local agreement
       const willAgree = firstValueFrom(clone.operations);
-      await clone.write({ '@insert': fred, '@agree': true });
+      await clone.write({ jrql: { '@insert': fred, '@agree': true } });
       const agreeOp = await willAgree;
       const tooOldSnapshot = remote.snapshot();
       remotes.snapshot = mockFn()
@@ -526,7 +529,7 @@ describe('Dataset engine', () => {
       const remotesLive = hotLive([null]);
       const remotes = mockRemotes(NEVER, remotesLive);
       const clone = await TestDatasetEngine.instance({ backend, remotes });
-      await clone.write({ '@graph': [fred, wilma, barney] });
+      await clone.write({ jrql: { '@graph': [fred, wilma, barney] } });
       let count = 0;
       await each(clone.read({ // Shares 'live' lock until all results consumed
         '@select': '?id', '@where': { '@id': '?id' }

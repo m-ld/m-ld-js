@@ -1,5 +1,5 @@
 import { Query, Read, Write } from '../jrql-support';
-import { GraphSubject, MeldUpdate } from '../api';
+import { GraphSubject, MeldQuadDeleteInsert, MeldUpdate } from '../api';
 import { LockManager } from './locks';
 import { Observable, Subscription } from 'rxjs';
 import { QueryableRdfSource } from '../rdfjs-support';
@@ -17,9 +17,11 @@ export interface CloneEngine extends EngineState {
   readonly dataUpdates: Observable<MeldUpdate>;
 }
 
+export type EngineWrite = { jrql: Write } | { rdf: MeldQuadDeleteInsert };
+
 export interface EngineState extends QueryableRdfSource {
   read(request: Read): Consumable<GraphSubject>;
-  write(request: Write): Promise<EngineState>;
+  write(request: EngineWrite): Promise<EngineState>;
   ask(pattern: Query): Promise<boolean>;
 }
 
@@ -101,7 +103,7 @@ export class StateEngine extends QueryableRdfSourceProxy {
       read(request: Read) {
         return this.src.read(request);
       }
-      async write(request: Write) {
+      async write(request: EngineWrite) {
         // Ensure all read handlers are complete before changing state
         await engine.handling;
         await this.src.write(request);

@@ -1,15 +1,5 @@
 import {
-  any,
-  clone,
-  Construct,
-  Describe,
-  Group,
-  MeldClone,
-  MeldUpdate,
-  Reference,
-  Select,
-  Subject,
-  Update
+  any, clone, Construct, Describe, Group, MeldClone, MeldUpdate, Reference, Select, Subject, Update
 } from '../src';
 import { MockRemotes, testConfig } from './testClones';
 import { blankRegex, genIdRegex } from './testUtil';
@@ -318,6 +308,52 @@ describe('MeldClone', () => {
           expect(binding['?name'].equals(rdf.literal('Fred'))).toBe(true);
           done();
         }));
+    });
+
+    test('inserts quad', async () => {
+      await expect(api.updateQuads({
+        insert: [rdf.quad(
+          rdf.namedNode('http://test.m-ld.org/fred'),
+          rdf.namedNode('http://test.m-ld.org/#name'),
+          rdf.literal('Fred')
+        )]
+      })).resolves.toBe(api);
+      await expect(api.get('fred')).resolves.toEqual({
+        '@id': 'fred', name: 'Fred'
+      });
+    });
+
+    test('deletes quad', async () => {
+      await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
+      await expect(api.updateQuads({
+        delete: [rdf.quad(
+          rdf.namedNode('http://test.m-ld.org/fred'),
+          rdf.namedNode('http://test.m-ld.org/#name'),
+          rdf.literal('Fred')
+        )]
+      })).resolves.toBe(api);
+      await expect(api.get('fred')).resolves.toBeUndefined();
+    });
+
+    test('updates quad in procedure', async () => {
+      await api.write(async state => {
+        state = await state.write<Subject>({ '@id': 'fred', name: 'Fred' });
+        await expect(state.updateQuads({
+          delete: [rdf.quad(
+            rdf.namedNode('http://test.m-ld.org/fred'),
+            rdf.namedNode('http://test.m-ld.org/#name'),
+            rdf.literal('Fred')
+          )],
+          insert: [rdf.quad(
+            rdf.namedNode('http://test.m-ld.org/fred'),
+            rdf.namedNode('http://test.m-ld.org/#name'),
+            rdf.literal('Fred Flintstone')
+          )]
+        })).resolves.not.toBe(api);
+      });
+      await expect(api.get('fred')).resolves.toEqual({
+        '@id': 'fred', name: 'Fred Flintstone'
+      });
     });
   });
 

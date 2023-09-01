@@ -1,7 +1,7 @@
 import type { Bindings, DataFactory, NamedNode, Quad, Quad_Object, Term, Variable } from 'rdf-js';
 import { DataFactory as RdfDataFactory } from 'rdf-data-factory';
 import { IndexMap, IndexSet } from './indices';
-import { Binding, QueryableRdfSource } from '../rdfjs-support';
+import { Binding, QueryableRdfSource, UpdatableRdf } from '../rdfjs-support';
 import { Prefixes } from 'quadstore';
 import { Datatype } from '../api';
 import { Iri } from '@m-ld/jsonld';
@@ -76,13 +76,20 @@ export function unTypeTriple<T extends Triple>(triple: T): Omit<T, 'typed'> {
   return triple;
 }
 
-export abstract class QueryableRdfSourceProxy implements QueryableRdfSource {
+export abstract class QueryableRdfSourceProxy<I extends QueryableRdfSource = QueryableRdfSource>
+  implements QueryableRdfSource {
   match: QueryableRdfSource['match'] = (...args) => this.src.match(...args);
   // @ts-ignore - TS can't cope with overloaded query method
   query: QueryableRdfSource['query'] = (...args) => this.src.query(...args);
   countQuads: QueryableRdfSource['countQuads'] = (...args) => this.src.countQuads(...args);
 
-  protected abstract get src(): QueryableRdfSource;
+  protected abstract get src(): I;
+}
+
+export abstract class UpdatableRdfProxy<State>
+  extends QueryableRdfSourceProxy<UpdatableRdf<State> & QueryableRdfSource>
+  implements UpdatableRdf<State> {
+  updateQuads: UpdatableRdf<State>['updateQuads'] = (...args) => this.src.updateQuads(...args);
 }
 
 export class TripleMap<T, Q extends Triple = Triple> extends IndexMap<Q, T> {

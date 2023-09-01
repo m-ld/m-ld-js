@@ -4,7 +4,7 @@ import {
 } from '../../api';
 import { MeldLocal, MeldRemotes, OperationMessage, Recovery, Revup, Snapshot } from '..';
 import { liveRollup } from '../api-support';
-import { Pattern, Query, Read, Write } from '../../jrql-support';
+import { Query, Read } from '../../jrql-support';
 import {
   BehaviorSubject, concat, concatMap, debounce, defaultIfEmpty, EMPTY, firstValueFrom, from,
   interval, merge, Observable, of, OperatorFunction, partition, race, Subscriber, Subscription
@@ -21,7 +21,7 @@ import { checkLocked, LockManager, SHARED, SHARED_REENTRANT } from '../locks';
 import { levels } from 'loglevel';
 import { AbstractMeld, checkLive, comesAlive } from '../AbstractMeld';
 import { RemoteOperations } from './RemoteOperations';
-import { CloneEngine } from '../StateEngine';
+import { CloneEngine, EngineWrite } from '../StateEngine';
 import async from '../async';
 import { BaseStream } from '../../rdfjs-support';
 import { Consumable } from 'rx-flowable';
@@ -627,7 +627,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
 
   @checkNotClosed.async
   @checkLocked('state').async
-  async write(request: Write): Promise<this> {
+  async write(request: EngineWrite): Promise<this> {
     await this.lock.share('live', 'write', async () => {
       this.logRequest('write', request);
       // Take the send timestamp just before enqueuing the transaction. This
@@ -654,7 +654,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
       () => procedure(this.suset.readState));
   }
 
-  private logRequest(type: 'read' | 'write', request: Pattern) {
+  private logRequest(type: 'read' | 'write', request: {}) {
     if (this.log.getLevel() <= levels.DEBUG)
       this.log.debug(type, 'request', JSON.stringify(request));
   }
