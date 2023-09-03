@@ -27,8 +27,10 @@ export interface EngineState extends QueryableRdfSource {
 
 export type EngineUpdateProc =
   (update: MeldUpdate, state: EngineState) => PromiseLike<unknown> | void;
-export type EngineStateProc =
-  (state: EngineState) => PromiseLike<unknown> | unknown;
+export type EngineStateProc<T = unknown> =
+  (state: EngineState) => PromiseLike<T> | T;
+
+export const followUnsubscribed = Symbol('Unsubscribed');
 
 /**
  * Gates access to a {@link CloneEngine} such that its state is immutable during
@@ -50,26 +52,26 @@ export class StateEngine extends QueryableRdfSourceProxy {
     return this.state;
   }
 
-  follow(handler: EngineUpdateProc): Subscription {
+  follow(handler: EngineUpdateProc) {
     const key = this.handlers.push(handler) - 1;
-    return new Subscription(() => {
-      delete this.handlers[key];
-    });
+    return () => { delete this.handlers[key]; };
   }
 
   /** procedure and handler must not reject */
-  read(procedure: EngineStateProc, handler?: EngineUpdateProc): Subscription {
-    const subs = new Subscription;
+  read<T>(procedure: EngineStateProc<T>, subs?: Subscription, handler?: EngineUpdateProc) {
     // noinspection JSIgnoredPromiseFromCall – return subscription synchronously
-    this.clone.lock.share('state', 'read', async () => {
-      if (!subs.closed) {
-        if (handler != null)
-          subs.add(this.follow(handler));
-        await procedure(this.state);
-        // TODO destroy any unsubscribed queries?
+    return this.clone.lock.share<T | typeof followUnsubscribed>(
+      'state', 'read', async () => {
+        if (subs == null || !subs.closed) {
+          if (handler != null)
+            subs?.add(this.follow(handler));
+          return procedure(this.state);
+          // TODO destroy any unsubscribed queries?
+        } else {
+          return followUnsubscribed;
+        }
       }
-    });
-    return subs;
+    );
   }
 
   write(procedure: EngineStateProc): Promise<unknown> {

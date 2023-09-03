@@ -58,8 +58,9 @@ export interface QueryableRdfSource<Q extends BaseQuad = Quad>
 
 /**
  * Implicit supertype of Algebra.DeleteInsert that does not require a factory
+ * @category RDF/JS
  */
-export type BaseDeleteInsert = { delete?: Quad[], insert?: Quad[] };
+export type BaseDeleteInsert<Q extends BaseQuad = Quad> = { delete?: Q[], insert?: Q[] };
 
 /**
  * An RDF dataset representation that provides update semantics.
@@ -72,4 +73,23 @@ export interface UpdatableRdf<State> {
    * further modifications.
    */
   updateQuads(update: BaseDeleteInsert): Promise<State>;
+}
+
+/**
+ * An RDF dataset that transitions from one state to another via updates, which
+ * can be iterated over, for example to update some user state.
+ * @category RDF/JS
+ */
+export interface LiveRdf<State, Update extends BaseDeleteInsert> {
+  /**
+   * Obtains a generator of states, with the updates that led to them. The
+   * states are immutable until `next`, `return` or `throw` are called on the
+   * generator – if a `for await` loop is being used, these will be called by
+   * Javascript as the loop continues or terminates.
+   *
+   * The optional snapshot handler receives an initial state prior to any
+   * updates. Its passed state is immutable until the procedure's returned
+   * promise settles.
+   */
+  quadStates(snapshot?: (state: State) => Promise<unknown>): AsyncGenerator<[Update, State]>;
 }

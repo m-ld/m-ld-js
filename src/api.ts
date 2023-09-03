@@ -10,7 +10,7 @@ import { Iri } from '@m-ld/jsonld';
 import { BaseDeleteInsert, QueryableRdfSource, UpdatableRdf } from './rdfjs-support';
 import { Consumable, Flowable } from 'rx-flowable';
 import { MeldMessageType } from './ns/m-ld';
-import { MeldApp, MeldAppContext } from './config';
+import { MeldAppContext } from './config';
 import { EncodedOperation } from './engine';
 
 /**
@@ -182,7 +182,6 @@ export interface MeldReadState extends QueryableRdfSource {
  * until either a write is performed in the procedure, or the procedure's
  * asynchronous return promise resolves or rejects.
  *
- *
  * @see {@link MeldStateMachine.read}
  * @see {@link MeldStateMachine.write}
  * @see m-ld [specification](http://spec.m-ld.org/interfaces/meldupdate.html)
@@ -344,6 +343,24 @@ export type UpdateProc<U extends MeldPreUpdate = MeldUpdate, T = void> =
   (update: U, state: MeldReadState) => PromiseLike<T> | T;
 
 /**
+ * A subscription to a state machine. Can be unsubscribed to stop receiving
+ * updates. The subscription itself can also be async-iterated. Finally, the
+ * subscription may have a resolved value that can be awaited.
+ *
+ * When used as an async iterable, it's important to begin iteration
+ * synchronously in order not to miss any updates. It is safe to await the
+ * subscription resolved value, if applicable – but it's rare to need _both_ the
+ * resolved value _and_ iteration.
+ *
+ * When used as a promise, calling unsubscribe before the promise is settled may
+ * cause it to reject with `EmptyError`.
+ * @category API
+ */
+export type MeldStateSubscription<T = never> = Subscription &
+  AsyncGenerator<[MeldUpdate, MeldReadState]> &
+  PromiseLike<T>;
+
+/**
  * A m-ld state machine extends the {@link MeldState} API for convenience, but
  * note that the state of a machine is inherently mutable. For example, two
  * consecutive asynchronous reads will not necessarily operate on the same
@@ -354,32 +371,64 @@ export type UpdateProc<U extends MeldPreUpdate = MeldUpdate, T = void> =
 export interface MeldStateMachine extends MeldState {
   /**
    * Handle updates from the domain, from the moment this method is called. All
-   * data changes are signalled through the handler, strictly ordered according
-   * to the clone's logical clock. The updates can therefore be correctly used
-   * to maintain some other view of data, for example in a user interface or
-   * separate database. This will include the notification of 'rev-up' updates
-   * after a connect to the domain. To change this behaviour, ignore updates
-   * while the clone status is marked as `outdated`.
+   * data changes are signalled, strictly ordered according to the clone's
+   * logical clock. The updates can therefore be correctly used to maintain some
+   * other view of data, for example in a user interface or separate database.
+   * This will include the notification of 'rev-up' updates after a connect to
+   * the domain. To change this behaviour, ignore updates while the clone status
+   * is marked as `outdated`.
+   *
+   * The updates can be received either using the optional handler method, or by
+   * async-iterating the returned subscription, e.g.:
+   *
+   * ```typescript
+   * for await (let [update] of clone.follow()) {
+   *   // Do something with the update
+   * }
+   * ```
    *
    * This method is equivalent to calling {@link read} with a no-op procedure.
    *
    * @param handler a procedure to run for every update
    * @returns a subscription, allowing the caller to unsubscribe the handler
    */
-  follow(handler: UpdateProc): Subscription;
+  follow(handler?: UpdateProc): MeldStateSubscription;
 
   /**
    * Performs some read procedure on the current state, with notifications of
    * subsequent updates.
    *
-   * The state passed to the procedure is immutable and is guaranteed to remain
-   * 'live' until the procedure's return Promise resolves or rejects.
+   * The updates can be received either using the optional handler method, or by
+   * async-iterating the returned subscription, e.g.:
+   *
+   * ```typescript
+   * const subs = clone.read(async state => {
+   *   // Do something with the initial state
+   * });
+   * for await (let [update] of subs) {
+   *   // Do something with the updates that follow the initial state
+   * }
+   * ```
+   *
+   * > NOTE: if the state procedure throws, it's up to you to handle the
+   * rejection; otherwise a global unresolved rejection may occur.
+   *
+   * The states passed to the procedure and the handler are immutable and
+   * guaranteed to remain 'live' until the procedure's return Promise resolves
+   * or rejects. If iterating, the iterated states are immutable until `next`,
+   * `return` or `throw` are called on the generator – if a `for await` loop is
+   * being used, these will be called by Javascript as the loop continues or
+   * terminates.
    *
    * @param procedure a procedure to run for the current state
    * @param handler a procedure to run for every update that follows the state
    * in the procedure
+   * @returns a subscription, allowing the caller to unsubscribe the handler
    */
-  read(procedure: StateProc, handler?: UpdateProc): Subscription;
+  read<T>(
+    procedure: StateProc<MeldReadState, T>,
+    handler?: UpdateProc
+  ): MeldStateSubscription<T>;
 
   /**
    * Actively reads data from the domain.
@@ -388,9 +437,9 @@ export interface MeldStateMachine extends MeldState {
    * result, or calling `.then`.
    *
    * All results are guaranteed to derive from the current state; however since
-   * the observable results are delivered asynchronously, the current state is
-   * not guaranteed to be live in the subscriber. In order to keep this state
-   * alive during iteration (for example, to perform a consequential operation),
+   * the results are delivered asynchronously, the current state is not
+   * guaranteed to be live in the subscriber. In order to keep this state alive
+   * during iteration (for example, to perform a consequential operation),
    * perform the request in the scope of a read procedure instead.
    *
    * @param request the declarative read description
@@ -539,9 +588,6 @@ export interface MeldContext {
  * list your extension appears. The highest priority is `"0"`. The value is
  * decided by you, based on what you know about your extensions. In most cases
  * it won't matter, since extensions shouldn't interfere with each other.
- * - The `"@type"` identifies this extension as a Javascript module loaded in
- * [CommonJS](https://nodejs.org/docs/latest/api/modules.html) style. (We'll
- * support ES6 modules in future.)
  * - The `"http://js.m-ld.org/#require"` and `"http://js.m-ld.org/#class"`
  * properties tell the module loader how to instantiate your module class. It
  * will call a global `require` function with the first, dereference the second
@@ -1184,7 +1230,9 @@ export class MeldError extends Error {
 export type UUID = string;
 
 /**
- *
+ * Delete-insert of quads, augmented with m-ld-specific details.
+ * @todo indirected datatype values
+ * @todo shared datatype updates
  * @category API
  */
 export type MeldQuadDeleteInsert = BaseDeleteInsert & { agree?: unknown };

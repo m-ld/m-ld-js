@@ -1,7 +1,7 @@
 ```js
 import { updateSubject } from 'https://js.m-ld.org/ext/index.mjs';
 
-document.addEventListener('domainChanged', () => {
+document.addEventListener('domainChanged', async () => {
   shoppingList.innerHTML = '';
   const { state, genesis } = window.model;
   if (genesis) {
@@ -32,11 +32,11 @@ document.addEventListener('domainChanged', () => {
       }
     }
   };
-  state.read(async state => {
-    updateSubject(shopping, await state.get('shopping'));
-  }, update => {
-    updateSubject(shopping, update);
-  });
+
+  state.read(
+    async state => updateSubject(shopping, await state.get('shopping')),
+    update => updateSubject(shopping, update)
+  );
 });
 
 addItem.addEventListener('click', () => {

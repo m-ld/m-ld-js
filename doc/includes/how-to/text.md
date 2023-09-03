@@ -34,11 +34,10 @@ document.addEventListener('domainChanged', () => {
       return documentTextProxy;
     }
   };
-  window.model.state.read(async state => {
-    updateSubject(doc, await state.get('document'));
-  }, update => {
-    updateSubject(doc, update);
-  });
+  window.model.state.read(
+    async state => updateSubject(doc, await state.get('document')),
+    update => updateSubject(doc, update)
+  );
 });
 ```
 ```html

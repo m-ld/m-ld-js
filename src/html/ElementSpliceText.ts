@@ -51,12 +51,12 @@ export class ElementSpliceText<E extends HTMLElement> {
 
   private normalise() {
     // Replace line-breaks with text nodes containing \n
-    for (let child of this.element.childNodes) {
+    this.element.childNodes.forEach(child => {
       if (child.nodeName === 'BR')
         child.replaceWith(document.createTextNode('\n'));
       else if (child.nodeName !== '#text')
         child.remove();
-    }
+    });
     this.element.normalize();
   }
 

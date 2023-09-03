@@ -1,4 +1,4 @@
-import { firstValueFrom, Subject as Source } from 'rxjs';
+import { firstValueFrom, Subject as Source, Subscription } from 'rxjs';
 import { MeldUpdate } from '../src';
 import { LockManager } from '../src/engine/locks';
 import { CloneEngine, StateEngine } from '../src/engine/StateEngine';
@@ -81,7 +81,7 @@ describe('State Engine', () => {
       await expect(firstValueFrom(state.read({})))
         .resolves.toMatchObject({ value: { tick: 0 } })
         .catch(err => done(err));
-    }, async update => {
+    }, new Subscription(), async update => {
       expect(update).toMatchObject({ '@ticks': 1 });
       done();
     });
@@ -108,13 +108,14 @@ describe('State Engine', () => {
   });
 
   test('can unsubscribe a follow handler', done => {
-    states.follow(() => done.fail()).unsubscribe();
+    states.follow(() => done.fail())();
     states.write(state => state.write(noop)).then(() => done());
   });
 
   test('can unsubscribe a read follow handler', done => {
-    states.read(() => {
-    }, () => done.fail()).unsubscribe();
+    const subs = new Subscription();
+    states.read(() => {}, subs, () => done.fail());
+    subs.unsubscribe();
     states.write(state => state.write(noop)).then(() => done());
   });
 

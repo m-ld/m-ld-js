@@ -15,6 +15,7 @@ export { compareValues, getValues };
 /**
  * Subject utilities are generally tolerant of Javascript objects that are not
  * quite Subjects; for example, they may be various kinds of proxies.
+ * @category Utility
  */
 export type SubjectLike = Record<string, unknown>;
 

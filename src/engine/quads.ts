@@ -1,7 +1,7 @@
 import type { Bindings, DataFactory, NamedNode, Quad, Quad_Object, Term, Variable } from 'rdf-js';
 import { DataFactory as RdfDataFactory } from 'rdf-data-factory';
 import { IndexMap, IndexSet } from './indices';
-import { Binding, QueryableRdfSource, UpdatableRdf } from '../rdfjs-support';
+import { Binding, QueryableRdfSource } from '../rdfjs-support';
 import { Prefixes } from 'quadstore';
 import { Datatype } from '../api';
 import { Iri } from '@m-ld/jsonld';
@@ -84,12 +84,6 @@ export abstract class QueryableRdfSourceProxy<I extends QueryableRdfSource = Que
   countQuads: QueryableRdfSource['countQuads'] = (...args) => this.src.countQuads(...args);
 
   protected abstract get src(): I;
-}
-
-export abstract class UpdatableRdfProxy<State>
-  extends QueryableRdfSourceProxy<UpdatableRdf<State> & QueryableRdfSource>
-  implements UpdatableRdf<State> {
-  updateQuads: UpdatableRdf<State>['updateQuads'] = (...args) => this.src.updateQuads(...args);
 }
 
 export class TripleMap<T, Q extends Triple = Triple> extends IndexMap<Q, T> {
