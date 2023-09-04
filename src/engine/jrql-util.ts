@@ -131,11 +131,14 @@ export function toIndexNumber(
       return [indexKey];
     switch (typeof indexKey) {
       case 'string':
-        return toIndexNumber(indexKey.startsWith('data') ?
-          dataUrlData(indexKey, 'application/mld-li') : // 'data:,ℕ' or 'data:,ℕ,ℕ'
-          indexKey.includes(',') ?
-            indexKey.split(',').map(Number) : // 'ℕ,ℕ'
-            Number(indexKey), strict); // 'ℕ'
+        return toIndexNumber(
+          indexKey.startsWith('data') ?
+            dataUrlData(indexKey, 'application/mld-li') : // 'data:,ℕ' or 'data:,ℕ,ℕ'
+            indexKey.includes(',') ?
+              indexKey.split(',').map(Number) : // 'ℕ,ℕ'
+              Number(indexKey), // 'ℕ'
+          strict
+        );
       case 'object': // [ℕ,ℕ]
         if (isArray(indexKey) &&
           indexKey.length == 2 &&

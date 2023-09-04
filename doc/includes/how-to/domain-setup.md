@@ -35,7 +35,7 @@ newDomainButton.addEventListener('click', () => changeDomain());
   <a id="playgroundAnchor" target="_blank" title="go to playground">🛝</a>
   <input id="domainInput" type="text" placeholder="domain name" onfocus="this.select()"/>
   <button id="joinDomainButton">Join</button>
-  <button id="newDomainButton">New</button>
+  <button id="newDomainButton">New ⭐️</button>
   <hr/>
 </div>
 ```

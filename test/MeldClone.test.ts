@@ -314,28 +314,34 @@ describe('MeldClone', () => {
     });
 
     test('inserts quad', async () => {
-      await expect(api.updateQuads({
-        insert: [rdf.quad(
-          rdf.namedNode('http://test.m-ld.org/fred'),
-          rdf.namedNode('http://test.m-ld.org/#name'),
-          rdf.literal('Fred')
-        )]
-      })).resolves.toBe(api);
+      api.follow(captureUpdate.resolve);
+      const quad = rdf.quad(
+        rdf.namedNode('http://test.m-ld.org/fred'),
+        rdf.namedNode('http://test.m-ld.org/#name'),
+        rdf.literal('Fred')
+      );
+      await expect(api.updateQuads({ insert: [quad] })).resolves.toBe(api);
       await expect(api.get('fred')).resolves.toEqual({
         '@id': 'fred', name: 'Fred'
       });
+      const update = await captureUpdate;
+      expect(update['@delete'].quads).toEqual([]);
+      expect(update['@insert'].quads).toEqual([quad]);
     });
 
     test('deletes quad', async () => {
       await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
-      await expect(api.updateQuads({
-        delete: [rdf.quad(
-          rdf.namedNode('http://test.m-ld.org/fred'),
-          rdf.namedNode('http://test.m-ld.org/#name'),
-          rdf.literal('Fred')
-        )]
-      })).resolves.toBe(api);
+      api.follow(captureUpdate.resolve);
+      const quad = rdf.quad(
+        rdf.namedNode('http://test.m-ld.org/fred'),
+        rdf.namedNode('http://test.m-ld.org/#name'),
+        rdf.literal('Fred')
+      );
+      await expect(api.updateQuads({ delete: [quad] })).resolves.toBe(api);
       await expect(api.get('fred')).resolves.toBeUndefined();
+      const update = await captureUpdate;
+      expect(update['@delete'].quads).toEqual([quad]);
+      expect(update['@insert'].quads).toEqual([]);
     });
 
     test('updates quad in procedure', async () => {

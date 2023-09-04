@@ -42,7 +42,8 @@ export class StateEngine extends QueryableRdfSourceProxy {
   private handling: Promise<unknown>;
 
   constructor(
-    private readonly clone: CloneEngine) {
+    private readonly clone: CloneEngine
+  ) {
     super();
     this.newState();
     this.clone.dataUpdates.subscribe(this.nextState);
@@ -109,11 +110,11 @@ export class StateEngine extends QueryableRdfSourceProxy {
         // Ensure all read handlers are complete before changing state
         await engine.handling;
         await this.src.write(request);
-        // At this point, there should be a new state from the data update, but
-        // not if the write was a no-op
+        // At this point, there will be a new state from the data update unless
+        // the write was a no-op
         return engine.state;
       }
-      ask(pattern: Query): Promise<boolean> {
+      ask(pattern: Query) {
         return this.src.ask(pattern);
       }
     };

@@ -76,20 +76,7 @@ export interface UpdatableRdf<State> {
 }
 
 /**
- * An RDF dataset that transitions from one state to another via updates, which
- * can be iterated over, for example to update some user state.
+ * A read-only RDF dataset-like collection of Quads.
  * @category RDF/JS
  */
-export interface LiveRdf<State, Update extends BaseDeleteInsert> {
-  /**
-   * Obtains a generator of states, with the updates that led to them. The
-   * states are immutable until `next`, `return` or `throw` are called on the
-   * generator – if a `for await` loop is being used, these will be called by
-   * Javascript as the loop continues or terminates.
-   *
-   * The optional snapshot handler receives an initial state prior to any
-   * updates. Its passed state is immutable until the procedure's returned
-   * promise settles.
-   */
-  quadStates(snapshot?: (state: State) => Promise<unknown>): AsyncGenerator<[Update, State]>;
-}
+export type BaseDataset = ReadonlyArray<Quad>;

@@ -115,6 +115,10 @@ Here are usage docs and live coding examples to help get started with common pat
 
 [[include:how-to/text.md]]
 
+### Using the RDF/JS API
+
+[[include:how-to/rdfjs.md]]
+
 [[include:security.md]]
 
 [[include:ext/index.md]]

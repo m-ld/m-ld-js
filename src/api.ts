@@ -7,7 +7,7 @@ import { Expression, Value } from './jrql-support';
 import { Subscription } from 'rxjs';
 import { shortId } from './util';
 import { Iri } from '@m-ld/jsonld';
-import { BaseDeleteInsert, QueryableRdfSource, UpdatableRdf } from './rdfjs-support';
+import { BaseDataset, BaseDeleteInsert, QueryableRdfSource, UpdatableRdf } from './rdfjs-support';
 import { Consumable, Flowable } from 'rx-flowable';
 import { MeldMessageType } from './ns/m-ld';
 import { MeldAppContext } from './config';
@@ -231,12 +231,17 @@ export interface GraphSubjects extends Array<GraphSubject> {
    * by serialised to JSON as it may not be acyclic.
    */
   graph: ReadonlyMap<Iri, GraphSubject>;
+  /**
+   * The graph, presented as an RDF dataset. This field will not be included in
+   * the JSON representation of the graph.
+   */
+  quads: BaseDataset;
 }
 
 /** @internal */
 export namespace GraphSubjects {
   export const EMPTY: GraphSubjects =
-    Object.assign([], { graph: new Map() });
+    Object.assign([], { graph: new Map(), quads: [] });
 }
 
 /** @internal */

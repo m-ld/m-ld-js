@@ -236,7 +236,7 @@ export class SuSetDataset extends MeldEncoder {
       prepare: async txc => {
         const patch = 'jrql' in request ?
           await this.write(request.jrql, txc) :
-          toJrqlPatchQuads(request.rdf);
+          this.toJrqlPatchQuads(request.rdf);
         if (patch.isEmpty)
           return { return: null };
         txc.sw.next('check-constraints');
@@ -264,6 +264,13 @@ export class SuSetDataset extends MeldEncoder {
           ...txn, tidPatch, journaling, msg, trace, txc
         });
       }
+    });
+  }
+
+  private toJrqlPatchQuads(rdf: BaseDeleteInsert) {
+    return new JrqlPatchQuads({
+      deletes: rdf.delete?.map(this.toUserQuad),
+      inserts: rdf.insert?.map(this.toUserQuad)
     });
   }
 
@@ -922,11 +929,4 @@ export class SuSetDataset extends MeldEncoder {
 function getAgree(request: { rdf: MeldQuadDeleteInsert } | { jrql: Write }) {
   return 'jrql' in request ? isUpdate(request.jrql) ?
     request.jrql['@agree'] : undefined : request.rdf.agree;
-}
-
-function toJrqlPatchQuads(rdf: BaseDeleteInsert) {
-  return new JrqlPatchQuads({
-    deletes: rdf.delete,
-    inserts: rdf.insert
-  });
 }
