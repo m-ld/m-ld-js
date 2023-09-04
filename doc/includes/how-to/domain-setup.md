@@ -29,6 +29,9 @@ async function changeDomain(domainName) {
 
 joinDomainButton.addEventListener('click', () => changeDomain(domainInput.value));
 newDomainButton.addEventListener('click', () => changeDomain());
+
+document.querySelectorAll('.help').forEach(helpTemplate =>
+  helpDetails.appendChild(helpTemplate.content.cloneNode(true)));
 ```
 ```html
 <div>
@@ -36,6 +39,13 @@ newDomainButton.addEventListener('click', () => changeDomain());
   <input id="domainInput" type="text" placeholder="domain name" onfocus="this.select()"/>
   <button id="joinDomainButton">Join</button>
   <button id="newDomainButton">New ⭐️</button>
+  <details id="helpDetails">
+    <summary><small>help...</small></summary>
+    <p>This live code demo shows how to share live information with <b>m-ld</b>.</p>
+    <p>To get started with a new set of information (a "domain"), click New ⭐️ above. You can then interact with the mini-application below to create some information.</p>
+    <p>To share the information with a duplicate of this page:<ol><li>copy the domain name above</li><li>duplicate the browser tab</li><li>paste the domain name into the new page's domain input</li><li>click Join</li></ol></p>
+    <p>You can also share with the <b>m-ld</b> playground using the 🛝 button.</p>
+  </details>
   <hr/>
 </div>
 ```

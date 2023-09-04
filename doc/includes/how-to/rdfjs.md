@@ -52,8 +52,9 @@ PREFIX c: <http://example.org/cartoons#>
   <hr/>
   <div id="updatesDiv"></div>
   <template id="updateTemplate">
-    <details>
+    <details class="updateDetails">
       <summary>Update</summary>
+      <hr/>
       <label>DELETED triples</label>
       <textarea class="deleteTextarea" rows="5"></textarea>
       <label>INSERTED triples</label>
@@ -68,7 +69,7 @@ PREFIX c: <http://example.org/cartoons#>
 textarea {
     width: 100%;
 }
-details {
+.updateDetails {
   border: 1px solid #aaa;
   border-radius: 4px;
   padding: 0.5em;
