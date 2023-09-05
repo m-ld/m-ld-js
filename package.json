@@ -101,7 +101,10 @@
     },
     "moduleNameMapper": {
       "^@m-ld/m-ld/ext/(.*)$": "<rootDir>/src/$1"
-    }
+    },
+    "setupFilesAfterEnv": [
+      "<rootDir>/test/setup.ts"
+    ]
   },
   "dependencies": {
     "@ably/msgpack-js": "^0.4.0",

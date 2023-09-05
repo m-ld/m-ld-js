@@ -255,14 +255,14 @@ export class PropertyShape extends Shape {
     return new SubjectGraph(this.genMinimalSubjects(graph));
   }
 
-  private *genSubjectValues(subjects: SubjectGraph) {
+  private *genSubjectValues(subjects: GraphSubjects) {
     for (let subject of subjects) {
       if (this.path in subject)
         yield new SubjectPropertySet(subject, this.path);
     }
   }
 
-  private *genMinimalSubjects(subjects: SubjectGraph): Generator<GraphSubject> {
+  private *genMinimalSubjects(subjects: GraphSubjects): Generator<GraphSubject> {
     for (let spv of this.genSubjectValues(subjects))
       yield <GraphSubject>spv.minimalSubject();
   }

@@ -19,11 +19,11 @@ const state = await clone(new MemoryLevel(), IoRemotes, {
 successDiv.removeAttribute('hidden');
 domainInput.value = domainName;
 
-state.follow(update => {
+for await (let [update] of state.follow()) {
   for (let { name } of update['@insert'])
     successDiv.insertAdjacentHTML('beforeend',
       `<p>Welcome ${name}!</p>`);
-});
+}
 ```
 ```html
 <div id="successDiv" hidden>

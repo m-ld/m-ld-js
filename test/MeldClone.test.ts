@@ -1,21 +1,12 @@
 import {
-  any,
-  clone,
-  Construct,
-  Describe,
-  Group,
-  MeldClone,
-  MeldUpdate,
-  Reference,
-  Select,
-  Subject,
-  Update
+  any, clone, Construct, Describe, Group, MeldClone, MeldStateSubscription, MeldUpdate, Reference,
+  Select, Subject, Update
 } from '../src';
 import { MockRemotes, testConfig } from './testClones';
 import { blankRegex, genIdRegex } from './testUtil';
 import { DataFactory as RdfDataFactory, Quad } from 'rdf-data-factory';
 import { Factory as SparqlFactory } from 'sparqlalgebrajs';
-import { Subscription } from 'rxjs';
+import { EmptyError, Subscription } from 'rxjs';
 import { MemoryLevel } from 'memory-level';
 import { Future } from '../src/engine/Future';
 import { Binding } from '../src/rdfjs-support';
@@ -28,6 +19,8 @@ describe('MeldClone', () => {
     api = await clone(new MemoryLevel, MockRemotes, testConfig());
     captureUpdate = new Future;
   });
+
+  afterEach(() => api.close());
 
   test('retrieves a JSON-LD subject', async () => {
     api.follow(captureUpdate.resolve);
@@ -318,6 +311,58 @@ describe('MeldClone', () => {
           expect(binding['?name'].equals(rdf.literal('Fred'))).toBe(true);
           done();
         }));
+    });
+
+    test('inserts quad', async () => {
+      api.follow(captureUpdate.resolve);
+      const quad = rdf.quad(
+        rdf.namedNode('http://test.m-ld.org/fred'),
+        rdf.namedNode('http://test.m-ld.org/#name'),
+        rdf.literal('Fred')
+      );
+      await expect(api.updateQuads({ insert: [quad] })).resolves.toBe(api);
+      await expect(api.get('fred')).resolves.toEqual({
+        '@id': 'fred', name: 'Fred'
+      });
+      const update = await captureUpdate;
+      expect(update['@delete'].quads).toEqual([]);
+      expect(update['@insert'].quads).toEqual([quad]);
+    });
+
+    test('deletes quad', async () => {
+      await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
+      api.follow(captureUpdate.resolve);
+      const quad = rdf.quad(
+        rdf.namedNode('http://test.m-ld.org/fred'),
+        rdf.namedNode('http://test.m-ld.org/#name'),
+        rdf.literal('Fred')
+      );
+      await expect(api.updateQuads({ delete: [quad] })).resolves.toBe(api);
+      await expect(api.get('fred')).resolves.toBeUndefined();
+      const update = await captureUpdate;
+      expect(update['@delete'].quads).toEqual([quad]);
+      expect(update['@insert'].quads).toEqual([]);
+    });
+
+    test('updates quad in procedure', async () => {
+      await api.write(async state => {
+        state = await state.write<Subject>({ '@id': 'fred', name: 'Fred' });
+        await expect(state.updateQuads({
+          delete: [rdf.quad(
+            rdf.namedNode('http://test.m-ld.org/fred'),
+            rdf.namedNode('http://test.m-ld.org/#name'),
+            rdf.literal('Fred')
+          )],
+          insert: [rdf.quad(
+            rdf.namedNode('http://test.m-ld.org/fred'),
+            rdf.namedNode('http://test.m-ld.org/#name'),
+            rdf.literal('Fred Flintstone')
+          )]
+        })).resolves.not.toBe(api);
+      });
+      await expect(api.get('fred')).resolves.toEqual({
+        '@id': 'fred', name: 'Fred Flintstone'
+      });
     });
   });
 
@@ -1231,19 +1276,19 @@ describe('MeldClone', () => {
       });
     });
 
-    test('write state is predictable', done => {
+    test('write state is predictable', () => Promise.all([
       api.write(async state => {
         state = await state.write<Subject>({ '@id': 'fred', age: 40 });
+        await new Promise(resolve => setTimeout(resolve, 5));
         await expect(state.read<Describe>({
           '@describe': '?id', '@where': { '@id': '?id', age: 40 }
         }))
           // We only expect one person of that age
           .resolves.toMatchObject([{ '@id': 'fred', age: 40 }]);
-        done();
-      });
+      }),
       // Immediately make another write which could affect the query
-      api.write(state => state.write<Subject>({ '@id': 'wilma', age: 40 }));
-    });
+      api.write(state => state.write<Subject>({ '@id': 'wilma', age: 40 }))
+    ]));
 
     test('handler state follows writes', done => {
       let hadFred = false;
@@ -1335,6 +1380,157 @@ describe('MeldClone', () => {
         '@insert': { '@id': '?f', '@type': 'Jetson' }
       }).then(() => done());
     });
+
+    test('can async iterate to follow states', () => Promise.all([
+      (async function () {
+        // noinspection LoopStatementThatDoesntLoopJS
+        for await (let [update] of api.follow()) {
+          expect(update['@insert']).toEqual([{ '@id': 'fred', name: 'Fred' }]);
+          return;
+        }
+      })(),
+      api.write({ '@id': 'fred', name: 'Fred' })
+    ]));
+
+    test('states are immutable during async iterate', () => Promise.all([
+      (async function () {
+        for await (let [update, state] of api.follow()) {
+          // First update should be Fred
+          const { '@insert': [{ '@id': id }] } = update;
+          if (id === 'wilma')
+            return;
+          expect(id).toBe('fred');
+          // This separate write should have no effect on the state until next
+          api.write({ '@id': 'wilma', name: 'Wilma' }).then();
+          await new Promise(resolve => setTimeout(resolve, 5));
+          await expect(state.ask({ '@where': { '@id': 'wilma' } })).resolves.toBe(false);
+        }
+      })(),
+      api.write({ '@id': 'fred', name: 'Fred' })
+    ]));
+
+    test('immutable state is released by async break', () => Promise.all([
+      new Promise(async resolve => {
+        // noinspection LoopStatementThatDoesntLoopJS
+        for await (let [_update, state] of api.follow()) {
+          // This separate write should have no effect on the state until break
+          api.write({ '@id': 'wilma', name: 'Wilma' }).then(resolve);
+          await new Promise(resolve => setTimeout(resolve, 5));
+          await expect(state.ask({ '@where': { '@id': 'wilma' } })).resolves.toBe(false);
+          break;
+        }
+      }),
+      api.write({ '@id': 'fred', name: 'Fred' })
+    ]));
+
+    test('unsubscribe ends follow', () => Promise.all([
+      new Promise(async (resolve, reject) => {
+        const subs = api.follow();
+        for await (let [update, _state] of subs) {
+          const { '@insert': [{ '@id': id }] } = update;
+          if (id === 'wilma')
+            return reject('Wilma should not be notified!');
+          // This separate write should not appear in the follow...
+          api.write({ '@id': 'wilma', name: 'Wilma' }).then(resolve);
+          subs.unsubscribe(); // ... because we cancel the subscription
+        }
+      }),
+      api.write({ '@id': 'fred', name: 'Fred' })
+    ]));
+
+    test('unsubscribe after read cancels follow', () => Promise.all([
+      (async function () {
+        const subs = api.read(async () => {
+          await new Promise(resolve => setTimeout(resolve, 5));
+          subs.unsubscribe();
+          return 5;
+        });
+        // noinspection LoopStatementThatDoesntLoopJS
+        for await (let _anything of subs)
+          throw 'Follow should have cancelled!';
+      })(),
+      api.write({ '@id': 'fred', name: 'Fred' })
+    ]));
+
+    test('can async iterate immediately after read', () => Promise.all([
+      // This write should appear in the read but not the follow
+      api.write({ '@id': 'wilma', name: 'Wilma' }),
+      new Promise<void>(async resolve => {
+        const subs = api.read(async state => {
+          // This cheeky write should appear in the follow
+          api.write({ '@id': 'fred', name: 'Fred' }).then();
+          await expect(state.ask({ '@where': { '@id': 'wilma' } })).resolves.toBe(true);
+          await new Promise(resolve => setTimeout(resolve, 5));
+        });
+        // noinspection LoopStatementThatDoesntLoopJS
+        for await (let [update] of subs) {
+          expect(update['@insert']).toEqual([{ '@id': 'fred', name: 'Fred' }]);
+          return resolve();
+        }
+      })
+    ]));
+
+    test('can await read result and then follow', () => Promise.all([
+      // This write should appear in the read but not the follow
+      api.write({ '@id': 'wilma', name: 'Wilma' }),
+      new Promise<void>(async resolve => {
+        const subs = api.read(async state => {
+          // This cheeky write should appear in the follow
+          api.write({ '@id': 'fred', name: 'Fred' }).then();
+          await expect(state.ask({ '@where': { '@id': 'wilma' } })).resolves.toBe(true);
+          await new Promise(resolve => setTimeout(resolve, 5));
+          return 5;
+        });
+        expect(await subs).toBe(5);
+        // noinspection LoopStatementThatDoesntLoopJS
+        for await (let [update] of subs) {
+          expect(update['@insert']).toEqual([{ '@id': 'fred', name: 'Fred' }]);
+          return resolve();
+        }
+      })
+    ]));
+
+    test('can cancel read result with unsubscribe', async () => {
+      const subs = api.read(() =>
+        new Promise<number>(resolve => setTimeout(resolve, 5, 5)));
+      subs.unsubscribe();
+      await expect(subs).rejects.toBe(EmptyError);
+    });
+
+    test('cannot await read result for a pure follow', async () => {
+      const subs = api.follow();
+      await expect(subs).rejects.toBe(EmptyError);
+    });
+
+    test('delayed async iterate after read misses updates', async () => {
+      // Wait for the cheeky write in the read to complete
+      // (wrapped in an object to prevent resolve from settling the promise)
+      const { subs } = await new Promise<{ subs: MeldStateSubscription<void> }>(resolve => {
+        const subs = api.read(async state => {
+          api.write({ '@id': 'fred', name: 'Fred' }).then(() => resolve({ subs }));
+          await expect(state.ask({ '@where': { '@id': 'fred' } })).resolves.toBe(false);
+        });
+      });
+      api.write({ '@id': 'wilma', name: 'Wilma' }).then();
+      // noinspection LoopStatementThatDoesntLoopJS
+      for await (let [update] of subs) {
+        expect(update['@insert']).toEqual([{ '@id': 'wilma', name: 'Wilma' }]);
+        return;
+      }
+    });
+
+    test('can catch read procedure exception and still follow', () => Promise.all([
+      (async function () {
+        const subs = api.read(() => Promise.reject('Bang'));
+        await expect(subs).rejects.toBe('Bang');
+        // noinspection LoopStatementThatDoesntLoopJS
+        for await (let [update] of subs) {
+          expect(update).toMatchObject({ '@insert': [{ '@id': 'fred' }] });
+          return;
+        }
+      })(),
+      api.write({ '@id': 'fred', name: 'Fred' })
+    ]));
   });
 });
 

@@ -2,7 +2,7 @@ import { Iri } from '@m-ld/jsonld';
 import {
   isReference, isValueObject, Reference, Subject, SubjectProperty, Value, ValueObject
 } from '../jrql-support';
-import { Quad_Subject, Term, Triple } from './quads';
+import { Quad, RdfFactory, Term, Triple } from './quads';
 import { JRQL, RDF, XS } from '../ns';
 import { GraphSubject, GraphSubjects } from '../api';
 import { deepValues, isArray, setAtPath } from './util';
@@ -17,12 +17,16 @@ export interface RdfOptions {
   aliases?: GraphAliases,
   values?: ValueAliases,
   ctx?: JsonldContext,
-  serial?: true
+  serial?: boolean,
+  /** If provided, the caller is requesting resolved quads in the graph */
+  rdf?: RdfFactory
 }
 
 export class SubjectGraph extends Array<GraphSubject> implements GraphSubjects {
   /** Lazy instantiation of graph */
   _graph?: ReadonlyMap<Iri, GraphSubject>;
+  /** Triples, if the graph was created from RDF */
+  _quads?: Quad[];
 
   /**
    * Re-implementation of JSON-LD fromRDF with fixed options and simplifications:
@@ -34,16 +38,12 @@ export class SubjectGraph extends Array<GraphSubject> implements GraphSubjects {
    * @see https://github.com/m-ld/m-ld-js/issues/3
    */
   static fromRDF(triples: Triple[], opts: RdfOptions = {}): SubjectGraph {
-    return new SubjectGraph(Object.values(
-      triples.reduce<{ [id: string]: GraphSubject }>((byId, triple, i) => {
-        const subjectId = identifySubject(triple.subject, opts);
-        const subject = byId[subjectId] ??= { '@id': subjectId };
-        const property = identifyProperty(triple, opts);
-        const value = opts.values?.(i, triple) ??
-          jrqlValue(property, triple.object, opts.ctx, opts.serial);
-        addPropertyObject(subject, property, value);
-        return byId;
-      }, {})));
+    const byId: Record<string, GraphSubject> = {};
+    const apiQuads = [...processTriplesToSubjects(triples, byId, opts)];
+    const subjectGraph = new SubjectGraph(Object.values(byId));
+    if (opts.rdf)
+      subjectGraph._quads = apiQuads;
+    return subjectGraph;
   }
 
   /** numeric parameter is needed for Array constructor compliance */
@@ -74,6 +74,12 @@ export class SubjectGraph extends Array<GraphSubject> implements GraphSubjects {
     return this._graph;
   }
 
+  get quads() {
+    if (this._quads == null)
+      throw new TypeError('Quads are not available for this graph.');
+    return this._quads;
+  }
+
   ////////////////////////////////////////////////////////////////
   // Overrides of Array mutation methods
   pop() {
@@ -101,38 +107,65 @@ export class SubjectGraph extends Array<GraphSubject> implements GraphSubjects {
   }
 }
 
-function identifySubject(
-  subject: Quad_Subject,
-  { aliases, ctx }: RdfOptions
-): Iri {
-  if (subject.termType === 'BlankNode') {
-    return subject.value;
-  } else if (subject.termType === 'NamedNode') {
-    const maybeIri = aliases?.(subject.value, '@id') ?? subject.value;
-    if (!isArray(maybeIri))
-      return ctx ? ctx.compactIri(maybeIri) : maybeIri;
-  }
-  throw new SyntaxError('Subject @id alias must be an IRI or blank');
-}
+function *processTriplesToSubjects(
+  triples: Triple[],
+  subjects: Record<string, GraphSubject>,
+  opts: RdfOptions
+): Generator<Quad> {
+  // FIXME: If opts.rdf, we should sort the triples so list sub-items emit in order
+  for (let i = 0; i < triples.length; i++) {
+    const triple: Readonly<Triple> = triples[i];
+    // We output the API quad iff RDF is requested
+    const apiQuad: Quad | undefined = opts.rdf ? opts.rdf.quad(
+      triple.subject, triple.predicate, triple.object
+    ) : undefined;
 
-function identifyProperty(
-  triple: Triple,
-  { aliases, ctx }: RdfOptions
-): SubjectProperty {
-  if (triple.predicate.termType !== 'Variable') {
-    const property = aliases?.(triple.subject.value, triple.predicate.value) ??
-      aliases?.(null, triple.predicate.value) ?? triple.predicate.value;
-    return isArray(property) ? property :
-      jrqlProperty(triple.predicate.value, triple.object, ctx);
+    let subjectId: Iri | undefined;
+    if (triple.subject.termType === 'BlankNode') {
+      subjectId = triple.subject.value;
+    } else if (triple.subject.termType === 'NamedNode') {
+      const maybeIri =
+        opts.aliases?.(triple.subject.value, '@id') ?? triple.subject.value;
+      if (!isArray(maybeIri)) {
+        if (apiQuad != null && opts.rdf != null)
+          apiQuad.subject = opts.rdf.namedNode(maybeIri);
+        subjectId = opts.ctx ? opts.ctx.compactIri(maybeIri) : maybeIri;
+      }
+    }
+    if (subjectId == null)
+      throw new SyntaxError('Subject @id alias must be an IRI or blank');
+
+    let property: SubjectProperty | undefined;
+    if (triple.predicate.termType !== 'Variable') {
+      property = opts.aliases?.(triple.subject.value, triple.predicate.value) ??
+        opts.aliases?.(null, triple.predicate.value) ?? triple.predicate.value;
+      if (isArray(property)) {
+        if (apiQuad != null && opts.rdf != null) {
+          // Construct an RDF container member
+          const [, index] = property;
+          apiQuad.predicate = opts.rdf.namedNode(`${RDF.$base}_${Number(index) + 1}`);
+        }
+      } else {
+        property = jrqlProperty(triple.predicate.value, triple.object, opts.ctx);
+      }
+    }
+    if (property == null)
+      throw new SyntaxError('Subject property must be an IRI');
+
+    const value = opts.values?.(i, triple) ??
+      jrqlValue(property, triple.object, opts.ctx, opts.serial);
+    addPropertyObject(subjects[subjectId] ??= { '@id': subjectId }, property, value);
+
+    if (apiQuad != null)
+      yield apiQuad;
   }
-  throw new SyntaxError('Subject property must be an IRI');
 }
 
 export function jrqlValue(
   property: SubjectProperty,
   object: Term,
   ctx = JsonldContext.NONE,
-  serial?: true
+  serial?: boolean
 ): Value {
   if (object.termType.endsWith('Node')) {
     if (property === '@type') {

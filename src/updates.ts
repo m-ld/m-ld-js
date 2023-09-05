@@ -73,7 +73,10 @@ export function asSubjectUpdates(update: SubjectsUpdate, copy?: true): SubjectUp
   return su;
 }
 
-/** Things that can be interpreted as an update to graph subjects */
+/**
+ * Things that can be interpreted as an update to graph subjects
+ * @category Utility
+ */
 export type SubjectUpdateLike =
   SubjectUpdates | GraphUpdate | GraphSubject | GraphSubject[] | undefined;
 

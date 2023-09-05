@@ -34,11 +34,10 @@ document.addEventListener('domainChanged', () => {
       return documentTextProxy;
     }
   };
-  window.model.state.read(async state => {
-    updateSubject(doc, await state.get('document'));
-  }, update => {
-    updateSubject(doc, update);
-  });
+  window.model.state.read(
+    async state => updateSubject(doc, await state.get('document')),
+    update => updateSubject(doc, update)
+  );
 });
 ```
 ```html
@@ -56,4 +55,4 @@ div[contenteditable] {
     height: 20em;
 }
 ```
-<script>new LiveCode('domain-setup', document.currentScript).link('live code ↗');</script>
+<script>new LiveCode('domain-setup', document.currentScript).link();</script>

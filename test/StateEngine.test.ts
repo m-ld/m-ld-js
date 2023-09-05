@@ -1,4 +1,4 @@
-import { firstValueFrom, Subject as Source } from 'rxjs';
+import { firstValueFrom, Subject as Source, Subscription } from 'rxjs';
 import { MeldUpdate } from '../src';
 import { LockManager } from '../src/engine/locks';
 import { CloneEngine, StateEngine } from '../src/engine/StateEngine';
@@ -39,6 +39,7 @@ describe('State Engine', () => {
   let ops: number[]; // Used to assert concurrent operation ordering
   const pushOp = async (n: number) => ops.push(n);
   const rdf = new RdfDataFactory();
+  const noop = { jrql: {} };
 
   beforeEach(() => {
     clone = new MockCloneEngine;
@@ -72,7 +73,7 @@ describe('State Engine', () => {
       expect(update).toMatchObject({ '@ticks': 1 });
       done();
     });
-    states.write(state => state.write({}));
+    states.write(state => state.write(noop));
   });
 
   test('can read initial state and follow', done => {
@@ -80,11 +81,11 @@ describe('State Engine', () => {
       await expect(firstValueFrom(state.read({})))
         .resolves.toMatchObject({ value: { tick: 0 } })
         .catch(err => done(err));
-    }, async update => {
+    }, new Subscription(), async update => {
       expect(update).toMatchObject({ '@ticks': 1 });
       done();
     });
-    states.write(state => state.write({}));
+    states.write(state => state.write(noop));
   });
 
   test('can match in initial state', done => {
@@ -103,18 +104,19 @@ describe('State Engine', () => {
         done();
       });
     });
-    states.write(state => state.write({}));
+    states.write(state => state.write(noop));
   });
 
   test('can unsubscribe a follow handler', done => {
-    states.follow(() => done.fail()).unsubscribe();
-    states.write(state => state.write({})).then(() => done());
+    states.follow(() => done.fail())();
+    states.write(state => state.write(noop)).then(() => done());
   });
 
   test('can unsubscribe a read follow handler', done => {
-    states.read(() => {
-    }, () => done.fail()).unsubscribe();
-    states.write(state => state.write({})).then(() => done());
+    const subs = new Subscription();
+    states.read(() => {}, subs, () => done.fail());
+    subs.unsubscribe();
+    states.write(state => state.write(noop)).then(() => done());
   });
 
   test('read procedures are concurrent', done => {
@@ -171,7 +173,7 @@ describe('State Engine', () => {
       expect(ops).toEqual([1, 3, 2, 4]);
       done();
     });
-    states.write(state => state.write({}));
+    states.write(state => state.write(noop));
   });
 
   test('handlers complete before a write', done => {
@@ -181,10 +183,10 @@ describe('State Engine', () => {
         await pushOp(i + update['@ticks'] * 10);
     });
     states.write(async state => {
-      state = await state.write({}); // Kick handlers
+      state = await state.write(noop); // Kick handlers
       expect(clone.tick).toBe(1);
       await pushOp(100); // Concurrent with the handler
-      await state.write({}); // Should await the handler
+      await state.write(noop); // Should await the handler
       expect(clone.tick).toBe(2);
       // Expect ten ops from the first tick, and one 100
       expect(ops.indexOf(20)).toBe(11);
@@ -195,9 +197,9 @@ describe('State Engine', () => {
 
   test('cannot write to de-scoped state', done => {
     states.write(async state => {
-      await state.write({});
+      await state.write(noop);
       try {
-        await state.write({});
+        await state.write(noop);
         done.fail('Expecting de-scoped state');
       } catch (err) {
         done();
@@ -207,7 +209,7 @@ describe('State Engine', () => {
 
   test('cannot read from de-scoped state', done => {
     states.write(async state => {
-      await state.write({});
+      await state.write(noop);
       try {
         state.read({});
         done.fail('Expecting de-scoped state');

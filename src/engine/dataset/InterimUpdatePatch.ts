@@ -60,7 +60,7 @@ export class InterimUpdatePatch implements InterimUpdate {
     this.needsUpdate = { then: () => { throw 'Interim update has been finalised'; } };
     // The final update to the app will include all assertions and entailments
     const finalPatch = await this.finalisePatch();
-    const userUpdate = this.createUpdate(finalPatch, this.userCtx);
+    const userUpdate = this.createUpdate(finalPatch, true);
     // TODO: Make the internal update conditional on anyone wanting it
     const internalUpdate = this.createUpdate(finalPatch);
     const { assertions, entailments, agree } = this;
@@ -157,9 +157,10 @@ export class InterimUpdatePatch implements InterimUpdate {
     return this.graph.rdf.namedNode(this.userCtx.expandTerm(iri));
   }
 
-  private createUpdate(patch: JrqlPatchQuads, ctx?: JsonldContext): MeldPreUpdate {
+  private createUpdate(patch: JrqlPatchQuads, user?: true): MeldPreUpdate {
     const opts: RdfOptions = {
-      ctx, aliases: (subject, property) => this.subjectAliases.get(subject)?.[property]
+      aliases: (subject, property) => this.subjectAliases.get(subject)?.[property],
+      ...user ? { ctx: this.userCtx, rdf: this.graph.rdf } : undefined,
     };
     const updates = [...patch.updates];
     return {
@@ -168,7 +169,7 @@ export class InterimUpdatePatch implements InterimUpdate {
       '@update': SubjectGraph.fromRDF(updates.map(([triple]) => triple), {
         ...opts, values: i => updates[i][1].update
       }),
-      '@principal': InterimUpdatePatch.principalRef(this.principalId, ctx),
+      '@principal': InterimUpdatePatch.principalRef(this.principalId, opts.ctx),
       // Note that agreement specifically checks truthy-ness, not just non-null
       '@agree': this.agree || undefined
     };
@@ -230,7 +231,7 @@ export class InterimUpdatePatch implements InterimUpdate {
         state.set(key, quadState);
       }
       return quadState;
-    }
+    };
     for (let quad of patch.deletes) {
       if (this.isShared(quad))
         (await inState(quad)).delete(quad);

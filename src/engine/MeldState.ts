@@ -1,10 +1,15 @@
 import { Query, Read, Subject, SubjectProperty, Update, Write } from '../jrql-support';
-import { Subscription } from 'rxjs';
-import { any, MeldState, MeldStateMachine, ReadResult, StateProc, UpdateProc } from '../api';
-import { CloneEngine, EngineState, EngineUpdateProc, StateEngine } from './StateEngine';
+import { EmptyError, Subscription } from 'rxjs';
+import {
+  any, MeldReadState, MeldState, MeldStateMachine, MeldStateSubscription, MeldUpdate, ReadResult,
+  StateProc, UpdateProc
+} from '../api';
+import {
+  CloneEngine, EngineState, EngineUpdateProc, EngineWrite, followUnsubscribed, StateEngine
+} from './StateEngine';
 import { QueryableRdfSourceProxy } from './quads';
-import { first, inflateFrom } from './util';
-import { QueryableRdfSource } from '../rdfjs-support';
+import { first, inflateFrom, settled } from './util';
+import { BaseDeleteInsert, QueryableRdfSource } from '../rdfjs-support';
 import { constructProperties, describeId } from './jrql-util';
 import { readResult } from './api-support';
 import async from './async';
@@ -24,7 +29,11 @@ abstract class ApiState extends QueryableRdfSourceProxy implements MeldState {
   }
 
   async write<W extends Write = Write>(request: W): Promise<MeldState> {
-    return this.construct(await this.state.write(request));
+    return this.construct(await this.state.write({ jrql: request }));
+  }
+
+  async updateQuads(update: BaseDeleteInsert): Promise<MeldState> {
+    return this.construct(await this.state.write({ rdf: update }));
   }
 
   delete(id: string): Promise<MeldState> {
@@ -65,7 +74,7 @@ export class ApiStateMachine extends ApiState implements MeldStateMachine {
     ): Rtn {
       // Any direct read must be in a state procedure, so indirect
       return toRtn(new Promise((resolve, reject) => {
-        stateEngine.read(state => {
+        return stateEngine.read(state => {
           // possibly an over-abundance of caution, because the proc should
           // signal error through its return type (promise, observable, or stream)
           try { resolve(proc(state)); } catch (e) { reject(e); }
@@ -74,7 +83,7 @@ export class ApiStateMachine extends ApiState implements MeldStateMachine {
     }
     // The API state machine also pretends to be a state
     super({
-      async write(request: Write) {
+      async write(request: EngineWrite) {
         await stateEngine.write(state => state.write(request));
         return this;
       },
@@ -99,22 +108,27 @@ export class ApiStateMachine extends ApiState implements MeldStateMachine {
     this.engine = stateEngine;
   }
 
-  private updateHandler(handler: UpdateProc): EngineUpdateProc {
-    return async (update, state) =>
-      handler(update, new ImmutableState(state));
+  follow(handler?: UpdateProc): MeldStateSubscription {
+    const subs = new ApiStateSubscription(this.engine);
+    if (handler != null)
+      subs.add(this.engine.follow(this.updateHandler(handler)));
+    return subs;
   }
 
-  follow(handler: UpdateProc): Subscription {
-    return this.engine.follow(this.updateHandler(handler));
-  }
-
-  read(procedure: StateProc, handler?: UpdateProc): Subscription;
+  read<T>(procedure: StateProc<MeldReadState, T>, handler?: UpdateProc): MeldStateSubscription<T>;
   read<R extends Read = Read, S = Subject>(request: R): ReadResult;
-  read(request: Read | StateProc, handler?: UpdateProc) {
+  read<T>(
+    request: Read | StateProc<MeldReadState, T>,
+    handler?: UpdateProc
+  ): ReadResult | MeldStateSubscription<T> {
     if (typeof request == 'function') {
-      return this.engine.read(
+      const subs = new ApiStateSubscription<T>(this.engine);
+      subs.ready = this.engine.read(
         state => request(new ImmutableState(state)),
-        handler != null ? this.updateHandler(handler) : undefined);
+        subs,
+        handler != null ? this.updateHandler(handler) : undefined
+      );
+      return subs;
     } else {
       return super.read(request);
     }
@@ -135,4 +149,76 @@ export class ApiStateMachine extends ApiState implements MeldStateMachine {
     // For direct read and write, we are mutable
     return this;
   }
+
+  private updateHandler(handler: UpdateProc): EngineUpdateProc {
+    return async (update, state) =>
+      handler(update, new ImmutableState(state));
+  }
+}
+
+class ApiStateSubscription<T = never> extends Subscription
+  implements AsyncGenerator<[MeldUpdate, MeldReadState]>, PromiseLike<T> {
+  private iteratorSubs?: Subscription;
+  private doneUsingState?: () => void;
+  private nextState?: (args: [MeldUpdate, MeldReadState]) => void;
+
+  public ready?: Promise<T | typeof followUnsubscribed>;
+
+  constructor(
+    readonly engine: StateEngine
+  ) {
+    super(() => this.doneUsingState?.());
+  }
+
+  [Symbol.asyncIterator](): AsyncGenerator<[MeldUpdate, MeldReadState]> {
+    return this;
+  }
+
+  async next() {
+    // By calling next, the consumer indicates they're done with the prior state
+    this.doneUsingState?.();
+    if (this.closed)
+      return { value: null, done: this.closed };
+    if (this.ready != null)
+      await settled(this.ready); // We don't care about the ready result
+    if (this.closed)
+      return { value: null, done: this.closed };
+    // The first time next is called, we know for sure that iteration is wanted
+    this.ensureFollowing();
+    return ({
+      value: await new Promise<[MeldUpdate, MeldReadState]>(
+        resolve => this.nextState = resolve),
+      done: false
+    });
+  }
+
+  async return(value: any): Promise<IteratorResult<any>> {
+    this.doneUsingState?.();
+    this.iteratorSubs?.unsubscribe();
+    return { value: value, done: true };
+  }
+
+  throw(err: any) {
+    this.doneUsingState?.();
+    this.iteratorSubs?.unsubscribe();
+    return Promise.reject(err);
+  }
+
+  then: PromiseLike<T>['then'] = (onfulfilled, onrejected) =>
+    this.ready != null ? this.ready.then(
+      value => value === followUnsubscribed ?
+        Promise.reject(EmptyError).then(onfulfilled, onrejected) :
+        Promise.resolve(value).then(onfulfilled, onrejected),
+      onrejected
+    ) : Promise.reject(EmptyError).then(onfulfilled, onrejected);
+
+  private ensureFollowing() {
+    if (this.iteratorSubs == null)
+      this.add(this.iteratorSubs = new Subscription(this.engine.follow(this.handler)));
+  }
+
+  private handler: EngineUpdateProc = async (update, state) => {
+    this.nextState?.([update, new ImmutableState(state)]);
+    await new Promise<void>(resolve => this.doneUsingState = resolve);
+  };
 }

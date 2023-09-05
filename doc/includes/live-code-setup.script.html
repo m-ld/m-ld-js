@@ -52,14 +52,18 @@
       }
 
       link(html, title = '') {
+        const span = document.createElement('span');
+        span.id = this.name;
         const a = document.createElement('a');
-        a.id = this.name;
         // noinspection JSUnresolvedReference
         a.href = window.Flems.createFlemsIoLink(this.#state);
         a.title = title;
         a.target = '_blank';
-        a.innerHTML = html;
-        this.el.replaceWith(a);
+        a.innerText = 'live code ↗';
+        if (html)
+          span.innerHTML = `${html} – `;
+        span.appendChild(a);
+        this.el.replaceWith(span);
       }
 
       declare() {

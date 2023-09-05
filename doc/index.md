@@ -103,9 +103,13 @@ await meld.status.becomes({ online: true, outdated: false });
 
 ## How-To
 
-Here are usage docs and live coding examples to help get started with common patterns.
+Here is a roll-up of links to usage docs and live coding examples to help get started with common patterns.
 
 [[include:how-to/domain-setup.md]]
+
+### Reading, Following and Writing
+
+[[include:how-to/reload-all.md]]
 
 ### [Using Lists](interfaces/List.html)
 
@@ -114,6 +118,10 @@ Here are usage docs and live coding examples to help get started with common pat
 ### [Using Collaborative Text](classes/tseqtext.html)
 
 [[include:how-to/text.md]]
+
+### Using the RDF/JS API
+
+[[include:how-to/rdfjs.md]]
 
 [[include:security.md]]
 

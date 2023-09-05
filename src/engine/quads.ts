@@ -76,13 +76,14 @@ export function unTypeTriple<T extends Triple>(triple: T): Omit<T, 'typed'> {
   return triple;
 }
 
-export abstract class QueryableRdfSourceProxy implements QueryableRdfSource {
+export abstract class QueryableRdfSourceProxy<I extends QueryableRdfSource = QueryableRdfSource>
+  implements QueryableRdfSource {
   match: QueryableRdfSource['match'] = (...args) => this.src.match(...args);
   // @ts-ignore - TS can't cope with overloaded query method
   query: QueryableRdfSource['query'] = (...args) => this.src.query(...args);
   countQuads: QueryableRdfSource['countQuads'] = (...args) => this.src.countQuads(...args);
 
-  protected abstract get src(): QueryableRdfSource;
+  protected abstract get src(): I;
 }
 
 export class TripleMap<T, Q extends Triple = Triple> extends IndexMap<Q, T> {

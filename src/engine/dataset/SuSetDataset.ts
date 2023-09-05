@@ -1,6 +1,6 @@
 import {
   Attribution, AuditOperation, GraphSubject, GraphSubjects, MeldConstraint, MeldError,
-  MeldExtensions, MeldPreUpdate, MeldUpdate, UpdateTrace, UUID
+  MeldExtensions, MeldPreUpdate, MeldQuadDeleteInsert, MeldUpdate, UpdateTrace, UUID
 } from '../../api';
 import { BufferEncoding, EncodedOperation, OperationMessage, Snapshot, StateManaged } from '..';
 import { GlobalClock, TickTree, TreeClock } from '../clocks';
@@ -37,6 +37,8 @@ import { JsonldContext } from '../jsonld';
 import { CacheFactory } from '../cache';
 import { array } from '../../util';
 import { checkLocked } from '../locks';
+import { BaseDeleteInsert } from '../../rdfjs-support';
+import { EngineWrite } from '../StateEngine';
 
 export type DatasetSnapshot = Omit<Snapshot, 'updates'>;
 
@@ -229,18 +231,17 @@ export class SuSetDataset extends MeldEncoder {
   @checkNotClosed.async
   @checkLocked('state').async
   @checkReadyForTxn.async
-  async transact(time: TreeClock, request: Write): Promise<OperationMessage | null> {
+  async transact(time: TreeClock, request: EngineWrite): Promise<OperationMessage | null> {
     return this.dataset.transact<OperationMessage | null>({
       prepare: async txc => {
-        const patch = await this.write(request, txc);
+        const patch = 'jrql' in request ?
+          await this.write(request.jrql, txc) :
+          this.toJrqlPatchQuads(request.rdf);
         if (patch.isEmpty)
           return { return: null };
-
         txc.sw.next('check-constraints');
         const pid = this.app.principal?.['@id'] ?? null;
-        const agree = isUpdate(request) ? request['@agree'] : undefined;
-        const txn = await this.constrain(patch, 'check', pid, agree, txc);
-
+        const txn = await this.constrain(patch, 'check', pid, getAgree(request), txc);
         txc.sw.next('find-tids');
         const deletedTriplesTids =
           await this.tidsStore.findTriplesTids(txn.assertions.deletes);
@@ -263,6 +264,13 @@ export class SuSetDataset extends MeldEncoder {
           ...txn, tidPatch, journaling, msg, trace, txc
         });
       }
+    });
+  }
+
+  private toJrqlPatchQuads(rdf: BaseDeleteInsert) {
+    return new JrqlPatchQuads({
+      deletes: rdf.delete?.map(this.toUserQuad),
+      inserts: rdf.insert?.map(this.toUserQuad)
     });
   }
 
@@ -916,4 +924,9 @@ export class SuSetDataset extends MeldEncoder {
       cancel: (cause?: Error) => allQuads.destroy(cause)
     };
   }
+}
+
+function getAgree(request: { rdf: MeldQuadDeleteInsert } | { jrql: Write }) {
+  return 'jrql' in request ? isUpdate(request.jrql) ?
+    request.jrql['@agree'] : undefined : request.rdf.agree;
 }

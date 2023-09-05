@@ -3,23 +3,23 @@ import type { Algebra } from 'sparqlalgebrajs';
 import type { EventEmitter } from 'events';
 
 /**
- * This module defines the RDFJS and other extended RDF JS community style
+ * This module defines the RDF/JS and other extended RDF JS community style
  * methods supported by JrqlGraph.
  */
 
 /**
  * Bound variable values from a SPARQL projection.
  * Keys include the variable prefix `?`.
- * @category RDFJS
+ * @category RDF/JS
  */
 export interface Binding<T = Term> {
   [key: string]: T;
 }
 
 /**
- * Abstract stream of any type; implicit supertype of an RDFJS
+ * Abstract stream of any type; implicit supertype of an RDF/JS
  * [Stream](https://rdf.js.org/stream-spec/#stream-interface)
- * @category RDFJS
+ * @category RDF/JS
  */
 // Using type not interface so typedoc does not document EventEmitter
 export type BaseStream<T> = EventEmitter & {
@@ -28,7 +28,7 @@ export type BaseStream<T> = EventEmitter & {
 
 /**
  * SPARQL query methods
- * @category RDFJS
+ * @category RDF/JS
  */
 export interface QueryableRdf<Q extends BaseQuad = Quad> {
   query(query: Algebra.Construct): Stream<Q>;
@@ -41,8 +41,8 @@ export interface QueryableRdf<Q extends BaseQuad = Quad> {
  * A [Source](https://rdf.js.org/stream-spec/#source-interface) which is able to
  * count quads, as an optimisation for query engines
  *
- * @see https://github.com/comunica/comunica/tree/master/packages/actor-init-sparql-rdfjs#optimization
- * @category RDFJS
+ * @see https://www.npmjs.com/package/@comunica/query-sparql-rdfjs#optimization
+ * @category RDF/JS
  */
 export interface CountableRdf {
   countQuads(...args: Parameters<Source['match']>): Promise<number>;
@@ -50,8 +50,33 @@ export interface CountableRdf {
 
 /**
  * Rollup interface for an RDF source that can answer SPARQL queries
- * @category RDFJS
+ * @category RDF/JS
  */
 export interface QueryableRdfSource<Q extends BaseQuad = Quad>
   extends Source<Q>, QueryableRdf<Q>, CountableRdf {
 }
+
+/**
+ * Implicit supertype of Algebra.DeleteInsert that does not require a factory
+ * @category RDF/JS
+ */
+export type BaseDeleteInsert<Q extends BaseQuad = Quad> = { delete?: Q[], insert?: Q[] };
+
+/**
+ * An RDF dataset representation that provides update semantics.
+ * @category RDF/JS
+ */
+export interface UpdatableRdf<State> {
+  /**
+   * Performs an atomic update to the dataset. The deletes and inserts will be
+   * committed in the resolved state, which is expected to also be updatable for
+   * further modifications.
+   */
+  updateQuads(update: BaseDeleteInsert): Promise<State>;
+}
+
+/**
+ * A read-only RDF dataset-like collection of Quads.
+ * @category RDF/JS
+ */
+export type BaseDataset = ReadonlyArray<Quad>;

@@ -154,7 +154,7 @@ export class PauseableSource<T> extends Observable<T> implements Observer<T> {
  * incomplete set of properties for the semantics of the object subverts the
  * type system.
  */
-export function clone<T extends object>(term: T, ownProperties: object = {}) {
+export function clone<T extends object>(term: T, ownProperties: object = term) {
   return Object.assign(Object.create(Object.getPrototypeOf(term)), ownProperties);
 }
 
