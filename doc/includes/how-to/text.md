@@ -55,4 +55,4 @@ div[contenteditable] {
     height: 20em;
 }
 ```
-<script>new LiveCode('domain-setup', document.currentScript).link('live code ↗');</script>
+<script>new LiveCode('domain-setup', document.currentScript).link();</script>

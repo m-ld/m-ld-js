@@ -4,17 +4,15 @@ document.addEventListener('domainChanged', async () => {
   updateButton.disabled = false;
 
   for await (let [update] of window.model.state.follow()) {
-    const updateDiv = updateTemplate.content
-      .cloneNode(true).querySelector('details');
-    updateDiv.querySelector('summary').innerText =
-      `Update ${update['@ticks']}`;
+    const content = templated(updateTemplate);
+    content.summary.innerText = `Update ${update['@ticks']}`;
     
     const deleted = update['@delete'].quads;
     const inserted = update['@insert'].quads;
     
-    updateDiv.querySelector('.deleteTextarea').value = await toTurtle(deleted);
-    updateDiv.querySelector('.insertTextarea').value = await toTurtle(inserted);
-    updatesDiv.insertAdjacentElement('afterbegin', updateDiv);
+    content.deleteTextarea.value = await toTurtle(deleted);
+    content.insertTextarea.value = await toTurtle(inserted);
+    updatesDiv.insertAdjacentElement('afterbegin', content.details);
   }
 });
 
@@ -75,4 +73,4 @@ textarea {
   padding: 0.5em;
 }
 ```
-<script>new LiveCode('domain-setup', document.currentScript).link('live code ↗');</script>
+<script>new LiveCode('domain-setup', document.currentScript).link();</script>

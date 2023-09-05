@@ -64,14 +64,14 @@ removeItem.addEventListener('click', () => {
   <h2>Shopping</h2>
   <ol id="shoppingList"></ol>
   <p>
-    <input id="itemToAdd" type="text"/>
+    <input id="itemToAdd" type="text" placeholder="new shopping item"/>
     <button id="addItem">+ Add</button>
   </p>
   <p>
-    <input id="itemToRemove" type="text"/>
+    <input id="itemToRemove" type="text" placeholder="shopping item to remove"/>
     <button id="removeItem">- Remove</button>
   </p>
   <hr/>
 </div>
 ```
-<script>new LiveCode('domain-setup', document.currentScript).link('live code ↗');</script>
+<script>new LiveCode('domain-setup', document.currentScript).link();</script>
