@@ -1,7 +1,7 @@
 // noinspection JSUnusedGlobalSymbols
 
 import { defineConfig } from 'tsup';
-import resolve from 'resolve';
+import { resolveNode } from '@m-ld/io-js-build/esbuild';
 
 const { exports } = require('./package.json');
 
@@ -20,21 +20,11 @@ export default defineConfig({
   format: 'esm',
   platform: 'browser',
   outDir: '_site/ext',
-  esbuildPlugins: [{
-    name: 'resolve-nodejs',
-    setup({ onResolve, initialOptions }) {
-      for (let shim of [
-        'events',
-        'buffer', // See also inject of global
-        'url' // Used by mqtt module
-      ]) {
-        const shimPath = resolve.sync(shim, { includeCoreModules: false });
-        const filter = new RegExp(`^${shim}$`);
-        onResolve({ filter }, () => ({ path: shimPath }));
-      }
-      (initialOptions.inject ??= []).push(resolve.sync('./tsup/Buffer'));
-    }
-  }],
+  esbuildPlugins: [resolveNode([
+    'events',
+    'buffer', // Also injects global
+    'url' // Used by mqtt module
+  ])],
   sourcemap: true,
   noExternal: [/(.*)/], // Bundle all dependencies
   clean: true
