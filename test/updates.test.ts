@@ -1,10 +1,12 @@
 import { mockFn } from 'jest-mock-extended';
 import {
-  asSubjectUpdates, includesValue, includeValues, JsAtomType, JsContainerType, JsProperty, maxValue,
-  noMerge, Optional, propertyValue, Reference, Subject, updateSubject, VocabReference
+  asSubjectUpdates, GraphSubject, includesValue, includeValues, JsAtomType, JsContainerType,
+  JsProperty, maxValue, MeldPreUpdate, noMerge, Optional, propertyValue, Reference, Subject,
+  SubjectsUpdate, SubjectUpdater, SubjectUpdates, updateSubject, VocabReference
 } from '../src';
 import { XS } from '../src/ns';
 import { mockUpdate } from './testClones';
+import { SubjectGraph } from '../src/engine/SubjectGraph';
 
 describe('Update utilities', () => {
   describe('by-subject indexing', () => {
@@ -34,6 +36,55 @@ describe('Update utilities', () => {
           '@insert': { '@id': 'bar', size: 40 }
         }
       });
+    });
+  });
+
+  describe('subject updater affected ids', () => {
+    test('null update has no ids', () => {
+      expect([...new SubjectUpdater(undefined).affectedIds]).toEqual([]);
+    });
+
+    test('subjects update has ids', () => {
+      const update: SubjectsUpdate = {
+        '@delete': [{ '@id': 'foo', size: 10 }],
+        '@insert': [{ '@id': 'foo', size: 20 }]
+      };
+      expect([...new SubjectUpdater(update).affectedIds]).toEqual(['foo']);
+    });
+
+    test('graph update has ids', () => {
+      const update: MeldPreUpdate = {
+        '@delete': new SubjectGraph([{ '@id': 'foo', size: 10 }]),
+        '@insert': new SubjectGraph([{ '@id': 'foo', size: 20 }]),
+        '@update': new SubjectGraph([]),
+        '@agree': undefined // not a subject graph
+      };
+      expect([...new SubjectUpdater(update).affectedIds]).toEqual(['foo']);
+    });
+
+    test('subject updates has ids', () => {
+      const update: SubjectUpdates = {
+        'foo': {
+          '@delete': { '@id': 'foo', size: 10 },
+          '@insert': { '@id': 'foo', size: 20 }
+        }
+      };
+      expect([...new SubjectUpdater(update).affectedIds]).toEqual(['foo']);
+    });
+
+    test('graph subject has ids', () => {
+      const update: GraphSubject = { '@id': 'foo', size: 20 };
+      expect([...new SubjectUpdater(update).affectedIds]).toEqual(['foo']);
+    });
+
+    test('graph subject array has ids', () => {
+      const update: GraphSubject[] = [{ '@id': 'foo', size: 20 }];
+      expect([...new SubjectUpdater(update).affectedIds]).toEqual(['foo']);
+    });
+
+    test('graph subjects has ids', () => {
+      const update = new SubjectGraph([{ '@id': 'foo', size: 20 }]);
+      expect([...new SubjectUpdater(update).affectedIds]).toEqual(['foo']);
     });
   });
 

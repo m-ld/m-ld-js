@@ -41,7 +41,7 @@ document.addEventListener('domainChanged', () => {
 });
 ```
 ```html
-<div>
+<div id="appDiv" hidden>
   <h2>Document</h2>
   <div contenteditable="plaintext-only" id="documentTextDiv"></div>
 </div>

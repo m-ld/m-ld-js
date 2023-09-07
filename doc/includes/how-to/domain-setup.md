@@ -21,6 +21,7 @@ async function changeDomain(domainName) {
     io: { uri: "https://gw.m-ld.org" }
   });
   domainInput.value = domainName;
+  appDiv.hidden = false;
   playgroundAnchor.setAttribute('href', `https://m-ld.org/playground/#domain=${domainName}`);
   // Store the "model" as a global for access by other scripts, and tell them
   window.model = { state, genesis };
@@ -30,23 +31,15 @@ async function changeDomain(domainName) {
 joinDomainButton.addEventListener('click', () => changeDomain(domainInput.value));
 newDomainButton.addEventListener('click', () => changeDomain());
 
-document.querySelectorAll('.help').forEach(helpTemplate =>
-  helpDetails.appendChild(helpTemplate.content.cloneNode(true)));
-
 /**
  * Utility to populate a template. Returns an object containing the cloned
- * children of the template indexed by tagName and their first classname.
+ * children of the template, also indexed by tagName and classname.
  */
-globalThis.templated = function (template) {
-  const index = { content: template.content.cloneNode(true) };
-  (function addChildren(node) {
-    for (let child of node.children) {
-      if (child.classList.length) index[child.classList[0]] ??= child;
-      addChildren(index[child.tagName.toLowerCase()] ??= child);
-    }
-  })(index.content);
-  return index;
-}
+globalThis.templated = template => new Proxy({ $: template.content.cloneNode(true) }, {
+  get: (t, p) => t[p] ?? t.$.querySelector(p) ?? t.$.querySelector(`.${p}`)
+});
+
+document.querySelectorAll('.help').forEach(help => helpDetails.appendChild(templated(help).$));
 ```
 ```html
 <div>

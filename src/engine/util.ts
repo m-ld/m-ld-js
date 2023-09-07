@@ -192,10 +192,10 @@ export function binaryFold<T, R>(
   }, null);
 }
 
-export function mapObject<V = any>(
-  o: Record<string, V>,
-  fn: (k: string, v: V) => { [key: string]: V } | undefined
-): { [key: string]: V } {
+export function mapObject<V1, V2>(
+  o: Record<string, V1>,
+  fn: (k: string, v: V1) => Record<string, V2> | undefined
+): { [key: string]: V2 } {
   return Object.assign({}, ...Object.entries(o).map(([k, v]) => fn(k, v)));
 }
 
@@ -207,15 +207,6 @@ export function *mapIter<T, R>(it: Iterable<T>, fn: (v: T) => R): Iterable<R> {
 export function *concatIter<T>(...its: Iterable<T>[]) {
   for (let it of its)
     yield *it;
-}
-
-export function countIter(it: Iterable<unknown>) {
-  if (isArray(it))
-    return it.length;
-  let count = 0;
-  for (let item of it)
-    count++;
-  return count;
 }
 
 export function iterable<T, This>(

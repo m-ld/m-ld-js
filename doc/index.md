@@ -109,7 +109,10 @@ Here is a roll-up of links to usage docs and live coding examples to help get st
 
 ### Reading, Following and Writing
 
-[[include:how-to/reload-all.md]]
+[[include:how-to/kb-setup.md]]
+[[include:how-to/kb-reload-all.md]]
+[[include:how-to/kb-handle-updates.md]]
+[[include:how-to/kb-subject-updater.md]]
 
 ### [Using Lists](interfaces/List.html)
 
