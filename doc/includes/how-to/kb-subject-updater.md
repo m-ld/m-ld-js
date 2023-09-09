@@ -53,6 +53,7 @@ class KnowledgeView {
 
   set answer(answer) {
     this.answerList.innerHTML = '';
+    // The `answer` field can be one string or an array
     for (let ans of array(answer))
       this.answerList.insertAdjacentHTML('beforeend', `<li>${ans}</li>`);
   }
@@ -60,7 +61,7 @@ class KnowledgeView {
 ```
 ```html
 <template class="help">
-  <p>As your app's features and data model scale, it becomes more complex to deconstruct updates and apply them to selected UI elements, as in the previous example. In this code, we declaratively model the the knowledge UI as a class having question and answer properties. Then, we use a <a href="https://js.m-ld.org/classes/subjectupdater.html"><code>SubjectUpdater</code></a> to apply new information. This utility correctly handles all the possible changes that might apply in an update, taking into account <a href="https://spec.m-ld.org/#data-semantics"><b>m-ld</b> data semantics</a> – so, for example, it will still work when we start to allow deletion of answers.</p>
+  <p>As your app's features and data model scale, it becomes more complex to deconstruct updates and apply them to selected UI elements, as in the previous example. In this code, we declaratively model the knowledge UI as a class having question and answer properties. Then, we use a <a href="https://js.m-ld.org/classes/subjectupdater.html"><code>SubjectUpdater</code></a> to apply new information. This utility correctly handles all the possible changes that might apply in an update, taking into account <a href="https://spec.m-ld.org/#data-semantics"><b>m-ld</b> data semantics</a> – so, for example, it will still work when we start to allow deletion of answers, or if we include multiple questions in a single update.</p>
   <p>The code demonstrates:</p>
   <ul>
     <li>1️⃣ Constructing a <code>SubjectUpdater</code> with newly-loaded subjects, and then using it to apply the loaded property values to new knowledge views.</li>

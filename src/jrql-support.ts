@@ -191,9 +191,11 @@ export type Operator = keyof typeof jrql.operators | '@concat' | '@splice';
  * @see operators
  * @category json-rql
  */
-export type TextSplice = [number, number] | [number, number, string];
+export type TextSplice = [number, number, string?];
 /** @internal */
-export function isTextSplice(args: Expression | Expression[]): args is TextSplice {
+export function isTextSplice(
+  args: Expression | (Expression | undefined)[]
+): args is TextSplice {
   if (isArray(args)) {
     const [index, deleteCount, content] = args;
     // noinspection SuspiciousTypeOfGuard

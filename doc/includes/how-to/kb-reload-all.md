@@ -19,6 +19,7 @@ async function reloadAll(state) {
       knowledgeDiv, questionText, answerList, answerInput, addAnswerButton
     } = templated(knowledgeTemplate);
     questionText.innerText = question;
+    // The `answer` field can be one string or an array
     for (let ans of array(answer))
       answerList.insertAdjacentHTML('beforeend', `<li>${ans}</li>`);
     addAnswerButton.addEventListener('click', () => {

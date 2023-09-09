@@ -31,6 +31,7 @@ function addQuestion({ '@id': kid, question, answer }) {
     knowledgeDiv, questionText, answerList, answerInput, addAnswerButton
   } = templated(knowledgeTemplate);
   questionText.innerText = question;
+  // The `answer` field can be one string or an array
   for (let ans of array(answer))
     addAnswer(answerList, ans);
   addAnswerButton.addEventListener('click', () => {
