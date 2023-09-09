@@ -15,19 +15,13 @@ document.addEventListener('domainChanged', () => {
   let documentTextProxy = null;
   const doc = {
     '@id': 'document',
-    set text(content) {
+    set text(initialText) {
       documentTextProxy = new ElementSpliceText(
         documentTextDiv,
-        content,
-        async splices => {
-          window.model.state.write(async state => {
-            for await (let splice of splices) {
-              state = await state.write({
-                '@update': { '@id': 'document', text: { '@splice': splice } }
-              });
-            }
-          });
-        }
+        window.model.state,
+        'document',
+        'text',
+        initialText
       );
     },
     get text() {
@@ -41,7 +35,7 @@ document.addEventListener('domainChanged', () => {
 });
 ```
 ```html
-<div>
+<div id="appDiv" hidden>
   <h2>Document</h2>
   <div contenteditable="plaintext-only" id="documentTextDiv"></div>
 </div>

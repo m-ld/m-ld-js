@@ -87,9 +87,9 @@ export class TSeq extends TSeqNode {
     nodePreApply.sort(({ charIndex: c1 }, { charIndex: c2 }) =>
       c1 === c2 ? 0 : c1 > c2 ? 1 : -1);
     for (let { node, charTick: [char, tick], charIndex } of nodePreApply) {
-      const afterCharTick = node.set(char, tick);
-      nodePrior?.set(node, afterCharTick);
-      this.addToSplices(splices, charIndex, char);
+      const [oldChar, oldTick] = node.set(char, tick);
+      nodePrior?.set(node, [oldChar, oldTick]);
+      this.addToSplices(splices, charIndex, oldChar, char);
     }
     // Gather reversion operations prior to garbage collection
     const revert = nodePrior ? TSeqOperable.toRevertOps(nodePrior) : [];
@@ -99,14 +99,19 @@ export class TSeq extends TSeqNode {
     return splices;
   }
 
-  private addToSplices(splices: TSeqSplice[], charIndex: number, char: string) {
+  private addToSplices(
+    splices: TSeqSplice[],
+    charIndex: number,
+    del: string,
+    ins: string
+  ) {
     let last = splices[splices.length - 1];
     if (last != null && charIndex < last[TSeqSplice.$index])
       throw new RangeError('Expecting spliced chars in order');
     if (last == null || charIndex > last[TSeqSplice.$index] + last[TSeqSplice.$deleteCount])
       splices.push(last = [charIndex, 0, '']);
-    last[TSeqSplice.$deleteCount] -= char.length - 1;
-    last[TSeqSplice.$content] += char;
+    last[TSeqSplice.$deleteCount] += del.length;
+    last[TSeqSplice.$content] += ins;
   }
 
   /**

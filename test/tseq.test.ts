@@ -141,6 +141,14 @@ describe('TSeq CRDT', () => {
       expect(tSeq2.toString()).toBe('hi world');
     });
 
+    test('applies my own content change', () => {
+      const tSeq1 = new TSeq('p1'), tSeq2 = new TSeq('p2');
+      tSeq2.apply(tSeq1.splice(0, 0, 'hello world'));
+      tSeq2.apply(tSeq1.splice(11, 0, '!'));
+      const op = tSeq1.splice(11, 1, '?');
+      expect(tSeq2.apply(op)).toEqual([[11, 1, '?']]);
+    });
+
     test('applies multi-splice operation', () => {
       const tSeq1 = new TSeq('p1'), tSeq2 = new TSeq('p2');
       tSeq2.apply(tSeq1.splice(0, 0, 'hello world'));

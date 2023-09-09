@@ -475,8 +475,7 @@ export function sortValues(property: string, values: Value[]) {
 
 /**
  * Generates the difference between the texts in the form of a splice suitable
- * for use with the `@splice` operator. Will throw if the splice is not
- * contiguous.
+ * for use with the `@splice` operator.
  * @category Utility
  */
 export function textDiff(text1: string, text2: string): TextSplice | undefined {

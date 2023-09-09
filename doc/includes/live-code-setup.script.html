@@ -39,7 +39,7 @@
         return this.el.title ?? '';
       }
 
-      inline() {
+      inline(state) {
         let height = 0;
         for (let file of this.files)
           height = Math.max(height, (file.content.match(/\n/g) ?? []).length * 1.5 + 3);
@@ -48,22 +48,22 @@
         flemDiv.id = this.name;
         this.el.replaceWith(flemDiv);
         // noinspection JSUnresolvedReference
-        window.Flems(flemDiv, this.#state);
+        window.Flems(flemDiv, this.#state(state));
       }
 
-      link(html, title = '') {
-        const span = document.createElement('span');
-        span.id = this.name;
+      link(html, title = '', state) {
+        const p = document.createElement('p');
+        p.id = this.name;
         const a = document.createElement('a');
         // noinspection JSUnresolvedReference
-        a.href = window.Flems.createFlemsIoLink(this.#state);
+        a.href = window.Flems.createFlemsIoLink(this.#state(state));
         a.title = title;
         a.target = '_blank';
         a.innerText = 'live code ↗';
         if (html)
-          span.innerHTML = `${html} – `;
-        span.appendChild(a);
-        this.el.replaceWith(span);
+          p.innerHTML = `${html} – `;
+        p.appendChild(a);
+        this.el.replaceWith(p);
       }
 
       declare() {
@@ -73,8 +73,13 @@
         this.el.remove();
       }
 
-      get #state() {
-        return { files: this.files, console: 'min', autoReload: false };
+      #state(state) {
+        return {
+          files: this.files,
+          console: 'min',
+          autoReload: false,
+          ...state
+        };
       }
 
       #add(content, lang) {

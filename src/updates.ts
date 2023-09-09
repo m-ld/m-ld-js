@@ -1,9 +1,9 @@
 import { isPropertyObject, Reference, Subject } from './jrql-support';
-import { GraphSubject, GraphUpdate, isGraphSubjects, UpdateForm } from './api';
+import { GraphSubject, GraphSubjects, GraphUpdate, isGraphSubjects, UpdateForm } from './api';
 import { clone } from './engine/jsonld';
 import { isReference } from 'json-rql';
 import { SubjectLike, SubjectPropertyValues } from './subjects';
-import { isArray } from './engine/util';
+import { isArray, iterable, mapObject } from './engine/util';
 import { SubjectGraph } from './engine/SubjectGraph';
 
 /**
@@ -20,7 +20,9 @@ export type SubjectUpdate = UpdateForm<GraphSubject>;
  * A **m-ld** update notification, indexed by graph Subject ID.
  * @category Utility
  */
-export type SubjectUpdates = { [id: string]: SubjectUpdate };
+export type SubjectUpdates = {
+  [id: string]: SubjectUpdate
+};
 /** @internal */
 const graphUpdateKeys = ['@delete', '@insert', '@update'];
 /**
@@ -73,12 +75,27 @@ export function asSubjectUpdates(update: SubjectsUpdate, copy?: true): SubjectUp
   return su;
 }
 
+/** @internal */
+function *idsInUpdate(update: SubjectsUpdate) {
+  // Output unique ids
+  const done = new Set<string>();
+  for (let key of graphUpdateKeys as (keyof GraphUpdate)[]) {
+    for (let subject of update[key] ?? []) {
+      const id = subject['@id'];
+      if (!done.has(id)) {
+        done.add(id);
+        yield id;
+      }
+    }
+  }
+}
+
 /**
  * Things that can be interpreted as an update to graph subjects
  * @category Utility
  */
 export type SubjectUpdateLike =
-  SubjectUpdates | GraphUpdate | GraphSubject | GraphSubject[] | undefined;
+  SubjectUpdates | SubjectsUpdate | GraphSubject | GraphSubject[] | undefined;
 
 /**
  * Applies an update to the given subject in-place. This method will correctly
@@ -124,11 +141,14 @@ export function updateSubject<T extends SubjectLike & Reference>(
 }
 
 /** @internal */
-function isGraphUpdate(
-  update: SubjectUpdateLike
-): update is GraphUpdate {
+function isSubjectsUpdate(update: SubjectUpdateLike): update is SubjectsUpdate {
   return update != null &&
     Object.keys(update).some(key => graphUpdateKeys.includes(key));
+}
+
+/** @internal */
+function getGraph(update: GraphSubject[]): GraphSubjects['graph'] {
+  return isGraphSubjects(update) ? update.graph : new SubjectGraph(update).graph;
 }
 
 /**
@@ -143,25 +163,33 @@ export class SubjectUpdater {
     (subject: SubjectLike & Reference, key: keyof GraphUpdate) => Subject | undefined;
   private readonly done = new Set<object>();
 
+  readonly affectedIds: Iterable<string>;
+
   constructor(
     update: SubjectUpdateLike,
     readonly ignoreUnsupported = true
   ) {
     if (update == null) {
       this.verbForSubject = () => undefined;
-    } else if (isGraphUpdate(update)) {
-      this.verbForSubject = (subject, key) =>
-        update[key].graph.get(subject['@id']);
+      this.affectedIds = [];
     } else if (isArray(update)) {
-      const graph = isGraphSubjects(update) ? update.graph : new SubjectGraph(update).graph;
+      const graph = getGraph(update);
       this.verbForSubject = (subject, key) =>
         key === '@insert' ? graph.get(subject['@id']) : undefined;
+      this.affectedIds = iterable(() => graph.keys());
     } else if ('@id' in update) {
       this.verbForSubject = (subject, key) =>
         key === '@insert' && update['@id'] === subject['@id'] ? update : undefined;
+      this.affectedIds = [update['@id'] as string];
+    } else if (isSubjectsUpdate(update)) {
+      const graphical = mapObject(update, (k, v) =>
+        graphUpdateKeys.includes(k) ? { [k]: getGraph(v) } : undefined);
+      this.verbForSubject = (subject, key) => graphical[key].get(subject['@id']);
+      this.affectedIds = iterable(() => idsInUpdate(update));
     } else {
       this.verbForSubject = (subject, key) =>
         subject['@id'] in update ? update[subject['@id']][key] : undefined;
+      this.affectedIds = Object.keys(update);
     }
   }
 
@@ -193,5 +221,5 @@ export class SubjectUpdater {
     for (let value of values)
       if (typeof value == 'object' && '@id' in value && (unref || !isReference(value)))
         this.update(value);
-  }
+  };
 }

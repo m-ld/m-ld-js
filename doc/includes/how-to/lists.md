@@ -60,7 +60,7 @@ removeItem.addEventListener('click', () => {
 });
 ```
 ```html
-<div>
+<div id="appDiv" hidden>
   <h2>Shopping</h2>
   <ol id="shoppingList"></ol>
   <p>

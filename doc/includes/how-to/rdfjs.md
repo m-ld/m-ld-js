@@ -1,18 +1,18 @@
 ```js
 document.addEventListener('domainChanged', async () => {
   updatesDiv.innerHTML = '';
-  updateButton.disabled = false;
 
   for await (let [update] of window.model.state.follow()) {
-    const content = templated(updateTemplate);
-    content.summary.innerText = `Update ${update['@ticks']}`;
-    
+    const { details, summary, deleteTextarea, insertTextarea } =
+      templated(updateTemplate);
+    summary.innerText = `Update ${update['@ticks']}`;
+
     const deleted = update['@delete'].quads;
     const inserted = update['@insert'].quads;
-    
-    content.deleteTextarea.value = await toTurtle(deleted);
-    content.insertTextarea.value = await toTurtle(inserted);
-    updatesDiv.insertAdjacentElement('afterbegin', content.details);
+
+    deleteTextarea.value = await toTurtle(deleted);
+    insertTextarea.value = await toTurtle(inserted);
+    updatesDiv.insertAdjacentElement('afterbegin', details);
   }
 });
 
@@ -34,7 +34,7 @@ function toTurtle(quads) {
 }
 ```
 ```html
-<div>
+<div id="appDiv" hidden>
   <label for="deleteTextarea">DELETE triples</label>
   <textarea id="deleteTextarea" rows="5"></textarea>
   <label for="insertTextarea">INSERT triples</label>
@@ -44,7 +44,7 @@ PREFIX c: <http://example.org/cartoons#>
    c:Jerry a c:Mouse;
            c:smarterThan c:Tom.
   </textarea>
-  <button id="updateButton" disabled>
+  <button id="updateButton">
     Do Update
   </button>
   <hr/>
