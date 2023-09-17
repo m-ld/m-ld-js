@@ -40,7 +40,7 @@ class KnowledgeView {
   }
 
   get question() {
-    return this.questionText.innerText || undefined;
+    return this.questionText.innerText || [];
   }
 
   set question(question) {

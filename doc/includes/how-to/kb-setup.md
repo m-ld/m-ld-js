@@ -15,7 +15,7 @@ answerButton.addEventListener('click', async () => {
 
 async function askBot(question) {
   const response = await fetch(
-    `https://question-gx8raknaiaaa.runkit.sh/?q=${encodeURIComponent(question)}`);
+    `https://runkit.io/gsvarovsky/question/0.1.2?q=${encodeURIComponent(question)}`);
   return response.text();
 }
 ```

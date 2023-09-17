@@ -29,6 +29,10 @@ import { MeldAppContext } from '../config';
  * );
  * ```
  *
+ * [[include:live-code-setup.script.html]]
+ * [[include:how-to/domain-setup.md]]
+ * [[include:how-to/shapes.md]]
+ *
  * @see https://www.w3.org/TR/shacl/
  * @category Experimental
  * @experimental

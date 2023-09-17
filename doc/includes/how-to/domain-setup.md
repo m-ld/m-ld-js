@@ -8,28 +8,29 @@ import { IoRemotes } from 'https://js.m-ld.org/ext/socket.io.mjs';
 globalThis.require = module => import(module
   .replace(/@m-ld\/m-ld\/ext\/(\w+)/, 'https://js.m-ld.org/ext/$1.mjs'));
 
-async function changeDomain(domainName) {
-  const genesis = !domainName;
+globalThis.changeDomain = async function (domain) {
+  const genesis = !domain;
   if (genesis)
-    domainName = `${uuid()}.public.gw.m-ld.org`;
-  if (window.model)
+    domain = `${uuid()}.public.gw.m-ld.org`;
+  if (window.model) {
     await window.model.state.close();
+    delete window.model;
+  }
   const state = await clone(new MemoryLevel(), IoRemotes, {
     '@id': uuid(),
-    '@domain': domainName,
+    '@domain': domain,
     genesis,
     io: { uri: "https://gw.m-ld.org" }
   });
-  domainInput.value = domainName;
+  // Uncomment the next line to log individual updates as they come in
+  //state.follow(update => console.info('UDPATE', JSON.stringify(update)));
+  domainInput.value = domain;
   appDiv.hidden = false;
-  playgroundAnchor.setAttribute('href', `https://m-ld.org/playground/#domain=${domainName}`);
+  playgroundAnchor.setAttribute('href', `https://m-ld.org/playground/#domain=${domain}`);
   // Store the "model" as a global for access by other scripts, and tell them
-  window.model = { state, genesis };
+  window.model = { domain, state, genesis };
   document.dispatchEvent(new Event('domainChanged'));
 }
-
-joinDomainButton.addEventListener('click', () => changeDomain(domainInput.value));
-newDomainButton.addEventListener('click', () => changeDomain());
 
 /**
  * Utility to populate a template. Returns an object containing the cloned
@@ -45,8 +46,8 @@ document.querySelectorAll('.help').forEach(help => helpDetails.appendChild(templ
 <div>
   <a id="playgroundAnchor" target="_blank" title="go to playground">🛝</a>
   <input id="domainInput" type="text" placeholder="domain name" onfocus="this.select()"/>
-  <button id="joinDomainButton">Join</button>
-  <button id="newDomainButton">New ⭐️</button>
+  <button onclick="changeDomain(domainInput.value)">Join</button>
+  <button onclick="changeDomain()">New ⭐️</button>
   <details id="helpDetails">
     <summary>🔢 help...</summary>
     <p>This live code demo shows how to share live information with <b>m-ld</b>.</p>

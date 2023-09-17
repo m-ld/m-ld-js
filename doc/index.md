@@ -109,20 +109,34 @@ Here is a roll-up of links to usage docs and live coding examples to help get st
 
 ### Reading, Following and Writing
 
+These examples show simple patterns for getting started with an app's code structure. In principle, **m-ld** acts as a "model", replacing (or being proxied by) the local in-memory data model. Because **m-ld** information is fundamentally _live_ – it can change due to a remote edit as well as a local one – it's valuable for the local app code to react to changes that it may not have initiated itself.
+
 [[include:how-to/kb-setup.md]]
 [[include:how-to/kb-reload-all.md]]
 [[include:how-to/kb-handle-updates.md]]
 [[include:how-to/kb-subject-updater.md]]
 
+### [Using Shape Constraints](classes/shapeconstrained.html)
+
+One of the most common questions asked about live information models is, what happens if there is a "conflict"? Here, we handle one particular kind of conflict using declarative constraints.
+
+[[include:how-to/shapes.md]]
+
 ### [Using Lists](interfaces/List.html)
+
+By default, information in **m-ld** is an unordered _graph_ (just like in a relational database). This example shows how ordered lists can be embedded in the graph.
 
 [[include:how-to/lists.md]]
 
 ### [Using Collaborative Text](classes/tseqtext.html)
 
+Text embedded in a structured graph of information might need to be editable by multiple users at the same time, like an online document. This example shows the use of an embedded data type and a supporting HTML control, to enable multi-player text editing.
+
 [[include:how-to/text.md]]
 
 ### Using the RDF/JS API
+
+The information in **m-ld** is stored using the W3C standard data representation RDF (Resource Description Framework). For RDF-native apps, the Javascript engine API supports direct access to the RDF graph.
 
 [[include:how-to/rdfjs.md]]
 

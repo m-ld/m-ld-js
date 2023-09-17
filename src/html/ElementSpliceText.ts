@@ -1,12 +1,17 @@
 import { TextSplice } from '../jrql-support';
 import { textDiff } from '../subjects';
-import { MeldStateMachine } from '../api';
+import { MeldState, StateProc } from '../api';
 import { TSeq, TSeqOperation } from '../tseq/index';
 
 type Inputting = {
   ours: TSeqOperation[],
   theirs?: TSeqOperation[]
 };
+
+/** Minimal interface for writing to a m-ld state machine */
+interface WriteStateMachine {
+  write: (procedure: StateProc<MeldState>) => Promise<unknown>;
+}
 
 /**
  * A wrapper for a `contenteditable` HTML element, allowing the element's text
@@ -30,7 +35,7 @@ export class ElementSpliceText {
    */
   constructor(
     readonly element: HTMLElement,
-    readonly clone: MeldStateMachine,
+    readonly clone: WriteStateMachine,
     readonly subjectId: string,
     readonly property: string,
     initialText: string
