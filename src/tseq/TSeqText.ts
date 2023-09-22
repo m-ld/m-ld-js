@@ -114,7 +114,7 @@ export class TSeqText
   }
 
   /** @internal */
-  initFromData(src: GraphSubject, orm: OrmUpdating, ext: ExtensionSubject<this>) {
+  initFromData(src: GraphSubject, _orm: OrmUpdating, ext: ExtensionSubject<this>) {
     ext.initSrcProperty(src, [this, 'properties'], // not used due to get/set
       JsProperty.for(SH.targetObjectsOf, Array, VocabReference), {
         get: () => [...this.properties].map(p => ({ '@vocab': p })),
@@ -199,20 +199,18 @@ export class TSeqText
   }
 
   /** @internal */
-  apply(state: TSeq, operation: TSeqOperation): [TSeq, Expression[]] {
+  apply(
+    state: TSeq,
+    reversions: [TSeqOperation][], // TODO
+    operation: TSeqOperation
+  ): [TSeq, Expression[]] {
     const splices = state.apply(operation)
       .map<Constraint>(splice => ({ '@splice': array(splice) }));
     return [state, splices];
   }
 
   /** @internal */
-  revert(state: TSeq, operation: TSeqOperation, revert: null): [TSeq, Expression] {
-    // @ts-ignore - TODO
-    return [undefined, undefined];
-  }
-
-  /** @internal */
-  fuse(op1: TSeqOperation, op2: TSeqOperation): [TSeqOperation] {
+  fuse([op1]: [TSeqOperation], [op2]: [TSeqOperation]): [TSeqOperation] {
     return [TSeqOperable.concat(op1, op2)];
   }
 

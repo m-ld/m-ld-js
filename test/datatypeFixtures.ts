@@ -34,7 +34,7 @@ export class CounterType implements SharedDatatype<number, number>, MeldPlugin {
     return { '@type': XS.integer, '@value': value };
   }
 
-  sizeOf(value: number): number {
+  sizeOf(_value: number): number {
     return 8; // Javascript number
   }
 
@@ -43,18 +43,16 @@ export class CounterType implements SharedDatatype<number, number>, MeldPlugin {
     return [value + inc, inc];
   }
 
-  apply(value: number, inc: number): [number, Expression] {
+  apply(value: number, reversions: [number][], inc: number = 0): [number, Expression] {
     // noinspection SuspiciousTypeOfGuard: for testing
     if (typeof inc != 'number')
       throw new RangeError();
+    // Reversions become subtractions
+    inc -= reversions.reduce((sum, [inc]) => sum + inc, 0);
     return [value + inc, { '@plus': inc }];
   }
 
-  revert(value: number, inc: number, revert: null): [number, Expression] {
-    return [value - inc, { '@plus': -inc }];
-  }
-
-  fuse(inc1: number, inc2: number): [number] {
+  fuse([inc1]: [number], [inc2]: [number]): [number] {
     return [inc1 + inc2];
   }
 

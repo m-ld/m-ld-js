@@ -11,7 +11,7 @@ import { TidsStore } from './TidsStore';
 import { flatMap, ignoreIf } from 'rx-flowable/operators';
 import { consume } from 'rx-flowable/consume';
 import { map } from 'rxjs/operators';
-import { JrqlDataQuad, JrqlPatchQuads, JrqlQuadOperation } from './JrqlQuads';
+import { JrqlPatchQuads, JrqlQuad, JrqlQuadOperation } from './JrqlQuads';
 import { concatIter, mapIter } from '../util';
 import async from '../async';
 import { TxnContext } from './index';
@@ -160,14 +160,13 @@ export class InterimUpdatePatch implements InterimUpdate {
   private createUpdate(patch: JrqlPatchQuads, user?: true): MeldPreUpdate {
     const opts: RdfOptions = {
       aliases: (subject, property) => this.subjectAliases.get(subject)?.[property],
-      ...user ? { ctx: this.userCtx, rdf: this.graph.rdf } : undefined,
+      ...user ? { ctx: this.userCtx, rdf: this.graph.rdf } : undefined
     };
-    const updates = [...patch.updates];
     return {
       '@delete': SubjectGraph.fromRDF([...patch.deletes], opts),
       '@insert': SubjectGraph.fromRDF([...patch.inserts], opts),
-      '@update': SubjectGraph.fromRDF(updates.map(([triple]) => triple), {
-        ...opts, values: i => updates[i][1].update
+      '@update': SubjectGraph.fromRDF(patch.updates.map(({ quad }) => quad), {
+        ...opts, values: i => patch.updates[i].update
       }),
       '@principal': InterimUpdatePatch.principalRef(this.principalId, opts.ctx),
       // Note that agreement specifically checks truthy-ness, not just non-null
@@ -254,7 +253,7 @@ export class InterimUpdatePatch implements InterimUpdate {
     return quadState;
   }
 
-  private isShared(quad: JrqlDataQuad): quad is LiteralTriple & MaybeHiddenQuad {
+  private isShared(quad: JrqlQuad): quad is LiteralTriple & MaybeHiddenQuad {
     return isLiteralTriple(quad) && (
       (!!quad.hasData && quad.hasData.shared) || // if loaded from state
       (quad.object.typed?.type != null &&
@@ -263,4 +262,4 @@ export class InterimUpdatePatch implements InterimUpdate {
   }
 }
 
-type MaybeHiddenQuad = JrqlDataQuad & { hidden?: boolean };
+type MaybeHiddenQuad = JrqlQuad & { hidden?: boolean };

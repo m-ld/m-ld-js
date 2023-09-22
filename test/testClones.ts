@@ -247,8 +247,7 @@ export class MockProcess implements ClockHolder<TreeClock> {
     public time: TreeClock,
     public prev: number = time.ticks,
     public gwc = GlobalClock.GENESIS.set(time)
-  ) {
-  }
+  ) {}
 
   event(): TreeClock {
     // CAUTION: not necessarily internal

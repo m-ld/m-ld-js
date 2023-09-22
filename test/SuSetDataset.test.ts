@@ -1386,15 +1386,12 @@ describe('SU-Set Dataset', () => {
       }]);
     });
 
-    test.skip('voids shared operations', async () => {
+    test('voids shared operations', async () => {
       extensions.push(new CounterType('http://test.m-ld.org/#likes'));
       await ssd.transact(local.tick().time, {
         jrql: {
           '@id': 'http://test.m-ld.org/fred',
-          'http://test.m-ld.org/#likes': {
-            '@type': 'http://ex.org/#Counter',
-            '@value': 0
-          }
+          'http://test.m-ld.org/#likes': 0
         }
       });
       remote.join(local.time);
@@ -1425,7 +1422,45 @@ describe('SU-Set Dataset', () => {
         '@describe': 'http://test.m-ld.org/fred'
       }))).resolves.toMatchObject([{
         '@id': 'http://test.m-ld.org/fred',
-        'http://test.m-ld.org/#likes': { '@type': 'http://ex.org/#Counter', '@value': 0 }
+        'http://test.m-ld.org/#likes': 0
+      }]);
+    });
+
+    test('voids shared operations with revert metadata', async () => {
+      // In the absence of a test datatype that requires revert metadata,
+      // we just extend the counter type to allocate some spurious data
+      const counterType = new CounterType('http://test.m-ld.org/#likes');
+      jest.spyOn(counterType, 'update').mockImplementation(
+        (value, update): any => {
+          const inc = (<any>update)['@plus'];
+          return [value + inc, inc, `${inc}`]; // Increment as string
+        });
+      jest.spyOn(counterType, 'apply');
+      extensions.push(counterType);
+      await ssd.transact(local.tick().time, {
+        jrql: { '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#likes': 0 }
+      });
+      remote.join(local.time);
+      await ssd.transact(local.tick().time, {
+        jrql: {
+          '@update': {
+            '@id': 'http://test.m-ld.org/fred',
+            'http://test.m-ld.org/#likes': { '@plus': 1 }
+          }
+        }
+      });
+      // Not joining with local time here
+      await expect(ssd.apply(
+        remote.sentOperation({}, { '@id': 'wilma', 'name': 'Wilma' }, { agree: true }),
+        local.join(remote.time)
+      )).resolves.toBe(null);
+      // Check fred's likes have been voided out
+      expect(counterType.apply).toHaveBeenCalledWith(1, [[1, '1']], undefined);
+      await expect(drain(ssd.read<Describe>({
+        '@describe': 'http://test.m-ld.org/fred'
+      }))).resolves.toMatchObject([{
+        '@id': 'http://test.m-ld.org/fred',
+        'http://test.m-ld.org/#likes': 0
       }]);
     });
   });

@@ -944,7 +944,7 @@ export interface Datatype<Data = unknown> {
  *
  * @typeParam Data - data type
  * @typeParam Operation - operation type; must be JSON-serialisable
- * @typeParam Revert - reversion metadata type; must be JSON-serialisable
+ * @typeParam Revert - reversion local metadata type; must be JSON-serialisable
  * @experimental
  * @category Experimental
  */
@@ -967,7 +967,7 @@ export interface SharedDatatype<Data, Operation, Revert = never> extends Datatyp
    * @returns the new state of the data, an operation which can be
    * {@link apply applied}, and any additional local metadata required to revert
    * the operation (if applicable). If the revert is not supplied, it is assumed
-   * to be `null`.
+   * that no metadata is required to revert the operation.
    */
   update(state: Data, update: Expression): [Data, Operation, Revert?];
   /**
@@ -977,44 +977,27 @@ export interface SharedDatatype<Data, Operation, Revert = never> extends Datatyp
    * in memory across multiple operations and {@link update updates}.
    *
    * @param state the existing state of the shared value
-   * @param operation the operation being applied, created using {@link update}
-   * on another clone
+   * @param reversions any reversions (voiding) to apply _before_ the new
+   * operation, provided in reverse order of original application
+   * @param [operation] the operation being applied, created using {@link update}
+   * on another clone. If `undefined`, only reversions are being requested.
    * @returns the new state (can be the input), an update expression to notify
    * the app, and local metadata required to revert the operation (if applicable).
    */
-  apply(state: Data, operation: Operation): [Data, Expression | Expression[], Revert?];
+  apply(
+    state: Data,
+    reversions: LocalDataOperation<Operation, Revert>[],
+    operation?: Operation
+  ): [Data, Expression | Expression[], Revert?];
   /**
-   * Reverts an operation from the state. The implementation is welcome to
-   * mutate the passed `state` and return it as the new (old) state.
-   *
-   * @param state the existing state of the shared value
-   * @param operation the operation being reverted, created using {@link update}
-   * on another clone
-   * @param revert the additional local metadata provided by {@link update},
-   * or `null` if no reversion metadata was provided.
-   * @returns the new state (can be the input), and an update expression to
-   * notify the app.
-   */
-  revert(state: Data, operation: Operation, revert: Revert): [Data, Expression | Expression[]];
-  /**
-   * Fuses operations into a single operation. Operations are be provided in
-   * contiguous causal order: `op1` happened-before `op2` OR `op1` is concurrent
-   * with `op2`; AND there exists no `op'` where `op'` happened-before `op2` and
-   * `op1` happened-before `op'`.
-   */
-  fuse(operation: Operation, suffix: Operation): [Operation];
-  /**
-   * Fuses operations into a single operation, with reversion metadata. Note
-   * that if a fusion request has reversion information in the input it should
-   * be provided in the return.
-   * @see #fuse
+   * Fuses local operations into a single operation. Operations are be provided
+   * in contiguous application order. Reversion metadata may not be included in
+   * the parameters; if so, it's not required in the return.
    */
   fuse(
-    operation: Operation,
-    suffix: Operation,
-    opRevert: Revert,
-    suffixRevert: Revert
-  ): [Operation, Revert?];
+    operation: LocalDataOperation<Operation, Revert>,
+    suffix: LocalDataOperation<Operation, Revert>
+  ): LocalDataOperation<Operation, Revert>;
   /**
    * Cuts the prefix from the given operation and returns an operation which can
    * be safely applied to a state that has the prefix already applied, e.g.
@@ -1026,8 +1009,17 @@ export interface SharedDatatype<Data, Operation, Revert = never> extends Datatyp
   cut(prefix: Operation, operation: Operation): Operation | undefined;
 }
 
+/**
+ * Utility type to capture combination of shared data operation (in a m-ld
+ * Operation) and corresponding local revert metadata (in the Journal)
+ * @experimental
+ * @category Experimental
+ */
+export type LocalDataOperation<Operation = unknown, Revert = unknown> =
+  [operation: Operation, revert?: Revert];
+
 /** @internal */
-export function isSharedDatatype<T>(dt: Datatype<T>): dt is SharedDatatype<T, unknown> {
+export function isSharedDatatype<T>(dt: Datatype<T>): dt is SharedDatatype<T, unknown, unknown> {
   return 'update' in dt;
 }
 
