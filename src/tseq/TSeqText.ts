@@ -5,12 +5,14 @@ import {
 } from '../jrql-support';
 import { M_LD, SH, XS } from '../ns';
 import { Iri } from '@m-ld/jsonld';
-import { TSeq, TSeqOperation } from '.';
+import { TSeq, TSeqOperation, TSeqRevert } from '.';
 import { array, uuid } from '../util';
 import { MeldAppContext } from '../config';
 import { ExtensionSubjectInstance } from '../orm/ExtensionSubject';
 import { JsProperty } from '../js-support';
 import { TSeqOperable } from './TSeqOperable';
+
+type LocalTSeqOperation = [TSeqOperation, TSeqRevert?];
 
 /**
  * This extension allows an app to embed collaborative text in a domain.
@@ -65,8 +67,10 @@ import { TSeqOperable } from './TSeqOperable';
  * @experimental
  * @noInheritDoc
  */
-export class TSeqText
-  implements MeldPlugin, SharedDatatype<TSeq, TSeqOperation>, ExtensionSubjectInstance {
+export class TSeqText implements
+  MeldPlugin,
+  SharedDatatype<TSeq, TSeqOperation, TSeqRevert>,
+  ExtensionSubjectInstance {
   /**
    * Extension declaration. Insert into the domain data to install the
    * extension. For example (assuming a **m-ld** `clone` object and a property
@@ -178,19 +182,20 @@ export class TSeqText
   }
 
   /** @internal */
-  update(state: TSeq, update: Expression): [TSeq, TSeqOperation] {
+  update(state: TSeq, update: Expression): [TSeq, TSeqOperation, TSeqRevert?] {
     if (isConstraint(update)) {
+      const revert: TSeqRevert = [];
       for (let [key, args] of Object.entries(update)) {
         switch (key) {
           case '@concat':
             // noinspection SuspiciousTypeOfGuard
             if (typeof args == 'string')
-              return [state, state.splice(Infinity, 0, args)];
+              return [state, state.splice(Infinity, 0, args, revert), revert];
             break;
           case '@splice':
             if (isTextSplice(args)) {
               const [index, deleteCount, content] = args;
-              return [state, state.splice(index, deleteCount, content)];
+              return [state, state.splice(index, deleteCount, content, revert), revert];
             }
         }
       }
@@ -201,17 +206,22 @@ export class TSeqText
   /** @internal */
   apply(
     state: TSeq,
-    reversions: [TSeqOperation][], // TODO
+    reversions: LocalTSeqOperation[],
     operation: TSeqOperation
-  ): [TSeq, Expression[]] {
-    const splices = state.apply(operation)
+  ): [TSeq, Expression[], TSeqRevert?] {
+    // Apply requested reversions
+    for (let [op, revert] of reversions)
+      state.apply(op, revert);
+    // Apply the given operation and provide revert metadata
+    const revert: TSeqRevert = [];
+    const splices = state.apply(operation, revert)
       .map<Constraint>(splice => ({ '@splice': array(splice) }));
-    return [state, splices];
+    return [state, splices, revert];
   }
 
   /** @internal */
-  fuse([op1]: [TSeqOperation], [op2]: [TSeqOperation]): [TSeqOperation] {
-    return [TSeqOperable.concat(op1, op2)];
+  fuse(op1: LocalTSeqOperation, op2: LocalTSeqOperation): LocalTSeqOperation {
+    return TSeqOperable.concat(op1, op2);
   }
 
   /** @internal */

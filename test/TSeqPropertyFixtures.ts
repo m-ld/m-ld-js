@@ -116,6 +116,9 @@ export class TSeqProcessGroupSpliceCommand extends TSeqProcessGroupCommand {
   }
 }
 
+// For use when reverts are not being tested
+const toLocal = (op: TSeqOperation): [TSeqOperation] => [op];
+
 export class TSeqProcessGroupDeliverCommand extends TSeqProcessGroupCommand {
   last: { deliverCount: number, redeliverCount: number };
   constructor(
@@ -137,14 +140,17 @@ export class TSeqProcessGroupDeliverCommand extends TSeqProcessGroupCommand {
     const opsToDeliver = outbox.ops.splice(0, deliverCount);
     const opsToRedeliver = redeliverCount ? outbox.delivered.slice(-redeliverCount) : [];
     const prefix = redeliverCount ? opsToRedeliver.length == 1 ?
-      opsToRedeliver[0] : TSeqOperable.concat(...opsToRedeliver) : undefined;
+      opsToRedeliver[0] : TSeqOperable.concat(...opsToRedeliver.map(toLocal))[0] : undefined;
     // Deliver to all targets. This ensures causal delivery.
     for (let i = 0; i < seqs.length; i++) {
       if (this.processIndex !== i) {
         const tSeq = seqs[i];
         if (this.fuse) {
-          const fusion = TSeqOperable.concat(...opsToRedeliver, ...opsToDeliver);
-          this.deliver(tSeq, fusion, prefix);
+          const fusion = TSeqOperable.concat(
+            ...opsToRedeliver.map(toLocal),
+            ...opsToDeliver.map(toLocal)
+          );
+          this.deliver(tSeq, fusion[0], prefix);
         } else {
           opsToDeliver.forEach((op, i) =>
             i == 0 ? this.deliver(tSeq, op, prefix) : tSeq.apply(op))
