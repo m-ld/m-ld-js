@@ -986,7 +986,7 @@ export interface SharedDatatype<Data, Operation, Revert = never> extends Datatyp
    */
   apply(
     state: Data,
-    reversions: LocalDataOperation<Operation, Revert>[],
+    reversions: [Operation, Revert?][],
     operation?: Operation
   ): [Data, Expression | Expression[], Revert?];
   /**
@@ -995,9 +995,9 @@ export interface SharedDatatype<Data, Operation, Revert = never> extends Datatyp
    * the parameters; if so, it's not required in the return.
    */
   fuse(
-    operation: LocalDataOperation<Operation, Revert>,
-    suffix: LocalDataOperation<Operation, Revert>
-  ): LocalDataOperation<Operation, Revert>;
+    operation: [Operation, Revert?],
+    suffix: [Operation, Revert?]
+  ): [Operation, Revert?];
   /**
    * Cuts the prefix from the given operation and returns an operation which can
    * be safely applied to a state that has the prefix already applied, e.g.
@@ -1008,15 +1008,6 @@ export interface SharedDatatype<Data, Operation, Revert = never> extends Datatyp
    */
   cut(prefix: Operation, operation: Operation): Operation | undefined;
 }
-
-/**
- * Utility type to capture combination of shared data operation (in a m-ld
- * Operation) and corresponding local revert metadata (in the Journal)
- * @experimental
- * @category Experimental
- */
-export type LocalDataOperation<Operation = unknown, Revert = unknown> =
-  [operation: Operation, revert?: Revert];
 
 /** @internal */
 export function isSharedDatatype<T>(dt: Datatype<T>): dt is SharedDatatype<T, unknown, unknown> {

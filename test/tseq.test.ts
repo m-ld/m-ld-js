@@ -42,6 +42,15 @@ describe('TSeq CRDT', () => {
       ]]);
     });
 
+    test('append content with infinite index', () => {
+      tSeq.splice(0, 0, 'hello');
+      const operation = tSeq.splice(Infinity, 0, ' world');
+      expect(tSeq.toString()).toBe('hello world');
+      expect(operation).toEqual([[
+        [['p1', 5]], [[' ', 2], ['w', 2], ['o', 2], ['r', 2], ['l', 2], ['d', 2]]
+      ]]);
+    });
+
     test('prepend content', () => {
       tSeq.splice(0, 0, ' world');
       const operation = tSeq.splice(0, 0, 'hello');
@@ -178,6 +187,13 @@ describe('TSeq CRDT', () => {
       tSeq2.apply(tSeq1.splice(0, 2));
       expect(tSeq2.toString()).toBe('1');
     });
+
+    test('append content with infinite index after remote operation', () => {
+      const tSeq1 = new TSeq('p1'), tSeq2 = new TSeq('p2');
+      tSeq1.apply(tSeq2.splice(0, 0, 'hello'));
+      tSeq1.splice(Infinity, 0, ' world');
+      expect(tSeq1.toString()).toBe('hello world');
+    });
   });
 
   describe('reverting operations', () => {
@@ -220,6 +236,22 @@ describe('TSeq CRDT', () => {
       expect(tSeq2.toString()).toBe('he myld');
       expect(tSeq2.apply(null, [[operation, revert]])).toEqual([[2, 0, 'llo'], [5, 0, ' wor']]);
       expect(tSeq2.toString()).toBe('hello my world');
+    });
+
+    test('applies then re-bases remote insert', () => {
+      const tSeq1 = new TSeq('p1'), tSeq2 = new TSeq('p2');
+      tSeq1.apply(tSeq2.splice(0, 0, 'hello world'));
+      const revertDel: TSeqRevert = [];
+      const delOp = tSeq2.splice(5, 6, '', revertDel);
+      expect(tSeq2.toString()).toBe('hello');
+      const insOp = tSeq1.splice(11, 0, ', said Fred');
+      const revertIns: TSeqRevert = [];
+      tSeq2.apply(insOp, [], revertIns);
+      // Oh wait no, need to rebase – mimics the SuSetDataset rebase pattern
+      tSeq2.apply(null, [[insOp, revertIns]]);
+      // Got it right this time
+      tSeq2.apply(insOp, [[delOp, revertDel]]);
+      expect(tSeq2.toString()).toBe('hello world, said Fred');
     });
 
     test('reverts concatenated operation', () => {

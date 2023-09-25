@@ -1,6 +1,6 @@
 import {
-  Attribution, AuditOperation, GraphSubject, GraphSubjects, LocalDataOperation, MeldConstraint,
-  MeldError, MeldExtensions, MeldPreUpdate, MeldQuadDeleteInsert, MeldUpdate, UpdateTrace, UUID
+  Attribution, AuditOperation, GraphSubject, GraphSubjects, MeldConstraint, MeldError,
+  MeldExtensions, MeldPreUpdate, MeldQuadDeleteInsert, MeldUpdate, UpdateTrace, UUID
 } from '../../api';
 import { BufferEncoding, EncodedOperation, OperationMessage, Snapshot, StateManaged } from '..';
 import { GlobalClock, TickTree, TreeClock } from '../clocks';
@@ -23,7 +23,7 @@ import { batch } from 'rx-flowable/operators';
 import { consume } from 'rx-flowable/consume';
 import { MeldMessageType } from '../../ns/m-ld';
 import { MeldApp, MeldConfig } from '../../config';
-import { MeldOperation } from '../MeldOperation';
+import { LocalDataOperation, MeldOperation } from '../MeldOperation';
 import { ClockHolder } from '../messages';
 import { Iri } from '@m-ld/jsonld';
 import { M_LD } from '../../ns';
@@ -313,10 +313,14 @@ export class SuSetDataset extends MeldEncoder {
     trace: MeldUpdate['trace'],
     txc: TxnContext
   }): Promise<PatchResult<OperationMessage | null>> {
-    this.log.debug(`patch ${journaling.appendEntries.map(e => e.operation.time)}:
-    deletes: ${[...txn.assertions.deletes].map(triple => tripleIndexKey(triple))}
-    inserts: ${[...txn.assertions.inserts].map(triple => tripleIndexKey(triple))}`);
     const patch = new JrqlPatchQuads(txn.assertions).append(txn.entailments);
+    if (this.log.getLevel() <= this.log.levels.DEBUG) {
+      this.log.debug('patch', journaling.appendEntries.map(e => e.operation.time),
+        '\n\tdeletes:', [...patch.deletes].map(tripleIndexKey),
+        '\n\tinserts:', [...patch.inserts].map(tripleIndexKey),
+        '\n\tupdates:', [...patch.updates].map(({ quad, update }) =>
+              `${tripleIndexKey(quad)}: ${JSON.stringify(update)}`));
+    }
     txc.on('commit', async () => {
       if (this.readyForTxn)
         await this.extensions.onUpdate?.(txn.internalUpdate, this.readState);
@@ -549,6 +553,8 @@ export class SuSetDataset extends MeldEncoder {
         // Process deletions and inserts
         const reversion = await this.processSuSetOpToPatch(patch);
 
+        // TODO: Constraints should not be applied to voiding
+        // https://github.com/m-ld/m-ld-js/issues/139
         this.txc.sw.next('apply-cx'); // "cx" = constraint
         const { assertions: cxnAssertions, ...txn } = await this.ssd.constrain(
           patch.quads,
@@ -568,7 +574,7 @@ export class SuSetDataset extends MeldEncoder {
           if (this.operation.time.anyLt(this.journaling.state.gwc)) {
             // A rewind is required. This trumps the work we have already done.
             this.txc.sw.next('rewind');
-            return this.rewindAndReapply();
+            return this.rewindAndReapply(patch);
           }
         }
 
@@ -618,9 +624,12 @@ export class SuSetDataset extends MeldEncoder {
       }
     }
 
-    private async rewindAndReapply() {
+    private async rewindAndReapply(patch: SuSetDataPatch) {
+      // Immediately revert any updates already applied in the patch
+      await Promise.all(patch.quads.updates.map(loaded =>
+        this.ssd.userGraph.jrql.revertTripleOperation(loaded, this.txc)));
       // void more recent entries in conflict with the agreement
-      const patch = await this.rewind();
+      patch = await this.rewind();
       // If we now find that we are not ready for the agreement, we need to
       // re-connect to recover what's missing. This could include a rewound
       // local txn. But first, commit the rewind.
@@ -791,13 +800,7 @@ export class SuSetDataset extends MeldEncoder {
       }, Promise.resolve({ tids: [] as [Triple, UUID][], triples: [] as Triple[] }));
       // Now modify the patch with deletions, insertions and custom operations
       patch.tids.append({ deletes: deletions.tids });
-      // Zip up any shared datatype reversions in the patch with any new operations
-      const dataOps = new TripleMap<[LocalDataOperation[], unknown | undefined]>(
-        this.operation.updates.map(([triple, operation]) => [triple, [[], operation]])
-      );
-      for (let [triple, localDataOps] of patch.opReverts ?? [])
-        dataOps.with(triple, () => [[], undefined])[0] = localDataOps;
-      const updates = array(await Promise.all([...dataOps].map(this.toSharedDataOpMeta)));
+      const updates = await this.processPatchUpdates(patch);
       patch.quads.append({
         deletes: deletions.triples.map(this.ssd.toUserQuad),
         inserts: this.operation.inserts.map(([triple]) => this.ssd.toUserQuad(triple)),
@@ -805,6 +808,16 @@ export class SuSetDataset extends MeldEncoder {
       });
       const deleteTids = expandItemTids(deletions.tids, new TripleMap<string[]>);
       return this.ssd.reversion(this.operation, deleteTids, updates);
+    }
+
+    private async processPatchUpdates(patch: SuSetDataPatch) {
+      // Zip up any shared datatype reversions in the patch with any new operations
+      const dataOps = new TripleMap<[LocalDataOperation[], unknown | undefined]>(
+        this.operation.updates.map(([triple, operation]) => [triple, [[], operation]])
+      );
+      for (let [triple, localDataOps] of patch.opReverts ?? [])
+        dataOps.with(triple, () => [[], undefined])[0] = localDataOps;
+      return array(await Promise.all([...dataOps].map(this.toSharedDataOpMeta)));
     }
 
     /**

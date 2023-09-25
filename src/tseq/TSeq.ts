@@ -164,10 +164,10 @@ export class TSeq extends TSeqNode {
     ));
     // TODO: This reconstructs runs which are already about known in the insert
     // method, combining them with the deletes
-    const ops = TSeqOperable.toRuns(nodes, revert);
+    const operation = TSeqOperable.toRuns(nodes, revert);
     for (let node of nodes)
       node.commit();
-    return ops;
+    return operation;
   }
 
   private delete(index: number, deleteCount: number): TSeqCharNode[] {
@@ -191,6 +191,7 @@ export class TSeq extends TSeqNode {
     // Any insert ticks our clock
     this.tick++;
     const inserts: TSeqCharNode[] = Array(content.length);
+    if (!isFinite(index)) index = this.charLength;
     const charIt = this.chars(index > 0 ? index - 1 : 0);
     let itRes = index > 0 ? charIt.next() : null;
     let node = itRes && (itRes.done ? null : itRes.value), c = 0;

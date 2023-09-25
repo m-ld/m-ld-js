@@ -63,7 +63,8 @@ export function hasInserts(content: (TSeqCharTick | undefined)[]) {
   return content.some(charTick => charTick?.[0]);
 }
 /**
- * TODO
+ * Operation with optional revert metadata – the revert component is required if
+ * the local operation is to be reverted.
  * @experimental
  * @category Experimental
  */

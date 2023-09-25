@@ -1,7 +1,5 @@
 import { Graph, KvpBatch, PatchQuads, TxnContext } from '.';
-import {
-  Datatype, GraphSubject, IndirectedData, isSharedDatatype, LocalDataOperation
-} from '../../api';
+import { Datatype, GraphSubject, IndirectedData, isSharedDatatype } from '../../api';
 import { Atom, Expression, Result, Subject, Value } from '../../jrql-support';
 import {
   inPosition, isLiteralTriple, isTypedTriple, Literal, LiteralTriple, Quad, Quad_Object, Term,
@@ -20,6 +18,7 @@ import { drain } from 'rx-flowable';
 import { JsonldContext } from '../jsonld';
 import { IndexMap } from '../indices';
 import { CacheFactory } from '../cache';
+import { LocalDataOperation } from '../MeldOperation';
 
 export class JrqlQuads {
   /**
@@ -49,7 +48,7 @@ export class JrqlQuads {
       txc.on('rollback', () => {
         const loaded = txnData.delete(txc);
         if (lruCache != null && loaded?.size)
-          for (let tripleKey of loaded ?? [])
+          for (let tripleKey of loaded)
             lruCache.del(tripleKey);
       });
       return new Set;
@@ -177,7 +176,7 @@ export class JrqlQuads {
   async applyTripleOperation(
     quad: Quad,
     reversions: LocalDataOperation[],
-    operation: unknown | undefined,
+    operation: unknown | null,
     txc: TxnContext
   ): Promise<QuadUpdate | undefined> {
     if (isLiteralTriple(quad)) {
@@ -191,6 +190,17 @@ export class JrqlQuads {
         const snapshot = !!reversions.length || undefined;
         return { quad, operation, update, revert, snapshot };
       }
+    }
+  }
+
+  async revertTripleOperation(
+    { quad, operation, revert }: QuadUpdate,
+    txc: TxnContext
+  ): Promise<void> {
+    const loaded = this.dataCache.get(this.dataKeyFor(quad.object));
+    if (loaded != null && isSharedDatatype(loaded.type)) {
+      const [data] = loaded.type.apply(loaded.data, [[operation, revert]]);
+      this.dataCache.set(quad.object, { ...loaded, data }, txc);
     }
   }
 

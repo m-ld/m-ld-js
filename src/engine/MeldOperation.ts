@@ -7,9 +7,7 @@ import { EncodedOperation } from '.';
 import { MeldEncoder, RefTriplesOp } from './MeldEncoding';
 import { Iri } from '@m-ld/jsonld';
 import { RefTriple } from './jrql-util';
-import {
-  IndirectedData, isSharedDatatype, LocalDataOperation, MeldError, SharedDatatype, UUID
-} from '../api';
+import { IndirectedData, isSharedDatatype, MeldError, SharedDatatype, UUID } from '../api';
 import { concatIter, mapIter } from './util';
 
 const inspect = Symbol.for('nodejs.util.inspect.custom');
@@ -63,6 +61,14 @@ export interface MeldFusionOperator extends CausalOperator<MeldOperationSpec> {
   /** Override with operation reversion metadata */
   next(op: MeldOperation, reversion?: EntryReversion): this;
 }
+
+/**
+ * Utility type to capture combination of shared data operation (in a m-ld
+ * Operation) and corresponding local revert metadata (in the Journal).
+ * NOTE: Not used in SharedDatatype, for brevity.
+ */
+export type LocalDataOperation<Operation = unknown, Revert = unknown> =
+  [Operation, Revert?];
 
 /**
  * An immutable operation, fully expanded from the wire or journal encoding to
