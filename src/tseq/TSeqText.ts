@@ -5,14 +5,12 @@ import {
 } from '../jrql-support';
 import { M_LD, SH, XS } from '../ns';
 import { Iri } from '@m-ld/jsonld';
-import { TSeq, TSeqOperation, TSeqRevert } from '.';
+import { TSeq, TSeqLocalOperation, TSeqOperation, TSeqRevert } from '.';
 import { array, uuid } from '../util';
 import { MeldAppContext } from '../config';
 import { ExtensionSubjectInstance } from '../orm/ExtensionSubject';
 import { JsProperty } from '../js-support';
 import { TSeqOperable } from './TSeqOperable';
-
-type LocalTSeqOperation = [TSeqOperation, TSeqRevert?];
 
 /**
  * This extension allows an app to embed collaborative text in a domain.
@@ -206,21 +204,18 @@ export class TSeqText implements
   /** @internal */
   apply(
     state: TSeq,
-    reversions: LocalTSeqOperation[],
-    operation: TSeqOperation
+    reversions: TSeqLocalOperation[],
+    operation?: TSeqOperation
   ): [TSeq, Expression[], TSeqRevert?] {
-    // Apply requested reversions
-    for (let [op, revert] of reversions)
-      state.apply(op, revert);
     // Apply the given operation and provide revert metadata
     const revert: TSeqRevert = [];
-    const splices = state.apply(operation, revert)
+    const splices = state.apply(operation ?? null, reversions, revert)
       .map<Constraint>(splice => ({ '@splice': array(splice) }));
     return [state, splices, revert];
   }
 
   /** @internal */
-  fuse(op1: LocalTSeqOperation, op2: LocalTSeqOperation): LocalTSeqOperation {
+  fuse(op1: TSeqLocalOperation, op2: TSeqLocalOperation): TSeqLocalOperation {
     return TSeqOperable.concat(op1, op2);
   }
 

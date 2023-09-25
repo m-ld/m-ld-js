@@ -1,5 +1,5 @@
 import { mapIter } from '../engine/util';
-import { TSeqCharTick, TSeqName, TSeqOperation, TSeqRevert } from './types';
+import { TSeqCharTick, TSeqLocalOperation, TSeqName, TSeqOperation, TSeqRevert } from './types';
 
 /**
  * Utility interface for manipulating {@link TSeqOperation TSeqOperations}. This
@@ -97,7 +97,7 @@ export namespace TSeqOperable {
    * {@link apply Applying} operations requires unique paths; this utility
    * allows operation arrays to be concatenated safely, removing redundancy.
    */
-  export function concat(...ops: [TSeqOperation, TSeqRevert?][]): [TSeqOperation, TSeqRevert?] {
+  export function concat(...ops: TSeqLocalOperation[]): TSeqLocalOperation {
     const pathTree = new TSeqOperationTree();
     for (let [operation, revert] of ops)
       pathTree.process(operation, revert);

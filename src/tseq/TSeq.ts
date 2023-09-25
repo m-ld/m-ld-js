@@ -1,6 +1,6 @@
 import { TSeqCharNode, TSeqNode } from './TSeqNode';
 import { TSeqOperable } from './TSeqOperable';
-import { TSeqCharTick, TSeqOperation, TSeqRevert, TSeqSplice } from './types';
+import { TSeqCharTick, TSeqLocalOperation, TSeqOperation, TSeqRevert, TSeqSplice } from './types';
 import { concatIter } from '../engine/util';
 
 /**
@@ -75,37 +75,49 @@ export class TSeq extends TSeqNode {
    * Applies or reverts (see `revert` param) remote operations to this local
    * clone of the TSeq.
    *
-   * @param operation the operation to apply
-   * @param revert if empty, will be filled with reversion metadata. Otherwise,
-   * passing this parameter causes the given operation to be reverted using this
-   * revert metadata. This case it is essential that the TSeq state is exactly
-   * as it was after the operation was originally applied.
+   * @param operation the operation to apply, or `null` if only reverting.
+   * @param reversions are local operations to be reverted _prior_ to applying
+   * `operation`, in reverse order of original application. The effect of these
+   * will be included in the returned splice, but not in the `revert` metadata.
+   * @param revert will be populated with reversion metadata for the `operation`
    */
-  apply(operation: TSeqOperation, revert: TSeqRevert = []) {
-    const reverting = revert.length > 0;
-    const nodePreApply: TSeqPreApply[] = [];
+  apply(
+    operation: TSeqOperation | null,
+    reversions: TSeqLocalOperation[] = [],
+    revert: TSeqRevert = []
+  ) {
     // Pre-apply to get the character indexes
-    for (let run = 0; run < operation.length; run++) {
-      const [path, content] = operation[run];
-      for (let pre of this.preApply(
-        path, reverting ? revert[run] : content, 0, reverting
-      )) {
-        if (!reverting)
-          (revert[run] ??= [])[pre.indexInRun] = pre.node.charTick;
-        nodePreApply.push(pre);
+    const nodePreApply = new Map<TSeqCharNode, TSeqPreApply>();
+    for (let [operation, revert] of reversions) {
+      if (revert == null)
+        throw new TypeError('Cannot revert without reversion metadata');
+      for (let run = 0; run < operation.length; run++) {
+        const [path] = operation[run];
+        for (let pre of this.preApply(path, revert[run], 0, true))
+          nodePreApply.set(pre.node, pre);
       }
     }
+    if (operation != null) {
+      for (let run = 0; run < operation.length; run++) {
+        const [path, content] = operation[run];
+        for (let pre of this.preApply(path, content, 0)) {
+          (revert[run] ??= [])[pre.indexInRun] = pre.node.charTick;
+          nodePreApply.set(pre.node, pre);
+        }
+      }
+    }
+    const preApply = [...nodePreApply.values()];
     // Apply the content, accumulating metadata
     const splices: TSeqSplice[] = [];
     // Operations can 'jump' intermediate affected characters
-    nodePreApply.sort(({ charIndex: c1 }, { charIndex: c2 }) =>
+    preApply.sort(({ charIndex: c1 }, { charIndex: c2 }) =>
       c1 === c2 ? 0 : c1 > c2 ? 1 : -1);
-    for (let { node, post: [char, tick], charIndex } of nodePreApply) {
+    for (let { node, post: [char, tick], charIndex } of preApply) {
       node.set(char, tick);
       const [oldChar] = node.pre ?? [''];
       this.addToSplices(splices, charIndex, oldChar, char);
     }
-    for (let { node } of nodePreApply)
+    for (let { node } of preApply)
       node.commit();
     return splices;
   }
@@ -132,8 +144,7 @@ export class TSeq extends TSeqNode {
    * @param deleteCount the number of characters in the text to remove from `index`
    * @param content the characters to add to the text, beginning from `index`
    * @param revert will be populated with reversion metadata for the returned
-   * operation. Note, unlike in `apply`, this parameter will never be used to
-   * actually enact the reversion.
+   * operation.
    */
   splice(
     index: number,

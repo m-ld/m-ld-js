@@ -56,7 +56,15 @@ export type TSeqOperation = TSeqRun[];
 export type TSeqRevert = (TSeqCharTick | undefined)[][];
 /**
  * Utility to determine if some run content includes any character inserts
+ * @experimental
+ * @category Experimental
  */
 export function hasInserts(content: (TSeqCharTick | undefined)[]) {
   return content.some(charTick => charTick?.[0]);
 }
+/**
+ * TODO
+ * @experimental
+ * @category Experimental
+ */
+export type TSeqLocalOperation = [TSeqOperation, TSeqRevert?];

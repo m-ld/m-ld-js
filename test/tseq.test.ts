@@ -186,17 +186,27 @@ describe('TSeq CRDT', () => {
       const revert: TSeqRevert = [];
       const op = tSeq.splice(0, 0, 'hello world', revert);
       expect(tSeq.toString()).toBe('hello world');
-      tSeq.apply(op, revert);
+      tSeq.apply(null, [[op, revert]]);
       expect(tSeq.toString()).toBe('');
+    });
+
+    test('reverts initial and applies new operation', () => {
+      const tSeq = new TSeq('p1'), tSeq2 = new TSeq('p2');
+      const op2 = tSeq2.splice(0, 0, 'hi!');
+      const revert: TSeqRevert = [];
+      const op = tSeq.splice(0, 0, 'hello world', revert);
+      expect(tSeq.toString()).toBe('hello world');
+      expect(tSeq.apply(op2, [[op, revert]])).toEqual([[0, 11, 'hi!']]);
+      expect(tSeq.toString()).toBe('hi!');
     });
 
     test('reverts initial apply', () => {
       const tSeq1 = new TSeq('p1'), tSeq2 = new TSeq('p2');
       const operation = tSeq1.splice(0, 0, 'hello world');
       const revert: TSeqRevert = [];
-      expect(tSeq2.apply(operation, revert)).toEqual([[0, 0, 'hello world']]);
+      expect(tSeq2.apply(operation, [], revert)).toEqual([[0, 0, 'hello world']]);
       expect(tSeq2.toString()).toBe('hello world');
-      expect(tSeq2.apply(operation, revert)).toEqual([[0, 11, '']]);
+      expect(tSeq2.apply(null, [[operation, revert]])).toEqual([[0, 11, '']]);
       expect(tSeq2.toString()).toBe('');
     });
 
@@ -206,9 +216,9 @@ describe('TSeq CRDT', () => {
       tSeq2.splice(5, 0, ' my'); // 'hello my world'
       const revert: TSeqRevert = [];
       const operation = tSeq1.splice(2, 7);
-      tSeq2.apply(operation, revert);
+      tSeq2.apply(operation, [], revert);
       expect(tSeq2.toString()).toBe('he myld');
-      expect(tSeq2.apply(operation, revert)).toEqual([[2, 0, 'llo'], [5, 0, ' wor']]);
+      expect(tSeq2.apply(null, [[operation, revert]])).toEqual([[2, 0, 'llo'], [5, 0, ' wor']]);
       expect(tSeq2.toString()).toBe('hello my world');
     });
 
@@ -219,7 +229,7 @@ describe('TSeq CRDT', () => {
       const revert2: TSeqRevert = [];
       const op2 = tSeq.splice(5, 0, ' world', revert2);
       const [op, revert] = TSeqOperable.concat([op1, revert1], [op2, revert2]);
-      expect(tSeq.apply(op, revert)).toEqual([[0, 11, '']]);
+      expect(tSeq.apply(null, [[op, revert]])).toEqual([[0, 11, '']]);
       expect(tSeq.toString()).toBe('');
     });
   });
