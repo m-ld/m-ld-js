@@ -899,10 +899,6 @@ export interface Datatype<Data = unknown> {
    */
   toValue?(data: Data): Value;
   /**
-   * Returns the (approximate) size of the data in-memory (NOT as stringified).
-   */
-  sizeOf(data: Data): number;
-  /**
    * Convert data to a representation that can be stringified to JSON. If this
    * method is not provided, the data itself must be JSON serialisable. The
    * implementation should include a version if the format is likely to change.

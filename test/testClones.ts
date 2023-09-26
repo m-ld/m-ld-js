@@ -31,6 +31,7 @@ import { JrqlQuads } from '../src/engine/dataset/JrqlQuads';
 import { Stopwatch } from '../src/engine/Stopwatch';
 import { CacheFactory } from '../src/engine/cache';
 import { SHARED } from '../src/engine/locks';
+import LOG from 'loglevel';
 
 export const testDomain = 'test.m-ld.org';
 export const testDomainContext = new DomainContext(testDomain);
@@ -153,7 +154,7 @@ export class MockGraphState {
     cacheFactory: CacheFactory
   ) {
     const graph = state.dataset.graph();
-    const quads = new JrqlQuads(graph, indirectedData, cacheFactory);
+    const quads = new JrqlQuads(graph, indirectedData, cacheFactory, LOG);
     this.graph = new JrqlGraph(graph, quads);
     this.tidsStore = mock();
   }

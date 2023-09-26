@@ -7,7 +7,6 @@ export const dateDatatype: Datatype<Date> = {
   validate: (value: ValueObject) => new Date(<string>value['@value']),
   getDataId: date => date.toDateString(),
   toValue: date => date.toISOString(),
-  sizeOf: date => JSON.stringify(date).length,
   toJSON: date => ({
     year: date.getFullYear(), month: date.getMonth() + 1, date: date.getDate()
   }),
@@ -32,10 +31,6 @@ export class CounterType implements SharedDatatype<number, number>, MeldPlugin {
 
   toValue(value: number) {
     return { '@type': XS.integer, '@value': value };
-  }
-
-  sizeOf(_value: number): number {
-    return 8; // Javascript number
   }
 
   update(value: number, update: Expression): [number, number] {

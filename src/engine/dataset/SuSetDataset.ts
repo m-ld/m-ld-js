@@ -101,7 +101,7 @@ export class SuSetDataset extends MeldEncoder {
     await super.initialise();
     const graph = this.dataset.graph();
     this.userGraph = new JrqlGraph(graph,
-      new JrqlQuads(graph, this.indirectedData, this.cacheFactory));
+      new JrqlQuads(graph, this.indirectedData, this.cacheFactory, this.log));
   }
 
   private get transportSecurity() {
@@ -625,9 +625,6 @@ export class SuSetDataset extends MeldEncoder {
     }
 
     private async rewindAndReapply(patch: SuSetDataPatch) {
-      // Immediately revert any updates already applied in the patch
-      await Promise.all(patch.quads.updates.map(loaded =>
-        this.ssd.userGraph.jrql.revertTripleOperation(loaded, this.txc)));
       // void more recent entries in conflict with the agreement
       patch = await this.rewind();
       // If we now find that we are not ready for the agreement, we need to
@@ -868,7 +865,7 @@ export class SuSetDataset extends MeldEncoder {
       if (!isLiteralTriple(quad)) // Stronger test than in applyTripleOperation
         throw new MeldError('Bad update');
       return this.ssd.userGraph.jrql
-        .applyTripleOperation(quad, reversions, operation, this.txc);
+        .applyTripleOperation(quad, reversions, operation);
     };
   };
 

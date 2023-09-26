@@ -1121,7 +1121,7 @@ describe('SU-Set Dataset', () => {
         'http://test.m-ld.org/#likes': 1
       }]);
       // If caching, should return from cache; otherwise, should re-apply
-      if (maxDataCacheSize > counterType.sizeOf(1))
+      if (maxDataCacheSize > 0)
         expect(counterApply).not.toHaveBeenCalled();
       else
         expect(counterApply).toHaveBeenCalled();

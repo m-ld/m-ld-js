@@ -3,7 +3,7 @@ import { Datatype, GraphSubject, IndirectedData, isSharedDatatype } from '../../
 import { Atom, Expression, Result, Subject, Value } from '../../jrql-support';
 import {
   inPosition, isLiteralTriple, isTypedTriple, Literal, LiteralTriple, Quad, Quad_Object, Term,
-  TypedData, TypedLiteral, TypedTriple
+  TypedData, TypedLiteral
 } from '../quads';
 import { JRQL } from '../../ns';
 import { SubjectGraph } from '../SubjectGraph';
@@ -19,6 +19,7 @@ import { JsonldContext } from '../jsonld';
 import { IndexMap } from '../indices';
 import { CacheFactory } from '../cache';
 import { LocalDataOperation } from '../MeldOperation';
+import { Logger } from 'loglevel';
 
 export class JrqlQuads {
   /**
@@ -34,10 +35,13 @@ export class JrqlQuads {
   constructor(
     readonly graph: Graph,
     readonly indirectedData: IndirectedData,
-    readonly cacheFactory: CacheFactory
+    readonly cacheFactory: CacheFactory,
+    readonly log: Logger
   ) {
     const lruCache = cacheFactory.createCache<DataKey, LoadedData>({
-      length: loaded => loaded.type.sizeOf(loaded.data)
+      // Assuming that data grows with operations, to avoid size calculation.
+      // This assumption is corrected every time a new snapshot is taken.
+      length: loaded => loaded.snapshotSize + loaded.operationsSize
     });
     // Allow for concurrent transactions, but there should only ever be one
     const txnData = new class extends IndexMap<TxnContext, Set<DataKey>> {
@@ -58,11 +62,10 @@ export class JrqlQuads {
         return lruCache?.get(tripleKey);
       },
       set(literal, loaded, txc) {
-        const { type, data, id } = loaded;
-        literal.typed = { type, data };
-        const added = lruCache?.set(id, loaded);
+        setLiteralData(literal, loaded);
+        const added = lruCache?.set(loaded.id, loaded);
         if (added && txc != null)
-          txnData.with(txc, newTxc).add(id);
+          txnData.with(txc, newTxc).add(loaded.id);
         return loaded;
       }
     };
@@ -154,8 +157,7 @@ export class JrqlQuads {
 
   async applyTripleUpdate(
     quad: JrqlQuad,
-    update: Expression,
-    txc: TxnContext
+    update: Expression
   ): Promise<QuadUpdate | undefined> {
     if (isLiteralTriple(quad)) {
       const datatype = this.indirectedData(quad.object.datatype.value);
@@ -165,7 +167,7 @@ export class JrqlQuads {
         if (loaded != null) {
           const [data, operation, revert] =
             datatype.update(loaded.data, update);
-          if (!this.upgradeToDataQuad(quad, { ...loaded, data }, txc))
+          if (!this.upgradeToSharedDataQuad(quad, { ...loaded, data }))
             throw new TypeError();
           return { quad, operation, update, revert };
         }
@@ -176,8 +178,7 @@ export class JrqlQuads {
   async applyTripleOperation(
     quad: Quad,
     reversions: LocalDataOperation[],
-    operation: unknown | null,
-    txc: TxnContext
+    operation: unknown | null
   ): Promise<QuadUpdate | undefined> {
     if (isLiteralTriple(quad)) {
       const loaded = await this.loadData(quad.object);
@@ -185,7 +186,7 @@ export class JrqlQuads {
         // Shared datatypes have UUID values, so the type should be correct
         const [data, update, revert] =
           loaded.type.apply(loaded.data, reversions, operation);
-        if (!this.upgradeToDataQuad(quad, { ...loaded, data }, txc))
+        if (!this.upgradeToSharedDataQuad(quad, { ...loaded, data }))
           throw new TypeError();
         const snapshot = !!reversions.length || undefined;
         return { quad, operation, update, revert, snapshot };
@@ -193,26 +194,17 @@ export class JrqlQuads {
     }
   }
 
-  async revertTripleOperation(
-    { quad, operation, revert }: QuadUpdate,
-    txc: TxnContext
-  ): Promise<void> {
-    const loaded = this.dataCache.get(this.dataKeyFor(quad.object));
-    if (loaded != null && isSharedDatatype(loaded.type)) {
-      const [data] = loaded.type.apply(loaded.data, [[operation, revert]]);
-      this.dataCache.set(quad.object, { ...loaded, data }, txc);
-    }
-  }
-
-  private upgradeToDataQuad(
+  private upgradeToSharedDataQuad(
     quad: JrqlQuad & LiteralTriple,
-    loaded: LoadedData,
-    txc: TxnContext
+    loaded: LoadedData
   ): quad is JrqlSharedDataQuad {
-    this.dataCache.set(quad.object, loaded, txc);
-    // Redundant with the typed object literal, co-mutable
-    quad.hasData = loaded;
-    return isTypedTriple(quad);
+    if (isTypedTriple(quad) && loaded.shared) {
+      setLiteralData(quad.object, loaded);
+      // Cast is for type-checking of loaded
+      (quad as JrqlSharedDataQuad).hasData = loaded;
+      return true;
+    }
+    return false;
   }
 
   loadHasData(triples: Iterable<JrqlQuad>) {
@@ -258,7 +250,6 @@ export class JrqlQuads {
     literal: Literal,
     datatype: Datatype
   ): Promise<LoadedData | undefined> {
-    // TODO: Allow for datatype caching
     const dataKey = this.dataKeyFor(literal);
     const cached = this.dataCache.get(dataKey);
     if (cached != null) {
@@ -266,7 +257,8 @@ export class JrqlQuads {
     } else {
       const keyValues = await this.loadDataAndOps(dataKey);
       if (keyValues.length > 0) {
-        const [snapshot, ...ops] = keyValues.map(([, data]) => MsgPack.decode(data));
+        const [encSnapshot, ...encOps] = keyValues.map(([, enc]) => enc);
+        const snapshot = MsgPack.decode(encSnapshot), ops = encOps.map(MsgPack.decode);
         let data = datatype.fromJSON ? datatype.fromJSON(snapshot) : snapshot;
         if (isSharedDatatype(datatype)) {
           for (let op of ops)
@@ -275,7 +267,12 @@ export class JrqlQuads {
           throw new Error('Operations found for a non-shared datatype');
         }
         return this.dataCache.set(literal, {
-          id: dataKey, type: datatype, data, ...this.getDataMeta(datatype, keyValues)
+          id: dataKey,
+          type: datatype,
+          data,
+          snapshotSize: encSnapshot.length,
+          operationsSize: encOps.reduce((len, enc) => len + enc.length, 0),
+          ...this.getDataMeta(datatype, keyValues)
         });
       }
     }
@@ -284,41 +281,52 @@ export class JrqlQuads {
   saveData(txc: TxnContext, patch: JrqlQuadOperation, batch: KvpBatch, tick?: number) {
     for (let quad of patch.inserts) {
       if (isTypedTriple(quad))
-        this.saveDataSnapshot(txc, quad, batch, true);
+        this.saveDataSnapshot(txc, quad.object, batch);
     }
-    for (let { quad, operation, snapshot } of patch.updates) {
+    for (let { quad: { object, hasData }, operation, snapshot } of patch.updates) {
       if (tick == null)
         throw new RangeError('Saving shared data operations requires a tick');
-      if (snapshot) {
-        for (let tick of quad.hasData.ticks)
-          batch.del(this.dataKeyFor(quad.object, tick));
-        this.saveDataSnapshot(txc, quad, batch, false);
+      // Super-simple heuristic for saving a snapshot: it's been requested
+      // upstream, or the operations have grown bigger than the prior snapshot.
+      if (snapshot || hasData.operationsSize > hasData.snapshotSize) {
+        this.log.debug('Saving shared data snapshot', object.datatype.value,
+          'because', snapshot ? 'requested' : 'ops threshold');
+        for (let tick of hasData.ticks)
+          batch.del(this.dataKeyFor(object, tick));
+        this.saveDataSnapshot(txc, object, batch);
       } else {
-        quad.hasData.ticks.push(tick); // Mutates cache content! Avoids size re-calc
-        batch.put(this.dataKeyFor(quad.object, tick), MsgPack.encode(operation));
+        this.log.debug('Saving shared data individual op', object.datatype.value);
+        const encOp = MsgPack.encode(operation);
+        hasData.ticks.push(tick);
+        hasData.operationsSize += encOp.length;
+        // Bounce the cache entry so it knows about the operation size
+        this.dataCache.set(object, hasData, txc);
+        batch.put(this.dataKeyFor(object, tick), encOp);
       }
     }
   }
 
   private saveDataSnapshot(
     txc: TxnContext,
-    quad: JrqlQuad & TypedTriple,
-    batch: KvpBatch,
-    updateCache: boolean
+    object: TypedLiteral,
+    batch: KvpBatch
   ) {
-    const dataKey = this.dataKeyFor(quad.object);
-    if (quad.object.typed.type != null) {
-      const { type: datatype, data } = quad.object.typed;
+    const dataKey = this.dataKeyFor(object);
+    if (object.typed.type != null) {
+      const { type: datatype, data } = object.typed;
       const json = datatype.toJSON ? datatype.toJSON(data) : data;
-      batch.put(dataKey, MsgPack.encode(json));
-      if (updateCache) {
-        this.dataCache.set(quad.object, {
-          id: dataKey, ...quad.object.typed, ...this.getDataMeta(datatype)
-        }, txc);
-      }
+      const snapshot = MsgPack.encode(json);
+      batch.put(dataKey, snapshot);
+      this.dataCache.set(object, {
+        id: dataKey,
+        snapshotSize: snapshot.length,
+        operationsSize: 0,
+        ...object.typed,
+        ...this.getDataMeta(datatype)
+      }, txc);
     } else {
       // Data is already JSON; never caching
-      batch.put(dataKey, MsgPack.encode(quad.object.typed.data));
+      batch.put(dataKey, MsgPack.encode(object.typed.data));
     }
   }
 
@@ -345,8 +353,21 @@ type DataMeta = Readonly<{ shared: false } | SharedDataMeta>;
 /** Stored data with metadata */
 type LoadedData = TypedData & DataMeta & {
   /** Key for the data itself (not the ticks; redundant with cache key) */
-  id: DataKey
+  id: DataKey;
+  /** Size of snapshot saved in backend */
+  snapshotSize: number;
+  /** Total size of operations (oplog) saved in backend */
+  operationsSize: number;
 };
+
+/**
+ * Sets loaded data into a literal (implicitly making it typed). Note, this
+ * implies that typed literals are mutable during transactions.
+ */
+function setLiteralData(object: Literal, loaded: LoadedData) {
+  const { type, data } = loaded;
+  object.typed = { type, data };
+}
 
 export interface JrqlQuad extends Quad {
   /** Does this triple have attached data? If so, shared metadata */
@@ -355,7 +376,7 @@ export interface JrqlQuad extends Quad {
 
 export interface JrqlSharedDataQuad extends JrqlQuad {
   object: TypedLiteral;
-  hasData: SharedDataMeta;
+  hasData: SharedDataMeta & LoadedData;
 }
 
 export interface QuadUpdate {

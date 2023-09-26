@@ -8,6 +8,7 @@ import { Literal, RdfFactory } from '../src/engine/quads';
 import { dateDatatype } from './datatypeFixtures';
 import { JsonldContext } from '../src/engine/jsonld';
 import { CacheFactory } from '../src/engine/cache';
+import LOG from 'loglevel';
 
 describe('json-rql Quads translation', () => {
   const rdf = new RdfFactory('http://test.m-ld.org');
@@ -24,8 +25,9 @@ describe('json-rql Quads translation', () => {
     });
     jrql = new JrqlQuads(
       mock<Graph>({ rdf }),
-      (...args) => indirectedData?.(...args), // Deferred
-      new CacheFactory({ max: 0 }) // TODO
+      (...args) => indirectedData?.(...args),
+      new CacheFactory({ max: 0 }),
+      LOG
     );
   });
 
