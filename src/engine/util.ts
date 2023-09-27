@@ -274,3 +274,7 @@ export class IndexKeyGenerator {
     return Number.parseInt(key, this.radix);
   }
 }
+
+export function compare<T>(v1: T, v2: T) {
+  return v1 === v2 ? 0 : v1 > v2 ? 1 : -1;
+}

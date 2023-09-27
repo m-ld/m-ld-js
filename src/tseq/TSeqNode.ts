@@ -2,6 +2,7 @@ import { TSeqContainer } from './TSeqContainer';
 import { hasInserts, TSeqCharTick, TSeqName } from './types';
 import { TSeqPreApply } from './TSeq';
 import { TSeqOperable } from './TSeqOperable';
+import { compare } from '../engine/util';
 
 /**
  * Node in a {@link TSeq} tree. Only the root node, the TSeq itself, does not
@@ -257,7 +258,7 @@ export class TSeqProcessArray extends TSeqContainer<TSeqCharNode> {
     return rtn;
   }
 
-  static compare = (r1: TSeqProcessArray, r2: TSeqProcessArray) => r1.pid.localeCompare(r2.pid);
+  static compare = (r1: TSeqProcessArray, r2: TSeqProcessArray) => compare(r1.pid, r2.pid);
 
   /** exclusive maximum index */
   get end() {

@@ -1,4 +1,4 @@
-import { minIndexOfSparse } from '../engine/util';
+import { compare, minIndexOfSparse } from '../engine/util';
 
 /**
  * LSEQ-like CRDT helper class, for generating list position identifiers.
@@ -383,7 +383,7 @@ class PosIdInsertsQueue<T> {
   constructor(posIdInserts: Map<string, T>) {
     this.queue = [...posIdInserts.entries()]
       .map(([posId, value]) => ({ posId, value }))
-      .sort((e1, e2) => e1.posId.localeCompare(e2.posId));
+      .sort((e1, e2) => compare(e1.posId, e2.posId));
   }
 
   *dequeue(upper: LseqPosId) {

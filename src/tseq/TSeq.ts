@@ -1,7 +1,7 @@
 import { TSeqCharNode, TSeqNode } from './TSeqNode';
 import { TSeqOperable } from './TSeqOperable';
 import { TSeqCharTick, TSeqLocalOperation, TSeqOperation, TSeqRevert, TSeqSplice } from './types';
-import { concatIter } from '../engine/util';
+import { compare, concatIter } from '../engine/util';
 
 /**
  * Result of a pre-apply step during {@link TSeq#apply}.
@@ -110,8 +110,7 @@ export class TSeq extends TSeqNode {
     // Apply the content, accumulating metadata
     const splices: TSeqSplice[] = [];
     // Operations can 'jump' intermediate affected characters
-    preApply.sort(({ charIndex: c1 }, { charIndex: c2 }) =>
-      c1 === c2 ? 0 : c1 > c2 ? 1 : -1);
+    preApply.sort((p1, p2) => compare(p1.charIndex, p2.charIndex));
     for (let { node, post: [char, tick], charIndex } of preApply) {
       node.set(char, tick);
       const [oldChar] = node.pre ?? [''];
