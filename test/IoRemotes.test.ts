@@ -9,6 +9,7 @@ import { mockLocal, MockProcess } from './testClones';
 import { GlobalClock, TreeClock } from '../src/engine/clocks';
 import { lastValueFrom, of } from 'rxjs';
 import { mock } from 'jest-mock-extended';
+import { Snapshot } from '../src/engine/index';
 
 describe('Socket.io Remotes', () => {
   let serverIo: ServerIo;
@@ -59,7 +60,7 @@ describe('Socket.io Remotes', () => {
       expect(lastValueFrom(localRemotes.operations))
         .rejects.toThrowError('bork'),
       // Also check outstanding new clock requests waiting for connection
-      expect(localRemotes.newClock())
+      expect(localRemotes.snapshot(false, mock()))
         .rejects.toThrowError('Clone has closed')
     ]);
   });
@@ -140,7 +141,7 @@ describe('Socket.io Remotes', () => {
       await expect(comesAlive(localRemotes, false)).resolves.toBe(false);
     });
 
-    test('can get clock', async () => {
+    test('can get snapshot', async () => {
       // This tests sending and replying
       localRemotes = new IoRemotes({
         '@id': 'local-remotes', '@domain': domain, genesis: false,
@@ -149,11 +150,13 @@ describe('Socket.io Remotes', () => {
       localRemotes.setLocal(mockLocal());
       const clock = TreeClock.GENESIS.forked().left;
       remoteRemotes.setLocal(mockLocal({
-        newClock: async () => clock
+        snapshot: async () => mock<Snapshot>({
+          clock, gwc: GlobalClock.GENESIS, agreed: TreeClock.GENESIS
+        })
       }));
       await comesAlive(localRemotes);
-      const newClock = await localRemotes.newClock();
-      expect(newClock.equals(clock)).toBe(true);
+      const { clock: newClock } = await localRemotes.snapshot(true, mock());
+      expect(newClock!.equals(clock)).toBe(true);
     });
 
     test('can rev-up', async () => {

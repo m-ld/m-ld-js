@@ -9,7 +9,7 @@ import {
 import { comesAlive } from '../src/engine/AbstractMeld';
 import { count, map, observeOn, take, toArray } from 'rxjs/operators';
 import { TreeClock } from '../src/engine/clocks';
-import { MeldRemotes, Snapshot } from '../src/engine';
+import { Meld, MeldRemotes, Snapshot } from '../src/engine';
 import {
   combinePlugins, Describe, GraphSubject, MeldError, MeldReadState, Read, Select, Update
 } from '../src';
@@ -42,7 +42,7 @@ class TestDatasetEngine extends DatasetEngine {
     remotes: MeldRemotes,
     genesis: boolean,
     doNotInit?: typeof doNotInit
-  }>): Promise<DatasetEngine> {
+  }>): Promise<TestDatasetEngine> {
     const fullConfig = testConfig({ genesis: params?.genesis ?? true });
     const suset = new SuSetDataset(
       await memStore({ backend: params?.backend }),
@@ -55,9 +55,13 @@ class TestDatasetEngine extends DatasetEngine {
       await clone.initialise();
     return clone;
   }
-
-  // Read and write methods on a clone require the state lock. These are
-  // normally put in place by a StateEngine.
+  // Utility that snapshots the clone only to fork its clock
+  async newClock() {
+    return this.lock.share('state', 'test', async () =>
+      (await this.snapshot(true)).clock!);
+  }
+  // These methods on a clone require the state lock.
+  // These are normally put in place by a StateEngine.
   read(request: Read): Consumable<GraphSubject> {
     return inflateFrom(this.lock.share('state', 'test', () => super.read(request)));
   }
@@ -94,7 +98,7 @@ describe('Dataset engine', () => {
 
     test('non-genesis fails to initialise if siloed', async () => {
       await expect(TestDatasetEngine.instance({
-        remotes: mockRemotes(NEVER, [false], TreeClock.GENESIS.forked().left),
+        remotes: mockRemotes(NEVER, [false]),
         genesis: false
       })).rejects.toThrow();
     });
@@ -155,7 +159,7 @@ describe('Dataset engine', () => {
   });
 
   describe('as genesis with remote clone', () => {
-    let clone: DatasetEngine;
+    let clone: TestDatasetEngine;
     let remote: MockProcess;
     let remoteUpdates: Source<MeldOperationMessage>;
 
@@ -247,7 +251,7 @@ describe('Dataset engine', () => {
   describe('as new clone', () => {
     let remotes: MeldRemotes;
     let remoteUpdates: Source<MeldOperationMessage>;
-    let snapshot: jest.Mock<Promise<Snapshot>, [MeldReadState]>;
+    let snapshot: jest.Mock<Promise<Snapshot>, [boolean, MeldReadState]>;
     let collaborator: MockProcess;
     let collabPrevOp: MeldOperationMessage;
     let remotesLive: BehaviorSubject<boolean | null>;
@@ -258,10 +262,10 @@ describe('Dataset engine', () => {
       collabPrevOp = collaborator.sentOperation({}, wilma);
       remoteUpdates = new Source<MeldOperationMessage>();
       remotesLive = hotLive([true]);
-      remotes = mockRemotes(remoteUpdates, remotesLive, left);
-      // Cheating, snapshot should really contain Wilma (see op above)
-      snapshot = jest.fn().mockImplementation(async () => collaborator.snapshot());
-      remotes.snapshot = snapshot;
+      remotes = mockRemotes(remoteUpdates, remotesLive);
+      snapshot = remotes.snapshot = mockFn<Meld['snapshot']>()
+        // Cheating, snapshot should really contain Wilma (see op above)
+        .mockImplementation(async () => collaborator.snapshot([], EMPTY, left));
     });
 
     test('initialises from snapshot', async () => {
@@ -281,9 +285,29 @@ describe('Dataset engine', () => {
       await expect(TestDatasetEngine.instance({ remotes, genesis: false })).rejects.toThrow();
     });
 
+    test('does not come live if remotes close', async () => {
+      snapshot.mockImplementation(() => new Promise((_resolve, reject) => {
+        // The remotes object is killed by e.g. an authentication failure
+        // This causes undecided liveness and completion (see AbstractMeld)
+        setImmediate(() => {
+          remotesLive.next(null);
+          remotesLive.complete();
+          reject(new MeldError('Clone has closed'));
+        });
+      }));
+      await expect(TestDatasetEngine.instance({ remotes, genesis: false })).rejects.toThrow();
+    });
+
+    test('does not come live if remotes never open', async () => {
+      remotesLive = hotLive([null]);
+      remotes = mockRemotes(remoteUpdates, remotesLive);
+      setImmediate(() => remotesLive.complete());
+      await expect(TestDatasetEngine.instance({ remotes, genesis: false })).rejects.toThrow();
+    });
+
     test('retries if snapshot fails', async () => {
-      snapshot.mockImplementationOnce(async () =>
-        collaborator.snapshot(throwError(() => new MeldError('Unknown error'))));
+      snapshot.mockImplementationOnce(async () => collaborator.snapshot(
+        throwError(() => new MeldError('Unknown error'))));
       const clone = await TestDatasetEngine.instance({ remotes, genesis: false });
       await expect(clone.status.becomes({ outdated: false })).resolves.toBeDefined();
       expect(snapshot.mock.calls.length).toBe(2);

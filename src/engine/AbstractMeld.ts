@@ -43,7 +43,8 @@ export abstract class AbstractMeld implements Meld {
     // indicates a return to undecided liveness followed by completion.
     this.live = Object.defineProperties(
       this.liveSource.pipe(catchError(() => of(null)), distinctUntilChanged()),
-      { value: { get: () => this.liveSource.value } }) as LiveValue<boolean | null>;
+      { value: { get: () => this.liveSource.value } }
+    ) as LiveValue<boolean | null>;
 
     // Log liveness
     this.live.pipe(skip(1)).subscribe(
@@ -67,8 +68,7 @@ export abstract class AbstractMeld implements Meld {
     return this._closed;
   }
 
-  abstract newClock(): Promise<TreeClock>;
-  abstract snapshot(state: MeldReadState): Promise<Snapshot>;
+  abstract snapshot(newClock: boolean, state: MeldReadState): Promise<Snapshot>;
   abstract revupFrom(time: TreeClock, state: MeldReadState): Promise<Revup | undefined>;
 
   protected msgString(msg: OperationMessage) {

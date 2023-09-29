@@ -48,25 +48,22 @@ export function testConfig(config?: Partial<MeldConfig>): MeldConfig {
 
 export function mockRemotes(
   updates: Observable<MeldOperationMessage> = NEVER,
-  lives: Array<boolean | null> | LiveValue<boolean | null> = [false],
-  newClock: TreeClock = TreeClock.GENESIS
+  lives: Array<boolean | null> | LiveValue<boolean | null> = [false]
 ): MeldRemotes {
   // This weirdness is due to jest-mock-extended trying to mock arrays
   return {
     ...mock<MeldRemotes>(),
     setLocal: () => {},
     operations: updates,
-    live: Array.isArray(lives) ? hotLive(lives) : lives,
-    newClock: mockFn().mockResolvedValue(newClock)
+    live: Array.isArray(lives) ? hotLive(lives) : lives
   };
 }
 
 export class MockRemotes implements MeldRemotes {
   live: LiveValue<boolean>;
   operations: Observable<MeldOperationMessage>;
-  newClock: () => Promise<TreeClock>;
   revupFrom: (time: TreeClock, state: MeldReadState) => Promise<Revup | undefined>;
-  snapshot: (state: MeldReadState) => Promise<Snapshot>;
+  snapshot: (newClock: boolean, state: MeldReadState) => Promise<Snapshot>;
   setLocal: (clone: MeldLocal | null) => void;
 
   constructor() {
@@ -322,9 +319,11 @@ export class MockProcess implements ClockHolder<TreeClock> {
 
   snapshot(
     data: ObservableInput<Snapshot.Datum> = [],
-    updates: Observable<OperationMessage> = EMPTY
+    updates: Observable<OperationMessage> = EMPTY,
+    clock?: TreeClock
   ): Snapshot {
     return {
+      clock,
       gwc: this.gwc,
       agreed: this.agreed,
       data: from(data),

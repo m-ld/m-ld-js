@@ -108,13 +108,11 @@ export enum MeldMessageType {
 }
 
 export enum MeldRequestType {
-  clock = 'http://control.m-ld.org/request/clock',
   snapshot = 'http://control.m-ld.org/request/snapshot',
   revup = 'http://control.m-ld.org/request/revup'
 }
 
 export enum MeldResponseType {
-  clock = 'http://control.m-ld.org/response/clock',
   snapshot = 'http://control.m-ld.org/response/snapshot',
   revup = 'http://control.m-ld.org/response/revup',
   rejected = 'http://control.m-ld.org/response/rejected'

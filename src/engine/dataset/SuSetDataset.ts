@@ -161,32 +161,24 @@ export class SuSetDataset extends MeldEncoder {
       return (await this.journal.state()).time;
   }
 
+  /**
+   * Parameters should always be Genesis in production, because otherwise the
+   * clock would be set via a snapshot.
+   */
   @checkNotClosed.async
-  async resetClock(localTime: TreeClock): Promise<unknown> {
+  async resetClock(
+    localTime = TreeClock.GENESIS,
+    gwc = GlobalClock.GENESIS,
+    agreed = TreeClock.GENESIS
+  ): Promise<TreeClock> {
     return this.dataset.transact({
       id: 'suset-reset-clock',
       prepare: async () => {
         return {
           kvps: this.journal.reset(localTime,
             // Set GWC and last agreed to a default; will re-set on snapshot
-            GlobalClock.GENESIS, TreeClock.GENESIS)
-        };
-      }
-    });
-  }
-
-  @checkNotClosed.async
-  async saveClock(
-    prepare: (gwc: GlobalClock) => Promise<TreeClock> | TreeClock
-  ): Promise<TreeClock> {
-    return this.dataset.transact<TreeClock>({
-      id: 'suset-save-clock',
-      prepare: async () => {
-        const journal = await this.journal.state(),
-          newClock = await prepare(journal.gwc);
-        return {
-          kvps: journal.withTime(newClock).commit,
-          return: newClock
+            gwc, agreed),
+          return: localTime
         };
       }
     });
@@ -319,7 +311,7 @@ export class SuSetDataset extends MeldEncoder {
         '\n\tdeletes:', [...patch.deletes].map(tripleIndexKey),
         '\n\tinserts:', [...patch.inserts].map(tripleIndexKey),
         '\n\tupdates:', [...patch.updates].map(({ quad, update }) =>
-              `${tripleIndexKey(quad)}: ${JSON.stringify(update)}`));
+          `${tripleIndexKey(quad)}: ${JSON.stringify(update)}`));
     }
     txc.on('commit', async () => {
       if (this.readyForTxn)
@@ -916,8 +908,31 @@ export class SuSetDataset extends MeldEncoder {
    * The data will be loaded from the same consistent snapshot per abstract-level.
    */
   @checkNotClosed.async
-  async takeSnapshot(): Promise<DatasetSnapshot> {
+  @checkLocked('state').async
+  async takeSnapshot(
+    newClock: boolean,
+    clockHolder: ClockHolder<TreeClock>
+  ): Promise<DatasetSnapshot> {
     const journal = await this.journal.state();
+    let theirClock: TreeClock | undefined;
+    if (newClock) {
+      await this.dataset.transact({
+        id: 'suset-save-clock',
+        prepare: async () => {
+          // TODO: This should really be encapsulated in the causal clock
+          let ourClock = clockHolder.peek();
+          const lastPublicTick = journal.gwc.getTicks(ourClock);
+          // Back-date the clock to the last public tick before forking
+          const fork = ourClock.ticked(lastPublicTick).forked();
+          theirClock = fork.right;
+          // Re-apply the ticks to our local clock
+          ourClock = fork.left.ticked(ourClock.ticks);
+          // This is synchronous with the fork
+          clockHolder.push(ourClock);
+          return { kvps: journal.withTime(ourClock).commit };
+        }
+      });
+    }
     const allQuads = this.userGraph.quads.query();
     const insData = consume(allQuads).pipe(
       batch(10), // TODO batch size config
@@ -934,6 +949,7 @@ export class SuSetDataset extends MeldEncoder {
       return consume(operations.map(operation => ({ operation })));
     });
     return {
+      clock: theirClock,
       gwc: journal.gwc,
       agreed: journal.agreed,
       data: flowable<Snapshot.Datum>(merge(insData, opData)),
