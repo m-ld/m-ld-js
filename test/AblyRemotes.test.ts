@@ -1,7 +1,6 @@
 import * as Ably from 'ably';
 import { mockDeep as mock, MockProxy } from 'jest-mock-extended';
 import { AblyRemotes, MeldAblyConfig } from '../src/ably';
-import { comesAlive } from '../src/engine/AbstractMeld';
 import { mockLocal, testOp } from './testClones';
 import { BehaviorSubject, Subject as Source } from 'rxjs';
 import { GlobalClock, TreeClock } from '../src/engine/clocks';
@@ -80,14 +79,14 @@ describe('Ably remotes', () => {
     const remotes = new AblyRemotes(config, extensions, connect);
     connCallbacks.connected?.(mock<Ably.Types.ConnectionStateChange>());
     // We have not supplied a presence update, per Ably behaviour
-    await expect(comesAlive(remotes, false)).resolves.toBe(false);
+    await expect(remotes.comesAlive(false)).resolves.toBe(false);
   });
 
   test('responds to presence', async () => {
     const remotes = new AblyRemotes(config, extensions, connect);
     connCallbacks.connected?.(mock<Ably.Types.ConnectionStateChange>());
     otherPresent();
-    await expect(comesAlive(remotes)).resolves.toBe(true);
+    await expect(remotes.comesAlive()).resolves.toBe(true);
   });
 
   test('joins presence if clone is live', async () => {
@@ -115,7 +114,7 @@ describe('Ably remotes', () => {
     control.subscribe.mockReturnValue(new Promise(() => { }));
     const remotes = new AblyRemotes(config, extensions, connect);
     remotes.setLocal(mockLocal({}, [true]));
-    const goneLive = comesAlive(remotes, false); // No presence so false
+    const goneLive = remotes.comesAlive(false); // No presence so false
     connCallbacks.connected?.(mock<Ably.Types.ConnectionStateChange>());
     // Push to immediate because connected handling is async
     const now = new Promise(res => setImmediate(() => res('now')));
@@ -147,7 +146,7 @@ describe('Ably remotes', () => {
     const remotes = new AblyRemotes(config, extensions, connect);
     connCallbacks.connected?.(mock<Ably.Types.ConnectionStateChange>());
     otherPresent();
-    await comesAlive(remotes);
+    await remotes.comesAlive();
     const prevTime = TreeClock.GENESIS.forked().left, time = prevTime.ticked();
     const entry = MeldOperationMessage.fromOperation(prevTime.ticks, testOp(time, {}, {}), null);
     const updates = new Source<MeldOperationMessage>();
@@ -191,7 +190,7 @@ describe('Ably remotes', () => {
         return Promise.resolve();
       });
     otherPresent();
-    await comesAlive(remotes);
+    await remotes.comesAlive();
     expect((await remotes.snapshot(true, mock())).clock!.equals(newClock)).toBe(true);
   });
 

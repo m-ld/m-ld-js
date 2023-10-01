@@ -6,7 +6,6 @@ import {
   asapScheduler, BehaviorSubject, EMPTY, EmptyError, firstValueFrom, NEVER, of, Subject as Source,
   throwError
 } from 'rxjs';
-import { comesAlive } from '../src/engine/AbstractMeld';
 import { count, map, observeOn, take, toArray } from 'rxjs/operators';
 import { TreeClock } from '../src/engine/clocks';
 import { Meld, MeldRemotes, Snapshot } from '../src/engine';
@@ -76,7 +75,7 @@ describe('Dataset engine', () => {
       const clone = await TestDatasetEngine.instance({
         remotes: mockRemotes(NEVER, [null])
       });
-      await expect(comesAlive(clone, false)).resolves.toBe(false);
+      await expect(clone.comesAlive(false)).resolves.toBe(false);
       expect(clone.status.value).toEqual({ online: false, outdated: false, silo: false, ticks: 0 });
     });
 
@@ -84,7 +83,7 @@ describe('Dataset engine', () => {
       const clone = await TestDatasetEngine.instance({
         remotes: mockRemotes(NEVER, [null, false])
       });
-      await expect(comesAlive(clone)).resolves.toBe(true);
+      await expect(clone.comesAlive()).resolves.toBe(true);
       expect(clone.status.value).toEqual({ online: true, outdated: false, silo: true, ticks: 0 });
     });
 
@@ -92,7 +91,7 @@ describe('Dataset engine', () => {
       const clone = await TestDatasetEngine.instance({
         remotes: mockRemotes(NEVER, [true, false])
       });
-      await expect(comesAlive(clone)).resolves.toBe(true);
+      await expect(clone.comesAlive()).resolves.toBe(true);
       expect(clone.status.value).toEqual({ online: true, outdated: false, silo: true, ticks: 0 });
     });
 
@@ -169,7 +168,7 @@ describe('Dataset engine', () => {
       // Ensure that remote updates are async
       const remotes = mockRemotes(remoteUpdates.pipe(observeOn(asapScheduler)), remotesLive);
       clone = await TestDatasetEngine.instance({ remotes });
-      await comesAlive(clone); // genesis is alive
+      await clone.comesAlive(); // genesis is alive
       remote = new MockProcess(await clone.newClock()); // no longer genesis
       remotes.revupFrom = mockFn().mockImplementation(async () => remote.revup());
       remotesLive.next(true); // remotes come alive
@@ -252,12 +251,14 @@ describe('Dataset engine', () => {
     let remotes: MeldRemotes;
     let remoteUpdates: Source<MeldOperationMessage>;
     let snapshot: jest.Mock<Promise<Snapshot>, [boolean, MeldReadState]>;
+    let localTime: TreeClock;
     let collaborator: MockProcess;
     let collabPrevOp: MeldOperationMessage;
     let remotesLive: BehaviorSubject<boolean | null>;
 
     beforeEach(async () => {
       const { left, right } = TreeClock.GENESIS.forked();
+      localTime = left;
       collaborator = new MockProcess(right);
       collabPrevOp = collaborator.sentOperation({}, wilma);
       remoteUpdates = new Source<MeldOperationMessage>();
@@ -265,7 +266,7 @@ describe('Dataset engine', () => {
       remotes = mockRemotes(remoteUpdates, remotesLive);
       snapshot = remotes.snapshot = mockFn<Meld['snapshot']>()
         // Cheating, snapshot should really contain Wilma (see op above)
-        .mockImplementation(async () => collaborator.snapshot([], EMPTY, left));
+        .mockImplementation(async () => collaborator.snapshot([], EMPTY, localTime));
     });
 
     test('initialises from snapshot', async () => {
@@ -274,10 +275,15 @@ describe('Dataset engine', () => {
       expect(snapshot.mock.calls.length).toBe(1);
     });
 
-    test('does not come live if snapshot fails', async () => {
+    test('does not come live if snapshot rejected', async () => {
+      snapshot.mockRejectedValue(new MeldError('Request rejected'));
+      await expect(TestDatasetEngine.instance({ remotes, genesis: false })).rejects.toThrow();
+    });
+
+    test('does not come live if collaborator closes', async () => {
       snapshot.mockImplementation(async () => {
         const snapshot = collaborator.snapshot(throwError(() =>
-          new MeldError('Clone has closed')));
+          new MeldError('Clone has closed')), EMPTY, localTime);
         // When the collaborator has closed, there are no more clones
         setImmediate(() => remotesLive.next(false));
         return snapshot;
@@ -305,9 +311,9 @@ describe('Dataset engine', () => {
       await expect(TestDatasetEngine.instance({ remotes, genesis: false })).rejects.toThrow();
     });
 
-    test('retries if snapshot fails', async () => {
+    test('retries if snapshot data fails', async () => {
       snapshot.mockImplementationOnce(async () => collaborator.snapshot(
-        throwError(() => new MeldError('Unknown error'))));
+        throwError(() => new MeldError('Unknown error')), EMPTY, localTime));
       const clone = await TestDatasetEngine.instance({ remotes, genesis: false });
       await expect(clone.status.becomes({ outdated: false })).resolves.toBeDefined();
       expect(snapshot.mock.calls.length).toBe(2);

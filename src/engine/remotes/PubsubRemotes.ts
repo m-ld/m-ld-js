@@ -11,7 +11,7 @@ import {
 import { throwOnComplete, toJSON } from '../util';
 import * as MsgPack from '../msgPack';
 import { delay, first, map, takeUntil, timeout } from 'rxjs/operators';
-import { AbstractMeld, comesAlive } from '../AbstractMeld';
+import { AbstractMeld } from '../AbstractMeld';
 import {
   MeldError, MeldErrorStatus, MeldExtensions, MeldReadState, shortId, uuid
 } from '../../index';
@@ -696,7 +696,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
 
   private async nextSender(messageId: string): Promise<SubPub | null> {
     // Wait for decided liveness
-    await comesAlive(this, 'notNull');
+    await this.comesAlive('notNull');
 
     if (this.present.every(id => this.recentlySentTo.has(id)))
       this.recentlySentTo.clear();

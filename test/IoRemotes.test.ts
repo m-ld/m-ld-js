@@ -4,7 +4,6 @@ import { IoRemotesService } from '../src/socket.io/server';
 import { createServer } from 'http';
 import { Server as ServerIo } from 'socket.io';
 import { AddressInfo } from 'net';
-import { comesAlive } from '../src/engine/AbstractMeld';
 import { mockLocal, MockProcess } from './testClones';
 import { GlobalClock, TreeClock } from '../src/engine/clocks';
 import { lastValueFrom, of } from 'rxjs';
@@ -61,7 +60,7 @@ describe('Socket.io Remotes', () => {
         .rejects.toThrowError('bork'),
       // Also check outstanding new clock requests waiting for connection
       expect(localRemotes.snapshot(false, mock()))
-        .rejects.toThrowError('Clone has closed')
+        .rejects.toThrowError('bork')
     ]);
   });
 
@@ -70,7 +69,7 @@ describe('Socket.io Remotes', () => {
       '@id': 'local-remotes', '@domain': domain, genesis: false,
       io: { uri: `http://localhost:${port}` }
     }, extensions);
-    await comesAlive(localRemotes, false);
+    await localRemotes.comesAlive(false);
     serverIo.disconnectSockets();
     await expect(lastValueFrom(localRemotes.operations))
       .rejects.toBe('io server disconnect');
@@ -90,7 +89,7 @@ describe('Socket.io Remotes', () => {
       }, extensions);
     });
     serverIo.attach(port);
-    await expect(comesAlive(localRemotes, false)).resolves.toBe(false);
+    await expect(localRemotes.comesAlive(false)).resolves.toBe(false);
   });
 
   test('reconnects after transport error', async () => {
@@ -98,11 +97,11 @@ describe('Socket.io Remotes', () => {
       '@id': 'local-remotes', '@domain': domain, genesis: false,
       io: { uri: `http://localhost:${port}` }
     }, extensions);
-    await expect(comesAlive(localRemotes, false)).resolves.toBe(false);
+    await expect(localRemotes.comesAlive(false)).resolves.toBe(false);
     serverIo.close();
-    await expect(comesAlive(localRemotes, null)).resolves.toBeNull();
+    await expect(localRemotes.comesAlive(null)).resolves.toBeNull();
     serverIo.attach(port);
-    await expect(comesAlive(localRemotes, false)).resolves.toBe(false);
+    await expect(localRemotes.comesAlive(false)).resolves.toBe(false);
   });
 
   describe('with presence', () => {
@@ -121,10 +120,10 @@ describe('Socket.io Remotes', () => {
 
     test('remote connects', async () => {
       // live-ness of false means connected but no-one else around
-      await expect(comesAlive(remoteRemotes, false)).resolves.toBe(false);
+      await expect(remoteRemotes.comesAlive(false)).resolves.toBe(false);
       // And check disconnection
       serverIo.disconnectSockets();
-      await expect(comesAlive(remoteRemotes, null)).resolves.toBe(null);
+      await expect(remoteRemotes.comesAlive(null)).resolves.toBe(null);
     });
 
     test('comes alive with remote clone', async () => {
@@ -135,10 +134,10 @@ describe('Socket.io Remotes', () => {
       }, extensions);
       const remoteClone = mockLocal();
       remoteRemotes.setLocal(remoteClone);
-      await expect(comesAlive(localRemotes)).resolves.toBe(true);
+      await expect(localRemotes.comesAlive()).resolves.toBe(true);
       // Shut down the remote clone to check presence leaves
       remoteClone.liveSource.next(false);
-      await expect(comesAlive(localRemotes, false)).resolves.toBe(false);
+      await expect(localRemotes.comesAlive(false)).resolves.toBe(false);
     });
 
     test('can get snapshot', async () => {
@@ -154,7 +153,7 @@ describe('Socket.io Remotes', () => {
           clock, gwc: GlobalClock.GENESIS, agreed: TreeClock.GENESIS
         })
       }));
-      await comesAlive(localRemotes);
+      await localRemotes.comesAlive();
       const { clock: newClock } = await localRemotes.snapshot(true, mock());
       expect(newClock!.equals(clock)).toBe(true);
     });
@@ -174,7 +173,7 @@ describe('Socket.io Remotes', () => {
           cancel() {}
         })
       }));
-      await comesAlive(localRemotes); // Indicates that the remote is present
+      await localRemotes.comesAlive(); // Indicates that the remote is present
       const revup = await localRemotes.revupFrom(TreeClock.GENESIS.forked().right, mock());
       const op = await lastValueFrom(revup!.updates);
       expect(op.time.equals(remote.time)).toBe(true);

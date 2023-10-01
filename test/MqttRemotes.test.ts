@@ -7,7 +7,6 @@ import { GlobalClock, TreeClock } from '../src/engine/clocks';
 import { firstValueFrom, of, Subject as Source } from 'rxjs';
 import { mockLocal, MockMqtt, mockMqtt, MockProcess, testOp } from './testClones';
 import { take, toArray } from 'rxjs/operators';
-import { comesAlive } from '../src/engine/AbstractMeld';
 import { MeldErrorStatus } from '@m-ld/m-ld-spec';
 import { Response, RevupRequest, RevupResponse } from '../src/engine/remotes/ControlMessage';
 import * as MsgPack from '../src/engine/msgPack';
@@ -59,7 +58,7 @@ describe('New MQTT remotes', () => {
     remotes.setLocal(mockLocal());
     mqtt.mockConnect();
     // Presence is joined when the remotes' live status resolves
-    await comesAlive(remotes, false);
+    await remotes.comesAlive(false);
     expect(mqtt.publish).lastCalledWith(
       '__presence/test.m-ld.org/client1',
       '{"client1":"test.m-ld.org/control"}',
@@ -70,7 +69,7 @@ describe('New MQTT remotes', () => {
     remotes.setLocal(mockLocal());
     mqtt.mockConnect();
     // Presence is joined when the remotes' live status resolves
-    await comesAlive(remotes, false);
+    await remotes.comesAlive(false);
 
     remotes.setLocal(null);
     await once(mqtt, 'close');
@@ -124,7 +123,7 @@ describe('New MQTT remotes', () => {
     test('sets presence with local clone', async () => {
       remotes.setLocal(mockLocal());
       // Presence is joined when the remotes' live status resolves
-      await comesAlive(remotes, false);
+      await remotes.comesAlive(false);
       expect(mqtt.publish).lastCalledWith(
         '__presence/test.m-ld.org/client1',
         '{"client1":"test.m-ld.org/control"}',
@@ -136,7 +135,7 @@ describe('New MQTT remotes', () => {
       mqtt.mockPublish(
         '__presence/test.m-ld.org/client2',
         '{"consumer2":"test.m-ld.org/control"}');
-      await comesAlive(remotes);
+      await remotes.comesAlive();
 
       const entry = new MockProcess(TreeClock.GENESIS.forked().left).sentOperation({}, {});
       const operations = new Source<MeldOperationMessage>();
@@ -155,7 +154,7 @@ describe('New MQTT remotes', () => {
       mqtt.mockPublish(
         '__presence/test.m-ld.org/client2',
         '{"consumer2":"test.m-ld.org/control"}');
-      await comesAlive(remotes);
+      await remotes.comesAlive();
 
       const operations = new Source<MeldOperationMessage>();
       remotes.setLocal(mockLocal({ operations }));
