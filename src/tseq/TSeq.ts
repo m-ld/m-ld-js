@@ -25,6 +25,7 @@ export interface TSeqPreApply {
  * A TSeq requires the framework guarantees of a 'shared data type' in **m-ld**:
  * operations must be {@link apply applied} only once, and in causal order.
  *
+ * @see {@link TSeqText} for usage information
  * @category Experimental
  * @experimental
  */

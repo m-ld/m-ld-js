@@ -16,22 +16,37 @@ const state = await clone(new MemoryLevel(), IoRemotes, {
   io: { uri: "https://gw.m-ld.org" }
 });
 
-successDiv.hidden = false;
+successDiv.removeAttribute('hidden');
 domainInput.value = domainName;
 
 for await (let [update] of state.follow()) {
+  for (let { name } of update['@delete'])
+    document.getElementById(`welcome_${name}`).remove();
   for (let { name } of update['@insert'])
     successDiv.insertAdjacentHTML('beforeend',
-      `<h2>Welcome, ${name}!</h2>`);
+      `<h2 id="welcome_${name}" class="bounce">Welcome, ${name}!</h2>`);
 }
 ```
 ```html
 <div id="successDiv" hidden>
   <p>🎉 Your new domain is at</p>
   <input id="domainInput" type="text" onfocus="this.select()" style="width:100%;"/>
+  <hr/>
+  <p><i>When you've cloned the domain below, check back here for updates...</i></p>
 </div>
 ```
-<script>new LiveCode(document.currentScript).inline({ middle: 0 });</script>
+```css
+@keyframes bounce { 
+  0%, 20%, 50%, 80%, 100% { transform: translateY(0); }
+  40% { transform: translateY(-30px); }
+  60% { transform: translateY(-15px); } 
+}
+
+.bounce {
+  animation: bounce 1s;
+}
+```
+<script>new LiveCode(document.currentScript).inline({ middle: 0 }, 25);</script>
 
 The new domain's information is stored in memory here (and only here). The next live code app, below, allows us to make another clone of the domain. These two code blocks are **sandboxed** – they do not have access to each other's state via this browser.
 
@@ -49,15 +64,14 @@ cloneButton.addEventListener('click', async () => {
     io: { uri: 'https://gw.m-ld.org' }
   });
   
-  playgroundAnchor.setAttribute('href', `https://edge.m-ld.org/playground/#domain=${domainInput.value}&txn=%7B%22name%22%3A%22George%22%7D`);
+  playgroundAnchor.setAttribute('href', `https://m-ld.org/playground/#domain=${domainInput.value}&txn=%7B%22name%22%3A%22George%22%7D`);
   clonedDiv.removeAttribute('hidden');
   
-  const submitName = () => state.write({ name: nameInput.value });
-  submitNameButton.addEventListener('click', submitName);
-  nameInput.addEventListener('keydown', e => {
-    if (e.key === 'Enter')
-      submitName();
-  });
+  addNameButton.addEventListener('click', () =>
+    state.write({ name: nameInput.value }));
+  
+  rmNameButton.addEventListener('click', () =>
+    state.write({ '@delete': { name: nameInput.value } }));
 });
 ```
 ```html
@@ -70,7 +84,8 @@ cloneButton.addEventListener('click', async () => {
   <p>🎉 You have cloned the domain!</p>
   <p>Please enter your name:
     <input id="nameInput" type="text"/>
-    <button id="submitNameButton">Submit</button>
+    <button id="addNameButton">Add</button>
+    <button id="rmNameButton">Remove</button>
   </p>
   <p>You can also interact with this domain in the <a id="playgroundAnchor" target="_blank"><b>m-ld</b> playground</a>!</p>
 </div>

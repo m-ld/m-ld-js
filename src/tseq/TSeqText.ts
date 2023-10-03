@@ -60,7 +60,7 @@ import { TSeqOperable } from './TSeqOperable';
  * [[include:how-to/domain-setup.md]]
  * [[include:how-to/text.md]]
  *
- * @see TSeq
+ * @see {@link TSeq}
  * @category Experimental
  * @experimental
  * @noInheritDoc

@@ -238,8 +238,9 @@ export interface GraphSubjects extends Array<GraphSubject> {
   quads: BaseDataset;
 }
 
-/** @internal */
+// Note this must not be @internal, else TypeDoc ignores the interface too
 export namespace GraphSubjects {
+  /** Empty graph implementation (immutable) */
   export const EMPTY: GraphSubjects =
     Object.assign([], { graph: new Map(), quads: [] });
 }
@@ -619,8 +620,6 @@ export interface MeldPlugin extends Partial<MeldExtensions> {
 export interface MeldExtensions {
   /**
    * Data invariant constraints applicable to the domain.
-   *
-   * @experimental
    */
   readonly constraints: Iterable<MeldConstraint>;
   /**
@@ -660,8 +659,7 @@ export interface MeldExtensions {
  * state and the update.
  *
  * @see [m-ld concurrency](http://m-ld.org/doc/#concurrency)
- * @experimental
- * @category Experimental
+ * @category API
  */
 export interface MeldConstraint {
   /**
@@ -736,9 +734,7 @@ export interface AgreementCondition {
 
 /**
  * An update to which further updates can be asserted or entailed.
- *
- * @experimental
- * @category Experimental
+ * @category API
  */
 export interface InterimUpdate {
   /**
@@ -837,8 +833,7 @@ export interface InterimUpdate {
  * given property position in a Subject. Otherwise, it is the identity of the
  * datatype itself (which may be the same).
  * @see Datatype
- * @experimental
- * @category Experimental
+ * @category API
  */
 export type IndirectedData =
   (datatype: Iri, property?: Iri) => Datatype | undefined;
@@ -854,8 +849,7 @@ export type IndirectedData =
  * algorithms for reconciling concurrent mutations.
  *
  * @typeParam Data - data type
- * @experimental
- * @category Experimental
+ * @category API
  */
 export interface Datatype<Data = unknown> {
   /**
@@ -881,7 +875,7 @@ export interface Datatype<Data = unknown> {
    * fully pre-expanded IRI.
    *
    * @returns the valid data, or undefined if the data is not valid
-   * @throws {TypeError} if a validation message is indicated
+   * @throws TypeError if a validation message is indicated
    */
   validate(value: Value): Data | undefined;
   /**
@@ -941,8 +935,7 @@ export interface Datatype<Data = unknown> {
  * @typeParam Data - data type
  * @typeParam Operation - operation type; must be JSON-serialisable
  * @typeParam Revert - reversion local metadata type; must be JSON-serialisable
- * @experimental
- * @category Experimental
+ * @category API
  */
 export interface SharedDatatype<Data, Operation, Revert = never> extends Datatype<Data> {
   /**

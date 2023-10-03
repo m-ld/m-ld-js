@@ -252,6 +252,7 @@ export class SubjectPropertySet<S extends SubjectLike = Subject> extends Subject
   }
 }
 
+/** @internal */
 class ValueSet extends IndexSet<Value> {
   constructor(
     readonly property: string,
@@ -378,6 +379,7 @@ export class SubjectPropertyList<S extends List> extends SubjectPropertyValues<S
   }
 }
 
+/** @internal */
 abstract class Splices<Items> {
   /** A sparse array of concurrent splice operations for every position */
   readonly ops: { deleteCount: number; items?: Items }[] = [];
@@ -399,12 +401,14 @@ abstract class Splices<Items> {
   }
 }
 
+/** @internal */
 class IterableSplices extends Splices<Iterable<unknown>> {
   protected working(items1?: Iterable<unknown>, items2?: Iterable<unknown>) {
     return [...items1 ?? [], ...items2 ?? []];
   }
 }
 
+/** @internal */
 class StringSplices extends Splices<string> {
   protected working(items1?: string, items2?: string) {
     return (items1 ?? '') + (items2 ?? '');

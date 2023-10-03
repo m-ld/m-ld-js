@@ -29,7 +29,8 @@ There are more live code examples for you to try in the [How-To](#how-to) sectio
 
 In Node.js, or using a bundler, use:
 
-`npm install @m-ld/m-ld`
+- `npm install @m-ld/m-ld` – latest stable prerelease
+- `npm install @m-ld/m-ld@edge` – bleeding edge
 
 Browser bundles (as used above) are served on:
 - `js.m-ld.org/ext` – latest stable prerelease

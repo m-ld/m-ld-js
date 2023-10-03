@@ -39,9 +39,12 @@ export function shortId(spec?: string) {
 }
 
 /**
- * Utility to generate a unique short UUID for use in a MeldConfig
+ * Utility to generate a unique short UUID for use in a MeldConfig; actually
+ * a CUID starting with the character `c` and containing only lowercase
+ * US-English letters and digits. (Note that this is not an RFC 4122 UUID.)
  *
  * @category Utility
+ * @see https://github.com/paralleldrive/cuid#original-documentation-follows
  */
 export function uuid() {
   return cuid();
