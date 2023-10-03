@@ -50,14 +50,14 @@ describe('Ably remotes', () => {
 
     operations = mock<Ably.Types.RealtimeChannelPromise>();
     client.channels.get.calledWith('test.m-ld.org:operations').mockReturnValue(operations);
-    operations.subscribe.mockReturnValue(Promise.resolve());
+    operations.subscribe.mockReturnValue(Promise.resolve(null));
     operations.publish.mockReturnValue(Promise.resolve());
     operations.presence.subscribe.mockReturnValue(Promise.resolve());
     operations.presence.get.mockReturnValue(Promise.resolve([]));
 
     control = mock<Ably.Types.RealtimeChannelPromise>();
     client.channels.get.calledWith('test.m-ld.org:test').mockReturnValue(control);
-    control.subscribe.mockReturnValue(Promise.resolve());
+    control.subscribe.mockReturnValue(Promise.resolve(null));
 
     // Capture the connection event handlers
     (client.connection.on as unknown as UsedConnCallbackMock)
@@ -168,7 +168,7 @@ describe('Ably remotes', () => {
     // Set up the other clone's direct channel
     const other = mock<Ably.Types.RealtimeChannelPromise>();
     client.channels.get.calledWith('test.m-ld.org:other').mockReturnValue(other);
-    other.subscribe.mockReturnValue(Promise.resolve());
+    other.subscribe.mockReturnValue(Promise.resolve(null));
     (other.publish as unknown as MockInstance<Promise<void>, [string, any]>)
       .mockImplementation((name, data) => {
         const splitName = name.split(':');

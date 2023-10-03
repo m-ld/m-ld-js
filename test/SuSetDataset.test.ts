@@ -935,8 +935,8 @@ describe('SU-Set Dataset', () => {
     });
 
     test('insert indirected datatype', async () => {
-      const validate = jest.spyOn(byteArrayDatatype, 'validate').mockReset();
-      const getDataId = jest.spyOn(byteArrayDatatype, 'getDataId').mockReset();
+      const validate = jest.spyOn(byteArrayDatatype, 'validate').mockClear();
+      const getDataId = jest.spyOn(byteArrayDatatype, 'getDataId').mockClear();
       extensions.push(byteArrayDatatype);
       const willUpdate = firstValueFrom(ssd.updates);
       const photo = Buffer.from('abc');
@@ -1023,8 +1023,8 @@ describe('SU-Set Dataset', () => {
     });
 
     test('apply operation with indirected data', async () => {
-      const validate = jest.spyOn(byteArrayDatatype, 'validate').mockReset();
-      const getDataId = jest.spyOn(byteArrayDatatype, 'getDataId').mockReset();
+      const validate = jest.spyOn(byteArrayDatatype, 'validate').mockClear();
+      const getDataId = jest.spyOn(byteArrayDatatype, 'getDataId').mockClear();
       extensions.push(byteArrayDatatype);
       const photo = Buffer.from('abc');
       await expect(ssd.apply(
