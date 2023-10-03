@@ -344,7 +344,7 @@ export class JsProperty<T, S = unknown> {
 }
 
 /**
- * Top-level utility version of {@link JsProperty#value}
+ * Top-level utility version of {@link JsProperty.value}
  * @category Utility
  */
 export function propertyValue<T, S>(

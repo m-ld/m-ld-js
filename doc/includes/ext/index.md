@@ -9,7 +9,7 @@ The Javascript engine package bundles the following extensions – follow the li
 - [Remotes](#remotes) are pre-selected in the call to [clone](#clone), as described above.
 - [Lists](https://spec.m-ld.org/#lists) have a default implementation, which is replaceable.
 - [Shapes](/classes/shapeconstrained.html) are used to enforce a 'schema' or 'object model' on the domain's data.
-- Subject properties in the domain can be declared as [collaborative text](/classes/tseqtext.html).
+- [Text](/classes/tseqtext.html) subject properties can be made collaboratively-editable.
 - [Transport Security](/classes/meldacltransportsecurity.html) allows an app to encrypt and apply digital signatures to **m-ld** protocol network traffic.
 - [Statutes](/classes/statutory.html) allow an app to require that certain changes, such as changes to access controls, are _agreed_ before they are shared in the domain.
 - [Write Permissions](/classes/writepermitted.html) allow an app to add fine-grained access controls based on data [shapes](/classes/shape.html).

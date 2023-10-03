@@ -62,12 +62,6 @@ export const jsonDatatype = new class implements Datatype, MeldPlugin {
   getDataId(data: unknown) {
     return binaryId(this.lexical(data));
   }
-
-  sizeOf(data: unknown): number {
-    // No sizeof operator in Javascript
-    return (data != null && typeof data == 'object' && this._sizeCache.get(data))
-      || this.lexical(data).length * 2; // UTF-16
-  }
 }();
 
 /**
@@ -93,8 +87,7 @@ export const byteArrayDatatype: Datatype<Buffer> & MeldPlugin = {
     });
     return data;
   },
-  getDataId: binaryId,
-  sizeOf: data => data.length
+  getDataId: binaryId
 };
 
 /** @internal */

@@ -3,12 +3,16 @@ import { textDiff } from '../subjects';
 import { MeldState, StateProc } from '../api';
 import { TSeq, TSeqOperation } from '../tseq/index';
 
+/** @internal */
 type Inputting = {
   ours: TSeqOperation[],
   theirs?: TSeqOperation[]
 };
 
-/** Minimal interface for writing to a m-ld state machine */
+/**
+ * Minimal interface for writing to a m-ld state machine
+ * @category Utility
+ */
 interface WriteStateMachine {
   write: (procedure: StateProc<MeldState>) => Promise<unknown>;
 }
@@ -17,6 +21,7 @@ interface WriteStateMachine {
  * A wrapper for a `contenteditable` HTML element, allowing the element's text
  * content to be spliced – that is, modified using a {@link TextSplice}, without
  * losing or misplacing a user's active selection range.
+ * @category Utility
  */
 export class ElementSpliceText {
   private inputting?: Inputting;

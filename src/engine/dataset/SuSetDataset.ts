@@ -12,7 +12,7 @@ import { EMPTY, merge, mergeMap, Observable, of, Subject as Source } from 'rxjs'
 import { expand, filter, map, takeWhile } from 'rxjs/operators';
 import { completed, inflate, mapIter } from '../util';
 import { Logger } from 'loglevel';
-import { isLiteralTriple, LiteralTriple, Quad, Triple, tripleIndexKey, TripleMap } from '../quads';
+import { isLiteralTriple, Quad, Triple, tripleIndexKey, TripleMap } from '../quads';
 import { InterimUpdatePatch } from './InterimUpdatePatch';
 import { EntryBuilder, Journal, JournalEntry, JournalState } from '../journal';
 import { JournalClerk } from '../journal/JournalClerk';
@@ -23,7 +23,7 @@ import { batch } from 'rx-flowable/operators';
 import { consume } from 'rx-flowable/consume';
 import { MeldMessageType } from '../../ns/m-ld';
 import { MeldApp, MeldConfig } from '../../config';
-import { MeldOperation, OperationReversion } from '../MeldOperation';
+import { LocalDataOperation, MeldOperation } from '../MeldOperation';
 import { ClockHolder } from '../messages';
 import { Iri } from '@m-ld/jsonld';
 import { M_LD } from '../../ns';
@@ -31,8 +31,7 @@ import { MeldOperationMessage } from '../MeldOperationMessage';
 import { check, checkNotClosed } from '../check';
 import { getIdLogger } from '../logging';
 import { Future } from '../Future';
-import { JrqlPatchQuads, JrqlQuadOperation, JrqlQuads, UpdateMeta } from './JrqlQuads';
-import { RefTriple } from '../jrql-util';
+import { JrqlPatchQuads, JrqlQuads, QuadUpdate } from './JrqlQuads';
 import { JsonldContext } from '../jsonld';
 import { CacheFactory } from '../cache';
 import { array } from '../../util';
@@ -45,7 +44,11 @@ export type DatasetSnapshot = Omit<Snapshot, 'updates'>;
 type DatasetConfig = Pick<MeldConfig,
   '@id' | '@domain' | 'maxOperationSize' | 'logLevel' | 'journal' | 'maxDataCacheSize'>;
 
-type SuSetDataPatch = { quads: JrqlPatchQuads, tids: PatchTids };
+interface SuSetDataPatch {
+  quads: JrqlPatchQuads,
+  tids: PatchTids,
+  opReverts?: TripleMap<LocalDataOperation[]>
+}
 
 const OpKey = EncodedOperation.Key;
 
@@ -98,7 +101,7 @@ export class SuSetDataset extends MeldEncoder {
     await super.initialise();
     const graph = this.dataset.graph();
     this.userGraph = new JrqlGraph(graph,
-      new JrqlQuads(graph, this.indirectedData, this.cacheFactory));
+      new JrqlQuads(graph, this.indirectedData, this.cacheFactory, this.log));
   }
 
   private get transportSecurity() {
@@ -158,32 +161,24 @@ export class SuSetDataset extends MeldEncoder {
       return (await this.journal.state()).time;
   }
 
+  /**
+   * Parameters should always be Genesis in production, because otherwise the
+   * clock would be set via a snapshot.
+   */
   @checkNotClosed.async
-  async resetClock(localTime: TreeClock): Promise<unknown> {
+  async resetClock(
+    localTime = TreeClock.GENESIS,
+    gwc = GlobalClock.GENESIS,
+    agreed = TreeClock.GENESIS
+  ): Promise<TreeClock> {
     return this.dataset.transact({
       id: 'suset-reset-clock',
       prepare: async () => {
         return {
           kvps: this.journal.reset(localTime,
             // Set GWC and last agreed to a default; will re-set on snapshot
-            GlobalClock.GENESIS, TreeClock.GENESIS)
-        };
-      }
-    });
-  }
-
-  @checkNotClosed.async
-  async saveClock(
-    prepare: (gwc: GlobalClock) => Promise<TreeClock> | TreeClock
-  ): Promise<TreeClock> {
-    return this.dataset.transact<TreeClock>({
-      id: 'suset-save-clock',
-      prepare: async () => {
-        const journal = await this.journal.state(),
-          newClock = await prepare(journal.gwc);
-        return {
-          kvps: journal.withTime(newClock).commit,
-          return: newClock
+            gwc, agreed),
+          return: localTime
         };
       }
     });
@@ -310,10 +305,14 @@ export class SuSetDataset extends MeldEncoder {
     trace: MeldUpdate['trace'],
     txc: TxnContext
   }): Promise<PatchResult<OperationMessage | null>> {
-    this.log.debug(`patch ${journaling.appendEntries.map(e => e.operation.time)}:
-    deletes: ${[...txn.assertions.deletes].map(triple => tripleIndexKey(triple))}
-    inserts: ${[...txn.assertions.inserts].map(triple => tripleIndexKey(triple))}`);
     const patch = new JrqlPatchQuads(txn.assertions).append(txn.entailments);
+    if (this.log.getLevel() <= this.log.levels.DEBUG) {
+      this.log.debug('patch', journaling.appendEntries.map(e => e.operation.time),
+        '\n\tdeletes:', [...patch.deletes].map(tripleIndexKey),
+        '\n\tinserts:', [...patch.inserts].map(tripleIndexKey),
+        '\n\tupdates:', [...patch.updates].map(({ quad, update }) =>
+          `${tripleIndexKey(quad)}: ${JSON.stringify(update)}`));
+    }
     txc.on('commit', async () => {
       if (this.readyForTxn)
         await this.extensions.onUpdate?.(txn.internalUpdate, this.readState);
@@ -431,31 +430,33 @@ export class SuSetDataset extends MeldEncoder {
       )],
       updates: [...mapIter(
         additions.updates,
-        ([triple, meta]) => [triple, meta.operation] as [Triple, unknown]
+        ({ quad, operation }) => [quad, operation] as [Triple, unknown]
       )],
       principalId: this.app.principal?.['@id'] ?? null,
       // Note that agreement specifically checks truthy-ness, not just non-null
       agreed: agreed ? { tick: time.ticks, proof: agreed } : null
     });
     const reversion = this.reversion(
-      operation, removals, additions.updates, time.ticks);
+      operation, removals, additions.updates);
     return { operation, reversion };
   }
 
   private reversion(
     operation: MeldOperation,
     removals: TripleMap<UUID[]>,
-    updates: JrqlQuadOperation['updates'],
-    tick: number
+    updates: QuadUpdate[]
   ) {
-    // Here, we annotate the revert metadata with the clock tick, because shared
-    // data operations may be unrolled by tick in the backend
-    const revertMeta: Pick<TripleMap<unknown[]>, 'get'> = {
+    const revertMeta: Pick<TripleMap<unknown>, 'get'> = {
       get: triple => {
-        const meta = [...updates]
-          .filter(([quad]) => triple.equals(quad))
-          .map(([, meta]) => [meta.revert, tick]);
-        return meta.length > 0 ? meta : null;
+        let meta: unknown | null = null;
+        for (let { quad, revert } of updates) {
+          if (triple.equals(quad)) {
+            if (meta != null)
+              throw new TypeError('Multiple revert metadata');
+            meta = revert;
+          }
+        }
+        return meta;
       }
     };
     return {
@@ -544,6 +545,8 @@ export class SuSetDataset extends MeldEncoder {
         // Process deletions and inserts
         const reversion = await this.processSuSetOpToPatch(patch);
 
+        // TODO: Constraints should not be applied to voiding
+        // https://github.com/m-ld/m-ld-js/issues/139
         this.txc.sw.next('apply-cx'); // "cx" = constraint
         const { assertions: cxnAssertions, ...txn } = await this.ssd.constrain(
           patch.quads,
@@ -563,7 +566,7 @@ export class SuSetDataset extends MeldEncoder {
           if (this.operation.time.anyLt(this.journaling.state.gwc)) {
             // A rewind is required. This trumps the work we have already done.
             this.txc.sw.next('rewind');
-            return this.rewindAndReapply();
+            return this.rewindAndReapply(patch);
           }
         }
 
@@ -579,8 +582,7 @@ export class SuSetDataset extends MeldEncoder {
         // Done determining the applied operation patch. At this point we could
         // have an empty patch, but we still need to complete the journal entry.
         this.txc.sw.next('journal');
-        this.journaling.next(
-          this.operation, reversion(opTime.ticks), opTime, this.attribution);
+        this.journaling.next(this.operation, reversion, opTime, this.attribution);
 
         // If the constraint has done anything, we need to merge its work
         let cxnMsg: MeldOperationMessage | null = null;
@@ -614,9 +616,9 @@ export class SuSetDataset extends MeldEncoder {
       }
     }
 
-    private async rewindAndReapply() {
+    private async rewindAndReapply(patch: SuSetDataPatch) {
       // void more recent entries in conflict with the agreement
-      const patch = await this.rewind();
+      patch = await this.rewind();
       // If we now find that we are not ready for the agreement, we need to
       // re-connect to recover what's missing. This could include a rewound
       // local txn. But first, commit the rewind.
@@ -635,9 +637,11 @@ export class SuSetDataset extends MeldEncoder {
     }
 
     private async rewind(): Promise<SuSetDataPatch> {
-      const quadPatch = new JrqlPatchQuads();
-      const tidPatch = new PatchTids(this.ssd.tidsStore);
-      const operationReversions = new TripleMap<OperationReversion>();
+      const patch = {
+        quads: new JrqlPatchQuads(),
+        tids: new PatchTids(this.ssd.tidsStore),
+        opReverts: new TripleMap<LocalDataOperation[]>()
+      };
       // Work backwards through the journal, voiding entries that are not in the
       // causes of the applied operation. Stop when the GWC is all-less-than
       // applied op causes, OR we reach an agreement (because nothing prior
@@ -650,11 +654,10 @@ export class SuSetDataset extends MeldEncoder {
         if (this.operation.time.anyLt(entry.operation.time)) {
           const reversion = entry.revert();
           // Apply the SU-Set reversion (deletes & inserts)
-          tidPatch.append(CausalOperation.flatten(reversion));
+          patch.tids.append(CausalOperation.flatten(reversion));
           // Accumulate reverse updates
           for (let [triple, revertOperation] of reversion.updates)
-            // FIXME: This should be fusing sequential reversions
-            operationReversions.set(triple, revertOperation);
+            patch.opReverts.with(triple, () => []).push(revertOperation);
           // Tell the journal to lose this entry
           this.journaling.void(entry);
         }
@@ -662,13 +665,12 @@ export class SuSetDataset extends MeldEncoder {
       }
       // Now compare the affected triple-TIDs to the current state to find
       // actual triples to delete or insert
-      for (let [triple, tids] of await tidPatch.affected) {
-        quadPatch.append({
+      for (let [triple, tids] of await patch.tids.affected) {
+        patch.quads.append({
           [tids.size ? 'inserts' : 'deletes']: [this.ssd.toUserQuad(triple)]
         });
       }
-      // TODO: apply reverse updates!
-      return { tids: tidPatch, quads: quadPatch };
+      return patch;
     }
 
     private async missingCausesResult(rewindPatch: SuSetDataPatch): Promise<PatchResult<null>> {
@@ -787,16 +789,24 @@ export class SuSetDataset extends MeldEncoder {
       }, Promise.resolve({ tids: [] as [Triple, UUID][], triples: [] as Triple[] }));
       // Now modify the patch with deletions, insertions and custom operations
       patch.tids.append({ deletes: deletions.tids });
-      const updates = array(await Promise.all(
-        this.operation.updates.map(this.toSharedDataOpMeta)));
+      const updates = await this.processPatchUpdates(patch);
       patch.quads.append({
         deletes: deletions.triples.map(this.ssd.toUserQuad),
         inserts: this.operation.inserts.map(([triple]) => this.ssd.toUserQuad(triple)),
         updates
       });
       const deleteTids = expandItemTids(deletions.tids, new TripleMap<string[]>);
-      // Defer creation of the reversion because we don't know the tick yet
-      return (tick: number) => this.ssd.reversion(this.operation, deleteTids, updates, tick);
+      return this.ssd.reversion(this.operation, deleteTids, updates);
+    }
+
+    private async processPatchUpdates(patch: SuSetDataPatch) {
+      // Zip up any shared datatype reversions in the patch with any new operations
+      const dataOps = new TripleMap<[LocalDataOperation[], unknown | undefined]>(
+        this.operation.updates.map(([triple, operation]) => [triple, [[], operation]])
+      );
+      for (let [triple, localDataOps] of patch.opReverts ?? [])
+        dataOps.with(triple, () => [[], undefined])[0] = localDataOps;
+      return array(await Promise.all([...dataOps].map(this.toSharedDataOpMeta)));
     }
 
     /**
@@ -841,15 +851,13 @@ export class SuSetDataset extends MeldEncoder {
     }
 
     private toSharedDataOpMeta = async (
-      [triple, operation]: [RefTriple, unknown]
-    ): Promise<[Quad & LiteralTriple, UpdateMeta] | undefined> => {
+      [triple, [reversions, operation]]: [Triple, [LocalDataOperation[], unknown | undefined]]
+    ): Promise<QuadUpdate | undefined> => {
       const quad = this.ssd.toUserQuad(triple);
-      if (!isLiteralTriple(quad))
+      if (!isLiteralTriple(quad)) // Stronger test than in applyTripleOperation
         throw new MeldError('Bad update');
-      const upMeta = await this.ssd.userGraph.jrql
-        .applyTripleOperation(quad.object, operation, this.txc);
-      if (upMeta != null)
-        return [quad, upMeta];
+      return this.ssd.userGraph.jrql
+        .applyTripleOperation(quad, reversions, operation);
     };
   };
 
@@ -900,8 +908,31 @@ export class SuSetDataset extends MeldEncoder {
    * The data will be loaded from the same consistent snapshot per abstract-level.
    */
   @checkNotClosed.async
-  async takeSnapshot(): Promise<DatasetSnapshot> {
+  @checkLocked('state').async
+  async takeSnapshot(
+    newClock: boolean,
+    clockHolder: ClockHolder<TreeClock>
+  ): Promise<DatasetSnapshot> {
     const journal = await this.journal.state();
+    let theirClock: TreeClock | undefined;
+    if (newClock) {
+      await this.dataset.transact({
+        id: 'suset-save-clock',
+        prepare: async () => {
+          // TODO: This should really be encapsulated in the causal clock
+          let ourClock = clockHolder.peek();
+          const lastPublicTick = journal.gwc.getTicks(ourClock);
+          // Back-date the clock to the last public tick before forking
+          const fork = ourClock.ticked(lastPublicTick).forked();
+          theirClock = fork.right;
+          // Re-apply the ticks to our local clock
+          ourClock = fork.left.ticked(ourClock.ticks);
+          // This is synchronous with the fork
+          clockHolder.push(ourClock);
+          return { kvps: journal.withTime(ourClock).commit };
+        }
+      });
+    }
     const allQuads = this.userGraph.quads.query();
     const insData = consume(allQuads).pipe(
       batch(10), // TODO batch size config
@@ -918,6 +949,7 @@ export class SuSetDataset extends MeldEncoder {
       return consume(operations.map(operation => ({ operation })));
     });
     return {
+      clock: theirClock,
       gwc: journal.gwc,
       agreed: journal.agreed,
       data: flowable<Snapshot.Datum>(merge(insData, opData)),

@@ -72,6 +72,7 @@ export function property(type: JsType<any>, name?: Iri): PropertyDecorator {
   };
 }
 
+/** @internal */
 export function getProperty<S extends OrmSubject>(
   subject: S,
   name: string & keyof S

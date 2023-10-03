@@ -118,6 +118,14 @@ export type SubjectUpdateLike =
  * added. To intercept these calls, re-implement `splice` on the `@list`
  * property value.
  *
+ * Changes to text represented as a {@link SharedDatatype shared datatype}
+ * supporting the `@splice` operator will be correctly applied to plain strings,
+ * and can also be applied to any Object having a `splice` method taking three
+ * parameters, `index`, `deleteCount` and `content`. This allows an app to
+ * efficiently apply character-level changes, e.g. to document editing
+ * components. The proxy object should also implement a `toJSON()` method which
+ * returns the current string state.
+ *
  * CAUTION: If this function is called independently on subjects which reference
  * each other via Javascript references, or share referenced subjects, then the
  * referenced subjects may be updated more than once, with unexpected results.

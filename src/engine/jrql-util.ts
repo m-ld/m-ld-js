@@ -191,3 +191,7 @@ export function getContextType(
  * A reference triple carries a blank node identifier
  */
 export type RefTriple = Triple & Reference;
+
+export function isRefTriple(triple: Triple): triple is RefTriple {
+  return '@id' in triple;
+}

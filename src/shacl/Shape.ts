@@ -40,10 +40,10 @@ export namespace ShapeSpec {
  * validation result. However, the constraint {@link apply} _will_ attempt a
  * correction in response to a non-conformance.
  *
+ * @see {@link ShapeConstrained} for using Shapes for schema validation
  * @see https://www.w3.org/TR/shacl/#constraints-section
  * @noInheritDoc
- * @category Experimental
- * @experimental
+ * @category API
  */
 export abstract class Shape extends OrmSubject implements MeldConstraint {
   /** @internal */
@@ -120,8 +120,7 @@ export abstract class Shape extends OrmSubject implements MeldConstraint {
 /**
  * SHACL defines ValidationResult to report individual SHACL validation results.
  * @see https://www.w3.org/TR/shacl/#result
- * @category Experimental
- * @experimental
+ * @category API
  */
 export interface ValidationResult {
   /**

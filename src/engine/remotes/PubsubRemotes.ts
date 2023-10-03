@@ -5,13 +5,13 @@ import {
 } from 'rxjs';
 import { TreeClock } from '../clocks';
 import {
-  ControlMessage, NewClockRequest, NewClockResponse, RejectedResponse, Request, Response,
-  RevupRequest, RevupResponse, SnapshotRequest, SnapshotResponse
+  ControlMessage, RejectedResponse, Request, Response, RevupRequest, RevupResponse, SnapshotRequest,
+  SnapshotResponse
 } from './ControlMessage';
 import { throwOnComplete, toJSON } from '../util';
 import * as MsgPack from '../msgPack';
 import { delay, first, map, takeUntil, timeout } from 'rxjs/operators';
-import { AbstractMeld, comesAlive } from '../AbstractMeld';
+import { AbstractMeld } from '../AbstractMeld';
 import {
   MeldError, MeldErrorStatus, MeldExtensions, MeldReadState, shortId, uuid
 } from '../../index';
@@ -222,20 +222,10 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
       .catch(err => this.log.warn('Error while closing safely', err));
   }
 
-  async newClock(): Promise<TreeClock> {
-    const sw = new Stopwatch('clock', shortId());
-    const req = new NewClockRequest;
-    const { res } = await this.send<NewClockResponse>(
-      await this.wireRequest(req, null),
-      { sw, state: null, logRequest: req });
-    sw.stop();
-    return res.clock;
-  }
-
-  async snapshot(state: MeldReadState): Promise<Snapshot> {
+  async snapshot(newClock: boolean, state: MeldReadState): Promise<Snapshot> {
     const readyToAck = new Future;
     const sw = new Stopwatch('snapshot', shortId());
-    const req = new SnapshotRequest;
+    const req = new SnapshotRequest(newClock);
     const { res, fromId } = await this.send<SnapshotResponse>(
       await this.wireRequest(req, state),
       { readyToAck, state, sw, logRequest: req });
@@ -247,6 +237,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     ]);
     sw.stop();
     return {
+      clock: res.clock,
       gwc: res.gwc,
       agreed: res.agreed,
       data: defer(() => {
@@ -375,14 +366,9 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
             // Verify the message if necessary
             await transportSecurity.verify?.(req.enc, req.attr, state);
             // Generate a suitable response
-            if (req instanceof NewClockRequest) {
-              sw.next('clock');
-              const clock = await clone.newClock();
-              sw.lap.next('send');
-              return this.replyClock(sentParams, state, clock);
-            } else if (req instanceof SnapshotRequest) {
+            if (req instanceof SnapshotRequest) {
               sw.next('snapshot');
-              const snapshot = await clone.snapshot(state);
+              const snapshot = await clone.snapshot(req.newClock, state);
               sw.lap.next('send');
               return this.replySnapshot(sentParams, state, snapshot);
             } else {
@@ -575,18 +561,14 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     ));
   }
 
-  private async replyClock(sentParams: SendParams, state: MeldReadState, clock: TreeClock) {
-    await this.reply(sentParams, state, new NewClockResponse(clock));
-  }
-
   private async replySnapshot(sentParams: SendParams, state: MeldReadState, snapshot: Snapshot) {
-    const { gwc, agreed, data, updates } = snapshot;
+    const { clock, gwc, agreed, data, updates } = snapshot;
     try {
       const dataAddress = uuid(), updatesAddress = uuid();
       // Send the reply in parallel with establishing notifiers
       const replyId = uuid();
       const replied = this.reply(sentParams, state,
-        new SnapshotResponse(gwc, agreed, dataAddress, updatesAddress), replyId);
+        new SnapshotResponse(clock, gwc, agreed, dataAddress, updatesAddress), replyId);
       // Allow time for the notifiers to resolve while waiting for a reply
       const [dataNotifier, updatesNotifier] =
         await this.getAck(replied, replyId, state, Promise.all([
@@ -714,7 +696,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
 
   private async nextSender(messageId: string): Promise<SubPub | null> {
     // Wait for decided liveness
-    await comesAlive(this, 'notNull');
+    await this.comesAlive('notNull');
 
     if (this.present.every(id => this.recentlySentTo.has(id)))
       this.recentlySentTo.clear();

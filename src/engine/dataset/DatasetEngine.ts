@@ -16,10 +16,10 @@ import {
   delayWhen, distinctUntilChanged, expand, filter, finalize, ignoreElements, map, share, skipWhile,
   takeUntil, tap, toArray
 } from 'rxjs/operators';
-import { delayUntil, inflateFrom, poisson, settled } from '../util';
+import { delayUntil, inflateFrom, poisson, settled, takeUntilComplete } from '../util';
 import { checkLocked, LockManager, SHARED, SHARED_REENTRANT } from '../locks';
 import { levels } from 'loglevel';
-import { AbstractMeld, checkLive, comesAlive } from '../AbstractMeld';
+import { AbstractMeld, checkLive } from '../AbstractMeld';
 import { RemoteOperations } from './RemoteOperations';
 import { CloneEngine, EngineWrite } from '../StateEngine';
 import async from '../async';
@@ -70,15 +70,12 @@ type Operations = Observable<OperationMessage>;
 
 export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLocal {
   private readonly suset: SuSetDataset;
-  private messageService: TreeClockMessageService;
+  private messageService: undefined | TreeClockMessageService;
   private readonly processingBuffer = new Set<MeldOperationMessage>();
   private readonly orderingBuffer: MeldOperationMessage[] = [];
   private readonly remotes: Omit<MeldRemotes, 'operations'>;
   private readonly remoteOps: RemoteOperations;
   private subs = new Subscription;
-  // FIXME: New clone flag should be inferred from the journal (e.g. tail has no
-  // operation) in case of crash between new clock and first snapshot
-  private newClone: boolean = false;
   private readonly latestTicks = new BehaviorSubject<number>(NaN);
   private readonly networkTimeout: number;
   private readonly genesisClaim: boolean;
@@ -110,7 +107,10 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
     this.networkTimeout = config.networkTimeout ?? 5000;
     this.genesisClaim = config.genesis;
     this.status = this.createStatus();
-    this.subs.add(this.status.subscribe(status => this.log.debug(status)));
+    this.subs.add(this.status.subscribe({
+      next: status => this.log.debug(status),
+      error: () => {} // Else unhandled
+    }));
   }
 
   /**
@@ -119,6 +119,25 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
    */
   get lock(): LockManager<'state' | 'live'> {
     return this.suset.lock;
+  }
+
+  set clock(time: TreeClock | undefined) {
+    if (time != null) {
+      this.log.info('has time', time);
+      this.messageService = new TreeClockMessageService(time);
+      this.latestTicks.next(time.ticks);
+    } else {
+      throw new RangeError('Clock cannot be unset');
+    }
+  }
+
+  get clock() {
+    return this.messageService?.peek();
+  }
+
+  get isGenesis() {
+    // Note this is only valid after initialisation
+    return this.clock?.isId;
   }
 
   /**
@@ -139,18 +158,11 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
       await this.initDataset();
 
       this.remotes.setLocal(this);
-      // Establish a clock for this clone
+      // Load the clock for this clone; if a new clone, it will be requested later
       sw?.next('load-clock');
-      let time = await this.suset.loadClock();
-      if (!time) {
-        this.newClone = !this.genesisClaim; // New clone means non-genesis
-        sw?.next('reset-clock');
-        time = this.genesisClaim ? TreeClock.GENESIS : await this.remotes.newClock();
-        await this.suset.resetClock(time);
-      }
-      this.log.info('has time', time);
-      this.messageService = new TreeClockMessageService(time);
-      this.latestTicks.next(time.ticks);
+      const clock = await this.suset.loadClock();
+      if (clock != null || this.genesisClaim)
+        this.clock = clock ?? await this.suset.resetClock();
 
       // Revving-up will inject missed messages so the ordering buffer is
       // redundant when outdated, even if the remotes were previously attached.
@@ -172,6 +184,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
         // 3. Disordered operations
         this.operationProblems
       ).pipe(
+        takeUntilComplete(this.remotes.live),
         // 4. Last attempt to connect can generate more attempts
         expand(reason => this.decideLive(reason).pipe(
           delayWhen(this.reconnectDelayer), // delay if soft reconnect
@@ -182,17 +195,18 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
         complete: () => this.close()
       }));
 
-      if (this.newClone) {
+      if (clock == null && !this.genesisClaim) {
         sw?.next('comes-alive');
         // For a new non-genesis clone, the first connect is essential.
-        await comesAlive(this);
+        await this.comesAlive();
       }
       // Inform the dataset that we're open for business
       await this.lock.share('state', 'initialised',
         () => this.suset.allowTransact());
     } catch (e) {
       // Failed to initialise somehow – this is fatal
-      await this.close(e);
+      if (!this.closed) // That might be the problem
+        await this.close(e);
       throw e;
     }
   }
@@ -223,14 +237,6 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
     return this.suset.updates;
   }
 
-  private get isGenesis(): boolean {
-    return this.localTime.isId;
-  }
-
-  private get localTime() {
-    return this.messageService.peek();
-  }
-
   /**
    * Creates observables that emit if
    * - operations are being chronically buffered or
@@ -243,8 +249,9 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
     const acceptOutcomes = this.remoteOps.receiving.pipe(
       // Only try and accept one operation at a time. If the operation no longer
       // belongs to the remotes' active 'period', discard it.
-      concatMap(([op, period]) => period === this.remoteOps.period ?
-        this.receiveRemoteOperation(op) : EMPTY),
+      concatMap(([op, period]) =>
+        period === this.remoteOps.period && this.messageService != null ?
+          this.receiveRemoteOperation(op, this.messageService) : EMPTY),
       // Ensure that the merge below does not incur two subscribes
       share()
     );
@@ -275,7 +282,10 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
       tap(() => this.remoteOps.detach('outdated')));
   }
 
-  private async receiveRemoteOperation(op: MeldOperationMessage): Promise<OperationOutcome> {
+  private async receiveRemoteOperation(
+    op: MeldOperationMessage,
+    messageService: TreeClockMessageService
+  ): Promise<OperationOutcome> {
     const logBody = this.log.getLevel() < levels.DEBUG ? op : `${op.time}`;
     this.log.debug('Receiving', logBody);
     this.processingBuffer.add(op);
@@ -284,8 +294,8 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
     // clock ticks are immediately followed by their respective transactions.
     return this.lock.exclusive('state', 'remote operation', async () => {
       try {
-        const startTime = this.localTime;
-        return await this.messageService.receive(op, this.orderingBuffer,
+        const startTime = messageService.peek();
+        return await messageService.receive(op, this.orderingBuffer,
           async (msg, prevTime) => {
             // Check that we have the previous message from this clock ID
             const ticksSeen = prevTime.getTicks(msg.time);
@@ -295,7 +305,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
               msg.delivered.resolve();
             } else if (msg.prev > ticksSeen) {
               // We're missing a message. Reset the clock and trigger a re-connect.
-              this.messageService.push(startTime);
+              messageService.push(startTime);
               const outOfOrder = new MeldError('Update out of order', `
               Update claims prev is ${msg.prev} (${msg.time}),
               but local clock was ${ticksSeen} (${prevTime})`);
@@ -303,7 +313,13 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
               throw outOfOrder;
             } else {
               this.log.debug('Accepting', logBody);
-              await this.acceptRemoteOperation(msg);
+              await this.suset.apply(msg, messageService)
+                .then(cxOp => cxOp && this.nextOperation(cxOp, 'constraint'))
+                .then(msg.delivered.resolve)
+                .catch(err => {
+                  msg.delivered.reject(err);
+                  throw err;
+                });
             }
           }) ? OperationOutcome.ACCEPTED : OperationOutcome.BUFFERED;
       } catch (err) {
@@ -323,18 +339,6 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
     });
   }
 
-  private async acceptRemoteOperation(msg: MeldOperationMessage) {
-    try {
-      const cxOp = await this.suset.apply(msg, this.messageService);
-      if (cxOp != null)
-        this.nextOperation(cxOp, 'constraint');
-      msg.delivered.resolve();
-    } catch (e) {
-      msg.delivered.reject(e);
-      throw e;
-    }
-  }
-
   /**
    * @returns Zero or one retry indication. If zero, success. If a value is
    * emitted, it indicates failure, and the value is whether the re-connect
@@ -348,22 +352,23 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
         // Also block transactions, recovery requests and other connect attempts.
         this.lock.acquire('state', 'decide live', SHARED).then(release =>
           this.lock.exclusive('live', 'decide live', async () => {
-            const remotesLive = this.remotes.live.value;
+            // Not using LiveValue.value because it doesn't detect closed remotes
+            const remotesLive = await firstValueFrom(this.remotes.live);
             if (remotesLive === true) {
               if (this.isGenesis)
                 throw new Error('Genesis clone trying to join a live domain.');
               // Connect in the live lock
               const connected = await this.connect(reason, retry, release);
               // New clones cannot provide recovery (are 'live') until first connected
-              if (!this.newClone || connected)
+              if (connected || this.clock != null)
                 this.setLive(true);
             } else {
               // Stop receiving operations until re-connect, do not change outdated
               this.remoteOps.detach();
               if (remotesLive === false) {
                 // We are the silo, the last survivor.
-                if (this.newClone)
-                  throw new Error('New clone is siloed.');
+                if (this.clock == null)
+                  throw new Error('New clone is siloed.'); // TODO make a MeldError
                 // Stay live for any newcomers to rev-up from us.
                 this.setLive(true);
                 retry.complete();
@@ -393,30 +398,30 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
     releaseState: () => void
   ): Promise<boolean> {
     this.log.info(
-      this.newClone ? 'new clone' :
+      this.clock == null ? 'new clone' :
         this.live.value === true && this.remotes.live.value === false ? 'silo' : 'clone',
       'connecting to remotes, because',
       reason
     );
-    let recovery: Recovery | undefined = undefined;
+    let recovery: Recovery | undefined;
     const updates = new Future<Operations>();
     // Start listening for remote updates as early as possible
     this.acceptRecoveryUpdates(inflateFrom(updates), retry);
-    const processRecovery = async (
-      process: (recovery: Recovery, updates: Future<Operations>) => Promise<void>
-    ) => {
+    const processRecovery = async (process: Function) => {
       if (recovery != null) {
         releaseState();
         await process.call(this, recovery, updates);
       }
     };
     try {
-      if (!this.newClone && reason !== OperationOutcome.UNBASED) {
-        recovery = await this.remotes.revupFrom(this.localTime, this.suset.readState);
+      const clock = this.clock;
+      if (clock != null && reason !== OperationOutcome.UNBASED) {
+        recovery = await this.remotes.revupFrom(clock, this.suset.readState);
         await processRecovery(this.processRevup);
       }
       if (recovery == null) {
-        recovery = await this.remotes.snapshot(this.suset.readState);
+        recovery = await this.remotes.snapshot(
+          this.clock == null, this.suset.readState);
         await processRecovery(this.processSnapshot);
       }
       return true;
@@ -424,18 +429,25 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
       this.log.info('Cannot connect to remotes due to', err);
       updates.reject(err); // Ensure we release the remoteOps
       recovery?.cancel(err); // Tell the collaborator we're giving up
-      /*
-      An error could indicate that:
-      1. The remotes have gone offline during our connection attempt. If they
-         have reconnected, another attempt will have already been queued on the
-         connect lock.
-      2. A candidate collaborator timed-out. This could happen if we are
-         mutually requesting rev-ups, for example if we both believe we are the
-         silo. Hence the jitter on the soft reconnect, see
-         this.reconnectDelayer.
-      */
-      retry.next(Reconnect.SOFT);
-      retry.complete();
+      // noinspection JSUnusedAssignment – recovery may well be undefined
+      if (recovery == null && this.clock == null) {
+        // For a new clone, a failure to obtain a recovery is terminal
+        this.log.warn('New clone aborting initialisation');
+        retry.error(err);
+      } else {
+        /*
+        An error could indicate that:
+        1. The remotes have gone offline during our connection attempt. If they
+           have reconnected, another attempt will have already been queued on the
+           connect lock.
+        2. A candidate collaborator timed-out. This could happen if we are
+           mutually requesting rev-ups, for example if we both believe we are the
+           silo. Hence the jitter on the soft reconnect, see
+           this.reconnectDelayer.
+        */
+        retry.next(Reconnect.SOFT);
+        retry.complete();
+      }
       return false;
     }
   }
@@ -466,17 +478,24 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
   @checkNotClosed.async
   private processSnapshot(snapshot: Snapshot, updates: Future<Operations>) {
     this.log.info('processing snapshot from collaborator');
-    this.messageService.join(snapshot.gwc);
+    const time = this.clock ?? snapshot.clock;
+    if (time == null)
+      throw new MeldError('Bad response', 'No clock in snapshot');
     // If we have any operations since the snapshot: re-emit them now and
     // re-apply them to our own dataset when the snapshot is applied.
     /*
     FIXME: Holding this stuff in memory during a potentially long snapshot
     application is not scalable or safe.
     */
-    const reEmits = this.emitOpsSince(snapshot, toArray());
+    const reEmits = !this.clock ? Promise.resolve([]) :
+      this.emitOpsSince(snapshot, toArray());
     // Start applying the snapshot when we have done re-emitting
-    const snapshotApplied = reEmits.then(() =>
-      this.suset.applySnapshot(snapshot, this.localTime));
+    const snapshotApplied = reEmits
+      .then(() => this.suset.applySnapshot(snapshot, time))
+      .then(() => {
+        this.clock ??= time;
+        this.messageService?.join(snapshot.gwc);
+      });
     // Delay all updates until the snapshot has been fully applied
     // This is because a snapshot is applied in multiple transactions
     updates.resolve(concat(
@@ -492,7 +511,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
   ): Promise<T[]> {
     const toReturn = (ops: Operations) =>
       firstValueFrom(ops.pipe(ret, defaultIfEmpty([])));
-    if (this.newClone) {
+    if (this.clock == null) {
       return toReturn(EMPTY);
     } else {
       const recent = await this.suset.operationsSince(recovery.gwc);
@@ -512,9 +531,8 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
     this.remoteOps.attach(updates).then(() => {
       // If we were a new clone, we're up-to-date now
       this.log.info('connected');
-      this.newClone = false;
       retry.complete();
-    }, (err: any) => {
+    }, err => {
       // If rev-ups fail (for example, if the collaborator goes offline)
       // it's not a catastrophe but we do need to enqueue a retry
       this.log.warn('Rev-up did not complete due to', err);
@@ -523,32 +541,14 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
     });
   }
 
-  @checkNotClosed.async
-  async newClock(): Promise<TreeClock> {
-    const newClock = new Future<TreeClock>();
-    await this.suset.saveClock(gwc => {
-      // TODO: This should really be encapsulated in the causal clock
-      const lastPublicTick = gwc.getTicks(this.localTime);
-      // Back-date the clock to the last public tick before forking
-      const fork = this.localTime.ticked(lastPublicTick).forked();
-      newClock.resolve(fork.right);
-      // And re-apply the ticks to our local clock
-      const localClock = fork.left.ticked(this.localTime.ticks);
-      // This is synchronous with the fork
-      this.messageService.push(localClock);
-      return localClock;
-    });
-    return newClock;
-  }
-
   @checkLive.async
   @checkLocked('state').async
-  snapshot(): Promise<Snapshot> {
+  snapshot(newClock: boolean): Promise<Snapshot> {
     return this.lock.exclusive('live', 'snapshot', async () => {
       this.log.info('Compiling snapshot');
       const sentSnapshot = new Future;
       const updates = this.remoteUpdatesToForward(sentSnapshot);
-      const snapshot = await this.suset.takeSnapshot();
+      const snapshot = await this.suset.takeSnapshot(newClock, this.messageService!);
       return {
         ...snapshot, updates,
         // Snapshot data is a flowable, so no need to buffer it
@@ -632,7 +632,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
       this.logRequest('write', request);
       // Take the send timestamp just before enqueuing the transaction. This
       // ensures that transaction stamps increase monotonically.
-      const update = await this.suset.transact(this.messageService.event(), request);
+      const update = await this.suset.transact(this.messageService!.event(), request);
       // Publish the operation
       if (update != null)
         this.nextOperation(update, 'write');
@@ -711,7 +711,7 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
     if (this.orderingBuffer.length) {
       this.log.warn(`closed with ${this.orderingBuffer.length} items in ordering buffer
       first: ${this.orderingBuffer[0]}
-      time: ${this.localTime}`);
+      time: ${this.clock}`);
     }
     super.close(err);
     await this.suset.close(err);

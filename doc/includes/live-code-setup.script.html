@@ -39,10 +39,11 @@
         return this.el.title ?? '';
       }
 
-      inline(state) {
-        let height = 0;
-        for (let file of this.files)
-          height = Math.max(height, (file.content.match(/\n/g) ?? []).length * 1.5 + 3);
+      inline(state, height = 0) {
+        if (!height) {
+          for (let file of this.files)
+            height = Math.max(height, (file.content.match(/\n/g) ?? []).length * 1.5 + 3);
+        }
         const flemDiv = document.createElement('div');
         flemDiv.setAttribute('style', `height: ${height}em;`);
         flemDiv.id = this.name;

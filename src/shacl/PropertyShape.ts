@@ -17,8 +17,7 @@ import { MeldAppContext } from '../config';
 
 /**
  * Property cardinality specification
- * @category Experimental
- * @experimental
+ * @category API
  */
 export type PropertyCardinality = {
   count: number;
@@ -28,8 +27,7 @@ export type PropertyCardinality = {
 }
 /**
  * Convenience specification for a {@link PropertyShape}
- * @category Experimental
- * @experimental
+ * @category API
  */
 export type PropertyShapeSpec = ShapeSpec & {
   path: Iri;
@@ -37,9 +35,9 @@ export type PropertyShapeSpec = ShapeSpec & {
 } & PropertyCardinality;
 
 /**
+ * @see {@link ShapeConstrained} for using Shapes for schema validation
  * @see https://www.w3.org/TR/shacl/#property-shapes
- * @category Experimental
- * @experimental
+ * @category API
  */
 export class PropertyShape extends Shape {
   /** @internal */

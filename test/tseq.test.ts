@@ -1,4 +1,4 @@
-import { TSeq } from '../src/tseq';
+import { TSeq, TSeqRevert } from '../src/tseq';
 import { jsonify } from './testUtil';
 import fc from 'fast-check';
 import {
@@ -6,6 +6,7 @@ import {
   TSeqProcessGroupCommand, TSeqProcessGroupDeliverCommand, TSeqProcessGroupForceSyncCommand,
   TSeqProcessGroupSpliceCommand, TSeqSpliceCommand
 } from './TSeqPropertyFixtures';
+import { TSeqOperable } from '../src/tseq/TSeqOperable';
 
 describe('TSeq CRDT', () => {
   describe('local mutations', () => {
@@ -35,6 +36,15 @@ describe('TSeq CRDT', () => {
     test('append content', () => {
       tSeq.splice(0, 0, 'hello');
       const operation = tSeq.splice(5, 0, ' world');
+      expect(tSeq.toString()).toBe('hello world');
+      expect(operation).toEqual([[
+        [['p1', 5]], [[' ', 2], ['w', 2], ['o', 2], ['r', 2], ['l', 2], ['d', 2]]
+      ]]);
+    });
+
+    test('append content with infinite index', () => {
+      tSeq.splice(0, 0, 'hello');
+      const operation = tSeq.splice(Infinity, 0, ' world');
       expect(tSeq.toString()).toBe('hello world');
       expect(operation).toEqual([[
         [['p1', 5]], [[' ', 2], ['w', 2], ['o', 2], ['r', 2], ['l', 2], ['d', 2]]
@@ -176,6 +186,83 @@ describe('TSeq CRDT', () => {
       tSeq2.splice(2, 0, '1');
       tSeq2.apply(tSeq1.splice(0, 2));
       expect(tSeq2.toString()).toBe('1');
+    });
+
+    test('append content with infinite index after remote operation', () => {
+      const tSeq1 = new TSeq('p1'), tSeq2 = new TSeq('p2');
+      tSeq1.apply(tSeq2.splice(0, 0, 'hello'));
+      tSeq1.splice(Infinity, 0, ' world');
+      expect(tSeq1.toString()).toBe('hello world');
+    });
+  });
+
+  describe('reverting operations', () => {
+    test('reverts initial splice', () => {
+      const tSeq = new TSeq('p1');
+      const revert: TSeqRevert = [];
+      const op = tSeq.splice(0, 0, 'hello world', revert);
+      expect(tSeq.toString()).toBe('hello world');
+      tSeq.apply(null, [[op, revert]]);
+      expect(tSeq.toString()).toBe('');
+    });
+
+    test('reverts initial and applies new operation', () => {
+      const tSeq = new TSeq('p1'), tSeq2 = new TSeq('p2');
+      const op2 = tSeq2.splice(0, 0, 'hi!');
+      const revert: TSeqRevert = [];
+      const op = tSeq.splice(0, 0, 'hello world', revert);
+      expect(tSeq.toString()).toBe('hello world');
+      expect(tSeq.apply(op2, [[op, revert]])).toEqual([[0, 11, 'hi!']]);
+      expect(tSeq.toString()).toBe('hi!');
+    });
+
+    test('reverts initial apply', () => {
+      const tSeq1 = new TSeq('p1'), tSeq2 = new TSeq('p2');
+      const operation = tSeq1.splice(0, 0, 'hello world');
+      const revert: TSeqRevert = [];
+      expect(tSeq2.apply(operation, [], revert)).toEqual([[0, 0, 'hello world']]);
+      expect(tSeq2.toString()).toBe('hello world');
+      expect(tSeq2.apply(null, [[operation, revert]])).toEqual([[0, 11, '']]);
+      expect(tSeq2.toString()).toBe('');
+    });
+
+    test('reverts multi-splice operation', () => {
+      const tSeq1 = new TSeq('p1'), tSeq2 = new TSeq('p2');
+      tSeq2.apply(tSeq1.splice(0, 0, 'hello world'));
+      tSeq2.splice(5, 0, ' my'); // 'hello my world'
+      const revert: TSeqRevert = [];
+      const operation = tSeq1.splice(2, 7);
+      tSeq2.apply(operation, [], revert);
+      expect(tSeq2.toString()).toBe('he myld');
+      expect(tSeq2.apply(null, [[operation, revert]])).toEqual([[2, 0, 'llo'], [5, 0, ' wor']]);
+      expect(tSeq2.toString()).toBe('hello my world');
+    });
+
+    test('applies then re-bases remote insert', () => {
+      const tSeq1 = new TSeq('p1'), tSeq2 = new TSeq('p2');
+      tSeq1.apply(tSeq2.splice(0, 0, 'hello world'));
+      const revertDel: TSeqRevert = [];
+      const delOp = tSeq2.splice(5, 6, '', revertDel);
+      expect(tSeq2.toString()).toBe('hello');
+      const insOp = tSeq1.splice(11, 0, ', said Fred');
+      const revertIns: TSeqRevert = [];
+      tSeq2.apply(insOp, [], revertIns);
+      // Oh wait no, need to rebase – mimics the SuSetDataset rebase pattern
+      tSeq2.apply(null, [[insOp, revertIns]]);
+      // Got it right this time
+      tSeq2.apply(insOp, [[delOp, revertDel]]);
+      expect(tSeq2.toString()).toBe('hello world, said Fred');
+    });
+
+    test('reverts concatenated operation', () => {
+      const tSeq = new TSeq('p1');
+      const revert1: TSeqRevert = [];
+      const op1 = tSeq.splice(0, 0, 'hello', revert1);
+      const revert2: TSeqRevert = [];
+      const op2 = tSeq.splice(5, 0, ' world', revert2);
+      const [op, revert] = TSeqOperable.concat([op1, revert1], [op2, revert2]);
+      expect(tSeq.apply(null, [[op, revert]])).toEqual([[0, 11, '']]);
+      expect(tSeq.toString()).toBe('');
     });
   });
 

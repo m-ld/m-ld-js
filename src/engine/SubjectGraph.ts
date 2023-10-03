@@ -122,7 +122,7 @@ function *processTriplesToSubjects(
 
     let subjectId: Iri | undefined;
     if (triple.subject.termType === 'BlankNode') {
-      subjectId = triple.subject.value;
+      subjectId = `_:${triple.subject.value}`;
     } else if (triple.subject.termType === 'NamedNode') {
       const maybeIri =
         opts.aliases?.(triple.subject.value, '@id') ?? triple.subject.value;

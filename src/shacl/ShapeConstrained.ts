@@ -34,8 +34,7 @@ import { MeldAppContext } from '../config';
  * [[include:how-to/shapes.md]]
  *
  * @see https://www.w3.org/TR/shacl/
- * @category Experimental
- * @experimental
+ * @category API
  * @noInheritDoc
  */
 export class ShapeConstrained implements ExtensionSubjectInstance, MeldPlugin {

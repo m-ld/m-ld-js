@@ -1,8 +1,8 @@
 import { MeldRemotes, OperationMessage } from '..';
 import { LiveValue } from '../api-support';
-import { BehaviorSubject, endWith, merge, NEVER, Observable } from 'rxjs';
-import { delayUntil, HotSwitch, onErrorNever } from '../util';
-import { ignoreElements, map, takeUntil } from 'rxjs/operators';
+import { BehaviorSubject, merge, NEVER, Observable } from 'rxjs';
+import { delayUntil, HotSwitch, onErrorNever, takeUntilComplete } from '../util';
+import { map } from 'rxjs/operators';
 import { MeldOperationMessage } from '../MeldOperationMessage';
 import { Future, tapLast } from '../Future';
 
@@ -58,7 +58,7 @@ export class RemoteOperations {
           delayUntil(captureLastRevup))
       )).pipe(
         // If the remote operations finalise, mirror that
-        takeUntil(this.remotes.operations.pipe(ignoreElements(), endWith(0)))
+        takeUntilComplete(this.remotes.operations)
       ));
       captureLastRevup.then(async lastRevup => {
         // Here, we are definitely before the first post-revup update, but

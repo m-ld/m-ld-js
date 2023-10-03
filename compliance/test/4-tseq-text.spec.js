@@ -74,5 +74,33 @@ describe('TSeq text datatype', () => {
     }]);
   });
 
+  it('reverts text during voiding', async () => {
+    const [clone1, clone2] = clones = await Clone.start(2);
+    await clone1.transact(installDatatype('story'));
+    await Promise.all([
+      clone1.transact({ '@id': 'fred', story: 'Flintstones, meet the Flintstones' }),
+      clone2.updated('@insert', 'fred')
+    ]);
+    await clone2.partition();
+    await clone2.transact({
+      '@update': {
+        '@id': 'fred', story: { '@concat': ',\nThey\'re the modern stone age family' }
+      },
+      '@agree': true
+    });
+    await clone1.transact({
+      '@update': { '@id': 'fred', story: { '@splice': [11, 22] } } // -> 'Flintstones'
+    });
+    await Promise.all([
+      clone2.partition(false),
+      clone1.updated('@update', 'fred')
+    ]);
+    await expectAsync(clone1.transact({ '@describe': 'fred' })).toBeResolvedTo([{
+      '@id': 'fred',
+      story: 'Flintstones, meet the Flintstones,\n' +
+        'They\'re the modern stone age family'
+    }]);
+  });
+
   afterEach(() => Promise.all(clones?.map(clone => clone.destroy())));
 });

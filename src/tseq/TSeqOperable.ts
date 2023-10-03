@@ -1,6 +1,5 @@
-import { concatIter, mapIter } from '../engine/util';
-import { TSeqCharTick, TSeqName, TSeqOperation, TSeqRun } from './types';
-import { TSeqCharNode } from './TSeqNode';
+import { mapIter } from '../engine/util';
+import { TSeqCharTick, TSeqLocalOperation, TSeqName, TSeqOperation, TSeqRevert } from './types';
 
 /**
  * Utility interface for manipulating {@link TSeqOperation TSeqOperations}. This
@@ -11,6 +10,7 @@ import { TSeqCharNode } from './TSeqNode';
 export interface TSeqOperable {
   path: TSeqName[],
   charTick: TSeqCharTick,
+  pre: TSeqCharTick | undefined,
   /** Contiguous next – if undefined, nothing contiguous in context */
   next?: TSeqOperable
 }
@@ -24,37 +24,42 @@ export namespace TSeqOperable {
    * Processes the given operables into a set of "runs", which comprise an
    * anchor path and contiguous char-ticks following it
    */
-  export function *toRuns(nodes: Iterable<TSeqOperable>): Iterable<TSeqRun> {
-    const anchors = new Map(mapIter(nodes, node => [node, [] as TSeqCharTick[]]));
+  export function toRuns(nodes: Iterable<TSeqOperable>, revert?: TSeqRevert): TSeqOperation {
+    const anchors = new Map(mapIter(nodes, node => [node, [] as TSeqOperable[]]));
     for (let [node, run] of anchors) {
       for (let next = node.next; next != null && anchors.has(next); next = next.next) {
-        run.push(next.charTick, ...anchors.get(next)!);
+        run.push(next, ...anchors.get(next)!);
         anchors.delete(next);
       }
     }
-    for (let [node, run] of anchors) {
-      run.unshift(node.charTick);
-      yield [node.path, run];
-    }
+    return [...anchors].map(([node, run], r) => {
+      run.unshift(node);
+      return [node.path, run.map((runNode, i) => {
+        if (runNode.pre && revert != null)
+          (revert[r] ??= [])[i] = runNode.pre;
+        return runNode.charTick;
+      })];
+    });
   }
 
   class TSeqOperationTree {
     root: { [pid: string]: { [index: number]: TSeqPathTreeNode } } = {};
     operables = new Map<TSeqPathTreeNode, TSeqOperable>();
 
-    process(operation: Iterable<TSeqRun>, remove = false) {
-      for (let [runPath, content] of operation) {
+    process(operation: TSeqOperation, remove?: TSeqRevert | true) {
+      operation.forEach(([runPath, run], r) => {
         const { tree, anchor } = this.anchorAt(runPath);
         const parentPath = runPath.slice(0, -1);
         const [leafPid, leafIndex] = anchor.name;
-        for (let i = 0; i < content.length; i++) {
-          const charTick = content[i];
+        run.forEach((charTick, i) => {
           const charIndex = leafIndex + i;
           const byIndex = tree[leafPid];
           const charNode = byIndex[charIndex] ??= { name: [leafPid, charIndex] };
-          if (!remove) {
+          if (remove !== true) {
             const path = charNode === anchor ? runPath : [...parentPath, charNode.name];
-            const operable = { path, charTick };
+            // Take the earliest available pre-image of the node
+            const pre = this.operables.get(charNode)?.pre ?? (remove && remove[r][i]);
+            const operable = { path, charTick, pre };
             Object.defineProperty(operable, 'next', {
               get: () => this.operables.get(byIndex[charIndex + 1])
             });
@@ -66,8 +71,8 @@ export namespace TSeqOperable {
             if (operable != null && !TSeqCharTick.inApplyOrder(charTick, operable.charTick))
               this.operables.delete(charNode);
           }
-        }
-      }
+        });
+      });
     }
 
     private anchorAt(runPath: TSeqName[]) {
@@ -80,8 +85,8 @@ export namespace TSeqOperable {
       return { tree, anchor: node! };
     }
 
-    toRuns() {
-      return toRuns(this.operables.values());
+    toOperation(revert?: TSeqRevert): TSeqOperation {
+      return toRuns(this.operables.values(), revert);
     }
   }
 
@@ -92,10 +97,12 @@ export namespace TSeqOperable {
    * {@link apply Applying} operations requires unique paths; this utility
    * allows operation arrays to be concatenated safely, removing redundancy.
    */
-  export function concat(...ops: TSeqOperation[]): TSeqOperation {
+  export function concat(...ops: TSeqLocalOperation[]): TSeqLocalOperation {
     const pathTree = new TSeqOperationTree();
-    pathTree.process(concatIter(...ops));
-    return [...pathTree.toRuns()];
+    for (let [operation, revert] of ops)
+      pathTree.process(operation, revert);
+    const revert: TSeqRevert = [];
+    return [pathTree.toOperation(revert), revert];
   }
 
   /**
@@ -107,25 +114,6 @@ export namespace TSeqOperable {
     const pathTree = new TSeqOperationTree();
     pathTree.process(operation);
     pathTree.process(prefix, true);
-    return [...pathTree.toRuns()];
-  }
-
-  /**
-   * All nodes must still be attached to their containers, i.e. prior to garbage
-   * collection.
-   */
-  export function toRevertOps(nodePrior: Map<TSeqCharNode, TSeqCharTick>): TSeqOperation {
-    return [...TSeqOperable.toRuns(mapIter(nodePrior.keys(),
-      function operable(node: TSeqCharNode): TSeqOperable {
-        return {
-          path: node.path,
-          charTick: nodePrior.get(node)!,
-          get next() {
-            const nextNode = node.next;
-            if (nextNode) return operable(nextNode);
-          }
-        };
-      }
-    ))];
+    return pathTree.toOperation();
   }
 }

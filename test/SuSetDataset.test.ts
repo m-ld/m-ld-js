@@ -90,11 +90,18 @@ describe('SU-Set Dataset', () => {
         expect(savedTime!.equals(local.time)).toBe(true);
       });
 
-      test('answers an empty snapshot', async () => {
-        const snapshot = await ssd.takeSnapshot();
-        // Test artifact: resetClock sets GWC to genesis – always set to a snapshot in prod
+      test('answers an empty snapshot with no clock', async () => {
+        const snapshot = await ssd.takeSnapshot(false, local);
         expect(snapshot.gwc.equals(GlobalClock.GENESIS)).toBe(true);
         await expect(lastValueFrom(snapshot.data)).rejects.toBeInstanceOf(EmptyError);
+      });
+
+      test('answers an empty snapshot with a forked clock', async () => {
+        const { left, right } = local.time.forked();
+        const snapshot = await ssd.takeSnapshot(true, local);
+        expect(snapshot.clock?.equals(right)).toBe(true);
+        expect(local.time.equals(left)).toBe(true);
+        expect(snapshot.gwc.equals(GlobalClock.GENESIS)).toBe(true);
       });
 
       test('transacts a no-op', async () => {
@@ -148,7 +155,8 @@ describe('SU-Set Dataset', () => {
         let firstTid: string;
 
         beforeEach(async () => {
-          firstTid = (await ssd.transact(local.tick().time, { jrql: { '@insert': fred } }))!.time.hash;
+          firstTid = (await ssd.transact(
+            local.tick().time, { jrql: { '@insert': fred } }))!.time.hash;
         });
 
         test('answers the new time', async () => {
@@ -157,7 +165,7 @@ describe('SU-Set Dataset', () => {
         });
 
         test('answers a snapshot', async () => {
-          const snapshot = await ssd.takeSnapshot();
+          const snapshot = await ssd.takeSnapshot(false, local);
           expect(snapshot.gwc.equals(local.gwc)).toBe(true);
           const data = await firstValueFrom(snapshot.data.pipe(toArray()));
           expect(data.length).toBe(2);
@@ -182,8 +190,9 @@ describe('SU-Set Dataset', () => {
 
         test('answers a snapshot with fused last operations', async () => {
           const firstTick = local.time.ticks;
-          const tid2 = (await ssd.transact(local.tick().time, { jrql: { '@insert': wilma } }))!.time.hash;
-          const snapshot = await ssd.takeSnapshot();
+          const tid2 = (await ssd.transact(
+            local.tick().time, { jrql: { '@insert': wilma } }))!.time.hash;
+          const snapshot = await ssd.takeSnapshot(false, local);
           expect(snapshot.gwc.equals(local.gwc)).toBe(true);
           const data = await firstValueFrom(snapshot.data.pipe(toArray()));
           expect(data.length).toBe(2);
@@ -218,7 +227,7 @@ describe('SU-Set Dataset', () => {
             local.tick().time,
             { jrql: { '@insert': fred } } // again
           ))!.time.hash;
-          const snapshot = await ssd.takeSnapshot();
+          const snapshot = await ssd.takeSnapshot(false, local);
           const data = await firstValueFrom(snapshot.data.pipe(toArray()));
           expect(data.length).toBe(2);
           const expectReifiedJson = {
@@ -257,7 +266,7 @@ describe('SU-Set Dataset', () => {
               'http://test.m-ld.org/#sex': 'male'
             }
           }, state.newTxnContext()));
-          const snapshot = await ssd.takeSnapshot();
+          const snapshot = await ssd.takeSnapshot(false, local);
           const data = await firstValueFrom(snapshot.data.pipe(toArray()));
           expect(data.length).toBe(2);
           const reifiedSexJson = new RegExp( // Not a great check but must have all properties
@@ -281,7 +290,7 @@ describe('SU-Set Dataset', () => {
         });
 
         test('applies a snapshot', async () => {
-          const snapshot = await ssd.takeSnapshot();
+          const snapshot = await ssd.takeSnapshot(false, local);
           const staticData = await firstValueFrom(snapshot.data.pipe(toArray()));
           await ssd.applySnapshot(local.snapshot(staticData), local.tick().time);
           await expect(drain(ssd.read<Describe>({
@@ -290,7 +299,7 @@ describe('SU-Set Dataset', () => {
         });
 
         test('does not answer operations since before snapshot start', async () => {
-          const snapshot = await ssd.takeSnapshot();
+          const snapshot = await ssd.takeSnapshot(false, local);
           const staticData = await firstValueFrom(snapshot.data.pipe(toArray()));
           await ssd.applySnapshot(local.snapshot(staticData), local.tick().time);
           await expect(ssd.operationsSince(remote.time)).resolves.toBeUndefined();
@@ -391,8 +400,10 @@ describe('SU-Set Dataset', () => {
         });
 
         test('deletes a duplicated insert', async () => {
-          const tid2 = (await ssd.transact(local.tick().time, { jrql: { '@insert': fred } }))!.time.hash;
-          const msg = (await ssd.transact(local.tick().time, { jrql: { '@delete': fred } }))!;
+          const tid2 = (await ssd.transact(
+            local.tick().time, { jrql: { '@insert': fred } }))!.time.hash;
+          const msg = (await ssd.transact(
+            local.tick().time, { jrql: { '@delete': fred } }))!;
           const [del] = decodeOpUpdate(msg);
           expect(del).toEqual({
             '@id': expect.any(String),
@@ -402,8 +413,9 @@ describe('SU-Set Dataset', () => {
         });
 
         test('deletes a duplicated insert after snapshot', async () => {
-          const tid2 = (await ssd.transact(local.tick().time, { jrql: { '@insert': fred } }))!.time.hash;
-          const snapshot = await ssd.takeSnapshot();
+          const tid2 = (await ssd.transact(
+            local.tick().time, { jrql: { '@insert': fred } }))!.time.hash;
+          const snapshot = await ssd.takeSnapshot(false, local);
           const staticData = await firstValueFrom(snapshot.data.pipe(toArray()));
           await ssd.applySnapshot(local.snapshot(staticData), local.tick().time);
           const msg = (await ssd.transact(local.tick().time, { jrql: { '@delete': fred } }))!;
@@ -604,7 +616,7 @@ describe('SU-Set Dataset', () => {
 
         test('cuts snapshot last-seen message from incoming fusion', async () => {
           // Restart the clone with its own snapshot (unrealistic but benign)
-          const snapshot = await ssd.takeSnapshot();
+          const snapshot = await ssd.takeSnapshot(false, local);
           const staticData = await firstValueFrom(snapshot.data.pipe(toArray()));
           // Get a new clock for the rejuvenated clone
           const newLocal = remote.join(local.time).fork();
@@ -652,14 +664,16 @@ describe('SU-Set Dataset', () => {
 
     test('checks the constraint', async () => {
       constraint.check = () => Promise.reject('Failed!');
-      await expect(ssd.transact(local.tick().time, { jrql: { '@insert': fred } })).rejects.toBe('Failed!');
+      await expect(ssd.transact(
+        local.tick().time, { jrql: { '@insert': fred } })).rejects.toBe('Failed!');
     });
 
     test('provides state to the constraint', async () => {
       await ssd.transact(local.tick().time, { jrql: { '@insert': wilma } });
       constraint.check = async state =>
         firstValueFrom(state.read<Describe>({ '@describe': wilma['@id'] }));
-      await expect(ssd.transact(local.tick().time, { jrql: { '@insert': fred } })).resolves.toBeDefined();
+      await expect(ssd.transact(
+        local.tick().time, { jrql: { '@insert': fred } })).resolves.toBeDefined();
     });
 
     test('provides a mutable update to the constraint', async () => {
@@ -671,7 +685,8 @@ describe('SU-Set Dataset', () => {
         update = await interim.update;
         expect(update['@insert']).toMatchObject(expect.arrayContaining([wilma, barney]));
       };
-      await expect(ssd.transact(local.tick().time, { jrql: { '@insert': fred } })).resolves.toBeDefined();
+      await expect(ssd.transact(
+        local.tick().time, { jrql: { '@insert': fred } })).resolves.toBeDefined();
       await expect(drain(ssd.read(<Describe>{ '@describe': wilma['@id'] })))
         .resolves.toEqual([wilma]);
     });
@@ -697,7 +712,8 @@ describe('SU-Set Dataset', () => {
       constraint.check = async (_, interim) => {
         interim.assert({ '@insert': wilma, '@agree': false });
       };
-      const msg = await ssd.transact(local.tick().time, { jrql: { '@insert': fred, '@agree': true } });
+      const msg = await ssd.transact(
+        local.tick().time, { jrql: { '@insert': fred, '@agree': true } });
       expect(msg?.data[EncodedOperation.Key.agreed]).toBe(null);
     });
 
@@ -743,11 +759,13 @@ describe('SU-Set Dataset', () => {
 
     test('applies a deleting constraint', async () => {
       constraint.apply = async (_, update) => update.assert({ '@delete': wilma });
-      const firstTid = (await ssd.transact(local.tick().time, { jrql: { '@insert': wilma } }))!.time.hash;
+      const firstTid = (await ssd.transact(
+        local.tick().time, { jrql: { '@insert': wilma } }))!.time.hash;
       const willUpdate = firstValueFrom(ssd.updates);
       await ssd.apply(
         remote.sentOperation({}, { '@id': 'fred', 'name': 'Fred' }),
-        local.join(remote.time));
+        local.join(remote.time)
+      );
       const update = await willUpdate;
       expect(update).toMatchObject(
         { '@insert': [fred], '@delete': [wilma], '@ticks': local.time.ticks });
@@ -797,7 +815,8 @@ describe('SU-Set Dataset', () => {
       // Constraint is going to insert the data we're deleting
       constraint.apply = async (_, update) => update.assert({ '@insert': wilma });
 
-      const tid = (await ssd.transact(local.tick().time, { jrql: { '@insert': wilma } }))!.time.hash;
+      const tid = (await ssd.transact(
+        local.tick().time, { jrql: { '@insert': wilma } }))!.time.hash;
 
       const willUpdate = firstValueFrom(ssd.updates);
       await ssd.apply(
@@ -863,7 +882,7 @@ describe('SU-Set Dataset', () => {
         remote.sentOperation({}, { '@id': 'wilma', 'name': 'Wilma' }),
         local.join(remote.time));
 
-      const snapshot = await ssd.takeSnapshot();
+      const snapshot = await ssd.takeSnapshot(false, local);
       // Note that the blocked flag is strictly an internal detail
       expect(snapshot.gwc.tid(remote.time)).toBe('!blocked!');
     });
@@ -920,7 +939,7 @@ describe('SU-Set Dataset', () => {
       const getDataId = jest.spyOn(byteArrayDatatype, 'getDataId').mockReset();
       extensions.push(byteArrayDatatype);
       const willUpdate = firstValueFrom(ssd.updates);
-      const photo = new Buffer('abc');
+      const photo = Buffer.from('abc');
       const fredProfile = {
         '@id': 'http://test.m-ld.org/fred',
         'http://test.m-ld.org/#photo': photo
@@ -958,7 +977,7 @@ describe('SU-Set Dataset', () => {
     test('insert indirected datatype with explicit value object', async () => {
       extensions.push(byteArrayDatatype);
       const willUpdate = firstValueFrom(ssd.updates);
-      const photo = new Buffer('abc');
+      const photo = Buffer.from('abc');
       await ssd.transact(local.tick().time, {
         jrql: {
           '@id': 'http://test.m-ld.org/fred',
@@ -985,7 +1004,7 @@ describe('SU-Set Dataset', () => {
 
     test('constructs with indirected datatype', async () => {
       extensions.push(byteArrayDatatype);
-      const photo = new Buffer('abc');
+      const photo = Buffer.from('abc');
       await ssd.transact(local.tick().time, {
         jrql: {
           '@id': 'http://test.m-ld.org/fred',
@@ -1024,13 +1043,13 @@ describe('SU-Set Dataset', () => {
 
     test('datatype data included in snapshot', async () => {
       extensions.push(byteArrayDatatype);
-      const photo = new Buffer('abc');
+      const photo = Buffer.from('abc');
       const fredProfile = {
         '@id': 'http://test.m-ld.org/fred',
         'http://test.m-ld.org/#photo': photo
       };
       await ssd.transact(local.tick().time, { jrql: fredProfile });
-      const snapshot = await ssd.takeSnapshot();
+      const snapshot = await ssd.takeSnapshot(false, local);
       // Snapshot data should have one operation and one triple
       const data = await firstValueFrom(snapshot.data.pipe(toArray()));
       expect(data.length).toBe(2);
@@ -1121,7 +1140,7 @@ describe('SU-Set Dataset', () => {
         'http://test.m-ld.org/#likes': 1
       }]);
       // If caching, should return from cache; otherwise, should re-apply
-      if (maxDataCacheSize > counterType.sizeOf(1))
+      if (maxDataCacheSize > 0)
         expect(counterApply).not.toHaveBeenCalled();
       else
         expect(counterApply).toHaveBeenCalled();
@@ -1231,7 +1250,7 @@ describe('SU-Set Dataset', () => {
           }
         }
       });
-      const snapshot = await ssd.takeSnapshot();
+      const snapshot = await ssd.takeSnapshot(false, local);
       // Snapshot data should have one operation and one triple
       const data = await firstValueFrom(snapshot.data.pipe(toArray()));
       expect(data.length).toBe(2);
@@ -1386,15 +1405,12 @@ describe('SU-Set Dataset', () => {
       }]);
     });
 
-    test.skip('voids shared operations', async () => {
+    test('voids shared operations', async () => {
       extensions.push(new CounterType('http://test.m-ld.org/#likes'));
       await ssd.transact(local.tick().time, {
         jrql: {
           '@id': 'http://test.m-ld.org/fred',
-          'http://test.m-ld.org/#likes': {
-            '@type': 'http://ex.org/#Counter',
-            '@value': 0
-          }
+          'http://test.m-ld.org/#likes': 0
         }
       });
       remote.join(local.time);
@@ -1425,7 +1441,45 @@ describe('SU-Set Dataset', () => {
         '@describe': 'http://test.m-ld.org/fred'
       }))).resolves.toMatchObject([{
         '@id': 'http://test.m-ld.org/fred',
-        'http://test.m-ld.org/#likes': { '@type': 'http://ex.org/#Counter', '@value': 0 }
+        'http://test.m-ld.org/#likes': 0
+      }]);
+    });
+
+    test('voids shared operations with revert metadata', async () => {
+      // In the absence of a test datatype that requires revert metadata,
+      // we just extend the counter type to allocate some spurious data
+      const counterType = new CounterType('http://test.m-ld.org/#likes');
+      jest.spyOn(counterType, 'update').mockImplementation(
+        (value, update): any => {
+          const inc = (<any>update)['@plus'];
+          return [value + inc, inc, `${inc}`]; // Increment as string
+        });
+      jest.spyOn(counterType, 'apply');
+      extensions.push(counterType);
+      await ssd.transact(local.tick().time, {
+        jrql: { '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#likes': 0 }
+      });
+      remote.join(local.time);
+      await ssd.transact(local.tick().time, {
+        jrql: {
+          '@update': {
+            '@id': 'http://test.m-ld.org/fred',
+            'http://test.m-ld.org/#likes': { '@plus': 1 }
+          }
+        }
+      });
+      // Not joining with local time here
+      await expect(ssd.apply(
+        remote.sentOperation({}, { '@id': 'wilma', 'name': 'Wilma' }, { agree: true }),
+        local.join(remote.time)
+      )).resolves.toBe(null);
+      // Check fred's likes have been voided out
+      expect(counterType.apply).toHaveBeenCalledWith(1, [[1, '1']], undefined);
+      await expect(drain(ssd.read<Describe>({
+        '@describe': 'http://test.m-ld.org/fred'
+      }))).resolves.toMatchObject([{
+        '@id': 'http://test.m-ld.org/fred',
+        'http://test.m-ld.org/#likes': 0
       }]);
     });
   });
@@ -1519,7 +1573,7 @@ describe('SU-Set Dataset', () => {
       expect(trace.voids[0].attribution).toBeNull();
       //////////////////////////////////////////////////////////////////////////
       // Check snapshot content
-      const snapshot = await ssd.takeSnapshot();
+      const snapshot = await ssd.takeSnapshot(false, local);
       // Check GWT has been reset (to genesis, for the local process)
       expect(snapshot.gwc.getTicks(local.time)).toBe(0);
       expect(snapshot.gwc.getTicks(remote.time)).toBe(1);
@@ -1604,7 +1658,8 @@ describe('SU-Set Dataset', () => {
     });
 
     test('voids an operation in which deleted triples not found', async () => {
-      const firstTid = (await ssd.transact(local.tick().time, { jrql: { '@insert': fred } }))!.time.hash;
+      const firstTid = (await ssd.transact(
+        local.tick().time, { jrql: { '@insert': fred } }))!.time.hash;
       remote.join(local.time); // Remote has received our insert
       // Both we and a third process are going to delete Fred
       const third = local.fork();

@@ -116,7 +116,8 @@ export class JournalState {
           [prevTicks, prevTid],
           operation,
           reversion,
-          attribution));
+          attribution
+        ));
         this.state = this.state.withTime(
           localTime,
           this.state.gwc.set(operation.time),

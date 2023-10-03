@@ -1,7 +1,8 @@
 import { TSeqContainer } from './TSeqContainer';
-import { TSeqCharTick, TSeqName, TSeqRun } from './types';
+import { hasInserts, TSeqCharTick, TSeqName } from './types';
 import { TSeqPreApply } from './TSeq';
 import { TSeqOperable } from './TSeqOperable';
+import { compare } from '../engine/util';
 
 /**
  * Node in a {@link TSeq} tree. Only the root node, the TSeq itself, does not
@@ -45,16 +46,17 @@ export abstract class TSeqNode extends TSeqContainer<TSeqCharNode> {
 
   /** @returns the actually-affected character nodes (ignoring empty -> empty) */
   *preApply(
-    [[[pid, index], ...tail], content]: TSeqRun,
-    charIndex: number
+    [[pid, index], ...tail]: TSeqName[],
+    content: (TSeqCharTick | undefined)[],
+    charIndex: number,
+    force?: boolean
   ): Iterable<TSeqPreApply> {
     // If a pure delete, don't force creation
-    const restIndex = this.getRestIndex(pid, content.some(([char]) => char));
+    const restIndex = this.getRestIndex(pid, hasInserts(content));
     if (restIndex > -1) {
       for (let i = 0; i < restIndex; i++)
         charIndex += this.rest[i].charLength;
-      yield *this.rest[restIndex].preApply(
-        index, [tail, content], charIndex);
+      yield *this.rest[restIndex].preApply(index, tail, content, charIndex, force);
     }
   }
 
@@ -102,6 +104,9 @@ export class TSeqCharNode extends TSeqNode implements TSeqOperable {
   private _char = '';
   private _tick = 0;
 
+  /** Holds the pre-image of this char node, only used during an operation */
+  private _pre?: TSeqCharTick;
+
   constructor(
     readonly container: TSeqProcessArray,
     /** Index into sparse container array (NOT count of non-empty chars before) */
@@ -118,6 +123,8 @@ export class TSeqCharNode extends TSeqNode implements TSeqOperable {
     super.checkInvariants();
     if (this.container.at(this.index) !== this)
       throw 'incorrect index';
+    if (this._pre != null)
+      throw 'uncommitted';
   }
 
   toJSON(): [string, number, ...any[]][] {
@@ -129,6 +136,7 @@ export class TSeqCharNode extends TSeqNode implements TSeqOperable {
     const [char, tick, ...rest] = json;
     rtn.set(char, tick);
     rtn.restFromJSON(rest);
+    rtn.commit();
     return rtn;
   }
 
@@ -144,21 +152,29 @@ export class TSeqCharNode extends TSeqNode implements TSeqOperable {
     return [this.char, this.tick];
   }
 
+  get pre() {
+    return this._pre;
+  }
+
   get next(): TSeqCharNode | undefined {
     return this.container.at(this.index + 1);
   }
 
-  set(char: ''): TSeqCharTick;
-  set(char: string, tick: number): TSeqCharTick;
+  set(char: ''): void;
+  set(char: string, tick: number): void;
   set(char: string, tick?: number) {
     if (char.length > 1)
       throw new RangeError('TSeq node value is one character');
-    const old = this.charTick;
+    this._pre ??= this.charTick;
     this.container.incCharLength(char.length - this.char.length);
     this._char = char;
     if (char && tick != null)
       this._tick = tick;
-    return old;
+  }
+
+  commit() {
+    delete this._pre;
+    this.container.gc(this);
   }
 
   /**
@@ -177,8 +193,13 @@ export class TSeqCharNode extends TSeqNode implements TSeqOperable {
     return super.charLength + (this.char ? 1 : 0);
   }
 
-  *preApply(op: TSeqRun, charIndex: number): Iterable<TSeqPreApply> {
-    yield *super.preApply(op, charIndex + (this.char ? 1 : 0));
+  *preApply(
+    path: TSeqName[],
+    content: (TSeqCharTick | undefined)[],
+    charIndex: number,
+    force?: boolean
+  ): Iterable<TSeqPreApply> {
+    yield *super.preApply(path, content, charIndex + (this.char ? 1 : 0), force);
   }
 
   *chars(fromCharIndex = 0): IterableIterator<TSeqCharNode> {
@@ -237,7 +258,7 @@ export class TSeqProcessArray extends TSeqContainer<TSeqCharNode> {
     return rtn;
   }
 
-  static compare = (r1: TSeqProcessArray, r2: TSeqProcessArray) => r1.pid.localeCompare(r2.pid);
+  static compare = (r1: TSeqProcessArray, r2: TSeqProcessArray) => compare(r1.pid, r2.pid);
 
   /** exclusive maximum index */
   get end() {
@@ -327,30 +348,33 @@ export class TSeqProcessArray extends TSeqContainer<TSeqCharNode> {
   }
 
   *preApply(
-    index: number,
-    [path, content]: TSeqRun,
-    charIndex: number
+    indexInArray: number,
+    path: TSeqName[],
+    content: (TSeqCharTick | undefined)[],
+    charIndex: number,
+    force?: boolean
   ): Iterable<TSeqPreApply> {
-    for (let i = this.start; i < index; i++)
+    for (let i = this.start; i < indexInArray; i++)
       charIndex += this.at(i)?.charLength ?? 0;
     if (path.length) {
       // Don't create a non-existent node if it's just deletes
-      const node = content.some(([char]) => char) ? this.ensureAt(index) : this.at(index);
+      const node = hasInserts(content) ? this.ensureAt(indexInArray) : this.at(indexInArray);
       if (node)
-        yield *node.preApply([path, content], charIndex);
+        yield *node.preApply(path, content, charIndex);
     } else {
-      for (let c = 0; c < content.length; c++, index++) {
-        const charTick = content[c];
-        const node = this.at(index);
-        if (!TSeqCharTick.inApplyOrder(node?.charTick, charTick))
-          continue;
-        const [char] = charTick;
-        if (char) // Setting
-          yield { node: node ?? this.ensureAt(index), charTick, charIndex };
-        else if (node?.char) // Deleting
-          yield { node, charTick, charIndex };
-        if (node != null)
-          charIndex += node.charLength;
+      for (let indexInRun = 0; indexInRun < content.length; indexInRun++, indexInArray++) {
+        const charTick = content[indexInRun];
+        const node = this.at(indexInArray);
+        if (charTick != null && (TSeqCharTick.inApplyOrder(node?.charTick, charTick) || force)) {
+          const [char] = charTick;
+          const pre = { post: charTick, charIndex, indexInRun };
+          if (char) // Setting
+            yield Object.assign(pre, { node: node ?? this.ensureAt(indexInArray) });
+          else if (node?.char) // Deleting
+            yield Object.assign(pre, { node });
+          if (node != null)
+            charIndex += node.charLength;
+        }
       }
     }
   }

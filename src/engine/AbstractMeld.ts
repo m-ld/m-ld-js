@@ -24,7 +24,7 @@ export abstract class AbstractMeld implements Meld {
   private readonly operationSource = new PauseableSource<OperationMessage>();
   private readonly liveSource: BehaviorSubject<boolean | null> = new BehaviorSubject(null);
 
-  private _closed = false;
+  private _closed: any = false;
   protected readonly log: Logger;
   protected errorIfClosed: Observable<never>;
 
@@ -43,7 +43,8 @@ export abstract class AbstractMeld implements Meld {
     // indicates a return to undecided liveness followed by completion.
     this.live = Object.defineProperties(
       this.liveSource.pipe(catchError(() => of(null)), distinctUntilChanged()),
-      { value: { get: () => this.liveSource.value } }) as LiveValue<boolean | null>;
+      { value: { get: () => this.liveSource.value } }
+    ) as LiveValue<boolean | null>;
 
     // Log liveness
     this.live.pipe(skip(1)).subscribe(
@@ -64,19 +65,27 @@ export abstract class AbstractMeld implements Meld {
   };
 
   protected get closed() {
-    return this._closed;
+    return !!this._closed;
   }
 
-  abstract newClock(): Promise<TreeClock>;
-  abstract snapshot(state: MeldReadState): Promise<Snapshot>;
+  abstract snapshot(newClock: boolean, state: MeldReadState): Promise<Snapshot>;
   abstract revupFrom(time: TreeClock, state: MeldReadState): Promise<Revup | undefined>;
+
+  comesAlive(expected: boolean | null | 'notNull' = true): Promise<boolean | null> {
+    return firstValueFrom(concat(
+      this.live.pipe(filter(expected === 'notNull' ?
+        (live => live != null) : (live => live === expected))),
+      throwError(() => this._closed === true ?
+        new MeldError('Clone has closed') : this._closed)
+    ));
+  }
 
   protected msgString(msg: OperationMessage) {
     return MeldOperationMessage.toString(msg, this.log.getLevel());
   }
 
   close(err?: any) {
-    this._closed = true;
+    this._closed = err || true;
     if (err) {
       this.operationSource.error(err);
       this.liveSource.error(err);
@@ -85,16 +94,4 @@ export abstract class AbstractMeld implements Meld {
       this.liveSource.complete();
     }
   }
-}
-
-export function comesAlive(
-  meld: Pick<Meld, 'live'>,
-  expected: boolean | null | 'notNull' = true
-): Promise<boolean | null> {
-  return firstValueFrom(concat(
-    meld.live.pipe(
-      filter(expected === 'notNull' ? (live => live != null) : (live => live === expected))
-    ),
-    throwError(() => new MeldError('Clone has closed'))
-  ));
 }

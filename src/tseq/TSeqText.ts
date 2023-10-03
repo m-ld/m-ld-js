@@ -5,7 +5,7 @@ import {
 } from '../jrql-support';
 import { M_LD, SH, XS } from '../ns';
 import { Iri } from '@m-ld/jsonld';
-import { TSeq, TSeqOperation } from '.';
+import { TSeq, TSeqLocalOperation, TSeqOperation, TSeqRevert } from '.';
 import { array, uuid } from '../util';
 import { MeldAppContext } from '../config';
 import { ExtensionSubjectInstance } from '../orm/ExtensionSubject';
@@ -60,13 +60,15 @@ import { TSeqOperable } from './TSeqOperable';
  * [[include:how-to/domain-setup.md]]
  * [[include:how-to/text.md]]
  *
- * @see TSeq
+ * @see {@link TSeq}
  * @category Experimental
  * @experimental
  * @noInheritDoc
  */
-export class TSeqText
-  implements MeldPlugin, SharedDatatype<TSeq, TSeqOperation>, ExtensionSubjectInstance {
+export class TSeqText implements
+  MeldPlugin,
+  SharedDatatype<TSeq, TSeqOperation, TSeqRevert>,
+  ExtensionSubjectInstance {
   /**
    * Extension declaration. Insert into the domain data to install the
    * extension. For example (assuming a **m-ld** `clone` object and a property
@@ -114,7 +116,7 @@ export class TSeqText
   }
 
   /** @internal */
-  initFromData(src: GraphSubject, orm: OrmUpdating, ext: ExtensionSubject<this>) {
+  initFromData(src: GraphSubject, _orm: OrmUpdating, ext: ExtensionSubject<this>) {
     ext.initSrcProperty(src, [this, 'properties'], // not used due to get/set
       JsProperty.for(SH.targetObjectsOf, Array, VocabReference), {
         get: () => [...this.properties].map(p => ({ '@vocab': p })),
@@ -152,22 +154,6 @@ export class TSeqText
   }
 
   /** @internal */
-  sizeOf(data: TSeq): number {
-    // Every character:
-    // - object = 50 bytes
-    // - 2 fields = 2*8 bytes
-    // - _char = 2 bytes + string overhead = 10 bytes
-    // - _tick = 2 bytes (optimised as a short integer)
-    // Tree overhead, ideally O(log length)
-    // - object = 50 bytes
-    // - 2-3 fields = 20 bytes
-    // @see https://www.mattzeunert.com/2016/07/24/javascript-array-object-sizes.html
-    // TODO: Verify these claims!
-    const strLen = data.charLength;
-    return strLen * 70 + strLen.toString(2).length * 70;
-  }
-
-  /** @internal */
   fromJSON(json: any): TSeq {
     return TSeq.fromJSON(this.pid, json);
   }
@@ -178,19 +164,20 @@ export class TSeqText
   }
 
   /** @internal */
-  update(state: TSeq, update: Expression): [TSeq, TSeqOperation] {
+  update(state: TSeq, update: Expression): [TSeq, TSeqOperation, TSeqRevert?] {
     if (isConstraint(update)) {
+      const revert: TSeqRevert = [];
       for (let [key, args] of Object.entries(update)) {
         switch (key) {
           case '@concat':
             // noinspection SuspiciousTypeOfGuard
             if (typeof args == 'string')
-              return [state, state.splice(Infinity, 0, args)];
+              return [state, state.splice(Infinity, 0, args, revert), revert];
             break;
           case '@splice':
             if (isTextSplice(args)) {
               const [index, deleteCount, content] = args;
-              return [state, state.splice(index, deleteCount, content)];
+              return [state, state.splice(index, deleteCount, content, revert), revert];
             }
         }
       }
@@ -199,21 +186,21 @@ export class TSeqText
   }
 
   /** @internal */
-  apply(state: TSeq, operation: TSeqOperation): [TSeq, Expression[]] {
-    const splices = state.apply(operation)
+  apply(
+    state: TSeq,
+    reversions: TSeqLocalOperation[],
+    operation?: TSeqOperation
+  ): [TSeq, Expression[], TSeqRevert?] {
+    // Apply the given operation and provide revert metadata
+    const revert: TSeqRevert = [];
+    const splices = state.apply(operation ?? null, reversions, revert)
       .map<Constraint>(splice => ({ '@splice': array(splice) }));
-    return [state, splices];
+    return [state, splices, revert];
   }
 
   /** @internal */
-  revert(state: TSeq, operation: TSeqOperation, revert: null): [TSeq, Expression] {
-    // @ts-ignore - TODO
-    return [undefined, undefined];
-  }
-
-  /** @internal */
-  fuse(op1: TSeqOperation, op2: TSeqOperation): [TSeqOperation] {
-    return [TSeqOperable.concat(op1, op2)];
+  fuse(op1: TSeqLocalOperation, op2: TSeqLocalOperation): TSeqLocalOperation {
+    return TSeqOperable.concat(op1, op2);
   }
 
   /** @internal */

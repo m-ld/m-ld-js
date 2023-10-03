@@ -5,6 +5,30 @@ with prior versions for storage or network transmission, so they must be used
 with data persisted using the same version, and other clones of the same
 version. Please [get in touch](https://m-ld.org/hello) if you need help upgrading.
 
+## v0.10
+
+### [new]
+
+- Overhaul of the Getting Started guide on [the website](https://js.m-ld.org/), including live coding examples.
+- JavaScript [module](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Modules) bundles are now served on the `js.m-ld.org/ext` and `edge.js.m-ld.org/ext` websites.
+- (The **m-ld** [Gateway](https://gw.m-ld.org/) provides messaging and backup, also helping with getting started.)
+- Support for [live collaborative text](https://js.m-ld.org/classes/tseqtext.html) in **m-ld** domains.
+- New extension point for custom [Datatypes](https://js.m-ld.org/interfaces/datatype.html) and [Shared Datatypes](https://js.m-ld.org/interfaces/shareddatatype.html), which allow embedding of custom atomic value types, which can be mutable CRDTs.
+- Uint8Array (and Buffer) subject [property values](https://js.m-ld.org/globals.html#atom) are now supported in the API, without wrapping in a `base64Binary` JSON-LD value object. These are also stored efficiently in the backend.
+- A new clause key, `@update`, is available when [writing Updates](https://js.m-ld.org/interfaces/update.html#_update), reducing boilerplate when replacing the contents of a subject property. It is also used for issuing updates to a shared datatype.
+- Expanded RDF/JS support, including [writing RDF](https://js.m-ld.org/interfaces/updatablerdf.html) directly to a domain, and receiving [Quads in domain updates](https://js.m-ld.org/modules/graphsubjects.html#quads).
+
+### [breaking]
+
+- Major change to the inter-clone protocol, removing separate `newClock` requests, for integrity.
+- The built Javascript is now to ES2021 standard.
+
+### [bugfix]
+
+- [#148](https://github.com/m-ld/m-ld-js/issues/148) Time ... is from a different process group
+- [Bugfixes in v0.9.1](https://github.com/m-ld/m-ld-js/milestone/1?closed=1)
+- [Bugfixes in v0.9.2](https://github.com/m-ld/m-ld-js/milestone/2?closed=1)
+
 ## v0.9
 
 ### [new]

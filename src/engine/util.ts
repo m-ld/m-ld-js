@@ -1,9 +1,9 @@
 import {
-  BehaviorSubject, concat, connect, defaultIfEmpty, EMPTY, firstValueFrom, from, NEVER, Observable,
-  ObservableInput, ObservedValueOf, Observer, onErrorResumeNext, OperatorFunction, Subject,
-  Subscription, throwError
+  BehaviorSubject, concat, connect, defaultIfEmpty, EMPTY, endWith, firstValueFrom, from, NEVER,
+  Observable, ObservableInput, ObservedValueOf, Observer, onErrorResumeNext, OperatorFunction,
+  Subject, Subscription, throwError
 } from 'rxjs';
-import { ignoreElements, mergeMap, switchAll } from 'rxjs/operators';
+import { ignoreElements, mergeMap, switchAll, takeUntil } from 'rxjs/operators';
 
 export const isArray = Array.isArray;
 
@@ -53,6 +53,10 @@ export function throwOnComplete(
   errorFactory: () => any
 ): Observable<never> {
   return concat(observable.pipe(ignoreElements()), throwError(errorFactory));
+}
+
+export function takeUntilComplete<T>(other: Observable<unknown>): OperatorFunction<T, T> {
+  return takeUntil(other.pipe(ignoreElements(), endWith(0)));
 }
 
 /**
@@ -273,4 +277,8 @@ export class IndexKeyGenerator {
   index(key: string) {
     return Number.parseInt(key, this.radix);
   }
+}
+
+export function compare<T>(v1: T, v2: T) {
+  return v1 === v2 ? 0 : v1 > v2 ? 1 : -1;
 }

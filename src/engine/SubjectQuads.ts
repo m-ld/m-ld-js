@@ -1,4 +1,4 @@
-import { any, anyName, blank, IndirectedData } from '../api';
+import { any, anyName, IndirectedData } from '../api';
 import {
   Atom, Constraint, Expression, InlineConstraint, isInlineConstraint, isPropertyObject, isReference,
   isSet, isSubjectObject, Reference, Subject, SubjectPropertyObject, Variable
@@ -127,7 +127,7 @@ export class SubjectQuads extends EventEmitter {
   private subjectId(subject: Subject) {
     if (subject['@id'] != null)
       if (subject['@id'].startsWith('_:'))
-        return this.rdf.blankNode(subject['@id']);
+        return this.rdf.blankNode(subject['@id'].slice(2));
       else
         return this.expandNode(subject['@id']);
     else if (this.mode === JrqlMode.match)
@@ -135,7 +135,7 @@ export class SubjectQuads extends EventEmitter {
     else if (this.mode === JrqlMode.load && this.rdf.skolem != null)
       return this.rdf.skolem();
     else
-      return this.rdf.blankNode(blank());
+      return this.rdf.blankNode();
   }
 
   private *listQuads(lid: Quad_Subject, list: SubjectPropertyObject): Iterable<Quad> {

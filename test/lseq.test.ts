@@ -1,5 +1,6 @@
 import { mock } from 'jest-mock-extended';
 import { LseqDef, LseqIndexNotify, LseqIndexRewriter } from '../src/lseq';
+import { compare } from '../src/engine/util';
 
 describe('LSEQ', () => {
   const lseq = new LseqDef();
@@ -240,7 +241,7 @@ describe('LSEQ', () => {
       private items: { [posId: string]: T } = {};
       // Ordered position identifier-items
       private ordered = () => Object.entries(this.items)
-        .sort((e1, e2) => e1[0].localeCompare(e2[0]))
+        .sort((e1, e2) => compare(e1[0], e2[0]))
         .map(e => ({ posId: e[0], value: e[1] }));
       // Ordered values
       // @ts-ignore

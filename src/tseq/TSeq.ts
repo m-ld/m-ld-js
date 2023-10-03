@@ -1,7 +1,7 @@
-import { concatIter } from '../engine/util';
 import { TSeqCharNode, TSeqNode } from './TSeqNode';
 import { TSeqOperable } from './TSeqOperable';
-import { TSeqCharTick, TSeqOperation, TSeqRevertOperation, TSeqSplice } from './types';
+import { TSeqCharTick, TSeqLocalOperation, TSeqOperation, TSeqRevert, TSeqSplice } from './types';
+import { compare, concatIter } from '../engine/util';
 
 /**
  * Result of a pre-apply step during {@link TSeq#apply}.
@@ -9,8 +9,9 @@ import { TSeqCharTick, TSeqOperation, TSeqRevertOperation, TSeqSplice } from './
  */
 export interface TSeqPreApply {
   node: TSeqCharNode;
-  charTick: TSeqCharTick;
+  post: TSeqCharTick;
   charIndex: number;
+  indexInRun: number;
 }
 
 /**
@@ -24,6 +25,7 @@ export interface TSeqPreApply {
  * A TSeq requires the framework guarantees of a 'shared data type' in **m-ld**:
  * operations must be {@link apply applied} only once, and in causal order.
  *
+ * @see {@link TSeqText} for usage information
  * @category Experimental
  * @experimental
  */
@@ -71,31 +73,52 @@ export class TSeq extends TSeqNode {
   }
 
   /**
-   * Applies remote operations to this local clone of the TSeq
-   * @param operations the operations to apply
-   * @param cb a callback to recover reversion information if required
+   * Applies or reverts (see `revert` param) remote operations to this local
+   * clone of the TSeq.
+   *
+   * @param operation the operation to apply, or `null` if only reverting.
+   * @param reversions are local operations to be reverted _prior_ to applying
+   * `operation`, in reverse order of original application. The effect of these
+   * will be included in the returned splice, but not in the `revert` metadata.
+   * @param revert will be populated with reversion metadata for the `operation`
    */
-  apply(operations: TSeqOperation, cb?: (revert: TSeqRevertOperation) => void) {
-    const nodePreApply: TSeqPreApply[] = [];
+  apply(
+    operation: TSeqOperation | null,
+    reversions: TSeqLocalOperation[] = [],
+    revert: TSeqRevert = []
+  ) {
     // Pre-apply to get the character indexes
-    for (let operation of operations)
-      nodePreApply.push(...this.preApply(operation, 0));
+    const nodePreApply = new Map<TSeqCharNode, TSeqPreApply>();
+    for (let [operation, revert] of reversions) {
+      if (revert == null)
+        throw new TypeError('Cannot revert without reversion metadata');
+      for (let run = 0; run < operation.length; run++) {
+        const [path] = operation[run];
+        for (let pre of this.preApply(path, revert[run], 0, true))
+          nodePreApply.set(pre.node, pre);
+      }
+    }
+    if (operation != null) {
+      for (let run = 0; run < operation.length; run++) {
+        const [path, content] = operation[run];
+        for (let pre of this.preApply(path, content, 0)) {
+          (revert[run] ??= [])[pre.indexInRun] = pre.node.charTick;
+          nodePreApply.set(pre.node, pre);
+        }
+      }
+    }
+    const preApply = [...nodePreApply.values()];
     // Apply the content, accumulating metadata
-    const nodePrior = cb && new Map<TSeqCharNode, TSeqCharTick>();
     const splices: TSeqSplice[] = [];
     // Operations can 'jump' intermediate affected characters
-    nodePreApply.sort(({ charIndex: c1 }, { charIndex: c2 }) =>
-      c1 === c2 ? 0 : c1 > c2 ? 1 : -1);
-    for (let { node, charTick: [char, tick], charIndex } of nodePreApply) {
-      const [oldChar, oldTick] = node.set(char, tick);
-      nodePrior?.set(node, [oldChar, oldTick]);
+    preApply.sort((p1, p2) => compare(p1.charIndex, p2.charIndex));
+    for (let { node, post: [char, tick], charIndex } of preApply) {
+      node.set(char, tick);
+      const [oldChar] = node.pre ?? [''];
       this.addToSplices(splices, charIndex, oldChar, char);
     }
-    // Gather reversion operations prior to garbage collection
-    const revert = nodePrior ? TSeqOperable.toRevertOps(nodePrior) : [];
-    for (let { node } of nodePreApply)
-      node.container.gc(node);
-    cb?.(revert);
+    for (let { node } of preApply)
+      node.commit();
     return splices;
   }
 
@@ -120,24 +143,34 @@ export class TSeq extends TSeqNode {
    * @param index zero-based index at which to start changing the text
    * @param deleteCount the number of characters in the text to remove from `index`
    * @param content the characters to add to the text, beginning from `index`
+   * @param revert will be populated with reversion metadata for the returned
+   * operation.
    */
-  splice(index: number, deleteCount: number, content = ''): TSeqOperation {
+  splice(
+    index: number,
+    deleteCount: number,
+    content = '',
+    revert?: TSeqRevert
+  ): TSeqOperation {
     if (index < 0)
       throw new RangeError();
+    if (revert?.length)
+      throw new RangeError('Expecting empty revert to populate');
     if (!deleteCount && !content.length)
       return []; // Shortcut
-    const deletes = this.delete(index, deleteCount);
-    const inserts = this.insert(index, content);
-    // TODO: Supply the reverts to a callback, as per the apply method
+    const nodes = new Set(concatIter(
+      this.delete(index, deleteCount),
+      this.insert(index, content)
+    ));
     // TODO: This reconstructs runs which are already about known in the insert
     // method, combining them with the deletes
-    const ops = [...TSeqOperable.toRuns(concatIter(deletes, inserts))];
-    for (let node of deletes)
-      node.container.gc(node);
-    return ops;
+    const operation = TSeqOperable.toRuns(nodes, revert);
+    for (let node of nodes)
+      node.commit();
+    return operation;
   }
 
-  private delete(index: number, deleteCount: number) {
+  private delete(index: number, deleteCount: number): TSeqCharNode[] {
     if (deleteCount > 0) {
       const deletes: TSeqCharNode[] = Array(deleteCount);
       let d = 0;
@@ -152,12 +185,13 @@ export class TSeq extends TSeqNode {
     }
   }
 
-  private insert(index: number, content: string) {
+  private insert(index: number, content: string): TSeqCharNode[] {
     if (!content)
       return [];
     // Any insert ticks our clock
     this.tick++;
     const inserts: TSeqCharNode[] = Array(content.length);
+    if (!isFinite(index)) index = this.charLength;
     const charIt = this.chars(index > 0 ? index - 1 : 0);
     let itRes = index > 0 ? charIt.next() : null;
     let node = itRes && (itRes.done ? null : itRes.value), c = 0;
@@ -165,8 +199,7 @@ export class TSeq extends TSeqNode {
       while (node && c < content.length) {
         if (node.container.setIfEmpty(node.index + 1, content.charAt(c), this.tick))
           inserts[c++] = node = charIt.next().value!; // The node we just set
-        else
-          break;
+        else break;
       }
       content = content.slice(c);
     }

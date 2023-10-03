@@ -10,7 +10,7 @@ import { SubjectQuads } from './SubjectQuads';
 import { gunzipSync, gzipSync } from 'fflate';
 import { baseVocab, domainBase } from './dataset';
 import { IndirectedData, MeldError, UUID } from '../api';
-import { JrqlMode, RefTriple } from './jrql-util';
+import { isRefTriple, JrqlMode, RefTriple } from './jrql-util';
 import { jsonDatatype } from '../datatype';
 import { array } from '../util';
 import { Quad_Object } from 'rdf-js';
@@ -69,7 +69,9 @@ export class MeldEncoder {
   expandTerm = (value: string) => this.ctx.expandTerm(value);
 
   identifyTriple = <T extends Triple>(triple: T, id?: Iri): RefTriple & T =>
-    clone(triple, { '@id': id ?? `_:${this.rdf.blankNode().value}`, ...triple });
+    isRefTriple(triple) ? triple : clone(triple, {
+      '@id': id ?? `_:${this.rdf.blankNode().value}`, ...triple
+    });
 
   identifyTriplesData = <E>(triplesData: Iterable<[Triple, E]> = []): [RefTriple, E][] =>
     [...triplesData].map(([triple, data]) => [this.identifyTriple(triple), data]);

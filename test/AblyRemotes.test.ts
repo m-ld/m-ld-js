@@ -1,15 +1,14 @@
 import * as Ably from 'ably';
 import { mockDeep as mock, MockProxy } from 'jest-mock-extended';
 import { AblyRemotes, MeldAblyConfig } from '../src/ably';
-import { comesAlive } from '../src/engine/AbstractMeld';
 import { mockLocal, testOp } from './testClones';
 import { BehaviorSubject, Subject as Source } from 'rxjs';
-import { TreeClock } from '../src/engine/clocks';
-import { NewClockRequest, NewClockResponse } from '../src/engine/remotes/ControlMessage';
+import { GlobalClock, TreeClock } from '../src/engine/clocks';
 import { DeepMockProxy } from 'jest-mock-extended/lib/Mock';
 import { MeldOperationMessage } from '../src/engine/MeldOperationMessage';
 import { Future } from '../src/engine/Future';
 import { array, MeldExtensions, noTransportSecurity } from '../src/index';
+import { SnapshotRequest, SnapshotResponse } from '../src/engine/remotes/ControlMessage';
 import MockInstance = jest.MockInstance;
 
 /** The connection callback overload used by AblyRemotes */
@@ -80,14 +79,14 @@ describe('Ably remotes', () => {
     const remotes = new AblyRemotes(config, extensions, connect);
     connCallbacks.connected?.(mock<Ably.Types.ConnectionStateChange>());
     // We have not supplied a presence update, per Ably behaviour
-    await expect(comesAlive(remotes, false)).resolves.toBe(false);
+    await expect(remotes.comesAlive(false)).resolves.toBe(false);
   });
 
   test('responds to presence', async () => {
     const remotes = new AblyRemotes(config, extensions, connect);
     connCallbacks.connected?.(mock<Ably.Types.ConnectionStateChange>());
     otherPresent();
-    await expect(comesAlive(remotes)).resolves.toBe(true);
+    await expect(remotes.comesAlive()).resolves.toBe(true);
   });
 
   test('joins presence if clone is live', async () => {
@@ -115,7 +114,7 @@ describe('Ably remotes', () => {
     control.subscribe.mockReturnValue(new Promise(() => { }));
     const remotes = new AblyRemotes(config, extensions, connect);
     remotes.setLocal(mockLocal({}, [true]));
-    const goneLive = comesAlive(remotes, false); // No presence so false
+    const goneLive = remotes.comesAlive(false); // No presence so false
     connCallbacks.connected?.(mock<Ably.Types.ConnectionStateChange>());
     // Push to immediate because connected handling is async
     const now = new Promise(res => setImmediate(() => res('now')));
@@ -147,7 +146,7 @@ describe('Ably remotes', () => {
     const remotes = new AblyRemotes(config, extensions, connect);
     connCallbacks.connected?.(mock<Ably.Types.ConnectionStateChange>());
     otherPresent();
-    await comesAlive(remotes);
+    await remotes.comesAlive();
     const prevTime = TreeClock.GENESIS.forked().left, time = prevTime.ticked();
     const entry = MeldOperationMessage.fromOperation(prevTime.ticks, testOp(time, {}, {}), null);
     const updates = new Source<MeldOperationMessage>();
@@ -157,7 +156,7 @@ describe('Ably remotes', () => {
       '__op', MeldOperationMessage.toBuffer(entry));
   });
 
-  test('sends a new clock request', async () => {
+  test('sends a snapshot request', async () => {
     const newClock = TreeClock.GENESIS.forked().left;
     // Grab the control channel subscriber
     const remotes = new AblyRemotes(config, extensions, connect);
@@ -174,19 +173,25 @@ describe('Ably remotes', () => {
       .mockImplementation((name, data) => {
         const splitName = name.split(':');
         expect(splitName[0]).toBe('__send');
-        expect(data.equals(new NewClockRequest().toBuffer())).toBe(true);
+        expect(data.equals(new SnapshotRequest(true).toBuffer())).toBe(true);
         // Object assign overcomes mocking of the buffer which borks Buffer.equals
         setImmediate(() => subscriber(Object.assign(mock<Ably.Types.Message>(), {
           clientId: 'other',
           // Check that the remotes can cope with non-Buffers
-          data: new Uint8Array(new NewClockResponse(newClock).toBuffer()),
+          data: new Uint8Array(new SnapshotResponse(
+            newClock,
+            GlobalClock.GENESIS,
+            TreeClock.GENESIS,
+            'dataAddress',
+            'updatesAddress'
+          ).toBuffer()),
           name: `__reply:reply1:${splitName[1]}`
         })));
         return Promise.resolve();
       });
     otherPresent();
-    await comesAlive(remotes);
-    expect((await remotes.newClock()).equals(newClock)).toBe(true);
+    await remotes.comesAlive();
+    expect((await remotes.snapshot(true, mock())).clock!.equals(newClock)).toBe(true);
   });
 
   // TODO: notification channels for snapshots and revups

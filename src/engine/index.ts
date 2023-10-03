@@ -33,21 +33,15 @@ export interface Meld {
    */
   readonly live: LiveValue<boolean | null>;
   /**
-   * Mint a new clock, with a unique identity in the domain. For a local clone,
-   * this method forks the clone's clock. For a set of remotes, the request is
-   * forwarded to one remote clone (decided by the implementation) which will
-   * call the method locally.
-   */
-  newClock(): Promise<TreeClock>;
-  /**
    * Get a snapshot of all the data in the domain. For a local clone, this
    * method provides the local state. For a set of remotes, the request is
    * forwarded to one remote clone (decided by the implementation) which will
    * call the method locally.
    *
+   * @param newClock whether we want a new unique identity in the domain
    * @param state readable prior state, used to inspect metadata
    */
-  snapshot(state: MeldReadState): Promise<Snapshot>;
+  snapshot(newClock: boolean, state: MeldReadState): Promise<Snapshot>;
   /**
    * 'Rev-up' by obtaining recent operations for the domain. For a local clone,
    * this method provides the operations from the local journal. For a set of
@@ -209,6 +203,10 @@ export interface Revup extends Recovery {
  * @see Meld.snapshot
  */
 export interface Snapshot extends Recovery {
+  /**
+   * The new forked clock, if asked for in the snapshot request.
+   */
+  readonly clock?: TreeClock;
   /**
    * All data in the snapshot.
    * @see Snapshot.Datum

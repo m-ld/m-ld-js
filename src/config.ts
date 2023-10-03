@@ -71,9 +71,9 @@ export interface MeldConfig {
   /**
    * Size of the data cache, in bytes. Increasing the size can improve the
    * performance of operations on large data objects such as binary and text, at
-   * the expense of memory utilisation. Note that calculating the size of a
-   * Javascript object in memory is usually approximate and an underestimate, so
-   * this value should be set conservatively.
+   * the expense of memory utilisation. Note that cache items size calculation
+   * is approximate and an underestimate, so this value should be set
+   * conservatively.
    * @default 10MB
    */
   maxDataCacheSize?: number;

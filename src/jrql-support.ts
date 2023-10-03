@@ -390,7 +390,6 @@ export interface Subject extends Pattern {
    * to a set of one or more values.
    */
   [key: string]: SubjectPropertyObject | Context | undefined;
-  // No support for inline filters
 }
 
 /** @internal */
@@ -666,9 +665,8 @@ export interface Query extends Pattern {
    * }
    * ```
    *
-   * > The Javascript engine supports exact-matches for subject identities, properties and
-   * > values. [Inline&nbsp;filters](https://json-rql.org/globals.html#inlinefilter)
-   * > will be available in future.
+   * > The Javascript engine supports filters for subject identities, properties
+   * > and values, including {@link Constraint inline&nbsp;filters}.
    */
   '@where'?: Subject | Subject[] | Group;
 }

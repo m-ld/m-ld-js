@@ -238,8 +238,9 @@ export interface GraphSubjects extends Array<GraphSubject> {
   quads: BaseDataset;
 }
 
-/** @internal */
+// Note this must not be @internal, else TypeDoc ignores the interface too
 export namespace GraphSubjects {
+  /** Empty graph implementation (immutable) */
   export const EMPTY: GraphSubjects =
     Object.assign([], { graph: new Map(), quads: [] });
 }
@@ -619,8 +620,6 @@ export interface MeldPlugin extends Partial<MeldExtensions> {
 export interface MeldExtensions {
   /**
    * Data invariant constraints applicable to the domain.
-   *
-   * @experimental
    */
   readonly constraints: Iterable<MeldConstraint>;
   /**
@@ -660,8 +659,7 @@ export interface MeldExtensions {
  * state and the update.
  *
  * @see [m-ld concurrency](http://m-ld.org/doc/#concurrency)
- * @experimental
- * @category Experimental
+ * @category API
  */
 export interface MeldConstraint {
   /**
@@ -736,9 +734,7 @@ export interface AgreementCondition {
 
 /**
  * An update to which further updates can be asserted or entailed.
- *
- * @experimental
- * @category Experimental
+ * @category API
  */
 export interface InterimUpdate {
   /**
@@ -837,8 +833,7 @@ export interface InterimUpdate {
  * given property position in a Subject. Otherwise, it is the identity of the
  * datatype itself (which may be the same).
  * @see Datatype
- * @experimental
- * @category Experimental
+ * @category API
  */
 export type IndirectedData =
   (datatype: Iri, property?: Iri) => Datatype | undefined;
@@ -854,8 +849,7 @@ export type IndirectedData =
  * algorithms for reconciling concurrent mutations.
  *
  * @typeParam Data - data type
- * @experimental
- * @category Experimental
+ * @category API
  */
 export interface Datatype<Data = unknown> {
   /**
@@ -881,7 +875,7 @@ export interface Datatype<Data = unknown> {
    * fully pre-expanded IRI.
    *
    * @returns the valid data, or undefined if the data is not valid
-   * @throws {TypeError} if a validation message is indicated
+   * @throws TypeError if a validation message is indicated
    */
   validate(value: Value): Data | undefined;
   /**
@@ -898,10 +892,6 @@ export interface Datatype<Data = unknown> {
    * If this method is not provided, the data itself MUST be a valid API value.
    */
   toValue?(data: Data): Value;
-  /**
-   * Returns the (approximate) size of the data in-memory (NOT as stringified).
-   */
-  sizeOf(data: Data): number;
   /**
    * Convert data to a representation that can be stringified to JSON. If this
    * method is not provided, the data itself must be JSON serialisable. The
@@ -944,9 +934,8 @@ export interface Datatype<Data = unknown> {
  *
  * @typeParam Data - data type
  * @typeParam Operation - operation type; must be JSON-serialisable
- * @typeParam Revert - reversion metadata type; must be JSON-serialisable
- * @experimental
- * @category Experimental
+ * @typeParam Revert - reversion local metadata type; must be JSON-serialisable
+ * @category API
  */
 export interface SharedDatatype<Data, Operation, Revert = never> extends Datatype<Data> {
   /**
@@ -967,7 +956,7 @@ export interface SharedDatatype<Data, Operation, Revert = never> extends Datatyp
    * @returns the new state of the data, an operation which can be
    * {@link apply applied}, and any additional local metadata required to revert
    * the operation (if applicable). If the revert is not supplied, it is assumed
-   * to be `null`.
+   * that no metadata is required to revert the operation.
    */
   update(state: Data, update: Expression): [Data, Operation, Revert?];
   /**
@@ -977,43 +966,26 @@ export interface SharedDatatype<Data, Operation, Revert = never> extends Datatyp
    * in memory across multiple operations and {@link update updates}.
    *
    * @param state the existing state of the shared value
-   * @param operation the operation being applied, created using {@link update}
-   * on another clone
+   * @param reversions any reversions (voiding) to apply _before_ the new
+   * operation, provided in reverse order of original application
+   * @param [operation] the operation being applied, created using {@link update}
+   * on another clone. If `undefined`, only reversions are being requested.
    * @returns the new state (can be the input), an update expression to notify
    * the app, and local metadata required to revert the operation (if applicable).
    */
-  apply(state: Data, operation: Operation): [Data, Expression | Expression[], Revert?];
+  apply(
+    state: Data,
+    reversions: [Operation, Revert?][],
+    operation?: Operation
+  ): [Data, Expression | Expression[], Revert?];
   /**
-   * Reverts an operation from the state. The implementation is welcome to
-   * mutate the passed `state` and return it as the new (old) state.
-   *
-   * @param state the existing state of the shared value
-   * @param operation the operation being reverted, created using {@link update}
-   * on another clone
-   * @param revert the additional local metadata provided by {@link update},
-   * or `null` if no reversion metadata was provided.
-   * @returns the new state (can be the input), and an update expression to
-   * notify the app.
-   */
-  revert(state: Data, operation: Operation, revert: Revert): [Data, Expression | Expression[]];
-  /**
-   * Fuses operations into a single operation. Operations are be provided in
-   * contiguous causal order: `op1` happened-before `op2` OR `op1` is concurrent
-   * with `op2`; AND there exists no `op'` where `op'` happened-before `op2` and
-   * `op1` happened-before `op'`.
-   */
-  fuse(operation: Operation, suffix: Operation): [Operation];
-  /**
-   * Fuses operations into a single operation, with reversion metadata. Note
-   * that if a fusion request has reversion information in the input it should
-   * be provided in the return.
-   * @see #fuse
+   * Fuses local operations into a single operation. Operations are be provided
+   * in contiguous application order. Reversion metadata may not be included in
+   * the parameters; if so, it's not required in the return.
    */
   fuse(
-    operation: Operation,
-    suffix: Operation,
-    opRevert: Revert,
-    suffixRevert: Revert
+    operation: [Operation, Revert?],
+    suffix: [Operation, Revert?]
   ): [Operation, Revert?];
   /**
    * Cuts the prefix from the given operation and returns an operation which can
@@ -1027,7 +999,7 @@ export interface SharedDatatype<Data, Operation, Revert = never> extends Datatyp
 }
 
 /** @internal */
-export function isSharedDatatype<T>(dt: Datatype<T>): dt is SharedDatatype<T, unknown> {
+export function isSharedDatatype<T>(dt: Datatype<T>): dt is SharedDatatype<T, unknown, unknown> {
   return 'update' in dt;
 }
 
