@@ -1,16 +1,16 @@
-import { GraphSubject, GraphUpdate, MeldReadState, StateProc } from '../api';
+import { GraphSubject, GraphUpdate, MeldContext, MeldReadState, StateProc } from '../api';
 import { SharedPromise } from '../engine/locks';
 import { Iri } from '@m-ld/jsonld';
 import { OrmSubject } from './OrmSubject';
 import { isArray, settled } from '../engine/util';
 import { isReference, Subject, Update } from '../jrql-support';
 import { SubjectUpdater } from '../updates';
-import { ReadLatchable } from '../engine/index';
+import { ReadLatchable } from '../engine';
 import { BehaviorSubject, firstValueFrom } from 'rxjs';
 import { filter } from 'rxjs/operators';
 import async from '../engine/async';
 import { array } from '../util';
-import { MeldApp, MeldConfig } from '../config';
+import { MeldApp, MeldAppContext, MeldConfig } from '../config';
 import { EventEmitter } from 'events';
 
 /**
@@ -26,6 +26,7 @@ export type ConstructOrmSubject<T extends OrmSubject> =
  * Event handler for all new ORM subjects, in case they are of interest to the
  * domain – use {@link get} to translate the raw graph subject to an ORM
  * subject.
+ * @internal
  */
 export type CacheMissListener =
   (ref: GraphSubject, orm: OrmUpdating) => void | Promise<unknown>;
@@ -89,14 +90,7 @@ export interface OrmUpdating extends ReadLatchable {
   updated(update?: GraphUpdate): Promise<void>;
 }
 
-/**
- * Utility type for the required m-ld context in which an ORM is operating
- */
-export interface OrmContext {
-  readonly config: MeldConfig;
-  readonly app: MeldApp;
-}
-
+/** @internal */
 export interface OrmScope extends EventEmitter {
   /** The domain to which this scope belongs */
   readonly domain: OrmDomain;
@@ -145,7 +139,7 @@ export interface OrmScope extends EventEmitter {
  * @experimental
  * @category Experimental
  */
-export class OrmDomain implements OrmContext {
+export class OrmDomain implements MeldAppContext {
   /**
    * Used to delay all attempts to access subjects until after any update.
    * Note that we're "up to date" with no state before the first update.
@@ -258,12 +252,14 @@ export class OrmDomain implements OrmContext {
 
   readonly config: MeldConfig;
   readonly app: MeldApp;
+  readonly context: MeldContext;
   /** Global scope for the domain */
   readonly scope: OrmScope;
 
-  constructor({ config, app }: OrmContext) {
+  constructor({ config, app, context }: MeldAppContext) {
     this.app = app;
     this.config = config;
+    this.context = context;
     this.scope = this.createScope();
   }
 

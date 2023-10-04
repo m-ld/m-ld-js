@@ -1,4 +1,4 @@
-import { OrmSubject } from '../orm/index';
+import { OrmSubject } from '../orm';
 import { property } from '../orm/OrmSubject';
 import { JsType } from '../js-support';
 import { Subject, VocabReference } from '../jrql-support';
@@ -10,6 +10,7 @@ import { ConstraintComponent } from '../ns/sh';
 import { Iri } from '@m-ld/jsonld';
 import { mapIter } from '../engine/util';
 import { array } from '../util';
+import { MeldAppContext } from '../config';
 
 /** Convenience specification for a shape */
 export interface ShapeSpec {
@@ -39,10 +40,10 @@ export namespace ShapeSpec {
  * validation result. However, the constraint {@link apply} _will_ attempt a
  * correction in response to a non-conformance.
  *
+ * @see {@link ShapeConstrained} for using Shapes for schema validation
  * @see https://www.w3.org/TR/shacl/#constraints-section
  * @noInheritDoc
- * @category Experimental
- * @experimental
+ * @category API
  */
 export abstract class Shape extends OrmSubject implements MeldConstraint {
   /** @internal */
@@ -58,6 +59,16 @@ export abstract class Shape extends OrmSubject implements MeldConstraint {
       const { NodeShape } = require('./NodeShape');
       return new NodeShape({ src });
     }
+  }
+
+  /**
+   * Called prior to use; override to perform shape-specific init.
+   * @internal
+   */
+  setExtensionContext({ context }: MeldAppContext) {
+    // Expand any class terms given in the constructor
+    this.targetClass = new Set([...this.targetClass].map(
+      term => context.expandTerm(term, { vocab: true })));
   }
 
   /**
@@ -109,6 +120,7 @@ export abstract class Shape extends OrmSubject implements MeldConstraint {
 /**
  * SHACL defines ValidationResult to report individual SHACL validation results.
  * @see https://www.w3.org/TR/shacl/#result
+ * @category API
  */
 export interface ValidationResult {
   /**

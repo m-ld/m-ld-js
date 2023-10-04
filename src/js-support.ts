@@ -5,6 +5,7 @@ import {
 import { isArray } from './engine/util';
 import { XS } from './ns';
 import { asValues, isAbsolute, minimiseValue } from './engine/jsonld';
+import { SubjectLike } from './subjects';
 
 /**
  * Javascript atom constructors for types that can be obtained from graph
@@ -271,6 +272,19 @@ export class JsContainerType<T, S> extends JsType<T, S> {
  */
 export class JsProperty<T, S = unknown> {
   /**
+   * Construct a property mapping for a known type and subtype.
+   * @see JsType#for
+   * @category Utility
+   */
+  static for<T, S>(
+    property: string,
+    type: PropertyType<T>,
+    subType?: AtomType<S>
+  ) {
+    return new JsProperty(property, JsType.for(type, subType));
+  }
+
+  /**
    * @param name the JSON-LD property to inspect
    * @param type the property type
    */
@@ -309,7 +323,7 @@ export class JsProperty<T, S = unknown> {
    * @param subject the subject to inspect
    * @throws TypeError if the given property does not have the correct type
    */
-  value(subject: Subject): ValueConstructed<T, S> {
+  value(subject: SubjectLike): ValueConstructed<T, S> {
     const value = subject[this.name];
     if (value == null) {
       if (this.type instanceof JsContainerType) {
@@ -334,7 +348,7 @@ export class JsProperty<T, S = unknown> {
  * @category Utility
  */
 export function propertyValue<T, S>(
-  subject: Subject,
+  subject: SubjectLike,
   property: string,
   type: PropertyType<T>,
   subType?: AtomType<S>
@@ -455,7 +469,10 @@ function castValue<T>(value: Value, type: JsAtomValueConstructor): T {
         if (typeof value == 'string')
           return <T>value;
         break;
-      // Do not support Buffer here
+      case Uint8Array:
+        if (value instanceof Uint8Array)
+          return <T>value;
+        break;
     }
   }
   throw new TypeError(`${value} is not a ${type.name}`);
@@ -541,11 +558,6 @@ function normaliseAtomValue(
         return {
           '@type': XS.dateTime,
           '@value': value.toISOString()
-        };
-      else if (value instanceof Uint8Array)
-        return {
-          '@type': XS.base64Binary,
-          '@value': Buffer.from(value).toString('base64')
         };
       else if (value != null)
         return <Subject>value; // Could also be a reference or a value object

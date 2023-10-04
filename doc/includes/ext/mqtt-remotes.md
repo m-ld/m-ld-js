@@ -7,8 +7,9 @@ broker requirements.
 
 The `MqttRemotes` class and its companion configuration class `MeldMqttConfig`
 can be imported or required from `'@m-ld/m-ld/ext/mqtt'`. You must also 
-install the [`async-mqtt`](https://www.npmjs.com/package/async-mqtt) package 
-as a peer of `@m-ld/m-ld`.
+install the [`async-mqtt`](https://www.npmjs.com/package/async-mqtt) package as a peer of `@m-ld/m-ld`.
+
+A bundle is also available at `http://js.m-ld.org/ext/mqtt.mjs`.
 
 The configuration interface adds an `mqtt` key to the base
 [`MeldConfig`](interfaces/meldconfig.html). The content of this key is a client

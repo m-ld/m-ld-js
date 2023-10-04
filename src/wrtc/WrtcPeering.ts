@@ -1,6 +1,6 @@
 import { Logger } from 'loglevel';
 import type { Instance as Peer, Options as PeerOpts, SignalData } from 'simple-peer';
-import * as SimplePeer from 'simple-peer';
+import SimplePeer from 'simple-peer';
 import { timer } from 'rxjs';
 import type { NotifyParams, SubPub } from '../engine/remotes';
 import { MeldConfig } from '../config';

@@ -1,4 +1,4 @@
-const Clone = require('@m-ld/m-ld-spec/compliance/clone');
+const { Clone } = require('@m-ld/m-ld-test');
 
 describe('SHACL shape constraints', () => {
   let clones;
@@ -11,7 +11,6 @@ describe('SHACL shape constraints', () => {
     },
     '@id': 'http://m-ld.org/extensions',
     '@list': [{
-      '@type': 'js:CommonJSExport',
       'js:require': '@m-ld/m-ld/ext/shacl',
       'js:class': 'ShapeConstrained',
       'mld:controlled-shape': {

@@ -11,7 +11,7 @@ declare module '@m-ld/jsonld/lib/util' {
    *
    * @return the cloned value.
    */
-  function clone<T extends {}>(value: T): T;
+  function clone<T>(value: T): T;
 
   /**
    * Returns true if the given subject has the given property.

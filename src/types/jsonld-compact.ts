@@ -10,4 +10,11 @@ declare module '@m-ld/jsonld/lib/compact' {
     activeCtx: ActiveContext,
     iri: Iri
   } & Options.CompactIri): string;
+
+  function compactValue(opts: {
+    activeCtx: ActiveContext,
+    activeProperty: Iri,
+    value: any,
+    options?: Options.Compact
+  }): any;
 }

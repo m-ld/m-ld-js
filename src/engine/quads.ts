@@ -1,7 +1,12 @@
-import type { Bindings, DataFactory, NamedNode, Quad, Term } from 'rdf-js';
+import type { Bindings, DataFactory, NamedNode, Quad, Quad_Object, Term, Variable } from 'rdf-js';
+import { DataFactory as RdfDataFactory } from 'rdf-data-factory';
 import { IndexMap, IndexSet } from './indices';
 import { Binding, QueryableRdfSource } from '../rdfjs-support';
 import { Prefixes } from 'quadstore';
+import { Datatype } from '../api';
+import { Iri } from '@m-ld/jsonld';
+import { uuid } from '../util';
+import { clone } from './util';
 
 export type Triple = Omit<Quad, 'graph'>;
 export type TriplePos = 'subject' | 'predicate' | 'object';
@@ -14,27 +19,85 @@ export type {
 /** Utility interfaces shared with quadstore */
 export { Prefixes };
 
-export abstract class QueryableRdfSourceProxy implements QueryableRdfSource {
+export type TypedData<T = unknown> = {
+  readonly type: Datatype<T>,
+  readonly data: T
+};
+
+export type JsonData = {
+  readonly type: undefined,
+  readonly data: unknown
+};
+
+export type QuadData<T = unknown> = TypedData<T> | JsonData
+
+declare module './quads' {
+  export interface Quad {
+    before?: Quad_Object;
+  }
+
+  export interface Literal {
+    typed?: QuadData;
+  }
+}
+
+export interface LiteralTriple extends Triple {
+  object: Literal;
+}
+
+export function isLiteralTriple(triple: Triple): triple is LiteralTriple {
+  return triple.object.termType === 'Literal';
+}
+
+/** Note `datatype.value === typed.type['@id']` */
+export interface TypedLiteral extends Literal {
+  typed: QuadData;
+}
+
+export function isTypedLiteral(term: Term): term is TypedLiteral {
+  return term.termType === 'Literal' && term.typed != null;
+}
+
+export interface TypedTriple extends LiteralTriple {
+  object: TypedLiteral;
+}
+
+export function isTypedTriple(triple: Triple): triple is TypedTriple {
+  return isTypedLiteral(triple.object);
+}
+
+export function unTypeTriple<T extends Triple>(triple: T): Omit<T, 'typed'> {
+  if (isTypedTriple(triple)) {
+    const { typed: _, ...untypedLiteral } = triple.object;
+    return clone(triple, {
+      ...triple, object: clone(triple.object, untypedLiteral)
+    });
+  }
+  return triple;
+}
+
+export abstract class QueryableRdfSourceProxy<I extends QueryableRdfSource = QueryableRdfSource>
+  implements QueryableRdfSource {
   match: QueryableRdfSource['match'] = (...args) => this.src.match(...args);
   // @ts-ignore - TS can't cope with overloaded query method
   query: QueryableRdfSource['query'] = (...args) => this.src.query(...args);
   countQuads: QueryableRdfSource['countQuads'] = (...args) => this.src.countQuads(...args);
 
-  protected abstract get src(): QueryableRdfSource;
+  protected abstract get src(): I;
 }
 
-export class TripleMap<T> extends IndexMap<Triple, T> {
+export class TripleMap<T, Q extends Triple = Triple> extends IndexMap<Q, T> {
   protected getIndex(key: Triple): string {
     return tripleIndexKey(key);
   }
 }
 
-export class QuadSet extends IndexSet<Quad> {
-  protected construct(quads?: Iterable<Quad>): QuadSet {
-    return new QuadSet(quads);
+export class QuadSet<Q extends Quad = Quad> extends IndexSet<Q> {
+  protected construct(quads?: Iterable<Q>): QuadSet<Q> {
+    return new QuadSet<Q>(quads);
   }
 
-  protected getIndex(quad: Quad): string {
+  protected getIndex(quad: Q): string {
     return quadIndexKey(quad);
   }
 }
@@ -83,19 +146,15 @@ export function tripleFromKey(key: string, rdf: DataFactory, prefixes?: Prefixes
   return rdf.quad(
     rdf.namedNode(expand(subject)),
     rdf.namedNode(expand(predicate)),
-    object);
+    object
+  );
 }
 
-export function tripleIndexKey(triple: Triple, prefixes?: Prefixes) {
-  if (prefixes != null) {
-    // No caching if value function is specified
-    return tripleKey(triple, prefixes);
-  } else {
-    const tik = <Triple & { _tik: string }>triple;
-    if (tik._tik == null)
-      tik._tik = tripleKey(triple);
-    return tik._tik;
-  }
+export function tripleIndexKey(triple: Triple) {
+  const tik = <Triple & { _tik: string }>triple;
+  if (tik._tik == null)
+    tik._tik = tripleKey(triple);
+  return tik._tik;
 }
 
 export function quadIndexKey(quad: Quad) {
@@ -123,18 +182,61 @@ export function inPosition<P extends TriplePos>(pos: P, value?: Term): Quad[P] {
     throw new Error(`${value} cannot be used in ${pos} position`);
 }
 
-export interface RdfFactory extends Required<DataFactory> {
+export class RdfFactory extends RdfDataFactory {
+  constructor(
+    readonly base: Iri | undefined
+  ) {
+    super();
+  }
+
   /**
    * Generates a new skolemization IRI. The dataset base is allowed to be
    * `undefined` but the function will throw a `TypeError` if it is.
    * @see https://www.w3.org/TR/rdf11-concepts/#h3_section-skolemization
    */
-  skolem?(): NamedNode;
+  skolem = () => this.namedNode(
+    new URL(`/.well-known/genid/${uuid()}`, this.base).href);
+
+  /** @inheritDoc */
+  literal(value: string, languageOrDatatype?: string | NamedNode): Literal;
+  /**
+   * Creates a typed literal with a specific custom datatype. If the datatype is
+   * of class `Datatype`, then the data is the Datatype's native Data type.
+   * Otherwise, the data is the relevant (but unknown) Datatype's JSON
+   * representation.
+   */
+  literal(
+    value: string,
+    datatype: NamedNode | Datatype,
+    data: unknown
+  ): TypedLiteral;
+  /** @internal */
+  literal(
+    value: string,
+    languageOrDatatype?: string | NamedNode | Datatype,
+    data?: unknown
+  ): Literal {
+    let typed: QuadData | undefined;
+    if (typeof languageOrDatatype == 'object' && '@id' in languageOrDatatype) {
+      typed = { data, type: languageOrDatatype };
+      languageOrDatatype = this.namedNode(languageOrDatatype['@id']);
+    } else if (data != null) {
+      typed = { data, type: undefined };
+    }
+    const literal = super.literal(value, languageOrDatatype);
+    if (typed != null)
+      Object.assign(literal, { typed });
+    return literal;
+  }
+}
+
+export function asQueryVar(variable: Variable) {
+  return `?${variable.value}`;
 }
 
 export function toBinding(bindings: Bindings): Binding {
   const binding: Binding = {};
   for (let [variable, term] of bindings)
-    binding[`?${variable.value}`] = term;
+    binding[asQueryVar(variable)] = term;
   return binding;
 }

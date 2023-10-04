@@ -6,31 +6,38 @@ import { array, uuid } from '../util';
 import {
   Assertions, GraphSubject, GraphSubjects, GraphUpdate, InterimUpdate, MeldPreUpdate, MeldReadState
 } from '../api';
-import { sortValues, SubjectPropertyValues } from '../subjects';
+import { sortValues, SubjectPropertySet } from '../subjects';
 import { drain } from 'rx-flowable';
 import { SubjectGraph } from '../engine/SubjectGraph';
 import { Shape, ShapeSpec, ValidationResult } from './Shape';
 import { SH } from '../ns';
 import { mapIter } from '../engine/util';
 import { ConstraintComponent } from '../ns/sh';
+import { MeldAppContext } from '../config';
 
-/** Property cardinality specification */
+/**
+ * Property cardinality specification
+ * @category API
+ */
 export type PropertyCardinality = {
   count: number;
 } | {
   minCount?: number;
   maxCount?: number;
 }
-/** Convenience specification for a property shape */
+/**
+ * Convenience specification for a {@link PropertyShape}
+ * @category API
+ */
 export type PropertyShapeSpec = ShapeSpec & {
   path: Iri;
   name?: string | string[];
 } & PropertyCardinality;
 
 /**
+ * @see {@link ShapeConstrained} for using Shapes for schema validation
  * @see https://www.w3.org/TR/shacl/#property-shapes
- * @category Experimental
- * @experimental
+ * @category API
  */
 export class PropertyShape extends Shape {
   /** @internal */
@@ -84,6 +91,12 @@ export class PropertyShape extends Shape {
     });
   }
 
+  /** @internal */
+  setExtensionContext(appContext: MeldAppContext) {
+    super.setExtensionContext(appContext);
+    this.path = appContext.context.expandTerm(this.path, { vocab: true });
+  }
+
   /**
    * Updated subjects for a property shape will only contain the single property
    * which matches this property shape's path.
@@ -92,10 +105,11 @@ export class PropertyShape extends Shape {
    * @todo inverse properties: which subject is returned?
    * @todo respect targetClass
    */
-  async affected(state: MeldReadState, update: GraphUpdate): Promise<GraphUpdate> {
+  async affected(_state: MeldReadState, update: GraphUpdate): Promise<GraphUpdate> {
     return {
       '@delete': this.filterGraph(update['@delete']),
-      '@insert': this.filterGraph(update['@insert'])
+      '@insert': this.filterGraph(update['@insert']),
+      '@update': this.filterGraph(update['@update'])
     };
   }
 
@@ -108,7 +122,7 @@ export class PropertyShape extends Shape {
 
     async loadFinalValues(update: MeldPreUpdate) {
       const updated: {
-        [id: Iri]: Record<'final' | 'old', SubjectPropertyValues<GraphSubject>>
+        [id: Iri]: Record<'final' | 'old', SubjectPropertySet<GraphSubject>>
       } = {};
       const loadUpdated = async (id: Iri) => {
         if (id in updated)
@@ -117,15 +131,15 @@ export class PropertyShape extends Shape {
         return updated[id] = { old, final: old.clone() };
       };
       await Promise.all(mapIter(this.shape.genSubjectValues(update['@delete']), async del =>
-        (await loadUpdated(del.subject['@id'])).final.delete(...del.values)));
+        (await loadUpdated(del.subject['@id'])).final.delete(...del.values())));
       await Promise.all(mapIter(this.shape.genSubjectValues(update['@insert']), async ins =>
-        (await loadUpdated(ins.subject['@id'])).final.insert(...ins.values)));
+        (await loadUpdated(ins.subject['@id'])).final.insert(...ins.values())));
       return Object.values(updated);
     }
 
     async loadSubjectValues(id: Iri) {
       const existing = (await this.state.get(id, this.shape.path)) ?? { '@id': id };
-      return new SubjectPropertyValues(existing, this.shape.path);
+      return new SubjectPropertySet(existing, this.shape.path);
     }
 
     sort(values: any[]) {
@@ -133,7 +147,7 @@ export class PropertyShape extends Shape {
     }
 
     nonConformance(
-      spv: SubjectPropertyValues<GraphSubject>,
+      spv: SubjectPropertySet<GraphSubject>,
       sourceConstraintComponent: ConstraintComponent,
       correction?: Assertions
     ): ValidationResult {
@@ -166,7 +180,7 @@ export class PropertyShape extends Shape {
     }
 
     private async checkValues(
-      spv: SubjectPropertyValues<GraphSubject>
+      spv: SubjectPropertySet<GraphSubject>
     ): Promise<ValidationResult | undefined> {
       const result = this.checkMinCount(spv) ?? this.checkMaxCount(spv);
       // Delete all hidden values for this subject & property
@@ -176,13 +190,13 @@ export class PropertyShape extends Shape {
       return result;
     }
 
-    private checkMinCount(spv: SubjectPropertyValues<GraphSubject>) {
-      if (this.shape.minCount != null && spv.values.length < this.shape.minCount)
+    private checkMinCount(spv: SubjectPropertySet<GraphSubject>) {
+      if (this.shape.minCount != null && spv.values().length < this.shape.minCount)
         return this.nonConformance(spv, ConstraintComponent.MinCount);
     }
 
-    private checkMaxCount(spv: SubjectPropertyValues<GraphSubject>) {
-      if (this.shape.maxCount != null && spv.values.length > this.shape.maxCount)
+    private checkMaxCount(spv: SubjectPropertySet<GraphSubject>) {
+      if (this.shape.maxCount != null && spv.values().length > this.shape.maxCount)
         return this.nonConformance(spv, ConstraintComponent.MaxCount);
     }
   };
@@ -193,13 +207,13 @@ export class PropertyShape extends Shape {
       const finalValues = await this.loadFinalValues(await this.interim.update);
       return array(await Promise.all(finalValues.map(async ({ old, final }) => {
         // Final values is (prior + hidden) - deleted + inserted
-        const values = this.sort(final.values), { minCount, maxCount } = this.shape;
+        const values = this.sort(final.values()), { minCount, maxCount } = this.shape;
         // If not enough, re-assert prior maximal values that were deleted
         if (minCount != null && values.length < minCount) {
           // We need the values that were actually deleted
-          const reinstate = this.sort(final.deletes(old.values))
+          const reinstate = this.sort(final.deletes(old.values()))
             .slice(0, minCount - values.length);
-          const correction = { '@insert': final.minimalSubject(reinstate) };
+          const correction = { '@insert': final.minimalSubject(reinstate) as GraphSubject };
           this.interim.assert(correction);
           return this.nonConformance(final, ConstraintComponent.MinCount, correction);
         } else {
@@ -239,14 +253,14 @@ export class PropertyShape extends Shape {
     return new SubjectGraph(this.genMinimalSubjects(graph));
   }
 
-  private *genSubjectValues(subjects: SubjectGraph) {
+  private *genSubjectValues(subjects: GraphSubjects) {
     for (let subject of subjects) {
       if (this.path in subject)
-        yield new SubjectPropertyValues(subject, this.path);
+        yield new SubjectPropertySet(subject, this.path);
     }
   }
 
-  private *genMinimalSubjects(subjects: SubjectGraph): Generator<GraphSubject> {
+  private *genMinimalSubjects(subjects: GraphSubjects): Generator<GraphSubject> {
     for (let spv of this.genSubjectValues(subjects))
       yield <GraphSubject>spv.minimalSubject();
   }

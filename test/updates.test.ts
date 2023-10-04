@@ -1,10 +1,12 @@
 import { mockFn } from 'jest-mock-extended';
 import {
-  asSubjectUpdates, includesValue, includeValues, JsAtomType, JsContainerType, JsProperty, maxValue,
-  noMerge, Optional, propertyValue, Reference, Subject, updateSubject, VocabReference
+  asSubjectUpdates, GraphSubject, includesValue, includeValues, JsAtomType, JsContainerType,
+  JsProperty, maxValue, MeldPreUpdate, noMerge, Optional, propertyValue, Reference, Subject,
+  SubjectsUpdate, SubjectUpdater, SubjectUpdates, updateSubject, VocabReference
 } from '../src';
-import { SubjectGraph } from '../src/engine/SubjectGraph';
 import { XS } from '../src/ns';
+import { mockUpdate } from './testClones';
+import { SubjectGraph } from '../src/engine/SubjectGraph';
 
 describe('Update utilities', () => {
   describe('by-subject indexing', () => {
@@ -16,18 +18,6 @@ describe('Update utilities', () => {
         'foo': {
           '@delete': { '@id': 'foo', size: 10 },
           '@insert': { '@id': 'foo', size: 20 }
-        }
-      });
-    });
-
-    test('un-reifies references in subject updates', () => {
-      expect(asSubjectUpdates({
-        '@delete': [{ '@id': 'foo', friend: { '@id': 'bar', name: 'Bob' } }],
-        '@insert': []
-      })).toEqual({
-        'foo': {
-          '@delete': { '@id': 'foo', friend: { '@id': 'bar' } },
-          '@insert': undefined
         }
       });
     });
@@ -46,6 +36,55 @@ describe('Update utilities', () => {
           '@insert': { '@id': 'bar', size: 40 }
         }
       });
+    });
+  });
+
+  describe('subject updater affected ids', () => {
+    test('null update has no ids', () => {
+      expect([...new SubjectUpdater(undefined).affectedIds]).toEqual([]);
+    });
+
+    test('subjects update has ids', () => {
+      const update: SubjectsUpdate = {
+        '@delete': [{ '@id': 'foo', size: 10 }],
+        '@insert': [{ '@id': 'foo', size: 20 }]
+      };
+      expect([...new SubjectUpdater(update).affectedIds]).toEqual(['foo']);
+    });
+
+    test('graph update has ids', () => {
+      const update: MeldPreUpdate = {
+        '@delete': new SubjectGraph([{ '@id': 'foo', size: 10 }]),
+        '@insert': new SubjectGraph([{ '@id': 'foo', size: 20 }]),
+        '@update': new SubjectGraph([]),
+        '@agree': undefined // not a subject graph
+      };
+      expect([...new SubjectUpdater(update).affectedIds]).toEqual(['foo']);
+    });
+
+    test('subject updates has ids', () => {
+      const update: SubjectUpdates = {
+        'foo': {
+          '@delete': { '@id': 'foo', size: 10 },
+          '@insert': { '@id': 'foo', size: 20 }
+        }
+      };
+      expect([...new SubjectUpdater(update).affectedIds]).toEqual(['foo']);
+    });
+
+    test('graph subject has ids', () => {
+      const update: GraphSubject = { '@id': 'foo', size: 20 };
+      expect([...new SubjectUpdater(update).affectedIds]).toEqual(['foo']);
+    });
+
+    test('graph subject array has ids', () => {
+      const update: GraphSubject[] = [{ '@id': 'foo', size: 20 }];
+      expect([...new SubjectUpdater(update).affectedIds]).toEqual(['foo']);
+    });
+
+    test('graph subjects has ids', () => {
+      const update = new SubjectGraph([{ '@id': 'foo', size: 20 }]);
+      expect([...new SubjectUpdater(update).affectedIds]).toEqual(['foo']);
     });
   });
 
@@ -120,6 +159,18 @@ describe('Update utilities', () => {
     expect(box).toEqual({ '@id': 'foo', size: 10, label: 'My box' });
   });
 
+  test('adds a missing value using subject', () => {
+    const box: Box = { '@id': 'foo', size: 10 };
+    updateSubject(box, { '@id': 'foo' });
+    expect(box).toEqual({ '@id': 'foo', size: 10 });
+  });
+
+  test('adds a missing value using graph', () => {
+    const box: Box = { '@id': 'foo', size: 10 };
+    updateSubject(box, [{ '@id': 'foo' }]);
+    expect(box).toEqual({ '@id': 'foo', size: 10 });
+  });
+
   test('adds an array value', () => {
     const box: Box = { '@id': 'foo', size: 10 };
     updateSubject(box, {
@@ -170,6 +221,12 @@ describe('Update utilities', () => {
     const box: Box = { '@id': 'foo', size: 10, label: 'My box' };
     updateSubject(box, { foo: { '@delete': { '@id': 'foo', size: 10 }, '@insert': undefined } });
     expect(box).toEqual({ '@id': 'foo', label: 'My box' });
+  });
+
+  test('removes a deleted @type', () => {
+    const box = { '@id': 'foo', '@type': 'Box', size: 10 };
+    updateSubject(box, { foo: { '@delete': { '@id': 'foo', '@type': 'Box' }, '@insert': undefined } });
+    expect(box).toEqual({ '@id': 'foo', size: 10 });
   });
 
   test('updates a value', () => {
@@ -224,6 +281,85 @@ describe('Update utilities', () => {
       }
     });
     expect(box).toEqual({ '@id': 'foo', size: 10, contents: [{ '@id': 'baz' }] });
+  });
+
+  test('cannot apply unsupported shared data type updates', () => {
+    const box: Box = { '@id': 'foo', size: 10 };
+    expect(() => updateSubject(box, {
+      foo: { '@update': { '@id': 'foo', size: { '@minus': 1 } } }
+    }, false)).toThrow();
+  });
+
+  test('applies plus update', () => {
+    const box: Box = { '@id': 'foo', size: 10 };
+    updateSubject(box, {
+      foo: { '@update': { '@id': 'foo', size: { '@plus': 1 } } }
+    });
+    expect(box).toEqual({ '@id': 'foo', size: 11 });
+  });
+
+  test('applies string splice update', () => {
+    const box: Box = { '@id': 'foo', label: 'danger', size: 1 };
+    updateSubject(box, {
+      foo: { '@update': { '@id': 'foo', label: { '@splice': [0, 1, 'w'] } } }
+    });
+    expect(box).toEqual({ '@id': 'foo', label: 'wanger', size: 1 });
+  });
+
+  test('applies multiple splice updates', () => {
+    const box: Box = { '@id': 'foo', label: 'danger', size: 1 };
+    updateSubject(box, {
+      foo: {
+        '@update': {
+          '@id': 'foo', label: [
+            { '@splice': [0, 1] },
+            { '@splice': [4, 2, 'ry'] }
+          ]
+        }
+      }
+    });
+    expect(box).toEqual({ '@id': 'foo', label: 'angry', size: 1 });
+  });
+
+  test('applies proxied splice update', () => {
+    // noinspection JSUnusedGlobalSymbols
+    const label = {
+      value: 'danger',
+      splice(index: number, deleteCount: number, content?: string) {
+        this.value = `${index} ${deleteCount} ${content}`;
+      }
+    };
+    const box = {
+      '@id': 'foo',
+      get label() { return label; },
+      set label(_value: string | typeof label) { throw 'should not be calling setter'; },
+      size: 1
+    };
+    updateSubject(box, {
+      foo: { '@update': { '@id': 'foo', label: { '@splice': [0, 1, 'w'] } } }
+    });
+    expect(box).toMatchObject({ '@id': 'foo', label: { value: '0 1 w' }, size: 1 });
+  });
+
+  test('retains a proxied value if unchanged', () => {
+    // noinspection JSUnusedGlobalSymbols
+    const label = {
+      value: 'danger',
+      splice(index: number, deleteCount: number, content?: string) {
+        this.value = `${index} ${deleteCount} ${content}`;
+      },
+      toJSON() { return this.value; }
+    };
+    const box = {
+      '@id': 'foo',
+      get label() { return label; },
+      set label(_value: string | typeof label) { throw 'should not be calling setter'; },
+      size: 1
+    };
+    updateSubject(box, {
+      foo: { '@insert': { '@id': 'foo', label: 'danger' } }
+    });
+    expect(box).toEqual({ '@id': 'foo', label, size: 1 });
   });
 
   describe('with defined properties', () => {
@@ -300,20 +436,33 @@ describe('Update utilities', () => {
           '@id': 'bar', size: 5
         }]
       };
-      updateSubject(box, {
-        '@delete': new SubjectGraph([
+      updateSubject(box, mockUpdate({
+        '@delete': [
           { '@id': 'foo', size: 10 },
           { '@id': 'bar', size: 5 }
-        ]),
-        '@insert': new SubjectGraph([
+        ],
+        '@insert': [
           { '@id': 'foo', size: 11 },
           { '@id': 'bar', size: 6 }
-        ])
-      });
+        ]
+      }));
       expect(box).toEqual({
         '@id': 'foo', size: 11, contents: [{
           '@id': 'bar', size: 6
         }]
+      });
+    });
+
+    test('hydrates nested subject from graph', () => {
+      const box = {
+        '@id': 'foo'
+      };
+      updateSubject(box, [
+        { '@id': 'foo', size: 11, contents: { '@id': 'bar' } },
+        { '@id': 'bar', size: 6 }
+      ]);
+      expect(box).toEqual({
+        '@id': 'foo', size: 11, contents: { '@id': 'bar', size: 6 }
       });
     });
 
@@ -373,6 +522,33 @@ describe('Update utilities', () => {
           '@delete': undefined,
           '@insert': { '@id': 'slot1', '@item': 'made' }
         }
+      });
+      expect(box).toEqual({
+        '@id': 'foo', size: 10, history: { '@id': 'foo-history', '@list': ['made'] }
+      });
+    });
+
+    // BUT plain list subjects have a plain array
+    test('specifies one item in a list', () => {
+      const box: Box = {
+        '@id': 'foo', size: 10, history: { '@id': 'foo-history', '@list': [] }
+      };
+      updateSubject(box, {
+        '@id': 'foo-history',
+        '@list': ['made']
+      });
+      expect(box).toEqual({
+        '@id': 'foo', size: 10, history: { '@id': 'foo-history', '@list': ['made'] }
+      });
+    });
+
+    test('overrides list content', () => {
+      const box: Box = {
+        '@id': 'foo', size: 10, history: { '@id': 'foo-history', '@list': ['afu'] }
+      };
+      updateSubject(box, {
+        '@id': 'foo-history',
+        '@list': ['made']
       });
       expect(box).toEqual({
         '@id': 'foo', size: 10, history: { '@id': 'foo-history', '@list': ['made'] }
@@ -600,6 +776,9 @@ describe('Update utilities', () => {
       expect(avatar.equals(propertyValue({
         avatar: { '@type': XS.base64Binary, '@value': avatar.toString('base64') }
       }, 'avatar', Uint8Array))).toBe(true);
+      expect(avatar.equals(propertyValue({
+        avatar // Plain Uint8Array works too
+      }, 'avatar', Uint8Array))).toBe(true);
       expect(() => propertyValue({
         avatar: avatar.toString('base64')
       }, 'avatar', Uint8Array)).toThrow();
@@ -677,7 +856,7 @@ describe('Update utilities', () => {
     // Note, Some merge examples are included in 'property value casting' above
 
     test('strings', () => {
-      expect(maxValue(String,'a', 'b')).toBe('b');
+      expect(maxValue(String, 'a', 'b')).toBe('b');
     });
 
     test('numbers', () => {
@@ -685,7 +864,7 @@ describe('Update utilities', () => {
     });
 
     test('references', () => {
-      expect(maxValue(Reference,{ '@id': '1' }, { '@id': '2' }))
+      expect(maxValue(Reference, { '@id': '1' }, { '@id': '2' }))
         .toEqual({ '@id': '2' });
     });
   });

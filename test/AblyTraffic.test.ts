@@ -6,11 +6,11 @@ import { TickableScheduler } from './testUtil';
 describe('Ably traffic shaping', () => {
   test('subscribes', async () => {
     const channel = mock<Types.RealtimeChannelPromise>();
-    channel.subscribe.mockReturnValue(Promise.resolve());
+    channel.subscribe.mockReturnValue(Promise.resolve(null));
     const handler = () => { };
     await expect(new AblyTraffic({})
       .subscribe(channel, handler))
-      .resolves.toBeUndefined();
+      .resolves.not.toThrow();
     expect(channel.subscribe).toBeCalled();
   });
 

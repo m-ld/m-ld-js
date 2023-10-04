@@ -109,6 +109,16 @@ describe('Index map', () => {
     expect(dates.get(new Date(2018, 0, 1))).toBe('2');
   });
 
+  test('re-set overrides key', () => {
+    const dates = new DateMap<string>();
+    const oldKey = new Date(2017, 11, 30);
+    dates.set(oldKey, '1');
+    const newKey = new Date(2017, 11, 30);
+    dates.set(newKey, '2');
+    expect(newKey).not.toBe(oldKey); // Confirming toBe behaviour!
+    expect([...dates][0][0]).toBe(newKey);
+  });
+
   test('with existing', () => {
     const dates = new DateMap<string>();
     dates.set(new Date(2017, 11, 30), '1');

@@ -1,21 +1,30 @@
-import { isList, List, Reference, Slot, Subject } from './jrql-support';
-import { DeleteInsert, GraphSubject, GraphUpdate, isDeleteInsert } from './api';
-import { getValues } from './engine/jsonld';
-import { deepValues, isNaturalNumber, setAtPath } from './engine/util';
-import { array } from './util';
+import { isPropertyObject, Reference, Subject } from './jrql-support';
+import { GraphSubject, GraphSubjects, GraphUpdate, isGraphSubjects, UpdateForm } from './api';
+import { clone } from './engine/jsonld';
 import { isReference } from 'json-rql';
-import { SubjectPropertyValues } from './subjects';
+import { SubjectLike, SubjectPropertyValues } from './subjects';
+import { isArray, iterable, mapObject } from './engine/util';
+import { SubjectGraph } from './engine/SubjectGraph';
 
+/**
+ * Simplified form of {@link GraphUpdate}, with plain Subject arrays
+ * @category Utility
+ */
+export type SubjectsUpdate = UpdateForm<GraphSubject[]>;
 /**
  * An update to a single graph Subject.
  * @category Utility
  */
-export type SubjectUpdate = DeleteInsert<GraphSubject | undefined>;
+export type SubjectUpdate = UpdateForm<GraphSubject>;
 /**
  * A **m-ld** update notification, indexed by graph Subject ID.
  * @category Utility
  */
-export type SubjectUpdates = { [id: string]: SubjectUpdate };
+export type SubjectUpdates = {
+  [id: string]: SubjectUpdate
+};
+/** @internal */
+const graphUpdateKeys = ['@delete', '@insert', '@update'];
 /**
  * Provides an alternate view of the update deletes and inserts, by Subject.
  *
@@ -49,33 +58,44 @@ export type SubjectUpdates = { [id: string]: SubjectUpdate };
  * Javascript references to other Subjects in a Subject's properties will always
  * be collapsed to json-rql Reference objects (e.g. `{ '@id': '<iri>' }`).
  *
+ * @param update the update to convert
+ * @param copy if flagged, each subject in the update is cloned
  * @category Utility
  */
-export function asSubjectUpdates(update: DeleteInsert<GraphSubject[]>): SubjectUpdates {
-  return bySubject(update, '@insert', bySubject(update, '@delete'));
+export function asSubjectUpdates(update: SubjectsUpdate, copy?: true): SubjectUpdates {
+  const su: SubjectUpdates = {};
+  for (let key of graphUpdateKeys as (keyof GraphUpdate)[]) {
+    for (let subject of update[key] ?? []) {
+      Object.assign(
+        su[subject['@id']] ??= {},
+        { [key]: copy ? clone(subject) : subject }
+      );
+    }
+  }
+  return su;
 }
 
 /** @internal */
-function bySubject(
-  update: DeleteInsert<GraphSubject[]>,
-  key: keyof DeleteInsert<GraphSubject[]>,
-  bySubject: SubjectUpdates = {}
-): SubjectUpdates {
-  for (let subject of update[key])
-    Object.assign(
-      // @id should never be empty
-      bySubject[subject['@id']] ??= { '@delete': undefined, '@insert': undefined },
-      { [key]: unReifyRefs({ ...subject }) });
-  return bySubject;
+function *idsInUpdate(update: SubjectsUpdate) {
+  // Output unique ids
+  const done = new Set<string>();
+  for (let key of graphUpdateKeys as (keyof GraphUpdate)[]) {
+    for (let subject of update[key] ?? []) {
+      const id = subject['@id'];
+      if (!done.has(id)) {
+        done.add(id);
+        yield id;
+      }
+    }
+  }
 }
 
-/** @internal */
-function unReifyRefs(subject: Subject) {
-  for (let [path, value] of deepValues(subject,
-    (value, path) => path.length > 0 && typeof value == 'object' && '@id' in value))
-    setAtPath(subject, path, { '@id': value['@id'] });
-  return subject;
-}
+/**
+ * Things that can be interpreted as an update to graph subjects
+ * @category Utility
+ */
+export type SubjectUpdateLike =
+  SubjectUpdates | SubjectsUpdate | GraphSubject | GraphSubject[] | undefined;
 
 /**
  * Applies an update to the given subject in-place. This method will correctly
@@ -98,21 +118,45 @@ function unReifyRefs(subject: Subject) {
  * added. To intercept these calls, re-implement `splice` on the `@list`
  * property value.
  *
+ * Changes to text represented as a {@link SharedDatatype shared datatype}
+ * supporting the `@splice` operator will be correctly applied to plain strings,
+ * and can also be applied to any Object having a `splice` method taking three
+ * parameters, `index`, `deleteCount` and `content`. This allows an app to
+ * efficiently apply character-level changes, e.g. to document editing
+ * components. The proxy object should also implement a `toJSON()` method which
+ * returns the current string state.
+ *
  * CAUTION: If this function is called independently on subjects which reference
  * each other via Javascript references, or share referenced subjects, then the
  * referenced subjects may be updated more than once, with unexpected results.
  * To avoid this, use a {@link SubjectUpdater} to process the whole update.
  *
  * @param subject the resource to apply the update to
- * @param update the update, as a {@link MeldUpdate} or obtained from
- * {@link asSubjectUpdates}
+ * @param update the update, as a {@link MeldUpdate} or obtained from {@link asSubjectUpdates}
+ * @param ignoreUnsupported if `false`, any unsupported data expressions in the
+ * update will cause a `RangeError` – useful in development to catch problems
+ * early
  * @typeParam T the app-specific subject type of interest
  * @see [m-ld data semantics](http://spec.m-ld.org/#data-semantics)
  * @category Utility
  */
-export function updateSubject<T extends Subject & Reference>(
-  subject: T, update: SubjectUpdates | GraphUpdate): T {
-  return new SubjectUpdater(update).update(subject);
+export function updateSubject<T extends SubjectLike & Reference>(
+  subject: T,
+  update: SubjectUpdateLike,
+  ignoreUnsupported = true
+): T {
+  return new SubjectUpdater(update, ignoreUnsupported).update(subject);
+}
+
+/** @internal */
+function isSubjectsUpdate(update: SubjectUpdateLike): update is SubjectsUpdate {
+  return update != null &&
+    Object.keys(update).some(key => graphUpdateKeys.includes(key));
+}
+
+/** @internal */
+function getGraph(update: GraphSubject[]): GraphSubjects['graph'] {
+  return isGraphSubjects(update) ? update.graph : new SubjectGraph(update).graph;
 }
 
 /**
@@ -123,17 +167,38 @@ export function updateSubject<T extends Subject & Reference>(
  * @category Utility
  */
 export class SubjectUpdater {
-  private readonly delOrInsForSubject:
-    (subject: GraphSubject, key: keyof DeleteInsert<any>) => GraphSubject | undefined;
+  private readonly verbForSubject:
+    (subject: SubjectLike & Reference, key: keyof GraphUpdate) => Subject | undefined;
   private readonly done = new Set<object>();
 
-  constructor(update: SubjectUpdates | GraphUpdate) {
-    if (isDeleteInsert(update))
-      this.delOrInsForSubject = (subject, key) =>
-        update[key].graph.get(subject['@id']);
-    else
-      this.delOrInsForSubject = (subject, key) =>
+  readonly affectedIds: Iterable<string>;
+
+  constructor(
+    update: SubjectUpdateLike,
+    readonly ignoreUnsupported = true
+  ) {
+    if (update == null) {
+      this.verbForSubject = () => undefined;
+      this.affectedIds = [];
+    } else if (isArray(update)) {
+      const graph = getGraph(update);
+      this.verbForSubject = (subject, key) =>
+        key === '@insert' ? graph.get(subject['@id']) : undefined;
+      this.affectedIds = iterable(() => graph.keys());
+    } else if ('@id' in update) {
+      this.verbForSubject = (subject, key) =>
+        key === '@insert' && update['@id'] === subject['@id'] ? update : undefined;
+      this.affectedIds = [update['@id'] as string];
+    } else if (isSubjectsUpdate(update)) {
+      const graphical = mapObject(update, (k, v) =>
+        graphUpdateKeys.includes(k) ? { [k]: getGraph(v) } : undefined);
+      this.verbForSubject = (subject, key) => graphical[key].get(subject['@id']);
+      this.affectedIds = iterable(() => idsInUpdate(update));
+    } else {
+      this.verbForSubject = (subject, key) =>
         subject['@id'] in update ? update[subject['@id']][key] : undefined;
+      this.affectedIds = Object.keys(update);
+    }
   }
 
   /**
@@ -142,23 +207,17 @@ export class SubjectUpdater {
    * @returns the given subject, for convenience
    * @see {@link updateSubject}
    */
-  update<T extends Subject & Reference>(subject: T): T {
+  update<T extends SubjectLike & Reference>(subject: T): T {
     if (!this.done.has(subject)) {
       this.done.add(subject);
-      const deletes = this.delOrInsForSubject(subject, '@delete');
-      const inserts = this.delOrInsForSubject(subject, '@insert');
+      const deletes = this.verbForSubject(subject, '@delete');
+      const inserts = this.verbForSubject(subject, '@insert');
+      const updates = this.verbForSubject(subject, '@update');
       for (let property of new Set(Object.keys(subject).concat(Object.keys(inserts ?? {})))) {
-        switch (property) {
-          case '@id':
-            break;
-          case '@list':
-            this.updateList(subject, deletes, inserts);
-            break;
-          default:
-            const subjectProperty = new SubjectPropertyValues(subject, property, this.updateValues);
-            subjectProperty.update(
-              getValues(deletes ?? {}, property),
-              getValues(inserts ?? {}, property));
+        if (isPropertyObject(property, 'any')) {
+          SubjectPropertyValues
+            .for(subject, property, this.updateValues, this.ignoreUnsupported)
+            .update(deletes, inserts, updates);
         }
       }
     }
@@ -166,54 +225,9 @@ export class SubjectUpdater {
   }
 
   /** @internal */
-  updateValues = (values: Iterable<any>) => {
+  updateValues = (values: Iterable<any>, unref = false) => {
     for (let value of values)
-      if (typeof value == 'object' && '@id' in value && !isReference(value))
+      if (typeof value == 'object' && '@id' in value && (unref || !isReference(value)))
         this.update(value);
-  }
-
-  private updateList(subject: GraphSubject, deletes?: GraphSubject, inserts?: GraphSubject) {
-    if (isList(subject)) {
-      if (isListUpdate(deletes) || isListUpdate(inserts)) {
-        this.updateListIndexes(subject['@list'],
-          isListUpdate(deletes) ? deletes['@list'] : {},
-          isListUpdate(inserts) ? inserts['@list'] : {});
-      }
-      this.updateValues(array(subject['@list']));
-    }
-  }
-
-  private updateListIndexes(list: List['@list'], deletes: List['@list'], inserts: List['@list']) {
-    const splice = typeof list.splice == 'function' ? list.splice : (() => {
-      // Array splice operation must have a length field to behave
-      if (!('length' in list)) {
-        const maxIndex = Math.max(...Object.keys(list).map(Number).filter(isNaturalNumber));
-        list.length = isFinite(maxIndex) ? maxIndex + 1 : 0;
-      }
-      return [].splice;
-    })();
-    const splices: { deleteCount: number, items?: any[] }[] = []; // Sparse
-    for (let i in deletes)
-      splices[i] = { deleteCount: 1 };
-    for (let i in inserts)
-      (splices[i] ??= { deleteCount: 0 }).items =
-        // List updates are always expressed with identified slots, but the list
-        // is assumed to contain direct items, not slots
-        array(inserts[i]).map((slot: Slot) => this.update(slot)['@item']);
-    let deleteCount = 0, items: any[] = [];
-    for (let i of Object.keys(splices).reverse().map(Number)) {
-      deleteCount += splices[i].deleteCount;
-      items.unshift(...splices[i].items ?? []);
-      if (!(i - 1 in splices)) {
-        splice.call(list, i, deleteCount, ...items);
-        deleteCount = 0;
-        items = [];
-      }
-    }
-  }
-}
-
-/** @internal */
-function isListUpdate(updatePart?: Subject): updatePart is List {
-  return updatePart != null && isList(updatePart);
+  };
 }

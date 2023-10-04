@@ -7,8 +7,9 @@ a live web server or app server, using HTTP.
 
 The `IoRemotes` class and its companion configuration class `MeldIoConfig`
 can be imported or required from `'@m-ld/m-ld/ext/socket.io'`. You must also
-install the [`socket.io-client`](https://www.npmjs.com/package/socket.io-client)
-package as a peer of `@m-ld/m-ld`.
+install the [`socket.io-client`](https://www.npmjs.com/package/socket.io-client) package as a peer of `@m-ld/m-ld`.
+
+A bundle is also available at `http://js.m-ld.org/ext/socket.io.mjs`.
 
 The configuration interface adds an `io` key to the base
 [`MeldConfig`](interfaces/meldconfig.html). The value is an optional object

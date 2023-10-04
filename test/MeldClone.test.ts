@@ -1,12 +1,12 @@
 import {
-  any, clone, Construct, Describe, Group, MeldClone, MeldUpdate, Reference, Select, Subject, Update
+  any, clone, Construct, Describe, Group, MeldClone, MeldStateSubscription, MeldUpdate, Reference,
+  Select, Subject, Update
 } from '../src';
 import { MockRemotes, testConfig } from './testClones';
 import { blankRegex, genIdRegex } from './testUtil';
-import { SubjectGraph } from '../src/engine/SubjectGraph';
 import { DataFactory as RdfDataFactory, Quad } from 'rdf-data-factory';
 import { Factory as SparqlFactory } from 'sparqlalgebrajs';
-import { Subscription } from 'rxjs';
+import { EmptyError, Subscription } from 'rxjs';
 import { MemoryLevel } from 'memory-level';
 import { Future } from '../src/engine/Future';
 import { Binding } from '../src/rdfjs-support';
@@ -20,13 +20,16 @@ describe('MeldClone', () => {
     captureUpdate = new Future;
   });
 
+  afterEach(() => api.close());
+
   test('retrieves a JSON-LD subject', async () => {
     api.follow(captureUpdate.resolve);
     await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
     await expect(captureUpdate).resolves.toEqual({
       '@ticks': 1,
-      '@insert': new SubjectGraph([{ '@id': 'fred', name: 'Fred' }]),
-      '@delete': new SubjectGraph([]),
+      '@delete': [],
+      '@insert': [{ '@id': 'fred', name: 'Fred' }],
+      '@update': [],
       trace: expect.any(Function)
     });
     await expect(api.get('fred'))
@@ -49,6 +52,7 @@ describe('MeldClone', () => {
         '@ticks': 2,
         '@delete': [{ '@id': 'fred', name: 'Fred' }],
         '@insert': [],
+        '@update': [],
         trace: expect.any(Function)
       });
     });
@@ -63,6 +67,7 @@ describe('MeldClone', () => {
         '@ticks': 2,
         '@delete': [{ '@id': 'fred', height: 5 }],
         '@insert': [],
+        '@update': [],
         trace: expect.any(Function)
       });
     });
@@ -87,6 +92,7 @@ describe('MeldClone', () => {
         '@ticks': 2,
         '@delete': [{ '@id': 'fred', height: 5 }],
         '@insert': [{ '@id': 'fred', height: 6 }],
+        '@update': [],
         trace: expect.any(Function)
       });
     });
@@ -144,6 +150,7 @@ describe('MeldClone', () => {
         '@ticks': 1,
         '@delete': [],
         '@insert': [{ '@id': 'fred', name: 'Fred' }],
+        '@update': [],
         trace: expect.any(Function)
       });
     });
@@ -157,6 +164,7 @@ describe('MeldClone', () => {
         '@ticks': 2,
         '@delete': [{ '@id': 'fred', name: 'Fred' }],
         '@insert': [],
+        '@update': [],
         trace: expect.any(Function)
       });
     });
@@ -171,6 +179,101 @@ describe('MeldClone', () => {
       await api.write<Subject>({ '@id': 'fred', wife: { '@id': 'wilma' } });
       await api.delete('wilma');
       await expect(api.get('fred')).resolves.toBeUndefined();
+    });
+
+    test('inserts with a bound variable', async () => {
+      await api.write<Subject>({ '@id': 'fred', likes: 1 });
+      await api.write({
+        '@delete': { '@id': 'fred', likes: '?likes' },
+        '@insert': { '@id': 'fred', likes: '?newLikes' },
+        '@where': {
+          '@graph': { '@id': 'fred', likes: '?likes' },
+          '@bind': { '?newLikes': { '@plus': ['?likes', 1] } }
+        }
+      });
+      await expect(api.get('fred')).resolves.toEqual({ '@id': 'fred', likes: 2 });
+    });
+
+    test('inserts with inline bound variable', async () => {
+      await api.write<Subject>({ '@id': 'fred', likes: 1 });
+      await api.write({
+        '@delete': { '@id': 'fred', likes: '?likes' },
+        '@insert': { '@id': 'fred', likes: { '@value': '?likes', '@plus': 1 } }
+      });
+      await expect(api.get('fred')).resolves.toEqual({ '@id': 'fred', likes: 2 });
+    });
+
+    test('inserts where with inline bound variable', async () => {
+      await api.write<Subject>({ '@id': 'fred', likes: 1 });
+      await api.write({
+        '@insert': { '@id': 'fred', likes: { '@value': '?likes', '@plus': 1 } },
+        '@where': { '@id': 'fred', likes: '?likes' }
+      });
+      await expect(api.get('fred')).resolves.toEqual({
+        '@id': 'fred', likes: expect.arrayContaining([1, 2])
+      });
+    });
+
+    test('deletes with inline filter', async () => {
+      await api.write<Subject>({ '@id': 'fred', age: 41 });
+      await api.write<Subject>({ '@id': 'wilma', age: 39 });
+      await api.write({
+        '@delete': { age: { '@gt': 39 } }
+      });
+      await expect(api.get('fred')).resolves.toBeUndefined();
+      await expect(api.get('wilma')).resolves.toEqual({ '@id': 'wilma', age: 39 });
+    });
+
+    test('deletes where with inline filter', async () => {
+      await api.write<Subject>({ '@id': 'fred', age: 41 });
+      await api.write<Subject>({ '@id': 'wilma', age: 39 });
+      await api.write<Subject>({ '@id': 'barney', age: 40 });
+      await api.write({
+        '@delete': { '@id': '?b', age: { '@value': '?age', '@gt': 39 } },
+        '@where': { '@id': '?b', age: { '@value': '?age', '@lt': 41 } }
+      });
+      await expect(api.get('barney')).resolves.toBeUndefined();
+      await expect(api.get('wilma')).resolves.toBeDefined();
+      await expect(api.get('fred')).resolves.toBeDefined();
+    });
+  });
+
+  describe('basic updates', () => {
+    test('updates a property', async () => {
+      await api.write<Subject>({ '@id': 'fred', likes: 1 });
+      await api.write({
+        '@update': { '@id': 'fred', likes: 2 }
+      });
+      await expect(api.get('fred')).resolves.toEqual({ '@id': 'fred', likes: 2 });
+    });
+
+    test('updates with an operator', async () => {
+      await api.write<Subject>({ '@id': 'fred', likes: 1 });
+      await api.write({
+        '@update': { '@id': 'fred', likes: { '@plus': 1 } }
+      });
+      await expect(api.get('fred')).resolves.toEqual({ '@id': 'fred', likes: 2 });
+    });
+
+    test('updates multiple with an operator', async () => {
+      await api.write<Subject>({ '@id': 'fred', likes: [1, 2] });
+      await api.write({
+        '@update': { '@id': 'fred', likes: { '@plus': 1 } }
+      });
+      await expect(api.get('fred')).resolves.toEqual({
+        '@id': 'fred', likes: expect.arrayContaining([2, 3])
+      });
+    });
+
+    test('updates with filtered variable', async () => {
+      await api.write<Subject>({ '@id': 'fred', likes: [1, 11] });
+      await api.write({
+        '@update': { '@id': 'fred', likes: { '@value': '?old', '@plus': 1 } },
+        '@where': { '@id': 'fred', likes: { '@value': '?old', '@lt': 10 } }
+      });
+      await expect(api.get('fred')).resolves.toEqual({
+        '@id': 'fred', likes: expect.arrayContaining([2, 11])
+      });
     });
   });
 
@@ -197,14 +300,69 @@ describe('MeldClone', () => {
 
     test('selects quad', done => {
       api.write<Subject>({ '@id': 'fred', name: 'Fred' }).then(() =>
-        api.query(sparql.createProject(sparql.createBgp([sparql.createPattern(
+        api.query(sparql.createProject(
+          sparql.createBgp([sparql.createPattern(
             rdf.namedNode('http://test.m-ld.org/fred'),
             rdf.namedNode('http://test.m-ld.org/#name'),
-            rdf.variable('name'))]),
-          [rdf.variable('name')])).on('data', (binding: Binding) => {
+            rdf.variable('name')
+          )]),
+          [rdf.variable('name')]
+        )).on('data', (binding: Binding) => {
           expect(binding['?name'].equals(rdf.literal('Fred'))).toBe(true);
           done();
         }));
+    });
+
+    test('inserts quad', async () => {
+      api.follow(captureUpdate.resolve);
+      const quad = rdf.quad(
+        rdf.namedNode('http://test.m-ld.org/fred'),
+        rdf.namedNode('http://test.m-ld.org/#name'),
+        rdf.literal('Fred')
+      );
+      await expect(api.updateQuads({ insert: [quad] })).resolves.toBe(api);
+      await expect(api.get('fred')).resolves.toEqual({
+        '@id': 'fred', name: 'Fred'
+      });
+      const update = await captureUpdate;
+      expect(update['@delete'].quads).toEqual([]);
+      expect(update['@insert'].quads).toEqual([quad]);
+    });
+
+    test('deletes quad', async () => {
+      await api.write<Subject>({ '@id': 'fred', name: 'Fred' });
+      api.follow(captureUpdate.resolve);
+      const quad = rdf.quad(
+        rdf.namedNode('http://test.m-ld.org/fred'),
+        rdf.namedNode('http://test.m-ld.org/#name'),
+        rdf.literal('Fred')
+      );
+      await expect(api.updateQuads({ delete: [quad] })).resolves.toBe(api);
+      await expect(api.get('fred')).resolves.toBeUndefined();
+      const update = await captureUpdate;
+      expect(update['@delete'].quads).toEqual([quad]);
+      expect(update['@insert'].quads).toEqual([]);
+    });
+
+    test('updates quad in procedure', async () => {
+      await api.write(async state => {
+        state = await state.write<Subject>({ '@id': 'fred', name: 'Fred' });
+        await expect(state.updateQuads({
+          delete: [rdf.quad(
+            rdf.namedNode('http://test.m-ld.org/fred'),
+            rdf.namedNode('http://test.m-ld.org/#name'),
+            rdf.literal('Fred')
+          )],
+          insert: [rdf.quad(
+            rdf.namedNode('http://test.m-ld.org/fred'),
+            rdf.namedNode('http://test.m-ld.org/#name'),
+            rdf.literal('Fred Flintstone')
+          )]
+        })).resolves.not.toBe(api);
+      });
+      await expect(api.get('fred')).resolves.toEqual({
+        '@id': 'fred', name: 'Fred Flintstone'
+      });
     });
   });
 
@@ -605,6 +763,35 @@ describe('MeldClone', () => {
         { '@id': expect.stringMatching(blankRegex), '?f': { '@id': 'wilma' } }
       ]));
     });
+
+    test('selects where inline filtered', async () => {
+      await api.write<Subject>({ '@id': 'fred', age: 42 });
+      await api.write<Subject>({ '@id': 'wilma', age: 39 });
+      await expect(api.read<Select>({
+        '@select': '?f', '@where': { '@id': '?f', age: { '@gt': 40 } }
+      })).resolves.toMatchObject([{ '?f': { '@id': 'fred' } }]);
+    });
+
+    test('constructs where inline filtered', async () => {
+      await api.write<Subject>({ '@id': 'fred', age: 42 });
+      await api.write<Subject>({ '@id': 'wilma', age: 39 });
+      await expect(api.read<Construct>({
+        '@construct': { '@id': '?', age: { '@gt': 40 } }
+      })).resolves.toMatchObject([{ '@id': 'fred', age: 42 }]);
+    });
+
+    test('selects where inline and explicit filtered', async () => {
+      await api.write<Subject>({ '@id': 'fred', age: 42, height: 6 });
+      await api.write<Subject>({ '@id': 'barney', age: 41, height: 5 });
+      await api.write<Subject>({ '@id': 'wilma', age: 39, height: 5 });
+      await expect(api.read<Select>({
+        '@select': '?f',
+        '@where': {
+          '@graph': { '@id': '?f', age: { '@gt': 40 }, height: '?h' },
+          '@filter': { '@gt': ['?h', 5] }
+        }
+      })).resolves.toMatchObject([{ '?f': { '@id': 'fred' } }]);
+    });
   });
 
   describe('anonymous subjects', () => {
@@ -941,17 +1128,18 @@ describe('MeldClone', () => {
           '@id': 'shopping', '@list': { 0: { '@id': '?slot', '@item': '?item' } }
         }
       });
-      expect([...(await captureUpdate)['@delete'].graph.values()]).toContainEqual({
+      const update = await captureUpdate;
+      expect([...update['@delete'].graph.values()]).toContainEqual({
         '@id': 'shopping',
         '@list': {
           // @item is not included in delete for a move
           1: { '@id': expect.stringMatching(genIdRegex), '@index': 1 }
         }
       });
-      expect([...(await captureUpdate)['@insert'].graph.values()]).toContainEqual({
+      expect([...update['@insert'].graph.values()]).toContainEqual({
         '@id': 'shopping',
         '@list': {
-          0: [{ '@id': expect.stringMatching(genIdRegex), '@item': 'Bread', '@index': 0 }]
+          0: [{ '@id': expect.stringMatching(genIdRegex), '@index': 0 }]
         }
       });
       await expect(api.read<Describe>({ '@describe': 'shopping' }))
@@ -983,7 +1171,7 @@ describe('MeldClone', () => {
       expect([...(await captureUpdate)['@insert'].graph.values()]).toContainEqual({
         '@id': 'shopping',
         '@list': {
-          0: [{ '@id': expect.stringMatching(genIdRegex), '@item': 'Spam', '@index': 0 }]
+          0: [{ '@id': expect.stringMatching(genIdRegex), '@index': 0 }]
         }
       });
       await expect(api.read<Describe>({ '@describe': 'shopping' }))
@@ -1010,10 +1198,11 @@ describe('MeldClone', () => {
         '@delete': { '@id': 'shopping', '@list': { '?1': 'Bread' } },
         '@insert': { '@id': 'shopping', '@list': { '?1': 'Spam' } }
       });
-      expect([...(await captureUpdate)['@delete'].graph.values()]).toContainEqual({
+      const update = await captureUpdate;
+      expect([...update['@delete'].graph.values()]).toContainEqual({
         '@id': expect.stringMatching(genIdRegex), '@item': 'Bread'
       });
-      expect([...(await captureUpdate)['@insert'].graph.values()]).toContainEqual({
+      expect([...update['@insert'].graph.values()]).toContainEqual({
         '@id': expect.stringMatching(genIdRegex), '@item': 'Spam'
       });
       await expect(api.read<Describe>({ '@describe': 'shopping' }))
@@ -1087,19 +1276,19 @@ describe('MeldClone', () => {
       });
     });
 
-    test('write state is predictable', done => {
+    test('write state is predictable', () => Promise.all([
       api.write(async state => {
         state = await state.write<Subject>({ '@id': 'fred', age: 40 });
+        await new Promise(resolve => setTimeout(resolve, 5));
         await expect(state.read<Describe>({
           '@describe': '?id', '@where': { '@id': '?id', age: 40 }
         }))
           // We only expect one person of that age
           .resolves.toMatchObject([{ '@id': 'fred', age: 40 }]);
-        done();
-      });
+      }),
       // Immediately make another write which could affect the query
-      api.write(state => state.write<Subject>({ '@id': 'wilma', age: 40 }));
-    });
+      api.write(state => state.write<Subject>({ '@id': 'wilma', age: 40 }))
+    ]));
 
     test('handler state follows writes', done => {
       let hadFred = false;
@@ -1191,6 +1380,157 @@ describe('MeldClone', () => {
         '@insert': { '@id': '?f', '@type': 'Jetson' }
       }).then(() => done());
     });
+
+    test('can async iterate to follow states', () => Promise.all([
+      (async function () {
+        // noinspection LoopStatementThatDoesntLoopJS
+        for await (let [update] of api.follow()) {
+          expect(update['@insert']).toEqual([{ '@id': 'fred', name: 'Fred' }]);
+          return;
+        }
+      })(),
+      api.write({ '@id': 'fred', name: 'Fred' })
+    ]));
+
+    test('states are immutable during async iterate', () => Promise.all([
+      (async function () {
+        for await (let [update, state] of api.follow()) {
+          // First update should be Fred
+          const { '@insert': [{ '@id': id }] } = update;
+          if (id === 'wilma')
+            return;
+          expect(id).toBe('fred');
+          // This separate write should have no effect on the state until next
+          api.write({ '@id': 'wilma', name: 'Wilma' }).then();
+          await new Promise(resolve => setTimeout(resolve, 5));
+          await expect(state.ask({ '@where': { '@id': 'wilma' } })).resolves.toBe(false);
+        }
+      })(),
+      api.write({ '@id': 'fred', name: 'Fred' })
+    ]));
+
+    test('immutable state is released by async break', () => Promise.all([
+      new Promise(async resolve => {
+        // noinspection LoopStatementThatDoesntLoopJS
+        for await (let [_update, state] of api.follow()) {
+          // This separate write should have no effect on the state until break
+          api.write({ '@id': 'wilma', name: 'Wilma' }).then(resolve);
+          await new Promise(resolve => setTimeout(resolve, 5));
+          await expect(state.ask({ '@where': { '@id': 'wilma' } })).resolves.toBe(false);
+          break;
+        }
+      }),
+      api.write({ '@id': 'fred', name: 'Fred' })
+    ]));
+
+    test('unsubscribe ends follow', () => Promise.all([
+      new Promise(async (resolve, reject) => {
+        const subs = api.follow();
+        for await (let [update, _state] of subs) {
+          const { '@insert': [{ '@id': id }] } = update;
+          if (id === 'wilma')
+            return reject('Wilma should not be notified!');
+          // This separate write should not appear in the follow...
+          api.write({ '@id': 'wilma', name: 'Wilma' }).then(resolve);
+          subs.unsubscribe(); // ... because we cancel the subscription
+        }
+      }),
+      api.write({ '@id': 'fred', name: 'Fred' })
+    ]));
+
+    test('unsubscribe after read cancels follow', () => Promise.all([
+      (async function () {
+        const subs = api.read(async () => {
+          await new Promise(resolve => setTimeout(resolve, 5));
+          subs.unsubscribe();
+          return 5;
+        });
+        // noinspection LoopStatementThatDoesntLoopJS
+        for await (let _anything of subs)
+          throw 'Follow should have cancelled!';
+      })(),
+      api.write({ '@id': 'fred', name: 'Fred' })
+    ]));
+
+    test('can async iterate immediately after read', () => Promise.all([
+      // This write should appear in the read but not the follow
+      api.write({ '@id': 'wilma', name: 'Wilma' }),
+      new Promise<void>(async resolve => {
+        const subs = api.read(async state => {
+          // This cheeky write should appear in the follow
+          api.write({ '@id': 'fred', name: 'Fred' }).then();
+          await expect(state.ask({ '@where': { '@id': 'wilma' } })).resolves.toBe(true);
+          await new Promise(resolve => setTimeout(resolve, 5));
+        });
+        // noinspection LoopStatementThatDoesntLoopJS
+        for await (let [update] of subs) {
+          expect(update['@insert']).toEqual([{ '@id': 'fred', name: 'Fred' }]);
+          return resolve();
+        }
+      })
+    ]));
+
+    test('can await read result and then follow', () => Promise.all([
+      // This write should appear in the read but not the follow
+      api.write({ '@id': 'wilma', name: 'Wilma' }),
+      new Promise<void>(async resolve => {
+        const subs = api.read(async state => {
+          // This cheeky write should appear in the follow
+          api.write({ '@id': 'fred', name: 'Fred' }).then();
+          await expect(state.ask({ '@where': { '@id': 'wilma' } })).resolves.toBe(true);
+          await new Promise(resolve => setTimeout(resolve, 5));
+          return 5;
+        });
+        expect(await subs).toBe(5);
+        // noinspection LoopStatementThatDoesntLoopJS
+        for await (let [update] of subs) {
+          expect(update['@insert']).toEqual([{ '@id': 'fred', name: 'Fred' }]);
+          return resolve();
+        }
+      })
+    ]));
+
+    test('can cancel read result with unsubscribe', async () => {
+      const subs = api.read(() =>
+        new Promise<number>(resolve => setTimeout(resolve, 5, 5)));
+      subs.unsubscribe();
+      await expect(subs).rejects.toBe(EmptyError);
+    });
+
+    test('cannot await read result for a pure follow', async () => {
+      const subs = api.follow();
+      await expect(subs).rejects.toBe(EmptyError);
+    });
+
+    test('delayed async iterate after read misses updates', async () => {
+      // Wait for the cheeky write in the read to complete
+      // (wrapped in an object to prevent resolve from settling the promise)
+      const { subs } = await new Promise<{ subs: MeldStateSubscription<void> }>(resolve => {
+        const subs = api.read(async state => {
+          api.write({ '@id': 'fred', name: 'Fred' }).then(() => resolve({ subs }));
+          await expect(state.ask({ '@where': { '@id': 'fred' } })).resolves.toBe(false);
+        });
+      });
+      api.write({ '@id': 'wilma', name: 'Wilma' }).then();
+      // noinspection LoopStatementThatDoesntLoopJS
+      for await (let [update] of subs) {
+        expect(update['@insert']).toEqual([{ '@id': 'wilma', name: 'Wilma' }]);
+        return;
+      }
+    });
+
+    test('can catch read procedure exception and still follow', () => Promise.all([
+      (async function () {
+        const subs = api.read(() => Promise.reject('Bang'));
+        await expect(subs).rejects.toBe('Bang');
+        // noinspection LoopStatementThatDoesntLoopJS
+        for await (let [update] of subs) {
+          expect(update).toMatchObject({ '@insert': [{ '@id': 'fred' }] });
+          return;
+        }
+      })(),
+      api.write({ '@id': 'fred', name: 'Fred' })
+    ]));
   });
 });
 

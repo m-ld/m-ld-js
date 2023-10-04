@@ -5,7 +5,7 @@ import { GlobalClock, TreeClock, TreeClockJson } from './clocks';
 import { Observable } from 'rxjs';
 import * as MsgPack from './msgPack';
 import { LiveValue } from './api-support';
-import { Attribution, MeldReadState, StateProc } from '../api';
+import { Attribution, MeldPreUpdate, MeldReadState, StateProc, UpdateProc } from '../api';
 import { Message } from './messages';
 
 /**
@@ -33,21 +33,15 @@ export interface Meld {
    */
   readonly live: LiveValue<boolean | null>;
   /**
-   * Mint a new clock, with a unique identity in the domain. For a local clone,
-   * this method forks the clone's clock. For a set of remotes, the request is
-   * forwarded to one remote clone (decided by the implementation) which will
-   * call the method locally.
-   */
-  newClock(): Promise<TreeClock>;
-  /**
    * Get a snapshot of all the data in the domain. For a local clone, this
    * method provides the local state. For a set of remotes, the request is
    * forwarded to one remote clone (decided by the implementation) which will
    * call the method locally.
    *
+   * @param newClock whether we want a new unique identity in the domain
    * @param state readable prior state, used to inspect metadata
    */
-  snapshot(state: MeldReadState): Promise<Snapshot>;
+  snapshot(newClock: boolean, state: MeldReadState): Promise<Snapshot>;
   /**
    * 'Rev-up' by obtaining recent operations for the domain. For a local clone,
    * this method provides the operations from the local journal. For a set of
@@ -104,7 +98,7 @@ export type EncodedOperation = [
   /**
    * @since 1
    */
-  version: 4,
+  version: 5,
   /**
    * First tick of causal time range. If this is less than `time.ticks`, this
    * operation is a fusion of multiple operations.
@@ -118,7 +112,9 @@ export type EncodedOperation = [
    */
   time: TreeClockJson,
   /**
-   * A tuple `[delete: object, insert: object]` encoded as per `encoding`
+   * A tuple `[delete: object, insert: object, update?: object]` encoded as per
+   * `encoding` (`update` key {@since 5}).
+   *
    * @since 3
    */
   update: Buffer,
@@ -208,6 +204,10 @@ export interface Revup extends Recovery {
  */
 export interface Snapshot extends Recovery {
   /**
+   * The new forked clock, if asked for in the snapshot request.
+   */
+  readonly clock?: TreeClock;
+  /**
    * All data in the snapshot.
    * @see Snapshot.Datum
    */
@@ -271,4 +271,23 @@ export interface ReadLatchable {
    * change until the procedure's returned promise has settled.
    */
   latch<T>(procedure: StateProc<MeldReadState, T>): Promise<T>;
+}
+
+/**
+ * A component that needs to be kept abreast of state changes
+ * @internal
+ */
+export interface StateManaged {
+  /**
+   * Initialises the component against the given clone state. This method could
+   * be used to read significant state into memory for the efficient
+   * implementation of a component's function.
+   */
+  readonly onInitial?: StateProc;
+  /**
+   * Called to inform the component of an update to the state, _after_ it has
+   * been applied. If available, this procedure will be called for every state
+   * after that passed to {@link onInitial}.
+   */
+  readonly onUpdate?: UpdateProc<MeldPreUpdate>;
 }

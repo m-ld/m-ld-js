@@ -7,9 +7,9 @@ import { filter, toArray } from 'rxjs/operators';
 import { SubjectGraph } from '../engine/SubjectGraph';
 
 /**
+ * @todo not yet usable for schema validation
  * @see https://www.w3.org/TR/shacl/#node-shapes
- * @category Experimental
- * @experimental
+ * @category API
  */
 export class NodeShape extends Shape {
   /**
@@ -46,7 +46,8 @@ export class NodeShape extends Shape {
       ).pipe(filter((s): s is GraphSubject => s != null), toArray())));
     return {
       '@delete': await filterUpdate(update['@delete']),
-      '@insert': await filterUpdate(update['@insert'])
+      '@insert': await filterUpdate(update['@insert']),
+      '@update': await filterUpdate(update['@update'])
     };
   }
 

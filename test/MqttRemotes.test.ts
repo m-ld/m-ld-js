@@ -7,7 +7,6 @@ import { GlobalClock, TreeClock } from '../src/engine/clocks';
 import { firstValueFrom, of, Subject as Source } from 'rxjs';
 import { mockLocal, MockMqtt, mockMqtt, MockProcess, testOp } from './testClones';
 import { take, toArray } from 'rxjs/operators';
-import { comesAlive } from '../src/engine/AbstractMeld';
 import { MeldErrorStatus } from '@m-ld/m-ld-spec';
 import { Response, RevupRequest, RevupResponse } from '../src/engine/remotes/ControlMessage';
 import * as MsgPack from '../src/engine/msgPack';
@@ -15,6 +14,7 @@ import { JsonNotification } from '../src/engine/remotes';
 import { once } from 'events';
 import { MeldOperationMessage } from '../src/engine/MeldOperationMessage';
 import { Future } from '../src/engine/Future';
+import { MeldExtensions, noTransportSecurity } from '../src/index';
 
 /**
  * These tests also test the abstract base class, PubsubRemotes
@@ -30,7 +30,9 @@ describe('New MQTT remotes', () => {
       '@domain': 'test.m-ld.org',
       genesis: true, // Actually not used by MqttRemotes
       mqtt: { hostname: 'unused' }
-    }, () => Promise.resolve({}), () => mqtt);
+    }, () => Promise.resolve(mock<MeldExtensions>({
+      transportSecurity: noTransportSecurity
+    })), () => mqtt);
   });
 
   test('live starts unknown', async () => {
@@ -56,7 +58,7 @@ describe('New MQTT remotes', () => {
     remotes.setLocal(mockLocal());
     mqtt.mockConnect();
     // Presence is joined when the remotes' live status resolves
-    await comesAlive(remotes, false);
+    await remotes.comesAlive(false);
     expect(mqtt.publish).lastCalledWith(
       '__presence/test.m-ld.org/client1',
       '{"client1":"test.m-ld.org/control"}',
@@ -67,7 +69,7 @@ describe('New MQTT remotes', () => {
     remotes.setLocal(mockLocal());
     mqtt.mockConnect();
     // Presence is joined when the remotes' live status resolves
-    await comesAlive(remotes, false);
+    await remotes.comesAlive(false);
 
     remotes.setLocal(null);
     await once(mqtt, 'close');
@@ -121,7 +123,7 @@ describe('New MQTT remotes', () => {
     test('sets presence with local clone', async () => {
       remotes.setLocal(mockLocal());
       // Presence is joined when the remotes' live status resolves
-      await comesAlive(remotes, false);
+      await remotes.comesAlive(false);
       expect(mqtt.publish).lastCalledWith(
         '__presence/test.m-ld.org/client1',
         '{"client1":"test.m-ld.org/control"}',
@@ -133,7 +135,7 @@ describe('New MQTT remotes', () => {
       mqtt.mockPublish(
         '__presence/test.m-ld.org/client2',
         '{"consumer2":"test.m-ld.org/control"}');
-      await comesAlive(remotes);
+      await remotes.comesAlive();
 
       const entry = new MockProcess(TreeClock.GENESIS.forked().left).sentOperation({}, {});
       const operations = new Source<MeldOperationMessage>();
@@ -152,7 +154,7 @@ describe('New MQTT remotes', () => {
       mqtt.mockPublish(
         '__presence/test.m-ld.org/client2',
         '{"consumer2":"test.m-ld.org/control"}');
-      await comesAlive(remotes);
+      await remotes.comesAlive();
 
       const operations = new Source<MeldOperationMessage>();
       remotes.setLocal(mockLocal({ operations }));
@@ -232,14 +234,14 @@ describe('New MQTT remotes', () => {
       mqtt.mockConnect();
     });
 
-    test('cannot get new clock if no peers', done => {
-      remotes.newClock().then(() => { throw 'expecting error'; }, error => {
+    test('cannot get snapshot if no peers', done => {
+      remotes.snapshot(true, mock()).then(() => { throw 'expecting error'; }, error => {
         expect(error.message).toMatch(/No-one present/);
         done();
       });
     });
 
-    test('can get clock', async () => {
+    test('can get snapshot', async () => {
       const newClock = TreeClock.GENESIS.forked().right;
       // Set presence of client2's consumer
       await mqtt.mockPublish(
@@ -248,23 +250,25 @@ describe('New MQTT remotes', () => {
         const [type, toId, fromId, messageId, domain] = topic.split('/');
         const json = Buffer.isBuffer(payload) && MsgPack.decode(payload);
         if (type === '__send' && MsgPack.decode(json.enc)['@type'] ===
-          'http://control.m-ld.org/request/clock') {
+          'http://control.m-ld.org/request/snapshot') {
           expect(toId).toBe('consumer2');
           expect(fromId).toBe('client1');
           expect(domain).toBe('test.m-ld.org');
           mqtt.mockPublish('__reply/client1/consumer2/reply1/' + messageId, MsgPack.encode({
             enc: MsgPack.encode({
-              '@type': 'http://control.m-ld.org/response/clock',
-              clock: newClock.toJSON()
+              '@type': 'http://control.m-ld.org/response/snapshot',
+              clock: newClock.toJSON(),
+              gwc: GlobalClock.GENESIS.toJSON(),
+              agreed: TreeClock.GENESIS.toJSON()
             }),
             attr: null
           }));
         }
       });
-      expect((await remotes.newClock()).equals(newClock)).toBe(true);
+      expect((await remotes.snapshot(true, mock())).clock!.equals(newClock)).toBe(true);
     });
 
-    test('round robins for clock', async () => {
+    test('round robins for snapshot', async () => {
       const newClock = TreeClock.GENESIS.forked().right;
       // Set presence of client2's consumer
       await mqtt.mockPublish(
@@ -276,7 +280,7 @@ describe('New MQTT remotes', () => {
         const [type, toId, , messageId] = topic.split('/');
         const json = Buffer.isBuffer(payload) && MsgPack.decode(payload);
         if (type === '__send' && MsgPack.decode(json.enc)['@type'] ===
-          'http://control.m-ld.org/request/clock') {
+          'http://control.m-ld.org/request/snapshot') {
           if (first) {
             first = false;
             mqtt.mockPublish(`__reply/client1/${toId}/reply1/` + messageId, MsgPack.encode({
@@ -289,15 +293,17 @@ describe('New MQTT remotes', () => {
           } else {
             mqtt.mockPublish(`__reply/client1/${toId}/reply1/` + messageId, MsgPack.encode({
               enc: MsgPack.encode({
-                '@type': 'http://control.m-ld.org/response/clock',
-                clock: newClock.toJSON()
+                '@type': 'http://control.m-ld.org/response/snapshot',
+                clock: newClock.toJSON(),
+                gwc: GlobalClock.GENESIS.toJSON(),
+                agreed: TreeClock.GENESIS.toJSON()
               }),
               attr: null
             }));
           }
         }
       });
-      expect((await remotes.newClock()).equals(newClock)).toBe(true);
+      expect((await remotes.snapshot(true, mock())).clock!.equals(newClock)).toBe(true);
     });
 
     test('cannot get revup of no-one present', async () => {

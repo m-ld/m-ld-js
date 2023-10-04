@@ -3,9 +3,7 @@ import { MqttTopic } from './MqttTopic';
 import {
   AsyncMqttClient, IClientOptions, IClientPublishOptions, ISubscriptionMap
 } from 'async-mqtt';
-import { inflate } from '../engine/util';
 import { EventEmitter } from 'events';
-import { Observable } from 'rxjs';
 import { Logger, LogLevelDesc } from 'loglevel';
 import { getIdLogger } from '../engine/logging';
 import { Future } from '../engine/Future';
@@ -40,7 +38,8 @@ export class MqttPresence extends EventEmitter {
     private readonly mqtt: AsyncMqttClient,
     domain: string,
     private readonly clientId: string,
-    logLevel: LogLevelDesc = 'info') {
+    logLevel: LogLevelDesc = 'info'
+  ) {
     super();
     this.log = getIdLogger(this.constructor, clientId, logLevel);
 
@@ -64,7 +63,8 @@ export class MqttPresence extends EventEmitter {
           this.presence[presence.client] = JSON.parse(payloadStr);
         }
         if (!this.ready.pending)
-          this.emit('change');
+          // This ensures other ready handlers are already called
+          this.ready.then(() => this.emit('change'));
       });
     });
   }
@@ -93,7 +93,7 @@ export class MqttPresence extends EventEmitter {
   async join(consumerId: string, address: string): Promise<unknown> {
     if (this.ready.pending) // Convenience for tests: makes this method sync
       await this.ready;
-    const myConsumers = this.presence[this.clientId] || (this.presence[this.clientId] = {});
+    const myConsumers = this.presence[this.clientId] ??= {};
     myConsumers[consumerId] = address;
     return this.mqtt.publish(this.clientTopic.address, JSON.stringify(myConsumers), PRESENCE_OPTS);
   }
@@ -105,17 +105,13 @@ export class MqttPresence extends EventEmitter {
       myConsumers ? JSON.stringify(myConsumers) : LEAVE_PAYLOAD, PRESENCE_OPTS);
   }
 
-  present(address: string): Observable<string> {
-    return inflate(this.ready, () =>
-      new Observable<string>(subs => {
-        for (let clientId in this.presence) {
-          for (let consumerId in this.presence[clientId]) {
-            if (matches(this.presence[clientId][consumerId], address))
-              subs.next(consumerId);
-          }
-        }
-        subs.complete();
-      }));
+  *present(address: string) {
+    for (let clientId in this.presence) {
+      for (let consumerId in this.presence[clientId]) {
+        if (matches(this.presence[clientId][consumerId], address))
+          yield consumerId;
+      }
+    }
   }
 
   private left(clientId: string, consumerId?: string) {

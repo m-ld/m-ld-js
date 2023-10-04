@@ -46,14 +46,11 @@ export class ControlMessage {
 }
 
 export abstract class Request extends ControlMessage {
-  // If return type is Request the type system thinks it's always NewClock
   static fromBuffer(buffer: Buffer) {
     const { json, attr, enc } = ControlMessage.decodeBuffer(buffer);
     switch (json['@type']) {
-      case MeldRequestType.clock:
-        return new NewClockRequest(attr, enc);
       case MeldRequestType.snapshot:
-        return new SnapshotRequest(attr, enc);
+        return new SnapshotRequest(json.newClock, attr, enc);
       case MeldRequestType.revup:
         return new RevupRequest(TreeClock.fromJson(json.time), attr, enc);
     }
@@ -61,18 +58,13 @@ export abstract class Request extends ControlMessage {
   }
 }
 
-export class NewClockRequest extends Request {
-  constructor(attr: Attribution | null = null, enc?: Buffer) {
-    super({ '@type': MeldRequestType.clock }, attr, enc);
-  }
-  toString() {
-    return 'New Clock';
-  }
-}
-
 export class SnapshotRequest extends Request {
-  constructor(attr: Attribution | null = null, enc?: Buffer) {
-    super({ '@type': MeldRequestType.snapshot }, attr, enc);
+  constructor(
+    readonly newClock: boolean,
+    attr: Attribution | null = null,
+    enc?: Buffer
+  ) {
+    super({ '@type': MeldRequestType.snapshot, newClock }, attr, enc);
   }
   toString() {
     return 'Snapshot';
@@ -96,10 +88,9 @@ export abstract class Response extends ControlMessage {
   static fromBuffer(buffer: Buffer) {
     const { json, attr, enc } = ControlMessage.decodeBuffer(buffer);
     switch (json['@type']) {
-      case MeldResponseType.clock:
-        return new NewClockResponse(TreeClock.fromJson(json.clock), attr, enc);
       case MeldResponseType.snapshot:
         return new SnapshotResponse(
+          TreeClock.fromJson(json.clock),
           GlobalClock.fromJSON(json.gwc),
           TreeClock.fromJson(json.agreed),
           json.dataAddress,
@@ -117,25 +108,9 @@ export abstract class Response extends ControlMessage {
   }
 }
 
-export class NewClockResponse extends Response {
-  constructor(
-    readonly clock: TreeClock,
-    attr: Attribution | null = null,
-    enc?: Buffer
-  ) {
-    super({
-      '@type': MeldResponseType.clock,
-      clock: clock.toJSON()
-    }, attr, enc);
-  };
-
-  toString() {
-    return `New Clock ${this.clock}`;
-  }
-}
-
 export class SnapshotResponse extends Response {
   constructor(
+    readonly clock: TreeClock | undefined,
     readonly gwc: GlobalClock,
     readonly agreed: TreeClock,
     readonly dataAddress: string,
@@ -145,6 +120,7 @@ export class SnapshotResponse extends Response {
   ) {
     super({
       '@type': MeldResponseType.snapshot,
+      clock: clock?.toJSON(),
       gwc: gwc.toJSON(),
       agreed: agreed.toJSON(),
       dataAddress,
@@ -159,7 +135,6 @@ export class SnapshotResponse extends Response {
 
 export class RevupResponse extends Response {
   /**
-   *
    * @param gwc `null` indicates this clone cannot collaborate on the rev-up request
    * @param updatesAddress If gwc == null this should be a stable identifier of the answering
    * clone, to allow detection of re-send.

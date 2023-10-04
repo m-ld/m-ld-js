@@ -4,6 +4,9 @@ export const $vocab = `${$base}#`;
 /** Property for serialisation of transaction IDs in operation messages */
 export const tid = `${$vocab}tid`;
 
+/** Property for serialisation of datatype operations in operation messages */
+export const op = `${$vocab}op`;
+
 /** Property for secret known only to domain users */
 export const secret = `${$vocab}secret`;
 
@@ -53,17 +56,23 @@ export namespace EXT {
    * 'security/ACL'
    */
   export const $base = 'http://ext.m-ld.org/';
+  /**
+   * Helper function to declare a type name
+   */
+  export function extensionType(extModule: string, className: string) {
+    return `${$base}${extModule}/${className}`;
+  }
 }
 
 export namespace JS {
   export const $base = 'http://js.m-ld.org/';
   export const $vocab = `${$base}#`;
 
-  /** CommonJS module class */
-  export const commonJsExport = `${$vocab}CommonJSExport`;
-
   /** Property for CommonJS module require id */
   export const require = `${$vocab}require`;
+
+  /** Property for ECMAScript module URL */
+  export const module = `${$vocab}module`;
 
   /** Property for Javascript class name (in module scope) */
   export const className = `${$vocab}class`;
@@ -99,13 +108,11 @@ export enum MeldMessageType {
 }
 
 export enum MeldRequestType {
-  clock = 'http://control.m-ld.org/request/clock',
   snapshot = 'http://control.m-ld.org/request/snapshot',
   revup = 'http://control.m-ld.org/request/revup'
 }
 
 export enum MeldResponseType {
-  clock = 'http://control.m-ld.org/response/clock',
   snapshot = 'http://control.m-ld.org/response/snapshot',
   revup = 'http://control.m-ld.org/response/revup',
   rejected = 'http://control.m-ld.org/response/rejected'

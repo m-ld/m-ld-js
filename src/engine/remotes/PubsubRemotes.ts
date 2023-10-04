@@ -1,19 +1,19 @@
 import { MeldLocal, MeldRemotes, Revup, Snapshot } from '../index';
 import {
-  BehaviorSubject, concatWith, defer, EMPTY, firstValueFrom, from, identity, NEVER, Observable,
-  Observer, of, onErrorResumeNext, race, Subject as Source, Subscription, switchMap, throwError
+  BehaviorSubject, defer, EMPTY, firstValueFrom, from, identity, NEVER, Observable, Observer,
+  onErrorResumeNext, race, Subject as Source, Subscription, switchMap
 } from 'rxjs';
 import { TreeClock } from '../clocks';
 import {
-  ControlMessage, NewClockRequest, NewClockResponse, RejectedResponse, Request, Response,
-  RevupRequest, RevupResponse, SnapshotRequest, SnapshotResponse
+  ControlMessage, RejectedResponse, Request, Response, RevupRequest, RevupResponse, SnapshotRequest,
+  SnapshotResponse
 } from './ControlMessage';
-import { toJSON } from '../util';
+import { throwOnComplete, toJSON } from '../util';
 import * as MsgPack from '../msgPack';
-import { delay, first, ignoreElements, map, reduce, tap, timeout, toArray } from 'rxjs/operators';
+import { delay, first, map, takeUntil, timeout } from 'rxjs/operators';
 import { AbstractMeld } from '../AbstractMeld';
 import {
-  MeldError, MeldErrorStatus, MeldExtensions, MeldReadState, noTransportSecurity, shortId, uuid
+  MeldError, MeldErrorStatus, MeldExtensions, MeldReadState, shortId, uuid
 } from '../../index';
 import { JsonNotification, NotifyParams, ReplyParams, SendParams } from './PubsubParams';
 import { consume } from 'rx-flowable/consume';
@@ -22,6 +22,8 @@ import { MeldConfig } from '../../config';
 import { MeldOperationMessage } from '../MeldOperationMessage';
 import { Stopwatch } from '../Stopwatch';
 import { Future } from '../Future';
+import { checkNotClosed } from '../check';
+import { each } from 'rx-flowable';
 
 /**
  * A sub-publisher, used to temporarily address unicast messages to one peer clone. Sub-publishers
@@ -81,14 +83,15 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
   } = {};
   private readonly recentlySentTo: Set<string> = new Set;
   private readonly consuming: { [subPubId: string]: Observer<Buffer> } = {};
-  private readonly sendTimeout: number;
   private readonly active = new BehaviorSubject<Promise<unknown> | undefined>(undefined);
+  protected readonly sendTimeout: number;
   /**
    * This is separate to liveness because decided liveness requires presence,
    * which is discovered after connection. Connectedness is not equivalent to
    * decided-liveness.
    */
   private connected = new BehaviorSubject<boolean>(false);
+  private present: string[] = [];
 
   protected constructor(
     config: MeldConfig,
@@ -99,7 +102,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
   }
 
   private get transportSecurity() {
-    return this.extensions().then(ext => ext.transportSecurity ?? noTransportSecurity);
+    return this.extensions().then(ext => ext.transportSecurity);
   }
 
   setLocal(clone: MeldLocal | null) {
@@ -151,31 +154,13 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
   protected abstract publishOperation(msg: Buffer): Promise<unknown>;
 
   /**
-   * Retrieve a set of peer clone identities which are 'live' for recovery collaboration. A
-   * returned identity may be used to establish a unicast channel via {@link sender} or
-   * {@link notifier}.
-   *
-   * The subclass can choose whether to return the identities of _all_ other 'present' clones (who
-   * have called {@link setPresent} locally), or some subset. To not include the identity of some
-   * clone can prevent unwanted load, for example if the clone has restricted compute resources;
-   * but this symmetrically increases the potential for load on clones that _are_ included. It may
-   * also be most efficient to route all sent messages to some central clones, in a hub-and-spoke
-   * architecture.
-   *
-   * Note that while the return is an observable, the full set should be available quickly,
-   * comfortably with a single network timeout.
-   * @see MeldConfig
-   * @see Meld.live
-   */
-  protected abstract present(): Observable<string>;
-
-  /**
    * Called to indicate whether the local clone is 'live' for recovery collaboration.
    *
    * The implementation can choose whether to actually make this clone available in other peers'
-   * {@link present} sets.
+   * present sets.
    * @param present whether the local clone is available for recovery collaboration
    * @see Meld.live
+   * @see {@link onPresenceChange}
    */
   protected abstract setPresent(present: boolean): Promise<unknown>;
 
@@ -216,12 +201,16 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
       this.log.info('Shutting down normally');
     // This finalises the #updates, thereby notifying the clone (if present)
     super.close(err);
+    // Ensure that anything waiting for connection is rejected
+    if (this.connected.observed)
+      this.connected.error(new MeldError('Clone has closed', this.id));
     // Wait until all activities have finalised
     try { // TODO unit test this
       this.active.complete();
       await this.active.value;
     } catch (e) {
-      this.log.warn('Error while closing', e);
+      if (!(e instanceof MeldError) || e.status !== MeldErrorStatus['Clone has closed'])
+        this.log.warn('Error while closing', e);
     }
   }
 
@@ -233,20 +222,10 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
       .catch(err => this.log.warn('Error while closing safely', err));
   }
 
-  async newClock(): Promise<TreeClock> {
-    const sw = new Stopwatch('clock', shortId());
-    const req = new NewClockRequest;
-    const { res } = await this.send<NewClockResponse>(
-      await this.wireRequest(req, null),
-      { sw, state: null, logRequest: req });
-    sw.stop();
-    return res.clock;
-  }
-
-  async snapshot(state: MeldReadState): Promise<Snapshot> {
+  async snapshot(newClock: boolean, state: MeldReadState): Promise<Snapshot> {
     const readyToAck = new Future;
     const sw = new Stopwatch('snapshot', shortId());
-    const req = new SnapshotRequest;
+    const req = new SnapshotRequest(newClock);
     const { res, fromId } = await this.send<SnapshotResponse>(
       await this.wireRequest(req, state),
       { readyToAck, state, sw, logRequest: req });
@@ -258,6 +237,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     ]);
     sw.stop();
     return {
+      clock: res.clock,
       gwc: res.gwc,
       agreed: res.agreed,
       data: defer(() => {
@@ -314,22 +294,37 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
   protected onDisconnect() {
     if (this.connected.value)
       this.connected.next(false);
+    this.present = [];
     this.setLive(null);
   }
 
   /**
-   * Call from the subclass when the set of present peer clone identities has changed, for example
-   * because a peer has become present. This **must** also be called after connection, when the
-   * presence set becomes available and {@link present} is callable without error.
+   * Call from the subclass when the set of present peer clone identities has
+   * changed, for example because a peer has become present. This **must** also
+   * be called after connection, when the presence set becomes available.
+   *
+   * 'Present' means peer clone identities which are available for recovery
+   * collaboration. An identity may be used to establish a unicast channel via
+   * {@link sender} or {@link notifier}.
+   *
+   * The subclass can choose whether to indicate the identities of _all_ other
+   * 'present' clones (who have called {@link setPresent} locally), or some
+   * subset. To not include the identity of some clone can prevent unwanted
+   * load, for example if the clone has restricted compute resources; but this
+   * symmetrically increases the potential for load on clones that _are_
+   * included. It may also be most efficient to route all sent messages to some
+   * central clones, in a hub-and-spoke architecture.
+   *
+   * @see MeldConfig
+   * @see Meld.live
    */
-  protected onPresenceChange() {
+  protected onPresenceChange(present: string[]) {
+    this.present = present;
     // Don't process a presence change until connected emits true
-    this.connected.pipe(first(identity), tap(() => {
+    this.connected.pipe(first(identity)).subscribe(() => {
       // If there is more than just me present, we are live
-      this.present()
-        .pipe(reduce((live, id) => live || id !== this.id, false))
-        .subscribe(live => this.setLive(live));
-    })).subscribe();
+      this.setLive(present.some(id => id !== this.id));
+    });
   }
 
   /**
@@ -357,7 +352,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     if (this.clone) {
       // Keep track of long-running activity so that we can shut down cleanly
       const done = new Future, clone = this.clone;
-      this.active.next(Promise.all([this.active.value, done]));
+      this.setActive(done);
       const sw = new Stopwatch('reply', shortId());
       try {
         // The local state is required to prepare the response and to send it
@@ -371,14 +366,9 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
             // Verify the message if necessary
             await transportSecurity.verify?.(req.enc, req.attr, state);
             // Generate a suitable response
-            if (req instanceof NewClockRequest) {
-              sw.next('clock');
-              const clock = await clone.newClock();
-              sw.lap.next('send');
-              return this.replyClock(sentParams, state, clock);
-            } else if (req instanceof SnapshotRequest) {
+            if (req instanceof SnapshotRequest) {
               sw.next('snapshot');
-              const snapshot = await clone.snapshot(state);
+              const snapshot = await clone.snapshot(req.newClock, state);
               sw.lap.next('send');
               return this.replySnapshot(sentParams, state, snapshot);
             } else {
@@ -476,7 +466,7 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
   };
 
   // Note this method is recursive and can be long-running, waiting for timeout
-  @PubsubRemotes.checkNotClosed.async
+  @checkNotClosed.async
   private async send<T extends Response>(
     wireRequest: Buffer,
     params: {
@@ -495,29 +485,47 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     if (sender == null) {
       throw new MeldError('No visible clones',
         `No-one present on ${this.domain} to send message to`);
-    } else if (sender.id in tried) {
+    } else if (tried[sender.id] != null) {
       // If we have already tried this address, we've tried everyone; return
       // whatever the last response was.
+      sender.close?.();
       return tried[sender.id];
     }
     this.log.debug('Sending request', messageId, logRequest, sender.id);
     sw.next('send');
+    const retry = () => this.send(wireRequest, params, tried, messageId);
+    // With some remotes, the response can overtake the sent receipt, so we need
+    // to attach the response listeners immediately; hence the two promises here
     const sent = sender.publish(wireRequest).finally(() => sender.close?.());
-    tried[sender.id] = this.getResponse<T>(
-      sent,
-      messageId,
-      { readyToAck, state }
-    ).then(res => ({ res, fromId: sender.id }));
-    // If the publish fails, don't keep trying other addresses
-    await sent;
-    // If the caller doesn't like this response, try again
-    return tried[sender.id].then(rtn => check == null || check(rtn.res) ? rtn :
-        this.send(wireRequest, params, tried, messageId),
-      () => this.send(wireRequest, params, tried, messageId));
+    tried[sender.id] = this.getResponse<T>({
+      sent, messageId, readyToAck, state
+    }).then(res => ({ res, fromId: sender.id }));
+    const done = Promise.allSettled([sent, tried[sender.id]]);
+    // Ensure this potentially long-running promise is accounted for in closing
+    this.setActive(done);
+    const [sentResult, respondedResult] = await done;
+    if (sentResult.status === 'rejected') {
+      // If the send fails, don't retry – network unavailable etc.
+      return Promise.reject(sentResult.reason);
+    } else if (respondedResult.status === 'rejected') {
+      // Retry if the tried collaborator rejects or times out
+      return retry();
+    } else {
+      // If the caller doesn't like this response, try again
+      return check == null || check(respondedResult.value.res) ?
+        respondedResult.value : retry();
+    }
   }
 
-  private getResponse<T extends Response | ACK>(sent: Promise<unknown>, messageId: string,
-    { readyToAck, state, allowTimeFor }: {
+  private setActive<T>(done: PromiseLike<T>) {
+    this.active.next(Promise.all([this.active.value, done]));
+  }
+
+  @checkNotClosed.async
+  private getResponse<T extends Response | ACK>(
+    { sent, messageId, readyToAck, state, allowTimeFor }: {
+      sent: Promise<unknown>,
+      messageId: string,
       readyToAck?: PromiseLike<void>,
       state: MeldReadState | null,
       allowTimeFor?: Promise<unknown>
@@ -526,16 +534,17 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     return firstValueFrom(race(
       // Four possible outcomes:
       // 1. Response times out after allowing time for prior work
-      from(allowTimeFor ?? of(0)).pipe(delay(this.sendTimeout),
-        switchMap(() => throwError(() => {
+      throwOnComplete(
+        from(allowTimeFor ?? Promise.resolve()).pipe(delay(this.sendTimeout)),
+        () => {
           this.log.debug(`Message ${messageId} timed out.`);
           return new Error('Send timeout exceeded.');
-        }))),
+        }
+      ),
       // 2. Send fails - abandon the response if it rejects
       from(sent).pipe(switchMap(() => NEVER)),
       // 3. Remotes have closed
-      this.active.pipe(ignoreElements(),
-        concatWith(throwError(() => new MeldError('Clone has closed')))),
+      this.errorIfClosed,
       // 4. Response received
       new Observable<T>(subs => {
         const received = new Future<Response | ACK>();
@@ -546,22 +555,20 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
             subs.next(res as T);
         }, err => subs.error(err));
         this.replyResolvers[messageId] = { received, state, readyToAck };
+        // This teardown will apply for any outcome
         return () => { delete this.replyResolvers[messageId]; };
-      })));
-  }
-
-  private async replyClock(sentParams: SendParams, state: MeldReadState, clock: TreeClock) {
-    await this.reply(sentParams, state, new NewClockResponse(clock));
+      })
+    ));
   }
 
   private async replySnapshot(sentParams: SendParams, state: MeldReadState, snapshot: Snapshot) {
-    const { gwc, agreed, data, updates } = snapshot;
+    const { clock, gwc, agreed, data, updates } = snapshot;
     try {
       const dataAddress = uuid(), updatesAddress = uuid();
       // Send the reply in parallel with establishing notifiers
       const replyId = uuid();
       const replied = this.reply(sentParams, state,
-        new SnapshotResponse(gwc, agreed, dataAddress, updatesAddress), replyId);
+        new SnapshotResponse(clock, gwc, agreed, dataAddress, updatesAddress), replyId);
       // Allow time for the notifiers to resolve while waiting for a reply
       const [dataNotifier, updatesNotifier] =
         await this.getAck(replied, replyId, state, Promise.all([
@@ -638,6 +645,8 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     datumToPayload: (datum: T) => Buffer,
     type: string
   ) {
+    const notify = (notification: JsonNotification) =>
+      notifier.publish(MsgPack.encode(notification));
     const notifyError = (error: any) => {
       this.log.warn('Notifying error on', notifier.id, error);
       return notify({ error: toJSON(error) });
@@ -646,22 +655,11 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
       this.log.debug(`Completed production of ${type} on ${notifier.id}`);
       return notify({ complete: true });
     };
-    const notify: (notification: JsonNotification) => Promise<unknown> = notification =>
-      notifier.publish(MsgPack.encode(notification))
-        // If notifications fail due to channel death, the recipient will find
-        // out from the network so here we make best efforts to notify an error
-        // and then give up.
-        .catch(err => notifyError(err));
-    return new Promise<void>((resolve, reject) => {
-      this.log.debug(`Starting production of ${type} on ${notifier.id}`);
-      // Convert the input into a consumable to get backpressure, if available
-      consume(data).subscribe({
-        next: ({ value, next }) =>
-          notify({ next: datumToPayload(value) }).then(next),
-        error: err => notifyError(err).then(() => reject(err)),
-        complete: () => notifyComplete().then(resolve)
-      });
-    }).finally(() => notifier.close?.());
+    this.log.debug(`Starting production of ${type} on ${notifier.id}`);
+    return each(
+      consume(data).pipe(takeUntil(this.errorIfClosed)),
+      datum => notify({ next: datumToPayload(datum) })
+    ).then(notifyComplete, notifyError);
   }
 
   private async reply(
@@ -691,18 +689,20 @@ export abstract class PubsubRemotes extends AbstractMeld implements MeldRemotes 
     state: MeldReadState | null,
     allowTimeFor: Promise<T>
   ): Promise<T> {
-    return this.getResponse<ACK>(
-      replied, messageId, { allowTimeFor, state })
-      .then(() => allowTimeFor); // This just gets the return value
+    return this.getResponse<ACK>({
+      sent: replied, messageId, allowTimeFor, state
+    }).then(() => allowTimeFor); // This just gets the return value
   }
 
   private async nextSender(messageId: string): Promise<SubPub | null> {
-    const present = await firstValueFrom(this.present().pipe(toArray()));
-    if (present.every(id => this.recentlySentTo.has(id)))
+    // Wait for decided liveness
+    await this.comesAlive('notNull');
+
+    if (this.present.every(id => this.recentlySentTo.has(id)))
       this.recentlySentTo.clear();
 
     this.recentlySentTo.add(this.id);
-    const toId = present.filter(id => !this.recentlySentTo.has(id))[0];
+    const toId = this.present.filter(id => !this.recentlySentTo.has(id))[0];
     if (toId != null) {
       this.recentlySentTo.add(toId);
       return this.sender({ fromId: this.id, toId, messageId });

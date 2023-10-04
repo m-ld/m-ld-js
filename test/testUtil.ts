@@ -1,15 +1,20 @@
-import { SchedulerLike, SchedulerAction, Subscription } from 'rxjs';
+import { SchedulerAction, SchedulerLike, Subscription } from 'rxjs';
 import { shortId } from '../src';
 
 export class TickableScheduler implements SchedulerLike {
   ticks: number = 1; // >0 to not confuse an epoch baseline
   work: { [tick: number]: { [id: string]: () => void } } = {};
   now = () => this.ticks;
-  schedule<T>(work: (this: SchedulerAction<T>, state?: T) => void, delay: number = 0, state?: T): Subscription {
+  schedule<T>(
+    work: (this: SchedulerAction<T>, state?: T) => void,
+    delay: number = 0,
+    state?: T
+  ): Subscription {
     const id = shortId(), time = this.ticks + delay, scheduler = this;
-    const action: SchedulerAction<T> = Object.assign(new Subscription(() => delete this.work[time][id]), {
-      schedule: (state?: T, delay?: number) => scheduler.schedule(work, delay, state)
-    });
+    const action: SchedulerAction<T> = Object.assign(
+      new Subscription(() => delete this.work[time][id]),
+      { schedule: (state?: T, delay?: number) => scheduler.schedule(work, delay, state) }
+    );
     (this.work[time] = this.work[time] ?? {})[id] = () => work.call(action, state);
     if (delay === 0)
       this.tick(0);
@@ -22,7 +27,7 @@ export class TickableScheduler implements SchedulerLike {
 }
 
 export const genIdRegex = /^\.well-known\/genid\/.+/;
-export const blankRegex = /^_:b\w+/;
+export const blankRegex = /^_:\w+/;
 
 /** Round-trips the given value through JSON for matcher convenience */
 export function jsonify(obj: any) {

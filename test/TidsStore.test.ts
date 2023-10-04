@@ -4,7 +4,7 @@ import { DataFactory as RdfDataFactory } from 'rdf-data-factory/lib/DataFactory'
 import { TripleKeyStore } from '../src/engine/dataset';
 import { Operation } from '../src/engine/ops';
 import { Triple } from '../src/engine/quads';
-import { UUID } from '../src/engine/MeldEncoding';
+import { UUID } from '../src';
 
 describe('TIDs Store', () => {
   const rdf = new RdfDataFactory();

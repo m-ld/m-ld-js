@@ -2,7 +2,9 @@
   "compilerOptions": {
     "experimentalDecorators": true,
     "noImplicitAny": true,
-    "target": "es6",
+    "esModuleInterop": true,
+    "lib": ["ES2021"],
+    "target": "ES2021",
     "module": "commonjs",
     "moduleResolution": "node",
     "inlineSourceMap": true,

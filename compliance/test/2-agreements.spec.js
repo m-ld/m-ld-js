@@ -1,4 +1,4 @@
-const Clone = require('@m-ld/m-ld-spec/compliance/clone');
+const { Clone } = require('@m-ld/m-ld-test');
 
 describe('ACL Statutes and Permissions', () => {
   let aliceClone;
@@ -19,12 +19,10 @@ describe('ACL Statutes and Permissions', () => {
         '@id': 'http://m-ld.org/extensions',
         '@list': [{
           '@id': 'http://ext.m-ld.org/statutes/Statutory',
-          '@type': 'http://js.m-ld.org/#CommonJSExport',
           'http://js.m-ld.org/#require': '@m-ld/m-ld/ext/statutes',
           'http://js.m-ld.org/#class': 'Statutory'
         }, {
           '@id': 'http://ext.m-ld.org/security/WritePermitted',
-          '@type': 'http://js.m-ld.org/#CommonJSExport',
           'http://js.m-ld.org/#require': '@m-ld/m-ld/ext/security',
           'http://js.m-ld.org/#class': 'WritePermitted'
         }]

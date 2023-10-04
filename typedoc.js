@@ -3,6 +3,7 @@ module.exports = {
   readme: './doc/index.md',
   readmeToc: require('./doc/toc.json'),
   out: '_site',
+  disableOutputCheck: true,
   theme: 'node_modules/@m-ld/typedoc-theme/bin/minimal',
 
   includes: './doc/includes',

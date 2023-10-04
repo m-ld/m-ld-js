@@ -1,10 +1,13 @@
 import { settled } from './util';
 import { Future } from './Future';
+import { check } from './check';
+import { MeldError } from '../api';
 
 interface Task {
-  name: string;
+  /** For debugging */
+  id: unknown;
   /** Must never reject */
-  run: () => Promise<unknown>;
+  run?: () => Promise<unknown>;
 }
 
 export type SharedProc<T, P extends SharedPromise<unknown>> = (this: P) => (PromiseLike<T> | T);
@@ -17,27 +20,28 @@ export class SharedPromise<R> extends Future {
   private readonly tasks: Task[] = [];
   readonly result: Promise<R>;
 
-  constructor(name: string, proc: SharedProc<R, SharedPromise<R>>) {
+  constructor(id: unknown, proc: SharedProc<R, SharedPromise<R>>) {
     super();
-    this.result = this.share(name, proc);
+    this.result = this.share(id, proc);
   }
 
   get isRunning() {
     return this.pending && this.running != null;
   }
 
-  share<T>(name: string, proc: SharedProc<T, this>): Promise<T> {
+  share<T>(id: unknown, proc: SharedProc<T, this>): Promise<T> {
     if (!this.pending)
       return Promise.reject(new RangeError('Promise not available for sharing'));
     else if (this.isRunning)
-      return this.extend(name, this.exec(proc));
+      return this.extend(id, this.exec(proc));
     else
-      return this.willRun(name, proc);
+      return this.willRun(id, proc);
   }
 
-  extend<P extends PromiseLike<any>>(name: string, result: P): P {
+  extend<P extends PromiseLike<unknown>>(id: unknown, result: P): P {
     if (!this.isRunning)
       throw new RangeError('Promise not available for extending');
+    this.tasks.push({ id }); // For debugging
     this.addRunning(settled(result));
     return result;
   }
@@ -49,20 +53,21 @@ export class SharedPromise<R> extends Future {
       this.resolve();
     } else {
       this.tasks.slice().forEach(task =>
-        this.addRunning(task.run()));
+        this.addRunning(task.run?.() ?? Promise.resolve()));
     }
     return this;
   }
 
   /** Not currently used; for debugging deadlocks */
   toString(): string {
-    return `[${this.tasks.map(({ name }) => name).join(', ')}]${this.running ? '...' : ''}`;
+    return `[${this.tasks.map(({ id }) => id).join(', ')}]${this.running ? '...' : ''}`;
   }
 
-  private willRun<T>(name: string, proc: SharedProc<T, this>) {
+  private willRun<T>(id: unknown, proc: SharedProc<T, this>) {
     return new Promise<T>((resolve, reject) => {
       this.tasks.push({
-        name, run: () => {
+        id,
+        run: () => {
           const result = this.exec(proc);
           result.then(resolve, reject);
           return settled(result);
@@ -89,34 +94,68 @@ export class SharedPromise<R> extends Future {
   }
 }
 
+export function checkLocked<Key extends string>(key: Key) {
+  return check((m: { lock: LockManager<Key> }) => m.lock.state(key) != null,
+    () => new MeldError('Unknown error', 'Clone state not locked'));
+}
+
+/** newly scheduled tasks will execute when the lock opens */
+export const EXCLUSIVE = Symbol('exclusive');
+/** new shared tasks will extend the most recent task */
+export const SHARED = Symbol('shared');
+/** new shared tasks will extend the running task */
+export const SHARED_REENTRANT = Symbol('shared-reentrant');
+
+type SharedLockMode = typeof SHARED | typeof SHARED_REENTRANT;
+type LockMode = typeof EXCLUSIVE | SharedLockMode;
+
+interface LockMeta {
+  /**
+   * The original reason for acquiring the lock. Additional purposes may have
+   * been added by sharing or extension of the lock.
+   */
+  purpose: string | Symbol,
+  /**
+   * `true` means .
+   * `false` means tasks will be shared when any scheduled exclusive tasks
+   * complete.
+   */
+  mode: LockMode
+}
+
+class LockPeriod<T = unknown> extends SharedPromise<T> implements LockMeta {
+  /**
+   * @param key the lock identity
+   * @param purpose the original reason for acquiring the lock
+   * @param proc the first task to run
+   * @param mode lock sharing mode
+   */
+  constructor(
+    readonly key: string,
+    readonly purpose: string | Symbol,
+    proc: SharedProc<T, SharedPromise<T>>,
+    readonly mode: LockMode
+  ) {
+    super({ key, purpose }, proc);
+  }
+}
+
 export class LockManager<K extends string = string> {
   private locks: {
     [key: string]: {
       /** Currently running task, may be extended */
-      running?: SharedPromise<unknown>,
+      running?: LockPeriod,
       /** Head task, may be shared if not exclusive */
-      head: SharedPromise<unknown>,
-      /** Whether the head task is exclusive */
-      exclusive: boolean
+      head: LockPeriod
     }
   } = {};
 
   /**
    * Get the current state of the given lock.
-   * - `null` means the lock is immediately available
-   * - `{ ... exclusive: true }` means newly scheduled tasks will execute when
-   * the lock opens
-   * - `{ ... exclusive: false }` means tasks will be shared when any scheduled
-   * exclusive tasks complete
+   * `undefined` means the lock is immediately available.
    */
-  state(key: K) {
-    const lock = this.locks[key];
-    return lock == null ? null : {
-      // Debugging possibilities:
-      // running: lock.running?.toString(),
-      // head: lock.head.toString(),
-      exclusive: lock.exclusive
-    };
+  state(key: K): { running?: LockMeta; head: LockMeta } | undefined {
+    return this.locks[key];
   }
 
   /**
@@ -132,18 +171,28 @@ export class LockManager<K extends string = string> {
   /**
    * Acquires the lock. Note that this method requires the caller to handle
    * errors to ensure the lock is not permanently closed. If possible, prefer
-   * the use of {@link share} or {@link exclusive}.
+   * the use of {@link share}/{@link exclusive}/{@link extend}.
    *
    * @returns a promise that resolves when the lock is acquired, providing a
    * function to release it. This function can safely be called multiple times.
    */
-  async acquire(key: K, purpose: string, mode: 'share' | 'exclusive'): Promise<() => void> {
+  async acquire(
+    key: K,
+    purpose: string | Symbol,
+    mode: LockMode
+  ): Promise<() => void> {
     const running = new Future<() => void>();
-    this[mode](key, purpose, () => {
+    const proc = () => {
       const done = new Future;
       running.resolve(done.resolve);
       return done;
-    });
+    };
+    if (mode === EXCLUSIVE)
+      // noinspection ES6MissingAwait
+      this.exclusive(key, purpose, proc);
+    else
+      // noinspection ES6MissingAwait
+      this.share(key, purpose, proc, mode);
     return running;
   }
 
@@ -151,24 +200,39 @@ export class LockManager<K extends string = string> {
    * Schedules an exclusive task on the given lock. This task will execute when
    * any running task has completed.
    */
-  exclusive<T = void>(key: K, purpose: string, proc: () => (PromiseLike<T> | T)): Promise<T> {
+  exclusive<T = void>(
+    key: K,
+    purpose: string | Symbol,
+    proc: () => (PromiseLike<T> | T)
+  ): Promise<T> {
     // Always wait for the current head to finish
-    return this.next(key, purpose, proc, true);
+    return this.next(key, purpose, proc, EXCLUSIVE);
   }
 
   /**
-   * Schedules a shared task on the given lock. Sharing will only occur with the
-   * latest scheduled task, which may or may not be running, and only if that
-   * task is shared; otherwise, this task will be appended to the queue.
+   * Schedules a shared task on the given lock.
+   *
+   * @remarks
+   * If the currently running task allows reentry, the new task will extend it.
+   * Otherwise, sharing will only occur with the latest scheduled task, which
+   * may or may not be running, and only if that task allows sharing; otherwise,
+   * this task will be appended to the queue.
    */
-  share<T = void>(key: K, purpose: string, proc: () => (PromiseLike<T> | T)): Promise<T> {
+  share<T = void>(
+    key: K,
+    purpose: string | Symbol,
+    proc: () => (PromiseLike<T> | T),
+    mode: SharedLockMode = SHARED
+  ): Promise<T> {
     const lock = this.locks[key];
-    // If the head is shared and not finished, extend
-    if (lock != null && !lock.exclusive && lock.head.pending) {
-      return lock.head.share(LockManager.taskName(key, purpose), proc);
-    } else {
-      return this.next(key, purpose, proc, false);
-    }
+    // If the running task is reentrant, extend it
+    if (lock?.running?.mode === SHARED_REENTRANT)
+      return lock.running.share({ key, purpose }, proc);
+    // If the head is shared and not finished, extend it
+    if (lock?.head.pending && lock.head.mode !== EXCLUSIVE)
+      return lock.head.share({ key, purpose }, proc);
+    // Otherwise, schedule after current head
+    return this.next(key, purpose, proc, mode);
   }
 
   /**
@@ -178,20 +242,24 @@ export class LockManager<K extends string = string> {
    * @returns a promise which settles when the task completes
    * @throws {RangeError} if the lock is not currently held
    */
-  extend<P extends PromiseLike<any>>(key: K, purpose: string, task: P): P {
+  extend<P extends PromiseLike<any>>(key: K, purpose: string | Symbol, task: P): P {
     const lock = this.locks[key];
     if (lock == null || lock.running == null)
       throw new RangeError(`${key} not available for sharing`);
     // Forcing a share even if the lock is exclusive
-    return lock.running.extend(LockManager.taskName(key, purpose), task);
+    return lock.running.extend({ key, purpose }, task);
   }
 
   private async next<T = void>(
-    key: K, purpose: string, proc: () => (PromiseLike<T> | T), exclusive: boolean) {
+    key: K,
+    purpose: string | Symbol,
+    proc: () => (PromiseLike<T> | T),
+    mode: LockMode
+  ) {
     const prevTask = this.locks[key]?.head;
-    const task = new SharedPromise(LockManager.taskName(key, purpose), proc);
+    const task = new LockPeriod(key, purpose, proc, mode);
     // Don't change the running task
-    this.locks[key] = { ...this.locks[key], head: task, exclusive };
+    this.locks[key] = { ...this.locks[key], head: task };
     task.then(() => {
       // If we're the last in the queue, delete ourselves
       if (this.locks[key]?.head === task)
@@ -201,9 +269,5 @@ export class LockManager<K extends string = string> {
     this.locks[key].running = task;
     task.run();
     return task.result;
-  }
-
-  private static taskName(key: string, purpose: string) {
-    return `${key}: ${purpose}`;
   }
 }

@@ -1,19 +1,13 @@
 import { MockProxy } from 'jest-mock-extended';
 import { AsyncMqttClient } from 'async-mqtt';
-import { firstValueFrom, fromEvent } from 'rxjs';
 import { MockMqtt, mockMqtt } from './testClones';
-import { concatMap, toArray } from 'rxjs/operators';
 import { MqttPresence } from '../src/mqtt/MqttPresence';
+import { once } from 'events';
 
 describe('MQTT presence', () => {
   let mqtt: MockMqtt & MockProxy<AsyncMqttClient>;
   let presence: MqttPresence;
   
-  function nextChange(presence: MqttPresence) {
-    return firstValueFrom(fromEvent(presence, 'change').pipe(
-      concatMap(() => presence.present('address').pipe(toArray()))));
-  }
-
   beforeEach(async () => {
     mqtt = mockMqtt();
     presence = new MqttPresence(mqtt, 'test.m-ld.org', 'client1');
@@ -28,51 +22,48 @@ describe('MQTT presence', () => {
 
   test('gets no presence', async () => {
     await presence.initialise();
-    const present = firstValueFrom(presence.present('address').pipe(toArray()));
-    await expect(present).resolves.toEqual([]);
+    const present = [...presence.present('address')];
+    expect(present).toEqual([]);
   });
 
   test('gets retained presence', async () => {
     mqtt.mockPublish('__presence/test.m-ld.org/client2', '{"consumer2":"address"}');
     await presence.initialise();
-    const present = firstValueFrom(presence.present('address').pipe(toArray()));
-    await expect(present).resolves.toEqual(['consumer2']);
+    const present = [...presence.present('address')];
+    expect(present).toEqual(['consumer2']);
   });
 
   test('gets all retained', async () => {
     mqtt.mockPublish('__presence/test.m-ld.org/client2', '{"consumer2":"address"}');
     mqtt.mockPublish('__presence/test.m-ld.org/client3', '{"consumer3":"address"}');
     await presence.initialise();
-    const present = firstValueFrom(presence.present('address').pipe(toArray()));
-    await expect(present).resolves.toEqual(['consumer2', 'consumer3']);
+    const present = [...presence.present('address')];
+    expect(present).toEqual(['consumer2', 'consumer3']);
   });
 
   test('emits change when received all retained', async () => {
-    const present = fromEvent(presence, 'change').pipe(
-      concatMap(() => presence.present('address').pipe(toArray())));
-
     mqtt.mockPublish('__presence/test.m-ld.org/client2', '{"consumer2":"address"}');
     mqtt.mockPublish('__presence/test.m-ld.org/client3', '{"consumer3":"address"}');
     presence.initialise();
 
-    await expect(firstValueFrom(present)).resolves.toEqual(['consumer2', 'consumer3']);
+    await once(presence, 'change');
+    expect([...presence.present('address')]).toEqual(['consumer2', 'consumer3']);
   });
 
   test('emits change when no retained', async () => {
-    const present = fromEvent(presence, 'change').pipe(
-      concatMap(() => presence.present('address').pipe(toArray())));
-
     presence.initialise();
 
-    await expect(firstValueFrom(present)).resolves.toEqual([]);
+    await once(presence, 'change');
+    expect([...presence.present('address')]).toEqual([]);
   });
 
   test('emits when presence changed', async () => {
     presence.initialise();
-    await expect(nextChange(presence)).resolves.toEqual([]);
+    await once(presence, 'change');
 
     mqtt.mockPublish('__presence/test.m-ld.org/client2', '{"consumer2":"address"}');
-    await expect(nextChange(presence)).resolves.toEqual(['consumer2']);
+    await once(presence, 'change');
+    expect([...presence.present('address')]).toEqual(['consumer2']);
   });
 
   test('when racing, neither client sees the other', async () => {
@@ -81,10 +72,10 @@ describe('MQTT presence', () => {
     presence2.initialise();
     presence.join('consumer1', 'address');
     presence2.join('consumer2', 'address');
-    // First change sees no presences
+    // First change see self presence
     await expect(Promise.all([
-      nextChange(presence),
-      nextChange(presence2)
-    ])).resolves.toEqual([[], []]);
+      once(presence, 'change').then(() => [...presence.present('address')]),
+      once(presence2, 'change').then(() => [...presence2.present('address')])
+    ])).resolves.toEqual([['consumer1'], ['consumer2']]);
   });
 });

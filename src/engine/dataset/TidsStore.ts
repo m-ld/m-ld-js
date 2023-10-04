@@ -1,11 +1,11 @@
-import { Triple, tripleFromKey, tripleIndexKey, TripleMap } from '../quads';
+import { Triple, tripleFromKey, tripleIndexKey, tripleKey, TripleMap } from '../quads';
 import { MutableOperation, Operation } from '../ops';
-import { UUID } from '../MeldEncoding';
 import { IndexMatch, IndexSet } from '../indices';
 import { Kvps, TripleKeyStore } from './index';
 import * as MsgPack from '../msgPack';
 import { map, takeWhile } from 'rxjs/operators';
 import { Consumable } from 'rx-flowable';
+import { UUID } from '../../api';
 
 /** Prefix for TID keys */
 const KEY_PRE = '_qs:ttd:';
@@ -95,7 +95,7 @@ export class TidsStore {
   }
 
   tripleTidsKey(triple: Triple) {
-    return `${KEY_PRE}${tripleIndexKey(triple, this.store.prefixes)}`;
+    return `${KEY_PRE}${tripleKey(triple, this.store.prefixes)}`;
   }
 
   private cacheTids(triple: Triple, encodedTids: Buffer | undefined) {

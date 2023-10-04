@@ -1,9 +1,9 @@
-import { MockGraphState, mockInterim, MockRemotes, testConfig } from './testClones';
-import { OrmDomain } from '../src/orm';
+import { MockGraphState, mockInterim, MockRemotes, testConfig, testContext } from './testClones';
+import { OrmDomain, OrmUpdating } from '../src/orm';
 import { PropertyShape, ShapeConstrained } from '../src/shacl';
 import { SingletonExtensionSubject } from '../src/orm/ExtensionSubject';
 import { PropertyShapeSpec } from '../src/shacl/PropertyShape';
-import { clone, MeldClone } from '../src/index';
+import { clone, GraphSubject, MeldClone } from '../src/index';
 import { MemoryLevel } from 'memory-level';
 
 describe('Shape constrained extension', () => {
@@ -18,7 +18,7 @@ describe('Shape constrained extension', () => {
       api = await clone(
         new MemoryLevel, MockRemotes, testConfig(),
         new ShapeConstrained(new PropertyShape({
-          path: 'http://test.m-ld.org/#name', count: 1
+          path: 'name', count: 1
         })));
       await expect(api.write({
         '@id': 'fred', 'name': ['Fred', 'Flintstone']
@@ -32,16 +32,24 @@ describe('Shape constrained extension', () => {
 
     beforeEach(async () => {
       state = await MockGraphState.create();
-      domain = new OrmDomain({ config: testConfig(), app: {} });
+      domain = new OrmDomain({
+        config: testConfig(), app: {}, context: await testContext
+      });
     });
 
     afterEach(() => state.close());
+
+    class MockShapeControlledExtensionSubject extends SingletonExtensionSubject<ShapeConstrained> {
+      static async create(src: GraphSubject, orm: OrmUpdating) {
+        return new MockShapeControlledExtensionSubject(src, orm).ready;
+      }
+    }
 
     async function installShapeConstrained(spec: PropertyShapeSpec) {
       await state.write(ShapeConstrained.declare(0, PropertyShape.declare(spec)));
       return domain.updating(state.graph.asReadState, async orm => (await orm.get({
         '@id': 'http://ext.m-ld.org/shacl/ShapeConstrained'
-      }, src => new SingletonExtensionSubject<ShapeConstrained>(src, orm))).singleton);
+      }, src => MockShapeControlledExtensionSubject.create(src, orm))).singleton);
     }
 
     test('initialises with property shape', async () => {
@@ -88,7 +96,7 @@ describe('Shape constrained extension', () => {
     test('does not contradict subject deletion', async () => {
       const ext = await installShapeConstrained({ path: 'name', count: 1 });
       const fredName = {
-        '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': ['Fred']
+        '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Fred'
       };
       await state.write(fredName);
       const interim = mockInterim({ '@delete': [fredName] });
@@ -103,7 +111,7 @@ describe('Shape constrained extension', () => {
     test('does not contradict correction if subject not deleted', async () => {
       const ext = await installShapeConstrained({ path: 'name', count: 1 });
       const fredName = {
-        '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': ['Fred']
+        '@id': 'http://test.m-ld.org/fred', 'http://test.m-ld.org/#name': 'Fred'
       };
       await state.write({ ...fredName, 'http://test.m-ld.org/#height': 1 });
       const interim = mockInterim({ '@delete': [fredName] });

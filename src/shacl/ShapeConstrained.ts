@@ -1,7 +1,7 @@
 import {
-  GraphSubject, InterimUpdate, MeldConstraint, MeldExtensions, MeldPreUpdate, MeldReadState
+  GraphSubject, InterimUpdate, MeldConstraint, MeldPlugin, MeldPreUpdate, MeldReadState
 } from '../api';
-import { ExtensionSubject, OrmUpdating } from '../orm/index';
+import { ExtensionSubject, OrmUpdating } from '../orm';
 import { Shape } from './Shape';
 import { isReference, Reference, Subject } from '../jrql-support';
 import { M_LD } from '../ns';
@@ -9,6 +9,7 @@ import { ExtensionSubjectInstance } from '../orm/ExtensionSubject';
 import { JsProperty, JsType } from '../js-support';
 import { Iri } from '@m-ld/jsonld';
 import { SubjectUpdater } from '../updates';
+import { MeldAppContext } from '../config';
 
 /**
  * This extension allows an app to declare that the domain data must conform to
@@ -23,24 +24,20 @@ import { SubjectUpdater } from '../updates';
  * api = await clone(
  *   new MemoryLevel, MqttRemotes, config,
  *   new ShapeConstrained(new PropertyShape({
- *     path: 'http://ex.org/#name', count: 1
- *   })));
+ *     path: 'name', count: 1
+ *   }))
+ * );
  * ```
  *
- * > Note that properties and types provided as initialisation parameters to
- * shapes (e.g. `path` above) must be fully-qualified IRIs according to the
- * vocabulary of the domain. See {@link MeldContext} for more information.
- *
- * If combining shape constraints with other extensions, it may be necessary
- * (and is safe) to use the {@link constraints} member of this class directly as
- * a sublist in a list of constraints.
+ * [[include:live-code-setup.script.html]]
+ * [[include:how-to/domain-setup.md]]
+ * [[include:how-to/shapes.md]]
  *
  * @see https://www.w3.org/TR/shacl/
- * @category Experimental
- * @experimental
+ * @category API
  * @noInheritDoc
  */
-export class ShapeConstrained implements ExtensionSubjectInstance, MeldExtensions {
+export class ShapeConstrained implements ExtensionSubjectInstance, MeldPlugin {
   /**
    * Extension declaration. Insert into the domain data to install the
    * extension. For example (assuming a **m-ld** `clone` object):
@@ -84,6 +81,12 @@ export class ShapeConstrained implements ExtensionSubjectInstance, MeldExtension
     this.shapes = shapes;
   }
 
+  /** @internal */
+  setExtensionContext(context: MeldAppContext) {
+    for (let shape of this.shapes)
+      shape.setExtensionContext(context);
+  }
+
   /**
    * Note special case constraint handling for subject deletion.
    * @internal
@@ -114,16 +117,16 @@ export class ShapeConstrained implements ExtensionSubjectInstance, MeldExtension
   }];
 
   /** @internal */
-  initialise(src: GraphSubject, orm: OrmUpdating, ext: ExtensionSubject<this>): this {
+  initFromData(src: GraphSubject, orm: OrmUpdating, ext: ExtensionSubject<this>) {
     // We know we're a singleton; add our controlled shapes property
     ext.initSrcProperty(src,
       [this, 'shapes'],
       new JsProperty(M_LD.controlledShape, JsType.for(Array, Subject)),
       { orm, construct: Shape.from });
-    return this;
   }
 }
 
+/** @internal */
 class DeleteDetector extends SubjectUpdater {
   private readonly fullyDeletedIds = new Set<Iri>();
 

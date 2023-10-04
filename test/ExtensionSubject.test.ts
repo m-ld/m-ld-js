@@ -1,7 +1,8 @@
-import { MockGraphState, testConfig } from './testClones';
+import { MockGraphState, testConfig, testContext } from './testClones';
 import { M_LD } from '../src/ns';
-import { ExtensionSubject, OrmDomain } from '../src/orm/index';
+import { ExtensionSubject, OrmDomain, OrmUpdating } from '../src/orm';
 import { ExtensionSubjectInstance, SingletonExtensionSubject } from '../src/orm/ExtensionSubject';
+import { GraphSubject } from '../src/index';
 
 interface MyKindOfExtension extends ExtensionSubjectInstance {
   doIt(): boolean;
@@ -9,7 +10,18 @@ interface MyKindOfExtension extends ExtensionSubjectInstance {
 
 export class MyExtension implements MyKindOfExtension {
   doIt = () => true;
-  initialise = () => Promise.resolve(this);
+}
+
+jest.mock(
+  'myExtension.mjs',
+  () => ({ MyExtension }),
+  { virtual: true }
+);
+
+class MyKindOfExtensionSubject extends SingletonExtensionSubject<MyKindOfExtension> {
+  static async create(src: GraphSubject, orm: OrmUpdating) {
+    return new MyKindOfExtensionSubject(src, orm).ready;
+  }
 }
 
 describe('Extension subject', () => {
@@ -18,22 +30,40 @@ describe('Extension subject', () => {
 
   beforeEach(async () => {
     state = await MockGraphState.create();
-    domain = new OrmDomain({ config: testConfig(), app: {} });
+    domain = new OrmDomain({
+      config: testConfig(), app: {}, context: await testContext
+    });
   });
 
   afterEach(() => state.close());
 
-  test('Loads singleton', async () => {
+  test('Loads CommonJS singleton', async () => {
     const src = {
       '@id': 'myDoIt',
-      '@type': M_LD.JS.commonJsExport,
       [M_LD.JS.require]: require.resolve('./ExtensionSubject.test'),
+      undefined,
       [M_LD.JS.className]: 'MyExtension'
     };
     expect.hasAssertions();
     await domain.updating(state.graph.asReadState, async orm => {
       const es = await orm.get(src, src =>
-        new SingletonExtensionSubject<MyKindOfExtension>(src, orm));
+        MyKindOfExtensionSubject.create(src, orm));
+      const inst = await es.singleton;
+      expect(inst).toBeDefined();
+      expect(inst.doIt()).toBe(true);
+    });
+  });
+
+  test('Loads ESM singleton', async () => {
+    const src = {
+      '@id': 'myDoIt',
+      [M_LD.JS.module]: 'myExtension.mjs',
+      [M_LD.JS.className]: 'MyExtension'
+    };
+    expect.hasAssertions();
+    await domain.updating(state.graph.asReadState, async orm => {
+      const es = await orm.get(src, src =>
+        MyKindOfExtensionSubject.create(src, orm));
       const inst = await es.singleton;
       expect(inst).toBeDefined();
       expect(inst.doIt()).toBe(true);
@@ -45,6 +75,23 @@ describe('Extension subject', () => {
     await state.write(ExtensionSubject.declare(
       'myExtensionType',
       require.resolve('./ExtensionSubject.test'),
+      undefined,
+      'MyExtension')
+    );
+    expect.hasAssertions();
+    await domain.updating(state.graph.asReadState, async orm => {
+      const inst = await ExtensionSubject.instance<MyKindOfExtension>(src, orm);
+      expect(inst).toBeDefined();
+      expect(inst.doIt()).toBe(true);
+    });
+  });
+
+  test('Loads ESM instance', async () => {
+    const src = { '@id': 'myDoIt', '@type': 'myExtensionType' };
+    await state.write(ExtensionSubject.declare(
+      'myExtensionType',
+      undefined,
+      'myExtension.mjs',
       'MyExtension')
     );
     expect.hasAssertions();
@@ -68,7 +115,6 @@ describe('Extension subject', () => {
     await state.write({
       '@insert': {
         '@id': 'myExtensionType',
-        [M_LD.JS.require]: require.resolve('./ExtensionSubject.test'),
         [M_LD.JS.className]: 'MyExtension'
       }
     });

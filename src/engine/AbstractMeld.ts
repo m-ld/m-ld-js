@@ -1,32 +1,32 @@
 import { Meld, OperationMessage, Revup, Snapshot } from '.';
 import { LiveValue } from './api-support';
 import { TreeClock } from './clocks';
-import { asapScheduler, BehaviorSubject, firstValueFrom, Observable, of } from 'rxjs';
+import {
+  asapScheduler, BehaviorSubject, concat, firstValueFrom, Observable, of, throwError
+} from 'rxjs';
 import { catchError, distinctUntilChanged, filter, observeOn, skip } from 'rxjs/operators';
 import { Logger } from 'loglevel';
-import { PauseableSource } from './util';
+import { PauseableSource, throwOnComplete } from './util';
 import { MeldError, MeldReadState } from '../api';
 import { MeldConfig } from '../config';
 import { MeldOperationMessage } from './MeldOperationMessage';
 import { check } from './check';
 import { getIdLogger } from './logging';
 
-export abstract class AbstractMeld implements Meld {
-  protected static checkLive =
-    check((m: AbstractMeld) => m.live.value === true,
-      () => new MeldError('Meld is offline'));
-  protected static checkNotClosed =
-    check((m: AbstractMeld) => !m.closed,
-      () => new MeldError('Clone has closed'));
+export const checkLive =
+  check((m: Meld) => m.live.value === true,
+    () => new MeldError('Meld is offline'));
 
+export abstract class AbstractMeld implements Meld {
   readonly operations: Observable<OperationMessage>;
   readonly live: LiveValue<boolean | null>;
 
   private readonly operationSource = new PauseableSource<OperationMessage>();
   private readonly liveSource: BehaviorSubject<boolean | null> = new BehaviorSubject(null);
 
-  private _closed = false;
+  private _closed: any = false;
   protected readonly log: Logger;
+  protected errorIfClosed: Observable<never>;
 
   readonly id: string;
   readonly domain: string;
@@ -43,11 +43,15 @@ export abstract class AbstractMeld implements Meld {
     // indicates a return to undecided liveness followed by completion.
     this.live = Object.defineProperties(
       this.liveSource.pipe(catchError(() => of(null)), distinctUntilChanged()),
-      { value: { get: () => this.liveSource.value } }) as LiveValue<boolean | null>;
+      { value: { get: () => this.liveSource.value } }
+    ) as LiveValue<boolean | null>;
 
     // Log liveness
     this.live.pipe(skip(1)).subscribe(
       live => this.log.debug('is', live == null ? 'gone' : live ? 'live' : 'dead'));
+
+    this.errorIfClosed = throwOnComplete(this.live,
+      () => new MeldError('Clone has closed'));
   }
 
   protected nextOperation = (op: OperationMessage, reason: string) => {
@@ -61,19 +65,27 @@ export abstract class AbstractMeld implements Meld {
   };
 
   protected get closed() {
-    return this._closed;
+    return !!this._closed;
   }
 
-  abstract newClock(): Promise<TreeClock>;
-  abstract snapshot(state: MeldReadState): Promise<Snapshot>;
+  abstract snapshot(newClock: boolean, state: MeldReadState): Promise<Snapshot>;
   abstract revupFrom(time: TreeClock, state: MeldReadState): Promise<Revup | undefined>;
+
+  comesAlive(expected: boolean | null | 'notNull' = true): Promise<boolean | null> {
+    return firstValueFrom(concat(
+      this.live.pipe(filter(expected === 'notNull' ?
+        (live => live != null) : (live => live === expected))),
+      throwError(() => this._closed === true ?
+        new MeldError('Clone has closed') : this._closed)
+    ));
+  }
 
   protected msgString(msg: OperationMessage) {
     return MeldOperationMessage.toString(msg, this.log.getLevel());
   }
 
   close(err?: any) {
-    this._closed = true;
+    this._closed = err || true;
     if (err) {
       this.operationSource.error(err);
       this.liveSource.error(err);
@@ -82,12 +94,4 @@ export abstract class AbstractMeld implements Meld {
       this.liveSource.complete();
     }
   }
-}
-
-export function comesAlive(
-  meld: Pick<Meld, 'live'>,
-  expected: boolean | null | 'notNull' = true
-): Promise<boolean | null> {
-  return firstValueFrom(meld.live.pipe(filter(
-    expected === 'notNull' ? (live => live != null) : (live => live === expected))));
 }
