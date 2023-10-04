@@ -95,7 +95,7 @@
           content: content
             .replaceAll('https://js.m-ld.org', window.location.origin)
             .replaceAll('https://m-ld.org', window.location.origin.includes('localhost') ?
-              'https://edge.m-ld.org' : window.location.origin.replaceAll('.js', ''))
+              'https://edge.m-ld.org' : window.location.origin.replaceAll('js.', ''))
         });
       }
     }
