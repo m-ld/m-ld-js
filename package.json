@@ -18,7 +18,8 @@
     "./ext/security": "./ext/security/index.js",
     "./ext/shacl": "./ext/shacl/index.js",
     "./ext/statutes": "./ext/statutes/index.js",
-    "./ext/tseq": "./ext/tseq/index.js"
+    "./ext/tseq": "./ext/tseq/index.js",
+    "./ext/rx": "./ext/rx/index.js"
   },
   "files": [
     "ext"
@@ -117,6 +118,7 @@
     "cuid": "^2.1.8",
     "fast-array-diff": "^1.1.0",
     "fflate": "^0.8.0",
+    "immer": "^10.0.3",
     "json-rql": "^0.6.2",
     "loglevel": "^1.7.1",
     "lru-cache": "^6.0.0",
