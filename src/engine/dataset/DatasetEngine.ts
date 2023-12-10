@@ -686,7 +686,9 @@ export class DatasetEngine extends AbstractMeld implements CloneEngine, MeldLoca
     const values = stateRollup.pipe(
       skipWhile(() => this.messageService == null),
       map(toStatus),
-      distinctUntilChanged<MeldStatus>(matchStatus));
+      distinctUntilChanged<MeldStatus>(matchStatus),
+      takeUntilComplete(this.live)
+    );
     const becomes = async (match?: Partial<MeldStatus>) => firstValueFrom(
       values.pipe(filter(status => matchStatus(status, match)),
         defaultIfEmpty(undefined)));
