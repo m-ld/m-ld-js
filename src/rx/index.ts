@@ -1,4 +1,4 @@
-import { asapScheduler, Observable, observeOn } from 'rxjs';
+import { asyncScheduler, Observable, observeOn } from 'rxjs';
 import type { GraphSubject, Iri, MeldClone, MeldReadState, MeldUpdate } from '..';
 import { updateSubject } from '..';
 import { enablePatches, produceWithPatches } from 'immer';
@@ -46,7 +46,7 @@ export function watchQuery<T>(
   }).pipe(
     takeUntilComplete(meld.status),
     // TODO: workaround: live lock throws due to overlapping states
-    observeOn(asapScheduler)
+    observeOn(asyncScheduler)
   );
 }
 
